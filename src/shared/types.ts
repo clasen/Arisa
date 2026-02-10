@@ -18,6 +18,7 @@ export interface IncomingMessage {
   text?: string;
   audio?: { base64: string; filename: string };
   image?: { base64: string; caption?: string };
+  document?: { base64: string; filename: string; mimeType: string; caption?: string };
   command?: string;
   timestamp: number;
 }

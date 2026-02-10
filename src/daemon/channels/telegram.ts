@@ -128,6 +128,41 @@ export class TelegramChannel implements Channel {
       }
     });
 
+    // Document messages (PDFs, files, etc.)
+    this.bot.on("message:document", async (ctx) => {
+      if (ctx.chat.type !== "private") return;
+
+      const doc = ctx.message.document;
+      const caption = ctx.message.caption || "";
+
+      log.info(`Document from ${ctx.from!.first_name}: ${doc.file_name} (${doc.mime_type})`);
+      await ctx.api.sendChatAction(ctx.chat.id, "typing");
+
+      try {
+        const file = await ctx.api.getFile(doc.file_id);
+        if (!file.file_path) {
+          await ctx.reply("Could not download the document.");
+          return;
+        }
+        const buffer = await this.downloadFile(file.file_path);
+        this.handler?.({
+          chatId: String(ctx.chat.id),
+          sender: this.getSenderName(ctx),
+          senderId: String(ctx.from!.id),
+          document: {
+            base64: buffer.toString("base64"),
+            filename: doc.file_name || `file_${Date.now()}`,
+            mimeType: doc.mime_type || "application/octet-stream",
+            caption: caption || undefined,
+          },
+          timestamp: Date.now(),
+        });
+      } catch (error) {
+        log.error(`Document download error: ${error}`);
+        await ctx.reply("Could not download the document. Try again.");
+      }
+    });
+
     await this.bot.start({
       onStart: (botInfo) => {
         log.info(`Telegram bot connected as @${botInfo.username}`);

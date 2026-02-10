@@ -24,6 +24,7 @@ import { getOnboarding, checkDeps } from "./onboarding";
 import { initScheduler, addTask } from "./scheduler";
 import { detectScheduleIntent } from "./intent";
 import { initAuth, isAuthorized, tryAuthorize } from "./auth";
+import { initAttachments, saveAttachment } from "./attachments";
 
 const log = createLogger("core");
 
@@ -42,9 +43,10 @@ function getBackend(chatId: string): "claude" | "codex" {
   return backendState.get(chatId) || defaultBackend();
 }
 
-// Initialize auth + scheduler
+// Initialize auth + scheduler + attachments
 initAuth();
 initScheduler();
+initAttachments();
 
 const server = await serveWithRetry({
   port: config.corePort,
@@ -124,48 +126,54 @@ const server = await serveWithRetry({
         // Process media first
 
         if (msg.audio) {
+          const audioPath = saveAttachment(msg.chatId, "audio", msg.audio.base64, msg.audio.filename);
           if (isMediaConfigured()) {
             try {
               const transcription = await transcribeAudio(msg.audio.base64, msg.audio.filename);
               if (transcription.trim()) {
-                messageText = `[Voice message transcription]: ${transcription}`;
+                messageText = `[Audio saved to ${audioPath}]\n[Voice message transcription]: ${transcription}`;
               } else {
-                messageText = `[The user sent a voice message but transcription returned empty. Ask them to try again or send text.]`;
+                messageText = `[Audio saved to ${audioPath}]\n[Transcription returned empty. Ask the user to try again or send text.]`;
               }
             } catch (error) {
               log.error(`Transcription failed: ${error}`);
-              messageText = `[The user sent a voice message but transcription failed. Ask them to try again or send text.]`;
+              messageText = `[Audio saved to ${audioPath}]\n[Transcription failed. The audio file is still accessible at the path above.]`;
             }
           } else {
-            messageText = `[The user sent a voice message but it cannot be transcribed because OPENAI_API_KEY is not configured. Let them know and ask them to send text instead.]`;
+            messageText = `[Audio saved to ${audioPath}]\n[Cannot transcribe because OPENAI_API_KEY is not configured. The audio file is still accessible at the path above.]`;
           }
         }
 
         if (msg.image) {
           const caption = msg.image.caption || "";
-          if (isMediaConfigured()) {
+          const imgPath = saveAttachment(msg.chatId, "image", msg.image.base64);
+
+          if (caption && isMediaConfigured()) {
+            // User sent text with the image → describe it via Vision
             try {
               const description = await describeImage(msg.image.base64, caption);
-              if (description.trim()) {
-                messageText = caption
-                  ? `[Image attached with text: "${caption}"]\n[Image description: ${description}]`
-                  : `[Image attached]\n[Image description: ${description}]`;
-              } else {
-                messageText = caption
-                  ? `[Image attached with text: "${caption}"]\n[Image content could not be interpreted]`
-                  : `[Image attached]\n[Image content could not be interpreted]`;
-              }
+              messageText = description.trim()
+                ? `[Image saved to ${imgPath}]\n[Image description: ${description}]\n${caption}`
+                : `[Image saved to ${imgPath}]\n[Image content could not be interpreted]\n${caption}`;
             } catch (error) {
               log.error(`Image analysis failed: ${error}`);
-              messageText = caption
-                ? `[Image attached with text: "${caption}"]\n[Error analyzing the image]`
-                : `[Image attached]\n[Error analyzing the image]`;
+              messageText = `[Image saved to ${imgPath}]\n[Error analyzing the image]\n${caption}`;
             }
+          } else if (caption) {
+            // Has caption but no OpenAI key
+            messageText = `[Image saved to ${imgPath}]\n[Cannot describe image — OPENAI_API_KEY not configured. The image file is accessible at the path above.]\n${caption}`;
           } else {
-            messageText = caption
-              ? `[Image attached with text: "${caption}"]\n[Cannot interpret the image because OPENAI_API_KEY is not configured. Respond based on the user's text.]`
-              : `[Image attached without text]\n[Cannot interpret the image because OPENAI_API_KEY is not configured. Let the user know you can't see images, but ask how you can help.]`;
+            // No caption → just save, no GPT call
+            messageText = `[Image saved to ${imgPath}]`;
           }
+        }
+
+        if (msg.document) {
+          const docPath = saveAttachment(msg.chatId, "document", msg.document.base64, msg.document.filename);
+          const caption = msg.document.caption || "";
+          messageText = caption
+            ? `[Document saved to ${docPath}] (${msg.document.mimeType})\n${caption}`
+            : `[Document saved to ${docPath}] (${msg.document.mimeType})`;
         }
 
         if (!messageText) {

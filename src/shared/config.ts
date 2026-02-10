@@ -47,6 +47,8 @@ export const config = {
   tasksFile: join(PROJECT_DIR, ".tinyclaw", "scheduler", "tasks.json"),
   resetFlagPath: join(PROJECT_DIR, ".tinyclaw", "reset_flag"),
   voiceTempDir: join(PROJECT_DIR, ".tinyclaw", "voice_temp"),
+  attachmentsDir: join(PROJECT_DIR, ".tinyclaw", "attachments"),
+  attachmentMaxAgeDays: 30,
 
   claudeTimeout: 120_000,
   maxResponseLength: 4000,

@@ -13,7 +13,7 @@ bun run dev              # Start Core only with hot-reload (for development)
 ## Architecture: Daemon + Core
 
 ```
-Daemon (:7778)                          Core (:7777)
+Daemon (:51778)                         Core (:51777)
 ├── Telegram adapter (grammy)           ├── HTTP server /message, /health
 ├── HTTP server /send (for scheduler)   ├── Claude CLI with model routing
 ├── Bridge: HTTP client to Core         ├── Media: voice (Whisper) + vision
@@ -24,12 +24,12 @@ Daemon (:7778)                          Core (:7777)
 
 **Message flow:**
 1. Telegram → Daemon receives message (text/voice/photo)
-2. Daemon → POST Core:7777/message (media as base64)
+2. Daemon → POST Core:51777/message (media as base64)
 3. Core processes media → routes model → calls `claude CLI` → formats response
 4. Core returns response → Daemon sends to Telegram
 
 **Scheduler flow:**
-Scheduled task fires → Core POSTs to Daemon:7778/send → Telegram
+Scheduled task fires → Core POSTs to Daemon:51778/send → Telegram
 
 ### Principle of separation
 
