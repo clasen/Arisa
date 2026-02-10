@@ -4,61 +4,146 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## What is TinyClaw
 
-TinyClaw is a lightweight wrapper around Claude Code that connects messaging channels to a Claude Code session via a file-based queue system. Messages from all channels are processed sequentially through a single queue, preventing race conditions and maintaining shared conversation context.
-
-**Note:** WhatsApp integration is currently disabled. Telegram is the primary (and only active) channel. WhatsApp code remains in the codebase and can be re-enabled by uncommenting the relevant sections in `tinyclaw.sh`.
+TinyClaw v2 is a Bun + TypeScript system that connects Telegram to Claude Code via a two-process architecture: **Daemon** (stable channel I/O) and **Core** (message processing, media, scheduling, Claude CLI with model routing).
 
 ## Commands
 
 ```bash
-./tinyclaw.sh start      # Start all components in a tmux session
-./tinyclaw.sh stop       # Stop all components
-./tinyclaw.sh restart    # Stop + start
-./tinyclaw.sh status     # Show process status and recent logs
-./tinyclaw.sh send "msg" # Send a message to Claude manually
-./tinyclaw.sh reset      # Reset conversation (next message starts without -c flag)
-./tinyclaw.sh logs telegram # View logs (telegram|daemon|queue)
-./tinyclaw.sh attach     # Attach to tmux session
-npm install              # Install Node.js dependencies
+bun install              # Install dependencies
+bun run daemon           # Start everything (Daemon spawns Core with --watch)
+bun run dev              # Start Core only with hot-reload (for development)
 ```
 
-## Architecture
+## Architecture: Daemon + Core
 
-All channel clients follow the same pattern: they do NOT call Claude directly. Instead, they write JSON files to `.tinyclaw/queue/incoming/` and poll `.tinyclaw/queue/outgoing/` for responses.
+```
+Daemon (:7778)                          Core (:7777)
+├── Telegram adapter (grammy)           ├── HTTP server /message, /health
+├── HTTP server /send (for scheduler)   ├── Claude CLI with model routing
+├── Bridge: HTTP client to Core         ├── Media: voice (Whisper) + vision
+├── Lifecycle: spawn Core --watch       ├── Scheduler (croner)
+└── In-memory queue if Core is down     ├── Format: HTML + chunking
+                                        └── File detection in responses
+```
 
 **Message flow:**
-1. Channel client receives a message and writes `{channel}_{messageId}.json` to `incoming/`
-2. `queue-processor.js` polls `incoming/` every 1 second, moves the file to `processing/`, calls `claude --dangerously-skip-permissions -c -p "<message>"`, and writes the response to `outgoing/`
-3. Channel client polls `outgoing/` every 1 second, matches response by `messageId`, sends it back to the user, and deletes the file
+1. Telegram → Daemon receives message (text/voice/photo)
+2. Daemon → POST Core:7777/message (media as base64)
+3. Core processes media → routes model → calls `claude CLI` → formats response
+4. Core returns response → Daemon sends to Telegram
 
-**Queue file format** (JSON):
+**Scheduler flow:**
+Scheduled task fires → Core POSTs to Daemon:7778/send → Telegram
+
+### Principle of separation
+
+- **Daemon** = Channel I/O only. Receives/sends messages. Never processes content. Stable process that never needs restarting.
+- **Core** = Everything else. Media processing, Claude CLI, formatting, scheduling. Runs with `bun --watch` for hot-reload when code changes.
+
+## File Structure
+
 ```
-{ channel, sender, senderId, message, timestamp, messageId }
+src/
+├── daemon/
+│   ├── index.ts            # Entry: channel + HTTP server + spawn Core
+│   ├── channels/
+│   │   ├── base.ts         # Re-exports Channel interface
+│   │   └── telegram.ts     # Telegram adapter (grammy)
+│   ├── bridge.ts           # HTTP client to Core with retry + in-memory queue
+│   └── lifecycle.ts        # Spawn Core with --watch, auto-restart
+│
+├── core/
+│   ├── index.ts            # HTTP server with /message and /health endpoints
+│   ├── processor.ts        # Executes claude CLI with model routing
+│   ├── router.ts           # Selects model (haiku/sonnet/opus) by message pattern
+│   ├── media.ts            # Voice transcription (Whisper) + image analysis (Vision)
+│   ├── scheduler.ts        # Cron + one-time tasks with croner, persists tasks.json
+│   ├── format.ts           # Telegram chunking (4096 char limit)
+│   ├── file-detector.ts    # Detect file paths in responses for auto-sending
+│   └── context.ts          # Manage -c flag and reset_flag
+│
+└── shared/
+    ├── types.ts            # All shared interfaces
+    ├── config.ts           # Env vars, ports, paths
+    └── logger.ts           # Logger → .tinyclaw/logs/
 ```
 
-**Key components:**
-- `tinyclaw.sh` - Orchestrator. Creates a tmux session with 3 panes (Telegram, Queue Processor, Logs)
-- `queue-processor.js` - Single-threaded message processor. Calls Claude via `execSync` with 2-minute timeout. Responses truncated at 4000 chars
-- `whatsapp-client.js` - **Disabled.** Uses `whatsapp-web.js` with Puppeteer/LocalAuth. Can be re-enabled in `tinyclaw.sh`
-- `telegram-client.js` - **Primary channel.** Uses `grammy` library. Requires `TELEGRAM_BOT_TOKEN` in env or `.tinyclaw/.env`. Supports text, voice messages (via Whisper), and file sending
+## Model Routing
 
-**Conversation reset:** The `/reset` command (from Telegram) creates a `.tinyclaw/reset_flag` file. The queue processor checks for this flag and omits the `-c` (continue) flag on the next Claude invocation, starting a fresh conversation.
+The router (`src/core/router.ts`) selects Claude models based on message patterns:
+- **Haiku**: Reminders, acknowledgments, simple yes/no
+- **Sonnet** (default): General conversation, queries
+- **Opus**: Code changes, debugging, complex multi-step tasks
+
+## Adding a New Channel
+
+Implement the `Channel` interface from `src/shared/types.ts` and register it in `src/daemon/index.ts`. The interface requires: `connect()`, `onMessage()`, `send()`, `sendFile()`.
 
 ## Hooks
 
 Configured in `.claude/settings.json`:
-- **SessionStart**: Runs `session-start.sh` which outputs the TinyClaw context reminder
-- **PostToolUse** (async): Runs `log-activity.sh` which logs all tool usage to `.tinyclaw/logs/activity.log`
+- **SessionStart**: Runs `session-start.sh` — outputs TinyClaw context reminder
+- **PostToolUse** (async): Runs `log-activity.sh` — logs tool usage to `.tinyclaw/logs/activity.log`
 
 ## Runtime Data
 
 All runtime data lives under `.tinyclaw/` (gitignored):
-- `queue/incoming/`, `queue/processing/`, `queue/outgoing/` - message queue directories
-- `logs/` - per-component log files (telegram, queue, daemon, activity)
-- `whatsapp-session/` - persistent WhatsApp auth data (unused while WhatsApp is disabled)
-- `.env` - Telegram bot token and OpenAI API key
-- `voice_temp/` - temporary directory for voice message transcription
+- `logs/` — per-component log files (core, daemon, telegram, scheduler)
+- `scheduler/tasks.json` — persisted scheduled tasks
+- `.env` — TELEGRAM_BOT_TOKEN, OPENAI_API_KEY
+- `voice_temp/` — temporary directory for voice transcription
+- `reset_flag` — conversation reset marker
 
 ## Response Formatting
 
 Telegram responses are sent with `parse_mode: 'HTML'`. When composing responses that will be sent through Telegram, use HTML formatting instead of Markdown. For example, use `<b>bold</b>` instead of `**bold**`, `<code>inline code</code>` instead of backticks, and `<pre>code block</pre>` instead of triple backticks.
+
+## Workflow Orchestration
+
+### 1. Plan Mode Default
+- Enter plan mode for ANY non-trivial task (3+ steps or architectural decisions)
+- If something goes sideways, STOP and re-plan immediately - don't keep pushing
+- Use plan mode for verification steps, not just building
+- Write detailed specs upfront to reduce ambiguity
+
+### 2. Subagent Strategy to keep main context window clean
+- Offload research, exploration, and parallel analysis to subagents
+- For complex problems, throw more compute at it via subagents
+- One task per subagent for focused execution
+
+### 3. Self-Improvement Loop
+- After ANY correction from the user: update 'tasks/lessons.md' with the pattern
+- Write rules for yourself that prevent the same mistake
+- Ruthlessly iterate on these lessons until mistake rate drops
+- Review lessons at session start for relevant project
+
+### 4. Verification Before Done
+- Never mark a task complete without proving it works
+- Diff behavior between main and your changes when relevant
+- Ask yourself: "Would a staff engineer approve this?"
+- Run tests, check logs, demonstrate correctness
+
+### 5. Demand Elegance (Balanced)
+- For non-trivial changes: pause and ask "is there a more elegant way?"
+- If a fix feels hacky: "Knowing everything I know now, implement the elegant solution"
+- Skip this for simple, obvious fixes - don't over-engineer
+- Challenge your own work before presenting it
+
+### 6. Autonomous Bug Fixing
+- When given a bug report: just fix it. Don't ask for hand-holding
+- Point at logs, errors, failing tests -> then resolve them
+- Zero context switching required from the user
+- Go fix failing CI tests without being told how
+
+## Task Management
+1. **Plan First**: Write plan to 'tasks/todo.md' with checkable items
+2. **Verify Plan**: Check in before starting implementation
+3. **Track Progress**: Mark items complete as you go
+4. **Explain Changes**: High-level summary at each step
+5. **Document Results**: Add review to 'tasks/todo.md'
+6. **Capture Lessons**: Update 'tasks/lessons.md' after corrections
+
+## Core Principles
+- **Simplicity First**: Make every change as simple as possible. Impact minimal code.
+- **No Laziness**: Find root causes. No temporary fixes. Senior developer standards.
+- **Minimal Impact**: Changes should only touch what's necessary. Avoid introducing bugs.

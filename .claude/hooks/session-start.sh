@@ -1,26 +1,19 @@
 #!/bin/bash
-# Session start - Load TinyClaw context and SOUL
-
-SCRIPT_DIR="$(cd "$(dirname "$0")/../.." && pwd)"
+# Session start - Load TinyClaw context
+# SOUL.md is now injected by the processor for all backends (Claude + Codex)
 
 cat << 'EOF'
-🤖 TinyClaw Lite Active
+TinyClaw v2 Active
 
-Running in persistent mode with:
+Running with Daemon + Core architecture:
 - Telegram message integration
 - Voice message transcription (Whisper)
+- Image analysis (Vision)
+- Model routing (haiku/sonnet/opus)
+- Scheduler (croner)
 - Activity logging
-- File sending via Telegram
 
 Stay proactive and responsive to messages.
 EOF
-
-# Load SOUL.md if it exists
-if [ -f "$SCRIPT_DIR/SOUL.md" ]; then
-    echo ""
-    echo "--- SOUL ---"
-    cat "$SCRIPT_DIR/SOUL.md"
-    echo "--- END SOUL ---"
-fi
 
 exit 0

@@ -1,16 +1,18 @@
 {
   "name": "tinyclaw",
-  "version": "1.0.0",
-  "description": "TinyClaw with WhatsApp and Telegram integration",
-  "main": "whatsapp-client.js",
+  "version": "2.0.0",
+  "description": "TinyClaw v2 - Daemon + Core architecture connecting Telegram to Claude Code",
   "scripts": {
-    "whatsapp": "node whatsapp-client.js",
-    "telegram": "node telegram-client.js"
+    "daemon": "bun src/daemon/index.ts",
+    "dev": "bun --watch src/core/index.ts",
+    "start": "bun src/daemon/index.ts"
   },
   "dependencies": {
     "grammy": "^1.21.0",
     "openai": "^6.19.0",
-    "qrcode-terminal": "^0.12.0",
-    "whatsapp-web.js": "^1.23.0"
+    "croner": "^9.0.0"
+  },
+  "devDependencies": {
+    "@types/bun": "latest"
   }
 }

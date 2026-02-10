@@ -1,14 +1,14 @@
 # Dependencies
 node_modules/
 
-# TinyClaw runtime files
-.tinyclaw/logs/
-.tinyclaw/whatsapp-session/
-.tinyclaw/queue/
-.tinyclaw/reset_flag
-.tinyclaw/.env
-.wwebjs_cache
-*.log
+# TinyClaw runtime
+.tinyclaw/
+
+# Build output
+dist/
+
+# Environment
+.env
 
 # OS files
 .DS_Store
@@ -17,5 +17,9 @@ node_modules/
 .vscode/
 .idea/
 *.swp
-/.tinyclaw
-.env
+
+# Logs
+*.log
+
+# Bun
+bun.lock

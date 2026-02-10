@@ -1,0 +1,189 @@
+/**
+ * @module daemon/channels/telegram
+ * @role Telegram channel adapter using grammy.
+ * @responsibilities
+ *   - Connect to Telegram Bot API
+ *   - Receive text, voice, and photo messages
+ *   - Download media from Telegram servers as buffers
+ *   - Send text (HTML) and file messages back
+ *   - Extract commands from text and forward to Core
+ * @dependencies grammy, shared/config
+ * @effects Network (Telegram API), spawns long-polling connection
+ * @contract Implements Channel interface
+ */
+
+import { Bot, GrammyError, HttpError, InputFile } from "grammy";
+import type { Channel, IncomingMessage } from "./base";
+import { config } from "../../shared/config";
+import { createLogger } from "../../shared/logger";
+
+const log = createLogger("telegram");
+
+export class TelegramChannel implements Channel {
+  name = "telegram";
+  private bot: Bot;
+  private handler: ((msg: IncomingMessage) => void) | null = null;
+
+  constructor() {
+    if (!config.telegramBotToken) {
+      throw new Error("TELEGRAM_BOT_TOKEN not configured");
+    }
+    this.bot = new Bot(config.telegramBotToken);
+
+    this.bot.catch((err) => {
+      const e = err.error;
+      if (e instanceof GrammyError) {
+        log.error(`Telegram API error: ${e.description}`);
+      } else if (e instanceof HttpError) {
+        log.error(`Telegram HTTP error: ${e}`);
+      } else {
+        log.error(`Telegram unknown error: ${e}`);
+      }
+    });
+  }
+
+  async connect(): Promise<void> {
+    // All text messages — commands are extracted and forwarded to Core
+    this.bot.on("message:text", async (ctx) => {
+      if (ctx.chat.type !== "private") return;
+      const text = ctx.message.text;
+      if (!text?.trim()) return;
+
+      // Extract command if message starts with /
+      let command: string | undefined;
+      if (text.startsWith("/")) {
+        const match = text.match(/^\/(\w+)/);
+        if (match) command = `/${match[1].toLowerCase()}`;
+      }
+
+      log.info(`${command ? `Cmd ${command}` : "Text"} from ${ctx.from!.first_name}: ${text.substring(0, 60)}`);
+      if (!command) await ctx.api.sendChatAction(ctx.chat.id, "typing");
+
+      this.handler?.({
+        chatId: String(ctx.chat.id),
+        sender: this.getSenderName(ctx),
+        senderId: String(ctx.from!.id),
+        text,
+        command,
+        timestamp: Date.now(),
+      });
+    });
+
+    // Voice messages
+    this.bot.on("message:voice", async (ctx) => {
+      if (ctx.chat.type !== "private") return;
+
+      const voice = ctx.message.voice;
+      log.info(`Voice from ${ctx.from!.first_name} (${voice.duration}s)`);
+      await ctx.api.sendChatAction(ctx.chat.id, "typing");
+
+      try {
+        const file = await ctx.api.getFile(voice.file_id);
+        if (!file.file_path) {
+          await ctx.reply("No se pudo descargar el audio.");
+          return;
+        }
+        const buffer = await this.downloadFile(file.file_path);
+        this.handler?.({
+          chatId: String(ctx.chat.id),
+          sender: this.getSenderName(ctx),
+          senderId: String(ctx.from!.id),
+          audio: { base64: buffer.toString("base64"), filename: `voice_${Date.now()}.ogg` },
+          timestamp: Date.now(),
+        });
+      } catch (error) {
+        log.error(`Voice download error: ${error}`);
+        await ctx.reply("No se pudo descargar el audio. Intentá de nuevo.");
+      }
+    });
+
+    // Photo messages
+    this.bot.on("message:photo", async (ctx) => {
+      if (ctx.chat.type !== "private") return;
+
+      const photos = ctx.message.photo;
+      const photo = photos[photos.length - 1];
+      const caption = ctx.message.caption || "";
+
+      log.info(`Photo from ${ctx.from!.first_name} (${photo.width}x${photo.height})`);
+      await ctx.api.sendChatAction(ctx.chat.id, "typing");
+
+      try {
+        const file = await ctx.api.getFile(photo.file_id);
+        if (!file.file_path) {
+          await ctx.reply("No se pudo descargar la imagen.");
+          return;
+        }
+        const buffer = await this.downloadFile(file.file_path);
+        this.handler?.({
+          chatId: String(ctx.chat.id),
+          sender: this.getSenderName(ctx),
+          senderId: String(ctx.from!.id),
+          image: { base64: buffer.toString("base64"), caption: caption || undefined },
+          timestamp: Date.now(),
+        });
+      } catch (error) {
+        log.error(`Photo download error: ${error}`);
+        await ctx.reply("No se pudo descargar la imagen. Intentá de nuevo.");
+      }
+    });
+
+    await this.bot.start({
+      onStart: (botInfo) => {
+        log.info(`Telegram bot connected as @${botInfo.username}`);
+      },
+    });
+  }
+
+  onMessage(handler: (msg: IncomingMessage) => void): void {
+    this.handler = handler;
+  }
+
+  async send(chatId: string, text: string, parseMode: "HTML" | "plain" = "HTML"): Promise<void> {
+    try {
+      if (parseMode === "HTML") {
+        try {
+          await this.bot.api.sendMessage(chatId, text, { parse_mode: "HTML" });
+          return;
+        } catch (error) {
+          if (error instanceof GrammyError && error.description?.includes("can't parse entities")) {
+            log.warn("HTML parse failed, falling back to plain text");
+          } else {
+            throw error;
+          }
+        }
+      }
+      await this.bot.api.sendMessage(chatId, text);
+    } catch (error) {
+      log.error(`Send error to ${chatId}: ${error}`);
+      throw error;
+    }
+  }
+
+  async sendFile(chatId: string, filePath: string): Promise<void> {
+    try {
+      await this.bot.api.sendDocument(chatId, new InputFile(filePath));
+      log.info(`Sent file to ${chatId}: ${filePath}`);
+    } catch (error) {
+      log.error(`File send error: ${error}`);
+      throw error;
+    }
+  }
+
+  private getSenderName(ctx: { from?: { first_name: string; last_name?: string; username?: string; id: number } }): string {
+    if (!ctx.from) return "Unknown";
+    return (
+      ctx.from.first_name + (ctx.from.last_name ? " " + ctx.from.last_name : "") ||
+      ctx.from.username ||
+      String(ctx.from.id)
+    );
+  }
+
+  private async downloadFile(filePath: string): Promise<Buffer> {
+    const url = `https://api.telegram.org/file/bot${config.telegramBotToken}/${filePath}`;
+    const response = await fetch(url);
+    if (!response.ok) throw new Error(`Download failed: ${response.status}`);
+    const arrayBuffer = await response.arrayBuffer();
+    return Buffer.from(arrayBuffer);
+  }
+}
