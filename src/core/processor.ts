@@ -152,7 +152,7 @@ export async function processWithCodex(message: string): Promise<string> {
     args.push("exec", "--dangerously-bypass-approvals-and-sandbox", "-C", config.projectDir);
   }
 
-  args.push(withSoul(message));
+  args.push(message);
 
   const proc = Bun.spawn(["codex", ...args], {
     cwd: config.projectDir,

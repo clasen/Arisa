@@ -123,3 +123,25 @@ export function addTask(task: ScheduledTask) {
   saveTasks();
   log.info(`Added task ${task.id} (${task.type})`);
 }
+
+export function cancelRecurringTasks(chatId: string): number {
+  let removed = 0;
+  for (let i = tasks.length - 1; i >= 0; i -= 1) {
+    const task = tasks[i];
+    if (task.chatId === chatId && task.type === "cron" && task.origin === "recurring") {
+      const job = activeJobs.get(task.id);
+      if (job && "stop" in job && typeof job.stop === "function") {
+        job.stop();
+      } else if (job) {
+        clearTimeout(job as ReturnType<typeof setTimeout>);
+      }
+      activeJobs.delete(task.id);
+      tasks.splice(i, 1);
+      removed += 1;
+    }
+  }
+  if (removed > 0) {
+    saveTasks();
+  }
+  return removed;
+}

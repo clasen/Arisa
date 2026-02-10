@@ -1,11 +1,12 @@
 /**
  * @module core/intent
- * @role Use a fast model (haiku) to detect scheduling intents from any language.
+ * @role Use a fast model to detect scheduling intents from any language.
  * @responsibilities
  *   - Classify messages as schedule requests or regular messages
  *   - Extract schedule type (once/cron), timing, and reminder text
+ *   - Works with whatever CLI is available (claude or codex)
  * @dependencies shared/config
- * @effects Spawns claude CLI (haiku)
+ * @effects Spawns claude or codex CLI
  */
 
 import { config } from "../shared/config";
@@ -44,32 +45,64 @@ Rules:
 - Support any language
 - Only detect clear scheduling intent, not vague mentions of time`;
 
-export async function detectScheduleIntent(message: string): Promise<ScheduleIntent | null> {
-  try {
-    const proc = Bun.spawn(
-      ["claude", "--dangerously-skip-permissions", "--model", "haiku", "-p", `${INTENT_PROMPT}\n\nUser message: ${message}`],
-      { cwd: config.projectDir, stdout: "pipe", stderr: "pipe" },
-    );
-
-    const timeout = setTimeout(() => proc.kill(), 15_000);
-    const exitCode = await proc.exited;
-    clearTimeout(timeout);
-
-    if (exitCode !== 0) return null;
-
-    const raw = (await new Response(proc.stdout).text()).trim();
-
-    // Extract JSON from response (model might wrap it in markdown)
-    const jsonMatch = raw.match(/\{[\s\S]*\}/);
-    if (!jsonMatch) return null;
-
-    const parsed = JSON.parse(jsonMatch[0]);
-    if (parsed.type === "none") return null;
-    if (parsed.type !== "once" && parsed.type !== "cron") return null;
-
-    return parsed as ScheduleIntent;
-  } catch (e) {
-    log.warn(`Intent detection failed: ${e}`);
-    return null;
+function buildCmd(cli: "claude" | "codex", prompt: string): string[] {
+  if (cli === "claude") {
+    return ["claude", "--dangerously-skip-permissions", "--model", "haiku", "-p", prompt];
   }
+  return ["codex", "exec", "--dangerously-bypass-approvals-and-sandbox", "-C", config.projectDir, prompt];
+}
+
+// Track which CLI actually works (not just Bun.which, which can find broken shims)
+let verifiedCli: "claude" | "codex" | null = null;
+
+async function trySpawn(prompt: string, cli: "claude" | "codex"): Promise<string | null> {
+  const cmd = buildCmd(cli, prompt);
+  const proc = Bun.spawn(cmd, { cwd: config.projectDir, stdout: "pipe", stderr: "pipe" });
+
+  const timeout = setTimeout(() => proc.kill(), 15_000);
+  const exitCode = await proc.exited;
+  clearTimeout(timeout);
+
+  if (exitCode !== 0) return null;
+
+  return (await new Response(proc.stdout).text()).trim();
+}
+
+function getCliOrder(): Array<"claude" | "codex"> {
+  if (verifiedCli) return [verifiedCli];
+  const order: Array<"claude" | "codex"> = [];
+  if (Bun.which("claude") !== null) order.push("claude");
+  if (Bun.which("codex") !== null) order.push("codex");
+  return order;
+}
+
+export async function detectScheduleIntent(message: string): Promise<ScheduleIntent | null> {
+  const clis = getCliOrder();
+  if (clis.length === 0) return null;
+
+  const fullPrompt = `${INTENT_PROMPT}\n\nUser message: ${message}`;
+
+  for (const cli of clis) {
+    try {
+      const raw = await trySpawn(fullPrompt, cli);
+      if (raw === null) continue;
+
+      // This CLI works — remember it
+      verifiedCli = cli;
+
+      const jsonMatch = raw.match(/\{[\s\S]*\}/);
+      if (!jsonMatch) return null;
+
+      const parsed = JSON.parse(jsonMatch[0]);
+      if (parsed.type === "none") return null;
+      if (parsed.type !== "once" && parsed.type !== "cron") return null;
+
+      return parsed as ScheduleIntent;
+    } catch (e) {
+      log.warn(`Intent detection with ${cli} failed: ${e}`);
+      // Try next CLI
+    }
+  }
+
+  return null;
 }

@@ -185,6 +185,8 @@ const server = await serveWithRetry({
 
         // Route based on current backend state
         const backend = getBackend(msg.chatId);
+        const deps = checkDeps();
+        const canFallback = backend === "codex" ? deps.claude : deps.codex;
         let agentResponse: string;
         let usedBackend: "claude" | "codex" = backend;
 
@@ -195,18 +197,32 @@ const server = await serveWithRetry({
         if (backend === "codex") {
           try {
             agentResponse = await processWithCodex(enrichedMessage);
-            if (agentResponse.startsWith("Error processing with Codex")) {
+            if (agentResponse.startsWith("Error processing with Codex") && canFallback) {
               log.warn("Codex failed, falling back to Claude");
               agentResponse = await processWithClaude(enrichedMessage);
               usedBackend = "claude";
             }
           } catch (error) {
-            log.warn(`Codex threw, falling back to Claude: ${error}`);
-            agentResponse = await processWithClaude(enrichedMessage);
-            usedBackend = "claude";
+            if (canFallback) {
+              log.warn(`Codex threw, falling back to Claude: ${error}`);
+              agentResponse = await processWithClaude(enrichedMessage);
+              usedBackend = "claude";
+            } else {
+              agentResponse = "Error processing with Codex. Please try again.";
+            }
           }
         } else {
-          agentResponse = await processWithClaude(enrichedMessage);
+          try {
+            agentResponse = await processWithClaude(enrichedMessage);
+          } catch (error) {
+            if (canFallback) {
+              log.warn(`Claude threw, falling back to Codex: ${error}`);
+              agentResponse = await processWithCodex(enrichedMessage);
+              usedBackend = "codex";
+            } else {
+              agentResponse = "Error processing your message. Please try again.";
+            }
+          }
         }
 
         // Log exchange for shared history

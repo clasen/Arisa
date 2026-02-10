@@ -43,6 +43,7 @@ export interface ScheduledTask {
   sender: string;
   senderId: string;
   type: "once" | "cron";
+  origin?: "cron" | "recurring";
   message: string;
   originalMessage: string;
   createdAt: number;
