@@ -3,7 +3,7 @@
  * @role Manage cron and one-time scheduled tasks using croner.
  * @responsibilities
  *   - Persist tasks to tasks.json, restore on startup
- *   - Execute tasks by POSTing to Daemon's /send endpoint
+ *   - Execute tasks by processing through Claude, then sending result via Daemon
  *   - Schedule one-time (setTimeout) and recurring (croner) tasks
  * @dependencies croner, shared/config, shared/types
  * @effects Disk I/O (tasks.json), network (POST to Daemon), timers
@@ -13,6 +13,7 @@ import { Cron } from "croner";
 import { config } from "../shared/config";
 import { createLogger } from "../shared/logger";
 import { getTasks, updateTask, deleteTask, addTask as dbAddTask } from "../shared/db";
+import { processWithClaude } from "./processor";
 import type { ScheduledTask } from "../shared/types";
 
 const log = createLogger("scheduler");
@@ -40,19 +41,23 @@ async function saveTask(task: ScheduledTask) {
 async function executeTask(task: ScheduledTask) {
   log.info(`Executing task ${task.id}: ${task.message.substring(0, 60)}`);
   try {
+    // Process through Claude to get a real response
+    const result = await processWithClaude(task.message, task.chatId);
+
+    // Send the processed result to Telegram via Daemon
     const response = await fetch(`http://localhost:${config.daemonPort}/send`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         chatId: task.chatId,
-        text: task.message,
+        text: result,
       }),
     });
     if (!response.ok) {
       log.error(`Daemon returned ${response.status} for task ${task.id}`);
     }
   } catch (error) {
-    log.error(`Failed to send task ${task.id} to Daemon: ${error}`);
+    log.error(`Failed to execute task ${task.id}: ${error}`);
   }
 }
 
