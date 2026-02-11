@@ -353,7 +353,7 @@ ${messageText}`;
             if (isClaudeRateLimitResponse(agentResponse) && canFallback) {
               log.warn("Claude credits exhausted, falling back to Codex");
               const codexResponse = await processWithCodex(enrichedMessage);
-              agentResponse = `Claude is out of credits right now, so I switched this reply to Codex.\n\n${codexResponse}`;
+              agentResponse = `Claude is out of credits right now, so I switched this reply to Codex.\n---CHUNK---\n${codexResponse}`;
               usedBackend = "codex";
             }
           } catch (error) {
