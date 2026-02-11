@@ -322,6 +322,7 @@ ${messageText}`;
         const deps = checkDeps();
         const canFallback = backend === "codex" ? deps.claude : deps.codex;
         let agentResponse: string;
+        let historyResponse: string | null = null;
         let usedBackend: "claude" | "codex" = backend;
 
         // Inject cross-backend context if switching
@@ -354,7 +355,11 @@ ${messageText}`;
               log.warn("Claude credits exhausted, falling back to Codex");
               const codexResponse = await processWithCodex(enrichedMessage);
               agentResponse = `Claude is out of credits right now, so I switched this reply to Codex.\n---CHUNK---\n${codexResponse}`;
+              historyResponse = codexResponse;
               usedBackend = "codex";
+              // Persist the switch so subsequent messages don't keep re-injecting
+              // cross-backend context while Claude has no credits.
+              backendState.set(msg.chatId, "codex");
             }
           } catch (error) {
             const errMsg = error instanceof Error ? error.message : String(error);
@@ -369,7 +374,7 @@ ${messageText}`;
         }
 
         // Log exchange for shared history
-        addExchange(msg.chatId, messageText, agentResponse, usedBackend);
+        addExchange(msg.chatId, messageText, historyResponse ?? agentResponse, usedBackend);
 
         log.info(`Response | backend: ${usedBackend} | responseChars: ${agentResponse.length}`);
         log.debug(`Response raw >>>>\n${agentResponse}\n<<<<`);
