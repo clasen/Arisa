@@ -40,7 +40,13 @@ telegram.onMessage(async (msg) => {
   const typingInterval = setInterval(() => telegram.sendTyping(msg.chatId), 4000);
 
   try {
-    const response = await sendToCore(msg);
+    const response = await sendToCore(msg, async (statusText) => {
+      try {
+        await telegram.send(msg.chatId, statusText);
+      } catch (e) {
+        log.error(`Failed to send status message: ${e}`);
+      }
+    });
     clearInterval(typingInterval);
 
     // Convert markdown to HTML first, then chunk the HTML

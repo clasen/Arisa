@@ -12,11 +12,39 @@
 import DeepBase from "deepbase";
 import { config } from "./config";
 import type { ScheduledTask, AttachmentRecord, MessageRecord } from "./types";
+import { DeepbaseSecure } from "./deepbase-secure";
+import { existsSync, readFileSync, writeFileSync, mkdirSync } from "fs";
+import { randomBytes } from "crypto";
+import { dirname } from "path";
 
 // Initialize deepbase with the storage directory
 const db = new DeepBase({
   path: `${config.tinyclawDir}/db`,
   name: "tinyclaw",
+});
+
+// Initialize encrypted secrets database
+function getOrCreateEncryptionKey(): string {
+  const keyPath = `${config.tinyclawDir}/.encryption_key`;
+  const keyDir = dirname(keyPath);
+
+  if (!existsSync(keyDir)) {
+    mkdirSync(keyDir, { recursive: true });
+  }
+
+  if (existsSync(keyPath)) {
+    return readFileSync(keyPath, 'utf-8').trim();
+  }
+
+  const key = randomBytes(32).toString('hex');
+  writeFileSync(keyPath, key, { mode: 0o600 });
+  return key;
+}
+
+const secretsDb = new DeepbaseSecure({
+  path: `${config.tinyclawDir}/db`,
+  name: "secrets",
+  encryptionKey: getOrCreateEncryptionKey(),
 });
 
 /**
@@ -195,4 +223,18 @@ export async function cleanupOldMessages(maxAgeDays: number): Promise<number> {
   return deleted;
 }
 
-export { db };
+// Secrets (API keys stored encrypted)
+export async function getSecret(key: string): Promise<string | null> {
+  const val = await secretsDb.get("secrets", key);
+  return val?.value ?? null;
+}
+
+export async function setSecret(key: string, value: string): Promise<void> {
+  await secretsDb.set("secrets", key, { value });
+}
+
+export async function deleteSecret(key: string): Promise<void> {
+  await secretsDb.del("secrets", key);
+}
+
+export { db, secretsDb };

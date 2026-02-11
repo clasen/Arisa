@@ -1,0 +1,8 @@
+{
+  "permissions": {
+    "allow": [
+      "WebFetch(domain:grammy.dev)",
+      "Bash(npm install)"
+    ]
+  }
+}
