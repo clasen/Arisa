@@ -13,16 +13,10 @@ Arisa can execute actions with operational control over the system where it runs
 ## Commands
 
 Requires [Bun](https://bun.sh).
-For Bun global installs, use your user environment (do not use `sudo`).
-If needed, configure Bun's user-local install directory:
+For Bun global installs, use your user environment.
 
 ```bash
-export BUN_INSTALL="$HOME/.bun"
-export PATH="$BUN_INSTALL/bin:$PATH"
-```
-
-```bash
-bun install -g arisa     # Global install from package registry (recommended)
+bun add -g arisa     # Global install from package registry (recommended)
 ```
 
 ```bash
