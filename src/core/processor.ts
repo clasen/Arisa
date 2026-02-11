@@ -22,6 +22,7 @@ import { join } from "path";
 const log = createLogger("core");
 const ACTIVITY_LOG = join(config.logsDir, "activity.log");
 const PROMPT_PREVIEW_MAX = 220;
+export const CLAUDE_RATE_LIMIT_MESSAGE = "Claude is out of credits right now. Please try again in a few minutes.";
 
 function logActivity(backend: string, model: string | null, durationMs: number, status: string) {
   try {
@@ -162,7 +163,7 @@ async function runClaude(message: string, chatId: string): Promise<string> {
     log.error(`Claude exited with code ${exitCode}: ${stderr.substring(0, 200)}`);
     logActivity("claude", model.model, duration, `error:${exitCode}`);
     if (isRateLimit(combined)) {
-      return "Rate limit alcanzado. Intentá de nuevo en unos minutos.";
+      return CLAUDE_RATE_LIMIT_MESSAGE;
     }
     return `Error (exit ${exitCode}): ${summarizeError(stderr || stdout)}`;
   }
@@ -251,9 +252,13 @@ export async function processWithCodex(message: string): Promise<string> {
   return response;
 }
 
+export function isClaudeRateLimitResponse(text: string): boolean {
+  return text.trim() === CLAUDE_RATE_LIMIT_MESSAGE;
+}
+
 function summarizeError(raw: string): string {
   const clean = raw.replace(/\s+/g, " ").trim();
-  if (!clean) return "proceso terminó sin detalle.";
+  if (!clean) return "process ended without details.";
   // Cap at 200 chars for Telegram readability
   return clean.length > 200 ? clean.slice(0, 200) + "..." : clean;
 }
