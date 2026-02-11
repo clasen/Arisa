@@ -178,9 +178,7 @@ ${messageText}`;
         if (msg.command === "/claude") {
           const deps = checkDeps();
           if (!deps.claude) {
-            const hint = deps.os === "macOS"
-              ? "<code>brew install claude-code</code> or <code>bun add -g @anthropic-ai/claude-code</code>"
-              : "<code>bun add -g @anthropic-ai/claude-code</code>";
+            const hint = "<code>bun add -g @anthropic-ai/claude-code</code>";
             return Response.json({ text: `Claude CLI is not installed.\n${hint}` } as CoreResponse);
           }
           backendState.set(msg.chatId, "claude");

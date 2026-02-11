@@ -1,6 +1,6 @@
 {
   "name": "arisa",
-  "version": "2.0.3",
+  "version": "2.0.4",
   "description": "Arisa - dynamic agent runtime with daemon/core architecture that evolves through user interaction",
   "preferGlobal": true,
   "bin": {
@@ -20,7 +20,7 @@
     "bun": ">=1.0.0"
   },
   "scripts": {
-    "arisa": "node ./bin/arisa.js",
+    "arisa": "bun ./bin/arisa.js",
     "daemon": "bun src/daemon/index.ts",
     "dev": "bun --watch src/core/index.ts",
     "start": "bun src/daemon/index.ts",

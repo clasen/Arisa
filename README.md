@@ -10,14 +10,18 @@ Arisa is intentionally dynamic: the project grows as the user builds a relations
 
 Arisa can execute actions with operational control over the system where it runs. Before deploying it, make sure you understand and accept the associated security risks. It is strongly recommended to run Arisa in an isolated environment (for example, a Docker container or a dedicated VPS) that does not store sensitive information or critical assets.
 
-## Commands
-
-Requires [Bun](https://bun.sh).
-For Bun global installs, use your user environment.
+## Requirements and Installation
 
 ```bash
-bun add -g arisa     # Global install from package registry (recommended)
+curl -fsSL https://bun.sh/install | bash  # Install Bun https://bun.sh
+
+bun add -g @anthropic-ai/claude-code      # Install Claude CLI (both or one is required)
+bun add -g @openai/codex                  # Install Codex CLI (both or one is required)
+
+bun add -g arisa                          # Install Arisa CLI
 ```
+
+## Commands
 
 ```bash
 arisa                    # Foreground daemon mode (Ctrl+C to stop)
