@@ -18,7 +18,12 @@ await config.secrets.initialize();
 import { createLogger } from "../shared/logger";
 import { serveWithRetry, claimProcess } from "../shared/ports";
 import type { IncomingMessage, CoreResponse, ScheduledTask } from "../shared/types";
-import { processWithClaude, processWithCodex, isClaudeRateLimitResponse } from "./processor";
+import {
+  processWithClaude,
+  processWithCodex,
+  isClaudeRateLimitResponse,
+  isCodexAuthRequiredResponse,
+} from "./processor";
 import { transcribeAudio, describeImage, generateSpeech, isMediaConfigured, isSpeechConfigured } from "./media";
 import { detectFiles } from "./file-detector";
 
@@ -363,12 +368,16 @@ ${messageText}`;
             if (isClaudeRateLimitResponse(agentResponse) && canFallback) {
               log.warn("Claude credits exhausted, falling back to Codex");
               const codexResponse = await processWithCodex(enrichedMessage);
-              agentResponse = `Claude is out of credits right now, so I switched this reply to Codex.\n---CHUNK---\n${codexResponse}`;
-              historyResponse = codexResponse;
-              usedBackend = "codex";
-              // Persist the switch so subsequent messages don't keep re-injecting
-              // cross-backend context while Claude has no credits.
-              backendState.set(msg.chatId, "codex");
+              if (isCodexAuthRequiredResponse(codexResponse)) {
+                agentResponse = `${agentResponse}\n---CHUNK---\n${codexResponse}`;
+              } else {
+                agentResponse = `Claude is out of credits right now, so I switched this reply to Codex.\n---CHUNK---\n${codexResponse}`;
+                historyResponse = codexResponse;
+                usedBackend = "codex";
+                // Persist the switch so subsequent messages don't keep re-injecting
+                // cross-backend context while Claude has no credits.
+                backendState.set(msg.chatId, "codex");
+              }
             }
           } catch (error) {
             const errMsg = error instanceof Error ? error.message : String(error);

@@ -6,7 +6,35 @@ Inspired by the architecture of [`jlia0/tinyclaw`](https://github.com/jlia0/tiny
 
 Arisa is intentionally dynamic: the project grows as the user builds a relationship with it. Many capabilities are added live during real conversations (for example, Whisper support), so the system evolves through use instead of staying static.
 
+## Security Notice
+
+Arisa can execute actions with operational control over the system where it runs. Before deploying it, make sure you understand and accept the associated security risks. It is strongly recommended to run Arisa in an isolated environment (for example, a Docker container or a dedicated VPS) that does not store sensitive information or critical assets.
+
 ## Commands
+
+Requires [Bun](https://bun.sh).
+For Bun global installs, use your user environment (do not use `sudo`).
+If needed, configure Bun's user-local install directory:
+
+```bash
+export BUN_INSTALL="$HOME/.bun"
+export PATH="$BUN_INSTALL/bin:$PATH"
+```
+
+```bash
+bun install -g arisa     # Global install from package registry (recommended)
+npm install -g arisa     # Alternative global install via npm (may require sudo)
+```
+
+```bash
+arisa start              # Start as service (enables autostart with systemd --user)
+arisa stop               # Stop service
+arisa status             # Service status
+arisa restart            # Restart service
+arisa daemon             # Foreground daemon mode (manual/dev)
+arisa core               # Foreground core-only mode
+arisa dev                # Foreground core watch mode
+```
 
 ```bash
 bun install              # Install dependencies
@@ -14,7 +42,12 @@ bun run daemon           # Start everything (Daemon spawns Core with --watch)
 bun run dev              # Start Core only with hot-reload (for development)
 npm install -g .         # Global install via Node/npm
 bun add -g .             # Global install via Bun
-arisa                    # Start daemon from global install
+```
+
+On Linux with `systemd --user`, `arisa start` enables auto-start on reboot. To keep it running even without an active login session:
+
+```bash
+sudo loginctl enable-linger "$USER"
 ```
 
 ## Architecture: Daemon + Core

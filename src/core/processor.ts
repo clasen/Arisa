@@ -23,6 +23,12 @@ const log = createLogger("core");
 const ACTIVITY_LOG = join(config.logsDir, "activity.log");
 const PROMPT_PREVIEW_MAX = 220;
 export const CLAUDE_RATE_LIMIT_MESSAGE = "Claude is out of credits right now. Please try again in a few minutes.";
+export const CODEX_AUTH_REQUIRED_MESSAGE = [
+  "Codex is not authenticated on this server.",
+  "Check the server terminal and run:",
+  "<code>codex login --device-auth</code>",
+  "Then try again.",
+].join("\n");
 
 function logActivity(backend: string, model: string | null, durationMs: number, status: string) {
   try {
@@ -230,8 +236,12 @@ export async function processWithCodex(message: string): Promise<string> {
   const duration = Date.now() - start;
 
   if (exitCode !== 0) {
+    const combined = `${stdout}\n${stderr}`;
     log.error(`Codex exited with code ${exitCode}: ${stderr.substring(0, 200)}`);
     logActivity("codex", null, duration, `error:${exitCode}`);
+    if (isCodexAuthError(combined)) {
+      return CODEX_AUTH_REQUIRED_MESSAGE;
+    }
     return "Error processing with Codex. Please try again.";
   }
 
@@ -256,6 +266,10 @@ export function isClaudeRateLimitResponse(text: string): boolean {
   return text.trim() === CLAUDE_RATE_LIMIT_MESSAGE;
 }
 
+export function isCodexAuthRequiredResponse(text: string): boolean {
+  return text.trim() === CODEX_AUTH_REQUIRED_MESSAGE;
+}
+
 function summarizeError(raw: string): string {
   const clean = raw.replace(/\s+/g, " ").trim();
   if (!clean) return "process ended without details.";
@@ -265,4 +279,12 @@ function summarizeError(raw: string): string {
 
 function isRateLimit(output: string): boolean {
   return /you'?ve hit your limit|rate limit|quota|credits.*(exceeded|exhausted)/i.test(output);
+}
+
+function isCodexAuthError(output: string): boolean {
+  return (
+    /missing bearer authentication in header/i.test(output)
+    || (/401\s+Unauthorized/i.test(output) && /bearer/i.test(output))
+    || (/failed to refresh available models/i.test(output) && /unauthorized/i.test(output))
+  );
 }

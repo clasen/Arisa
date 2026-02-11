@@ -28,6 +28,7 @@ const { TelegramChannel } = await import("./channels/telegram");
 const { sendToCore } = await import("./bridge");
 const { startCore, stopCore, setLifecycleNotify } = await import("./lifecycle");
 const { setAutoFixNotify } = await import("./autofix");
+const { maybeStartCodexDeviceAuth } = await import("./codex-login");
 const { chunkMessage, markdownToTelegramHtml } = await import("../core/format");
 const { saveMessageRecord } = await import("../shared/db");
 
@@ -77,6 +78,7 @@ telegram.onMessage(async (msg) => {
     clearInterval(typingInterval);
 
     const raw = response.text || "";
+    maybeStartCodexDeviceAuth(raw);
     const messageParts = raw.split(/\n---CHUNK---\n/g);
     let sentText = false;
 
