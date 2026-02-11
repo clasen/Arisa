@@ -1,9 +1,9 @@
 #!/bin/bash
-# Session start - Load TinyClaw context
+# Session start - Load Arisa context
 # SOUL.md is now injected by the processor for all backends (Claude + Codex)
 
 cat << 'EOF'
-TinyClaw v2 Active
+Arisa Active
 
 Running with Daemon + Core architecture:
 - Telegram message integration

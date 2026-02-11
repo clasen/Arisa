@@ -12,14 +12,14 @@ import { join } from "path";
 import { existsSync, readFileSync, writeFileSync, mkdirSync } from "fs";
 import CryptoJS from "crypto-js";
 import { DeepbaseSecure } from "./deepbase-secure";
+import { dataDir } from "./paths";
 
-const PROJECT_DIR = join(import.meta.dir, "..", "..");
-const TINYCLAW_DIR = join(PROJECT_DIR, ".tinyclaw");
-const ENCRYPTION_KEY_PATH = join(TINYCLAW_DIR, ".encryption_key");
-const SECRETS_DB_PATH = join(TINYCLAW_DIR, "db");
+const ARISA_DIR = dataDir;
+const ENCRYPTION_KEY_PATH = join(ARISA_DIR, ".encryption_key");
+const SECRETS_DB_PATH = join(ARISA_DIR, "db");
 
-// Ensure .tinyclaw and db dirs exist
-mkdirSync(join(TINYCLAW_DIR, "db"), { recursive: true });
+// Ensure runtime data and db dirs exist
+mkdirSync(join(ARISA_DIR, "db"), { recursive: true });
 
 /**
  * Load or generate encryption key

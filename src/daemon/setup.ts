@@ -4,16 +4,16 @@
  * @responsibilities
  *   - Check required config (TELEGRAM_BOT_TOKEN)
  *   - Check optional config (OPENAI_API_KEY)
- *   - Prompt user interactively and save to .tinyclaw/.env
- * @dependencies None (avoids importing config to prevent module caching issues)
- * @effects Reads stdin, writes .tinyclaw/.env
+ *   - Prompt user interactively and save to runtime .env
+ * @dependencies shared/paths (avoids importing config to prevent module caching issues)
+ * @effects Reads stdin, writes runtime .env
  */
 
 import { existsSync, readFileSync, writeFileSync, mkdirSync } from "fs";
-import { join, dirname } from "path";
+import { dirname } from "path";
+import { dataDir } from "../shared/paths";
 
-const PROJECT_DIR = join(import.meta.dir, "..", "..");
-const ENV_PATH = join(PROJECT_DIR, ".tinyclaw", ".env");
+const ENV_PATH = join(dataDir, ".env");
 
 function loadExistingEnv(): Record<string, string> {
   if (!existsSync(ENV_PATH)) return {};
@@ -48,7 +48,7 @@ export async function runSetup(): Promise<boolean> {
 
   // Required: TELEGRAM_BOT_TOKEN
   if (!vars.TELEGRAM_BOT_TOKEN && !process.env.TELEGRAM_BOT_TOKEN) {
-    console.log("\n🔧 TinyClaw Setup\n");
+    console.log("\n🔧 Arisa Setup\n");
     console.log("Telegram Bot Token required. Get one from @BotFather on Telegram.");
     const token = await prompt("TELEGRAM_BOT_TOKEN: ");
     if (!token) {
@@ -61,7 +61,7 @@ export async function runSetup(): Promise<boolean> {
 
   // Optional: OPENAI_API_KEY
   if (!vars.OPENAI_API_KEY && !process.env.OPENAI_API_KEY) {
-    if (!changed) console.log("\n🔧 TinyClaw Setup\n");
+    if (!changed) console.log("\n🔧 Arisa Setup\n");
     console.log("\nOpenAI API Key (optional — enables voice transcription + image analysis).");
     const key = await prompt("OPENAI_API_KEY (enter to skip): ");
     if (key) {

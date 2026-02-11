@@ -7,7 +7,7 @@
  *   - Generate speech from text via ElevenLabs API
  *   - Manage temp files for audio processing
  * @dependencies shared/config
- * @effects Network calls to OpenAI API and ElevenLabs API, temp file I/O in .tinyclaw/voice_temp/
+ * @effects Network calls to OpenAI API and ElevenLabs API, temp file I/O in runtime voice_temp/
  * @contract transcribeAudio(base64, filename) => Promise<string>
  * @contract describeImage(base64, caption?) => Promise<string>
  * @contract generateSpeech(text, voice?) => Promise<string>

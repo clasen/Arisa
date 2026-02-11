@@ -3,7 +3,13 @@
 
 INPUT=$(cat)
 TOOL_NAME=$(echo "$INPUT" | jq -r '.tool_name')
-LOGFILE="$CLAUDE_PROJECT_DIR/.tinyclaw/logs/activity.log"
+ARISA_LOGFILE="$CLAUDE_PROJECT_DIR/.arisa/logs/activity.log"
+LEGACY_LOGFILE="$CLAUDE_PROJECT_DIR/.tinyclaw/logs/activity.log"
+LOGFILE="$ARISA_LOGFILE"
+
+if [[ ! -d "$CLAUDE_PROJECT_DIR/.arisa" && -d "$CLAUDE_PROJECT_DIR/.tinyclaw" ]]; then
+  LOGFILE="$LEGACY_LOGFILE"
+fi
 
 mkdir -p "$(dirname "$LOGFILE")"
 

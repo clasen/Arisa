@@ -109,7 +109,7 @@ telegram.onMessage(async (msg) => {
             chatId: msg.chatId,
             messageId: sentId,
             direction: "out",
-            sender: "TinyClaw",
+            sender: "Arisa",
             timestamp: Date.now(),
             text: chunk,
           }).catch((e) => log.error(`Failed to save outgoing message record: ${e}`));
@@ -164,7 +164,7 @@ const pushServer = await serveWithRetry({
               chatId: body.chatId,
               messageId: sentId,
               direction: "out",
-              sender: "TinyClaw",
+              sender: "Arisa",
               timestamp: Date.now(),
               text: chunk,
             }).catch((e) => log.error(`Failed to save outgoing message record: ${e}`));

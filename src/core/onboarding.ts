@@ -4,10 +4,10 @@
  * @responsibilities
  *   - Detect installed CLIs (claude, codex) via Bun.which
  *   - Check OPENAI_API_KEY config
- *   - Track onboarded chats in .tinyclaw/onboarded.json
+ *   - Track onboarded chats in runtime storage
  *   - Build platform-specific install instructions
  * @dependencies shared/config
- * @effects Reads/writes .tinyclaw/onboarded.json
+ * @effects Reads/writes onboarded state in deepbase
  */
 
 import { config } from "../shared/config";
@@ -80,7 +80,7 @@ export async function getOnboarding(chatId: string): Promise<{ message: string; 
   // No CLI at all — block
   if (!deps.claude && !deps.codex) {
     const lines = [
-      "<b>Welcome to TinyClaw!</b>\n",
+      "<b>Welcome to Arisa!</b>\n",
       "Neither Claude CLI nor Codex CLI found. You need at least one.\n",
     ];
     if (deps.os === "macOS") {
@@ -97,7 +97,7 @@ export async function getOnboarding(chatId: string): Promise<{ message: string; 
   await markOnboarded(chatId);
 
   const using = deps.claude ? "Claude" : "Codex";
-  const lines = [`<b>TinyClaw</b> — using <b>${using}</b>`];
+  const lines = [`<b>Arisa</b> — using <b>${using}</b>`];
 
   if (!deps.claude) {
     lines.push("Claude CLI not installed. Add it with <code>npm install -g @anthropic-ai/claude-code</code>");
@@ -108,7 +108,7 @@ export async function getOnboarding(chatId: string): Promise<{ message: string; 
   }
 
   if (!deps.openaiKey) {
-    lines.push("No OpenAI API key — voice and image processing disabled. Add <code>OPENAI_API_KEY</code> to <code>.tinyclaw/.env</code> to enable.");
+    lines.push("No OpenAI API key — voice and image processing disabled. Add <code>OPENAI_API_KEY</code> to <code>.arisa/.env</code> to enable.");
   }
 
   return { message: lines.join("\n"), blocking: false };

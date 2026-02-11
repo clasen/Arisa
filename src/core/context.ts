@@ -6,7 +6,7 @@
  *   - Return whether to use -c (continue) flag
  *   - Clear reset_flag after consuming it
  * @dependencies shared/config
- * @effects Reads/deletes .tinyclaw/reset_flag from disk
+ * @effects Reads/deletes reset_flag from runtime data dir
  * @contract shouldContinue() => boolean
  */
 

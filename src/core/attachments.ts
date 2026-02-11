@@ -2,15 +2,15 @@
  * @module core/attachments
  * @role Persist media attachments so the model can access them later.
  * @responsibilities
- *   - Save base64 attachments to .tinyclaw/attachments/{chatId}/
+ *   - Save base64 attachments to runtime attachments/{chatId}/
  *   - Track metadata in deepbase (collection: "attachments")
  *   - Clean up files older than configured max age
  * @dependencies shared/config, shared/db
- * @effects Disk I/O in .tinyclaw/attachments/, deepbase writes
+ * @effects Disk I/O in runtime attachments dir, deepbase writes
  */
 
 import { mkdirSync, existsSync, unlinkSync, rmdirSync, readdirSync } from "fs";
-import { join, dirname } from "path";
+import { join, dirname, relative } from "path";
 import { config } from "../shared/config";
 import { createLogger } from "../shared/logger";
 import { addAttachment, getExpiredAttachments, deleteAttachment, cleanupOldMessages } from "../shared/db";
@@ -56,7 +56,10 @@ export async function saveAttachment(
   const buffer = Buffer.from(base64, "base64");
   await Bun.write(outPath, buffer);
 
-  const relPath = `.tinyclaw/attachments/${chatId}/${outName}`;
+  let relPath = relative(config.projectDir, outPath).replace(/\\/g, "/");
+  if (relPath.startsWith("..")) {
+    relPath = outPath;
+  }
 
   const record: AttachmentRecord = {
     id: `${chatId}_${outName}`,

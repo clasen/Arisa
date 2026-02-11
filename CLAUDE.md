@@ -1,6 +1,6 @@
-# What is TinyClaw v2
+# What is Arisa
 
-TinyClaw v2 is a Bun + TypeScript system that connects Telegram to Claude Code via a two-process architecture: **Daemon** (stable channel I/O) and **Core** (message processing, media, scheduling, Claude CLI with model routing).
+Arisa is a Bun + TypeScript system that connects Telegram to Claude Code via a two-process architecture: **Daemon** (stable channel I/O) and **Core** (message processing, media, scheduling, Claude CLI with model routing).
 
 ## Commands
 
@@ -8,6 +8,9 @@ TinyClaw v2 is a Bun + TypeScript system that connects Telegram to Claude Code v
 bun install              # Install dependencies
 bun run daemon           # Start everything (Daemon spawns Core with --watch)
 bun run dev              # Start Core only with hot-reload (for development)
+npm install -g .         # Global install via Node/npm
+bun add -g .             # Global install via Bun
+arisa                    # Start daemon from global install
 ```
 
 ## Architecture: Daemon + Core
@@ -61,7 +64,7 @@ src/
 └── shared/
     ├── types.ts            # All shared interfaces
     ├── config.ts           # Env vars, ports, paths
-    ├── logger.ts           # Logger → .tinyclaw/logs/
+    ├── logger.ts           # Logger → .arisa/logs/
     └── db.ts               # Unified persistence layer (deepbase)
 ```
 
@@ -88,14 +91,14 @@ Implement the `Channel` interface from `src/shared/types.ts` and register it in 
 ## Hooks
 
 Configured in `.claude/settings.json`:
-- **SessionStart**: Runs `session-start.sh` — outputs TinyClaw context reminder
-- **PostToolUse** (async): Runs `log-activity.sh` — logs tool usage to `.tinyclaw/logs/activity.log`
+- **SessionStart**: Runs `session-start.sh` — outputs Arisa context reminder
+- **PostToolUse** (async): Runs `log-activity.sh` — logs tool usage to `.arisa/logs/activity.log`
 
 ## Runtime Data
 
-All runtime data lives under `.tinyclaw/` (gitignored):
+All runtime data lives under `.arisa/` (gitignored, with automatic fallback to legacy `.tinyclaw/`):
 - `logs/` — per-component log files (core, daemon, telegram, scheduler)
-- `db/tinyclaw.json` — unified persistence with deepbase
+- `db/arisa.json` — unified persistence with deepbase
 - `attachments/` — saved media files organized by `{chatId}/`
 - `.env` — TELEGRAM_BOT_TOKEN, OPENAI_API_KEY, ELEVENLABS_API_KEY
 - `voice_temp/` — temporary directory for voice transcription
@@ -103,7 +106,7 @@ All runtime data lives under `.tinyclaw/` (gitignored):
 
 ### Persistence with DeepBase
 
-All persistent data is managed by **deepbase** (`src/shared/db.ts`). Location: `.tinyclaw/db/tinyclaw.json`.
+All persistent data is managed by **deepbase** (`src/shared/db.ts`). Location: `.arisa/db/arisa.json`.
 
 | Collection      | Key           | Value type         | Description                              |
 |-----------------|---------------|--------------------|------------------------------------------|
@@ -117,7 +120,6 @@ All persistent data is managed by **deepbase** (`src/shared/db.ts`). Location: `
 
 - **API**: `db.get(collection, key)`, `db.set(collection, key, data)`, `db.del(collection, key)`
 - **Helper functions**: `src/shared/db.ts` provides type-safe wrappers per collection
-- **Migration**: Run `bun run scripts/migrate-to-deepbase.ts` to migrate from old JSON files
 
 ## Response Formatting
 

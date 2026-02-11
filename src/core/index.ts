@@ -75,7 +75,7 @@ const server = await serveWithRetry({
         // Auth gate: require token before anything else
         if (!isAuthorized(msg.chatId)) {
           if (msg.text && await tryAuthorize(msg.chatId, msg.text)) {
-            return Response.json({ text: "Authorized. Welcome to TinyClaw!" } as CoreResponse);
+            return Response.json({ text: "Authorized. Welcome to Arisa!" } as CoreResponse);
           }
           return Response.json({ text: "Send the auth token to start. Check the server console." } as CoreResponse);
         }
@@ -178,7 +178,7 @@ ${messageText}`;
         // Handle /speak command — generate speech via ElevenLabs
         if (msg.command === "/speak") {
           if (!config.elevenlabsApiKey) {
-            return Response.json({ text: "ELEVENLABS_API_KEY not configured. Add it to .tinyclaw/.env" } as CoreResponse);
+            return Response.json({ text: "ELEVENLABS_API_KEY not configured. Add it to .arisa/.env" } as CoreResponse);
           }
           const textToSpeak = messageText.replace(/^\/speak\s*/, "").trim();
           if (!textToSpeak) {

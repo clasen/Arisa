@@ -1,7 +1,9 @@
 # Dependencies
 node_modules/
 
-# TinyClaw runtime
+# Arisa runtime
+.arisa/
+# Legacy runtime
 .tinyclaw/
 
 # Build output

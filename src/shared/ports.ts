@@ -1,16 +1,17 @@
 /**
  * @module shared/ports
  * @role Process cleanup via PID files + /proc scan, retry-aware Bun.serve.
- * @effects Reads/writes .tinyclaw/*.pid, kills processes via SIGKILL
+ * @effects Reads/writes runtime pid files, kills processes via SIGKILL
  */
 
 import { existsSync, readFileSync, readdirSync, writeFileSync, unlinkSync, mkdirSync } from "fs";
 import { join, dirname } from "path";
+import { dataDir } from "./paths";
 
-const TINYCLAW_DIR = join(import.meta.dir, "..", "..", ".tinyclaw");
+const ARISA_DIR = dataDir;
 
 function pidPath(name: string): string {
-  return join(TINYCLAW_DIR, `${name}.pid`);
+  return join(ARISA_DIR, `${name}.pid`);
 }
 
 // Patterns to match in /proc cmdline for each process type

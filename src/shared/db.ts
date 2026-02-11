@@ -6,7 +6,7 @@
  *   - Provide type-safe operations with JSON storage
  *   - Auto-connect on first operation
  * @dependencies deepbase, shared/types, shared/config
- * @effects Disk I/O (.tinyclaw/db/)
+ * @effects Disk I/O (runtime db directory)
  */
 
 import DeepBase from "deepbase";
@@ -17,15 +17,25 @@ import { existsSync, readFileSync, writeFileSync, mkdirSync } from "fs";
 import { randomBytes } from "crypto";
 import { dirname } from "path";
 
+const DB_PATH = `${config.arisaDir}/db`;
+
+function resolveDbName(): string {
+  const arisaDb = `${DB_PATH}/arisa.json`;
+  const legacyDb = `${DB_PATH}/tinyclaw.json`;
+  if (existsSync(arisaDb)) return "arisa";
+  if (existsSync(legacyDb)) return "tinyclaw";
+  return "arisa";
+}
+
 // Initialize deepbase with the storage directory
 const db = new DeepBase({
-  path: `${config.tinyclawDir}/db`,
-  name: "tinyclaw",
+  path: DB_PATH,
+  name: resolveDbName(),
 });
 
 // Initialize encrypted secrets database
 function getOrCreateEncryptionKey(): string {
-  const keyPath = `${config.tinyclawDir}/.encryption_key`;
+  const keyPath = `${config.arisaDir}/.encryption_key`;
   const keyDir = dirname(keyPath);
 
   if (!existsSync(keyDir)) {
@@ -42,7 +52,7 @@ function getOrCreateEncryptionKey(): string {
 }
 
 const secretsDb = new DeepbaseSecure({
-  path: `${config.tinyclawDir}/db`,
+  path: DB_PATH,
   name: "secrets",
   encryptionKey: getOrCreateEncryptionKey(),
 });

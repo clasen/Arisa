@@ -1,12 +1,30 @@
 {
-  "name": "tinyclaw",
+  "name": "arisa",
   "version": "2.0.0",
-  "description": "TinyClaw v2 - Daemon + Core architecture connecting Telegram to Claude Code",
+  "description": "Arisa - Telegram AI daemon/core architecture",
+  "preferGlobal": true,
+  "bin": {
+    "arisa": "./bin/arisa.js"
+  },
+  "files": [
+    "bin",
+    "src",
+    "scripts",
+    "CLAUDE.md",
+    "SOUL.md",
+    "README.md",
+    "tsconfig.json"
+  ],
+  "engines": {
+    "node": ">=18",
+    "bun": ">=1.0.0"
+  },
   "scripts": {
+    "arisa": "node ./bin/arisa.js",
     "daemon": "bun src/daemon/index.ts",
     "dev": "bun --watch src/core/index.ts",
     "start": "bun src/daemon/index.ts",
-    "migrate": "bun scripts/migrate-to-deepbase.ts"
+    "core": "bun src/core/index.ts"
   },
   "dependencies": {
     "croner": "^9.0.0",

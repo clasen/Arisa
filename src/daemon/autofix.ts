@@ -52,13 +52,14 @@ export async function attemptAutoFix(error: string): Promise<boolean> {
   await notifyFn?.(`Auto-fix: intento ${attemptCount}/${MAX_ATTEMPTS}. Analizando error...`);
 
   // Extract file paths from the error to help the fallback model focus
-  const fileRefs = error.match(/\/srv\/tinyclaw\/[^\s:)]+/g) || [];
+  const projectPathPattern = new RegExp(`${escapeRegExp(config.projectDir)}[^\\s:)]+`, "g");
+  const fileRefs = error.match(projectPathPattern) || [];
   const uniqueFiles = [...new Set(fileRefs)].slice(0, 5);
   const fileHint = uniqueFiles.length > 0
     ? `\nKey files from the stack trace: ${uniqueFiles.join(", ")}`
     : "";
 
-  const prompt = `TinyClaw Core error on startup. Fix it.
+  const prompt = `Arisa Core error on startup. Fix it.
 
 Error:
 \`\`\`
@@ -108,4 +109,8 @@ Rules:
 
 function escapeHtml(s: string): string {
   return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+}
+
+function escapeRegExp(s: string): string {
+  return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }

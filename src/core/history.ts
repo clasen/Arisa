@@ -7,7 +7,7 @@
  *     that the current backend hasn't seen
  *   - Persist to disk, load on startup
  * @dependencies shared/config
- * @effects Reads/writes .tinyclaw/history.jsonl
+ * @effects Reads/writes runtime history.jsonl
  */
 
 import { existsSync, readFileSync, appendFileSync, writeFileSync, mkdirSync } from "fs";
@@ -17,7 +17,7 @@ import { createLogger } from "../shared/logger";
 
 const log = createLogger("core");
 
-const HISTORY_PATH = join(config.tinyclawDir, "history.jsonl");
+const HISTORY_PATH = join(config.arisaDir, "history.jsonl");
 const MAX_ENTRIES_PER_CHAT = 50;
 
 interface Exchange {

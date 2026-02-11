@@ -1,12 +1,12 @@
 /**
  * @module shared/logger
- * @role Structured logging to .tinyclaw/logs/ and stdout.
+ * @role Structured logging to runtime logs dir and stdout.
  * @responsibilities
  *   - Create named loggers per component (core, daemon, telegram, scheduler)
  *   - Write timestamped log lines to file + console
  *   - Ensure log directory exists
  * @dependencies shared/config
- * @effects Writes to disk (.tinyclaw/logs/), writes to stdout
+ * @effects Writes to disk (logs dir), writes to stdout
  */
 
 import { appendFileSync, mkdirSync, existsSync } from "fs";

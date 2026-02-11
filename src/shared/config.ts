@@ -11,21 +11,30 @@
 import { existsSync, readFileSync } from "fs";
 import { join } from "path";
 import { secrets } from "./secrets";
+import { dataDir, legacyDataDir, preferredDataDir, projectDir } from "./paths";
 
-const PROJECT_DIR = join(import.meta.dir, "..", "..");
-const ENV_PATH = join(PROJECT_DIR, ".tinyclaw", ".env");
+const ENV_PATH_CANDIDATES = Array.from(new Set([
+  join(dataDir, ".env"),
+  join(preferredDataDir, ".env"),
+  join(legacyDataDir, ".env"),
+]));
 
 function loadEnvFile(): Record<string, string> {
-  if (!existsSync(ENV_PATH)) return {};
-  const content = readFileSync(ENV_PATH, "utf8");
-  const vars: Record<string, string> = {};
-  for (const line of content.split("\n")) {
-    const match = line.match(/^([A-Z_][A-Z0-9_]*)=(.+)$/);
-    if (match) {
-      vars[match[1]] = match[2].trim();
+  for (const envPath of ENV_PATH_CANDIDATES) {
+    if (!existsSync(envPath)) continue;
+
+    const content = readFileSync(envPath, "utf8");
+    const vars: Record<string, string> = {};
+    for (const line of content.split("\n")) {
+      const match = line.match(/^([A-Z_][A-Z0-9_]*)=(.+)$/);
+      if (match) {
+        vars[match[1]] = match[2].trim();
+      }
     }
+    return vars;
   }
-  return vars;
+
+  return {};
 }
 
 const envFile = loadEnvFile();
@@ -91,8 +100,10 @@ class SecureConfig {
 const secureConfig = new SecureConfig();
 
 export const config = {
-  projectDir: PROJECT_DIR,
-  tinyclawDir: join(PROJECT_DIR, ".tinyclaw"),
+  projectDir,
+  arisaDir: dataDir,
+  // Backward-compatible alias for existing modules.
+  tinyclawDir: dataDir,
 
   corePort: 51777,
   daemonPort: 51778,
@@ -104,11 +115,11 @@ export const config = {
 
   elevenlabsVoiceId: "BpjGufoPiobT79j2vtj4",
 
-  logsDir: join(PROJECT_DIR, ".tinyclaw", "logs"),
-  tasksFile: join(PROJECT_DIR, ".tinyclaw", "scheduler", "tasks.json"),
-  resetFlagPath: join(PROJECT_DIR, ".tinyclaw", "reset_flag"),
-  voiceTempDir: join(PROJECT_DIR, ".tinyclaw", "voice_temp"),
-  attachmentsDir: join(PROJECT_DIR, ".tinyclaw", "attachments"),
+  logsDir: join(dataDir, "logs"),
+  tasksFile: join(dataDir, "scheduler", "tasks.json"),
+  resetFlagPath: join(dataDir, "reset_flag"),
+  voiceTempDir: join(dataDir, "voice_temp"),
+  attachmentsDir: join(dataDir, "attachments"),
   attachmentMaxAgeDays: 30,
 
   claudeTimeout: 120_000,
