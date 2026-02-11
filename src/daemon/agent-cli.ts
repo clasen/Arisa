@@ -11,10 +11,15 @@
 
 import { config } from "../shared/config";
 import { createLogger } from "../shared/logger";
+import {
+  buildBunWrappedAgentCliCommand,
+  resolveAgentCliPath,
+  type AgentCliName,
+} from "../shared/ai-cli";
 
 const log = createLogger("daemon");
 
-export type AgentCli = "claude" | "codex";
+export type AgentCli = AgentCliName;
 
 export interface CliExecutionResult {
   cli: AgentCli;
@@ -32,8 +37,8 @@ export interface CliFallbackOutcome {
 
 export function getAvailableAgentCli(): AgentCli[] {
   const order: AgentCli[] = [];
-  if (Bun.which("claude") !== null) order.push("claude");
-  if (Bun.which("codex") !== null) order.push("codex");
+  if (resolveAgentCliPath("claude") !== null) order.push("claude");
+  if (resolveAgentCliPath("codex") !== null) order.push("codex");
   return order;
 }
 
@@ -43,9 +48,15 @@ export function getAgentCliLabel(cli: AgentCli): string {
 
 function buildCommand(cli: AgentCli, prompt: string): string[] {
   if (cli === "claude") {
-    return ["claude", "--dangerously-skip-permissions", "--model", "sonnet", "-p", prompt];
+    return buildBunWrappedAgentCliCommand(
+      "claude",
+      ["--dangerously-skip-permissions", "--model", "sonnet", "-p", prompt],
+    );
   }
-  return ["codex", "exec", "--dangerously-bypass-approvals-and-sandbox", "-C", config.projectDir, prompt];
+  return buildBunWrappedAgentCliCommand(
+    "codex",
+    ["exec", "--dangerously-bypass-approvals-and-sandbox", "-C", config.projectDir, prompt],
+  );
 }
 
 async function runSingleCli(
@@ -116,4 +127,3 @@ function summarizeError(raw: string): string {
   if (!clean) return "no details";
   return clean.length > 200 ? `${clean.slice(0, 200)}...` : clean;
 }
-

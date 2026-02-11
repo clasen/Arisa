@@ -16,6 +16,7 @@ import { getRecentHistory } from "./history";
 import { shouldContinue } from "./context";
 import { config } from "../shared/config";
 import { createLogger } from "../shared/logger";
+import { buildBunWrappedAgentCliCommand } from "../shared/ai-cli";
 import { existsSync, mkdirSync, readFileSync, appendFileSync } from "fs";
 import { join } from "path";
 
@@ -25,10 +26,7 @@ const PROMPT_PREVIEW_MAX = 220;
 export const CLAUDE_RATE_LIMIT_MESSAGE = "Claude is out of credits right now. Please try again in a few minutes.";
 export const CODEX_AUTH_REQUIRED_MESSAGE = [
   "Codex login is required.",
-  "Check the Arisa daemon logs now and complete the device-auth steps shown there.",
-  "If the login flow is not running, execute:",
-  "<code>codex login --device-auth</code>",
-  "Then send your message again.",
+  "Check the Arisa daemon logs now and complete the device-auth steps shown there."
 ].join("\n");
 
 function logActivity(backend: string, model: string | null, durationMs: number, status: string) {
@@ -147,7 +145,7 @@ async function runClaude(message: string, chatId: string): Promise<string> {
   log.info(`Claude spawn | cmd: claude --dangerously-skip-permissions --model ${model.model} -p <prompt>`);
   log.debug(`Claude prompt >>>>\n${prompt}\n<<<<`);
 
-  const proc = Bun.spawn(["claude", ...args], {
+  const proc = Bun.spawn(buildBunWrappedAgentCliCommand("claude", args), {
     cwd: config.projectDir,
     stdout: "pipe",
     stderr: "pipe",
@@ -218,7 +216,7 @@ export async function processWithCodex(message: string): Promise<string> {
   );
   log.debug(`Codex prompt >>>>\n${message}\n<<<<`);
 
-  const proc = Bun.spawn(["codex", ...args], {
+  const proc = Bun.spawn(buildBunWrappedAgentCliCommand("codex", args), {
     cwd: config.projectDir,
     stdout: "pipe",
     stderr: "pipe",

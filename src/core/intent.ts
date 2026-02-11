@@ -11,6 +11,7 @@
 
 import { config } from "../shared/config";
 import { createLogger } from "../shared/logger";
+import { buildBunWrappedAgentCliCommand, resolveAgentCliPath } from "../shared/ai-cli";
 
 const log = createLogger("core");
 
@@ -51,9 +52,15 @@ Rules:
 
 function buildCmd(cli: "claude" | "codex", prompt: string): string[] {
   if (cli === "claude") {
-    return ["claude", "--dangerously-skip-permissions", "--model", "haiku", "-p", prompt];
+    return buildBunWrappedAgentCliCommand(
+      "claude",
+      ["--dangerously-skip-permissions", "--model", "haiku", "-p", prompt],
+    );
   }
-  return ["codex", "exec", "--dangerously-bypass-approvals-and-sandbox", "-C", config.projectDir, prompt];
+  return buildBunWrappedAgentCliCommand(
+    "codex",
+    ["exec", "--dangerously-bypass-approvals-and-sandbox", "-C", config.projectDir, prompt],
+  );
 }
 
 // Track which CLI actually works (not just Bun.which, which can find broken shims)
@@ -75,8 +82,8 @@ async function trySpawn(prompt: string, cli: "claude" | "codex"): Promise<string
 function getCliOrder(): Array<"claude" | "codex"> {
   if (verifiedCli) return [verifiedCli];
   const order: Array<"claude" | "codex"> = [];
-  if (Bun.which("claude") !== null) order.push("claude");
-  if (Bun.which("codex") !== null) order.push("codex");
+  if (resolveAgentCliPath("claude") !== null) order.push("claude");
+  if (resolveAgentCliPath("codex") !== null) order.push("codex");
   return order;
 }
 

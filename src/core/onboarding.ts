@@ -13,6 +13,7 @@
 import { config } from "../shared/config";
 import { createLogger } from "../shared/logger";
 import { getOnboardedUsers, addOnboarded as dbAddOnboarded, isOnboarded as dbIsOnboarded } from "../shared/db";
+import { isAgentCliInstalled } from "../shared/ai-cli";
 
 const log = createLogger("core");
 
@@ -46,8 +47,8 @@ export function checkDeps(): DepsStatus {
         : "Linux";
 
   return {
-    claude: Bun.which("claude") !== null,
-    codex: Bun.which("codex") !== null,
+    claude: isAgentCliInstalled("claude"),
+    codex: isAgentCliInstalled("codex"),
     openaiKey: !!config.openaiApiKey,
     os,
   };

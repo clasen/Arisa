@@ -3,18 +3,19 @@
  * @role Trigger Codex device auth flow from Daemon when auth errors are detected.
  * @responsibilities
  *   - Detect codex auth-required signals in Core responses
- *   - Run `codex login --device-auth` in background from daemon process
+ *   - Run `codex login --device-auth` (wrapped via Bun) in background from daemon process
  *   - Avoid duplicate runs with in-progress lock + cooldown
  * @effects Spawns codex CLI process, writes to daemon logs/terminal
  */
 
 import { config } from "../shared/config";
 import { createLogger } from "../shared/logger";
+import { buildBunWrappedAgentCliCommand } from "../shared/ai-cli";
 
 const log = createLogger("daemon");
 
 const AUTH_HINT_PATTERNS = [
-  /codex login --device-auth/i,
+  /codex.*login --device-auth/i,
   /codex is not authenticated on this server/i,
   /missing bearer authentication in header/i,
 ];
@@ -59,12 +60,12 @@ export function maybeStartCodexDeviceAuth(rawCoreText: string, chatId?: string):
 }
 
 async function runCodexDeviceAuth(): Promise<void> {
-  log.warn("Codex auth required. Starting `codex login --device-auth` now.");
+  log.warn("Codex auth required. Starting `bun --bun <path-to-codex> login --device-auth` now.");
   log.warn("Complete device auth using the URL/code printed below in this Arisa terminal.");
 
   let proc: ReturnType<typeof Bun.spawn>;
   try {
-    proc = Bun.spawn(["codex", "login", "--device-auth"], {
+    proc = Bun.spawn(buildBunWrappedAgentCliCommand("codex", ["login", "--device-auth"]), {
       cwd: config.projectDir,
       stdin: "inherit",
       stdout: "inherit",
