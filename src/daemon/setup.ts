@@ -12,8 +12,10 @@
 import { existsSync, readFileSync, writeFileSync, mkdirSync } from "fs";
 import { dirname, join } from "path";
 import { dataDir } from "../shared/paths";
+import { secrets } from "../shared/secrets";
 
 const ENV_PATH = join(dataDir, ".env");
+const SETUP_DONE_KEY = "ARISA_SETUP_COMPLETE";
 
 function loadExistingEnv(): Record<string, string> {
   if (!existsSync(ENV_PATH)) return {};
@@ -44,10 +46,13 @@ async function prompt(question: string): Promise<string> {
 
 export async function runSetup(): Promise<boolean> {
   const vars = loadExistingEnv();
+  const telegramSecret = await secrets.telegram();
+  const openaiSecret = await secrets.openai();
   let changed = false;
+  const setupDone = vars[SETUP_DONE_KEY] === "1" || process.env[SETUP_DONE_KEY] === "1";
 
   // Required: TELEGRAM_BOT_TOKEN
-  if (!vars.TELEGRAM_BOT_TOKEN && !process.env.TELEGRAM_BOT_TOKEN) {
+  if (!vars.TELEGRAM_BOT_TOKEN && !process.env.TELEGRAM_BOT_TOKEN && !telegramSecret) {
     console.log("\n🔧 Arisa Setup\n");
     console.log("Telegram Bot Token required. Get one from @BotFather on Telegram.");
     const token = await prompt("TELEGRAM_BOT_TOKEN: ");
@@ -60,7 +65,7 @@ export async function runSetup(): Promise<boolean> {
   }
 
   // Optional: OPENAI_API_KEY
-  if (!vars.OPENAI_API_KEY && !process.env.OPENAI_API_KEY) {
+  if (!vars.OPENAI_API_KEY && !process.env.OPENAI_API_KEY && !openaiSecret && !setupDone) {
     if (!changed) console.log("\n🔧 Arisa Setup\n");
     console.log("\nOpenAI API Key (optional — enables voice transcription + image analysis).");
     const key = await prompt("OPENAI_API_KEY (enter to skip): ");
@@ -68,6 +73,11 @@ export async function runSetup(): Promise<boolean> {
       vars.OPENAI_API_KEY = key;
       changed = true;
     }
+  }
+
+  if (!setupDone) {
+    vars[SETUP_DONE_KEY] = "1";
+    changed = true;
   }
 
   if (changed) {

@@ -86,9 +86,9 @@ export async function getOnboarding(chatId: string): Promise<{ message: string; 
     if (deps.os === "macOS") {
       lines.push("Claude: <code>brew install claude-code</code>");
     } else {
-      lines.push("Claude: <code>npm install -g @anthropic-ai/claude-code</code>");
+      lines.push("Claude: <code>bun add -g @anthropic-ai/claude-code</code>");
     }
-    lines.push("Codex: <code>npm install -g @openai/codex</code>\n");
+    lines.push("Codex: <code>bun add -g @openai/codex</code>\n");
     lines.push("Install one and message me again.");
     return { message: lines.join("\n"), blocking: true };
   }
@@ -100,9 +100,9 @@ export async function getOnboarding(chatId: string): Promise<{ message: string; 
   const lines = [`<b>Arisa</b> — using <b>${using}</b>`];
 
   if (!deps.claude) {
-    lines.push("Claude CLI not installed. Add it with <code>npm install -g @anthropic-ai/claude-code</code>");
+    lines.push("Claude CLI not installed. Add it with <code>bun add -g @anthropic-ai/claude-code</code>");
   } else if (!deps.codex) {
-    lines.push("Codex CLI not installed. Add it with <code>npm install -g @openai/codex</code>");
+    lines.push("Codex CLI not installed. Add it with <code>bun add -g @openai/codex</code>");
   } else {
     lines.push("Use /codex or /claude to switch backend.");
   }

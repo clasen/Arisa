@@ -164,8 +164,8 @@ ${messageText}`;
           const deps = checkDeps();
           if (!deps.codex) {
             const hint = deps.os === "macOS"
-              ? "<code>npm install -g @openai/codex</code>"
-              : "<code>npm install -g @openai/codex</code>";
+              ? "<code>bun add -g @openai/codex</code>"
+              : "<code>bun add -g @openai/codex</code>";
             return Response.json({ text: `Codex CLI is not installed.\n${hint}` } as CoreResponse);
           }
           backendState.set(msg.chatId, "codex");
@@ -179,8 +179,8 @@ ${messageText}`;
           const deps = checkDeps();
           if (!deps.claude) {
             const hint = deps.os === "macOS"
-              ? "<code>brew install claude-code</code> o <code>npm install -g @anthropic-ai/claude-code</code>"
-              : "<code>npm install -g @anthropic-ai/claude-code</code>";
+              ? "<code>brew install claude-code</code> or <code>bun add -g @anthropic-ai/claude-code</code>"
+              : "<code>bun add -g @anthropic-ai/claude-code</code>";
             return Response.json({ text: `Claude CLI is not installed.\n${hint}` } as CoreResponse);
           }
           backendState.set(msg.chatId, "claude");
