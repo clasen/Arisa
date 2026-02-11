@@ -1,69 +1,132 @@
 /**
  * @module daemon/bridge
- * @role HTTP client from Daemon to Core with fallback to Claude CLI.
+ * @role HTTP client from Daemon to Core with smart fallback to Claude CLI.
  * @responsibilities
  *   - POST messages to Core at :51777/message
- *   - If Core is down, retry once after 3s
- *   - If still down, fall back to direct Claude CLI invocation
- *   - Health check Core availability
+ *   - Respect Core lifecycle state (starting/up/down)
+ *   - Wait for Core during startup, fallback only when truly down
+ *   - Serialize fallback calls (one claude CLI at a time)
  * @dependencies shared/config, shared/types, daemon/fallback, daemon/lifecycle
  * @effects Network (HTTP to Core), may spawn Claude CLI process
- * @contract sendToCore(msg, onStatus?) => Promise<CoreResponse>, isCoreHealthy() => Promise<boolean>
  */
 
 import { config } from "../shared/config";
 import { createLogger } from "../shared/logger";
 import type { IncomingMessage, CoreResponse } from "../shared/types";
 import { fallbackClaude } from "./fallback";
-import { getCoreError } from "./lifecycle";
+import { getCoreState, getCoreError, waitForCoreReady } from "./lifecycle";
 
 const log = createLogger("daemon");
 
 const CORE_URL = `http://localhost:${config.corePort}`;
+const STARTUP_WAIT_MS = 15_000;
 const RETRY_DELAY = 3000;
 
 type StatusCallback = (text: string) => Promise<void>;
+
+// Serialize fallback calls — only one claude CLI process at a time
+let fallbackQueue: Promise<string> = Promise.resolve("");
 
 export async function sendToCore(
   message: IncomingMessage,
   onStatus?: StatusCallback,
 ): Promise<CoreResponse> {
-  // First attempt
+  const state = getCoreState();
+
+  if (state === "starting") {
+    return await handleStarting(message, onStatus);
+  }
+
+  if (state === "up") {
+    return await handleUp(message, onStatus);
+  }
+
+  // state === "down" — go straight to fallback
+  log.warn("Core is down, using fallback");
+  return await runFallback(message, onStatus);
+}
+
+/**
+ * Core is starting — wait for it, then send.
+ */
+async function handleStarting(
+  message: IncomingMessage,
+  onStatus?: StatusCallback,
+): Promise<CoreResponse> {
+  log.info("Core is starting, waiting for it to be ready...");
+  await onStatus?.("Core iniciando, esperando...");
+
+  const ready = await waitForCoreReady(STARTUP_WAIT_MS);
+
+  if (ready) {
+    try {
+      return await postToCore(message);
+    } catch {
+      log.warn("Core ready but request failed, retrying...");
+      await sleep(RETRY_DELAY);
+      try {
+        return await postToCore(message);
+      } catch {
+        // Fall through to fallback
+      }
+    }
+  }
+
+  log.warn("Core didn't start in time, using fallback");
+  return await runFallback(message, onStatus);
+}
+
+/**
+ * Core is up — normal path with one retry.
+ */
+async function handleUp(
+  message: IncomingMessage,
+  onStatus?: StatusCallback,
+): Promise<CoreResponse> {
   try {
     return await postToCore(message);
   } catch {
-    // Core unreachable — retry once after 3s
+    // First failure
   }
 
-  log.warn(`Core unreachable, retrying in ${RETRY_DELAY / 1000}s...`);
+  log.warn("Core unreachable, retrying in 3s...");
   await onStatus?.("Core no responde, reintentando...");
   await sleep(RETRY_DELAY);
 
-  // Second attempt
   try {
     return await postToCore(message);
   } catch {
-    // Still down — use fallback
+    // Still down
   }
 
-  log.warn("Core still unreachable, using fallback Claude CLI");
+  log.warn("Core still unreachable after retry, using fallback");
+  return await runFallback(message, onStatus);
+}
+
+/**
+ * Fallback: call Claude CLI directly. Serialized so only one runs at a time.
+ */
+async function runFallback(
+  message: IncomingMessage,
+  onStatus?: StatusCallback,
+): Promise<CoreResponse> {
   const coreError = getCoreError();
 
   if (coreError) {
-    const errorPreview = coreError.length > 300 ? coreError.slice(-300) : coreError;
-    await onStatus?.(`Core sigue caido. Error:\n<pre>${escapeHtml(errorPreview)}</pre>\nConsultando a Claude directo...`);
+    const preview = coreError.length > 300 ? coreError.slice(-300) : coreError;
+    await onStatus?.(`Core caido. Error:\n<pre>${escapeHtml(preview)}</pre>\nConsultando a Claude directo...`);
   } else {
-    await onStatus?.("Core sigue caido. Consultando a Claude directo...");
+    await onStatus?.("Core caido. Consultando a Claude directo...");
   }
 
   const text = message.text || "[non-text message — media not available in fallback mode]";
-  const response = await fallbackClaude(text, coreError ?? undefined);
 
+  // Chain onto the queue so only one claude CLI runs at a time
+  const result = fallbackQueue.then(() => fallbackClaude(text, coreError ?? undefined));
+  fallbackQueue = result.catch(() => "");
+
+  const response = await result;
   return { text: response };
-}
-
-function escapeHtml(s: string): string {
-  return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 }
 
 async function postToCore(message: IncomingMessage): Promise<CoreResponse> {
@@ -79,6 +142,10 @@ async function postToCore(message: IncomingMessage): Promise<CoreResponse> {
   }
 
   return (await response.json()) as CoreResponse;
+}
+
+function escapeHtml(s: string): string {
+  return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 }
 
 function sleep(ms: number): Promise<void> {

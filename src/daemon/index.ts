@@ -26,7 +26,8 @@ const { createLogger } = await import("../shared/logger");
 const { serveWithRetry, claimProcess, releaseProcess } = await import("../shared/ports");
 const { TelegramChannel } = await import("./channels/telegram");
 const { sendToCore } = await import("./bridge");
-const { startCore, stopCore } = await import("./lifecycle");
+const { startCore, stopCore, setLifecycleNotify } = await import("./lifecycle");
+const { setAutoFixNotify } = await import("./autofix");
 const { chunkMessage, markdownToTelegramHtml } = await import("../core/format");
 const { saveMessageRecord } = await import("../shared/db");
 
@@ -35,10 +36,33 @@ const log = createLogger("daemon");
 // --- Claim process: kill previous daemon, write our PID ---
 claimProcess("daemon");
 
+// --- Track known chatIds in memory (no deepbase dependency) ---
+const knownChatIds = new Set<string>();
+
+// Pre-seed from DB (best-effort — won't crash if DB is corrupt)
+try {
+  const { getAuthorizedUsers } = await import("../shared/db");
+  const chatIds = await getAuthorizedUsers();
+  for (const id of chatIds) knownChatIds.add(id);
+} catch {
+  log.warn("Could not pre-load authorized chatIds (DB may be corrupt)");
+}
+
 // --- Channel setup ---
 const telegram = new TelegramChannel();
 
+// --- Wire up notifications (lifecycle + autofix → Telegram) ---
+const sendToAllChats = async (text: string) => {
+  for (const chatId of knownChatIds) {
+    await telegram.send(chatId, text).catch(() => {});
+  }
+};
+
+setLifecycleNotify(sendToAllChats);
+setAutoFixNotify(sendToAllChats);
+
 telegram.onMessage(async (msg) => {
+  knownChatIds.add(msg.chatId);
   // Keep typing indicator alive while Core processes (expires every ~5s)
   const typingInterval = setInterval(() => telegram.sendTyping(msg.chatId), 4000);
 
