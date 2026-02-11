@@ -18,7 +18,7 @@ await config.secrets.initialize();
 import { createLogger } from "../shared/logger";
 import { serveWithRetry, claimProcess } from "../shared/ports";
 import type { IncomingMessage, CoreResponse, ScheduledTask } from "../shared/types";
-import { processWithClaude, processWithCodex } from "./processor";
+import { processWithClaude, processWithCodex, isClaudeRateLimitResponse } from "./processor";
 import { transcribeAudio, describeImage, generateSpeech, isMediaConfigured, isSpeechConfigured } from "./media";
 import { detectFiles } from "./file-detector";
 
@@ -350,6 +350,12 @@ ${messageText}`;
         } else {
           try {
             agentResponse = await processWithClaude(enrichedMessage, msg.chatId);
+            if (isClaudeRateLimitResponse(agentResponse) && canFallback) {
+              log.warn("Claude credits exhausted, falling back to Codex");
+              const codexResponse = await processWithCodex(enrichedMessage);
+              agentResponse = `Claude is out of credits right now, so I switched this reply to Codex.\n\n${codexResponse}`;
+              usedBackend = "codex";
+            }
           } catch (error) {
             const errMsg = error instanceof Error ? error.message : String(error);
             if (canFallback) {
@@ -357,7 +363,7 @@ ${messageText}`;
               agentResponse = await processWithCodex(enrichedMessage);
               usedBackend = "codex";
             } else {
-              agentResponse = `Error de Claude: ${errMsg.slice(0, 200)}`;
+              agentResponse = `Claude error: ${errMsg.slice(0, 200)}`;
             }
           }
         }
@@ -406,7 +412,7 @@ ${messageText}`;
         const errMsg = error instanceof Error ? error.message : String(error);
         log.error(`Request processing error: ${errMsg}`);
         const summary = errMsg.length > 200 ? errMsg.slice(0, 200) + "..." : errMsg;
-        return Response.json({ text: `Error interno: ${summary}` } as CoreResponse);
+        return Response.json({ text: `Internal error: ${summary}` } as CoreResponse);
       }
     }
 
