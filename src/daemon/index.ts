@@ -19,6 +19,9 @@ if (!ready) process.exit(1);
 
 // Dynamic imports so config loads AFTER setup has written .env
 const { config } = await import("../shared/config");
+
+// Initialize encrypted secrets
+await config.secrets.initialize();
 const { createLogger } = await import("../shared/logger");
 const { serveWithRetry, claimProcess, releaseProcess } = await import("../shared/ports");
 const { TelegramChannel } = await import("./channels/telegram");

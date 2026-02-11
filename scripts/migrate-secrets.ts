@@ -1,57 +1,58 @@
 #!/usr/bin/env bun
 /**
- * Migrates API keys from .env to encrypted deepbase secrets
+ * Migrate API keys from .env to encrypted secrets DB
  */
 
-import { getSecret, setSecret } from "../src/shared/db";
+import { join } from "path";
 import { existsSync, readFileSync } from "fs";
-import { config } from "../src/shared/config";
+import { setSecret } from "../src/shared/secrets";
 
-const ENV_PATH = `${config.tinyclawDir}/.env`;
+const PROJECT_DIR = join(import.meta.dir, "..");
+const ENV_PATH = join(PROJECT_DIR, ".tinyclaw", ".env");
 
-async function migrateSecrets() {
+async function main() {
   if (!existsSync(ENV_PATH)) {
-    console.log("No .env file found, skipping migration");
-    return;
+    console.log("❌ No .env file found at", ENV_PATH);
+    process.exit(1);
   }
 
-  const envContent = readFileSync(ENV_PATH, "utf-8");
-  const lines = envContent.split("\n");
+  const content = readFileSync(ENV_PATH, "utf8");
+  const secrets: Record<string, string> = {};
 
-  const secretKeys = [
+  for (const line of content.split("\n")) {
+    const match = line.match(/^([A-Z_][A-Z0-9_]*)=(.+)$/);
+    if (match) {
+      let value = match[2].trim();
+      // Remove surrounding quotes if present
+      if ((value.startsWith('"') && value.endsWith('"')) ||
+          (value.startsWith("'") && value.endsWith("'"))) {
+        value = value.slice(1, -1);
+      }
+      secrets[match[1]] = value;
+    }
+  }
+
+  const keysToMigrate = [
     "TELEGRAM_BOT_TOKEN",
     "OPENAI_API_KEY",
     "ELEVENLABS_API_KEY",
   ];
 
-  let migrated = 0;
+  console.log("🔐 Migrating secrets to encrypted DB...\n");
 
-  for (const line of lines) {
-    const trimmed = line.trim();
-    if (!trimmed || trimmed.startsWith("#")) continue;
-
-    const [key, ...valueParts] = trimmed.split("=");
-    const value = valueParts.join("=").replace(/^["']|["']$/g, "");
-
-    if (secretKeys.includes(key)) {
-      const existing = await getSecret(key);
-      if (!existing) {
-        await setSecret(key, value);
-        console.log(`✓ Migrated ${key}`);
-        migrated++;
-      } else {
-        console.log(`- ${key} already exists in encrypted DB, skipping`);
-      }
+  for (const key of keysToMigrate) {
+    if (secrets[key]) {
+      await setSecret(key, secrets[key]);
+      console.log(`✓ ${key}: migrated`);
+    } else {
+      console.log(`⚠ ${key}: not found in .env`);
     }
   }
 
-  console.log(`\nMigration complete: ${migrated} secrets migrated`);
-  console.log(
-    "\nIMPORTANT: You can now remove the API keys from .env file manually"
-  );
+  console.log("\n✅ Migration complete");
+  console.log("📍 Secrets stored encrypted at: .tinyclaw/db/secrets.json");
+  console.log("🔑 Encryption key stored at: .tinyclaw/.encryption_key");
+  console.log("\n⚠️  Keep .env as fallback, but secrets DB takes precedence now");
 }
 
-migrateSecrets().catch((err) => {
-  console.error("Migration failed:", err);
-  process.exit(1);
-});
+main();

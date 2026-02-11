@@ -12,6 +12,9 @@
  */
 
 import { config } from "../shared/config";
+
+// Initialize encrypted secrets
+await config.secrets.initialize();
 import { createLogger } from "../shared/logger";
 import { serveWithRetry, claimProcess } from "../shared/ports";
 import type { IncomingMessage, CoreResponse, ScheduledTask } from "../shared/types";

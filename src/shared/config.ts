@@ -1,15 +1,16 @@
 /**
  * @module shared/config
- * @role Centralized configuration from env vars and .tinyclaw/.env file.
+ * @role Centralized configuration from encrypted secrets + env vars fallback
  * @responsibilities
- *   - Load env vars (TELEGRAM_BOT_TOKEN, OPENAI_API_KEY)
+ *   - Load API keys from encrypted secrets DB (with .env fallback)
  *   - Define ports, paths, timeouts
- * @dependencies None
- * @effects Reads .tinyclaw/.env from disk on import
+ * @dependencies secrets.ts
+ * @effects Reads encrypted secrets on first access
  */
 
 import { existsSync, readFileSync } from "fs";
 import { join } from "path";
+import { secrets } from "./secrets";
 
 const PROJECT_DIR = join(import.meta.dir, "..", "..");
 const ENV_PATH = join(PROJECT_DIR, ".tinyclaw", ".env");
@@ -33,6 +34,62 @@ function env(key: string): string | undefined {
   return process.env[key] || envFile[key];
 }
 
+/**
+ * Lazy-loaded API keys from encrypted secrets with fallback to .env
+ */
+class SecureConfig {
+  private _telegramBotToken?: string;
+  private _openaiApiKey?: string;
+  private _elevenlabsApiKey?: string;
+  private _initialized = false;
+
+  async initialize(): Promise<void> {
+    if (this._initialized) return;
+
+    // Load all secrets in parallel
+    const [telegram, openai, elevenlabs] = await Promise.all([
+      secrets.telegram(),
+      secrets.openai(),
+      secrets.elevenlabs(),
+    ]);
+
+    this._telegramBotToken = telegram || env("TELEGRAM_BOT_TOKEN") || "";
+    this._openaiApiKey = openai || env("OPENAI_API_KEY") || "";
+    this._elevenlabsApiKey = elevenlabs || env("ELEVENLABS_API_KEY") || "";
+    this._initialized = true;
+  }
+
+  async getTelegramBotToken(): Promise<string> {
+    await this.initialize();
+    return this._telegramBotToken!;
+  }
+
+  async getOpenaiApiKey(): Promise<string> {
+    await this.initialize();
+    return this._openaiApiKey!;
+  }
+
+  async getElevenlabsApiKey(): Promise<string> {
+    await this.initialize();
+    return this._elevenlabsApiKey!;
+  }
+
+  // Synchronous getters for backwards compatibility (will use cached values)
+  get telegramBotToken(): string {
+    return this._telegramBotToken || "";
+  }
+
+  get openaiApiKey(): string {
+    return this._openaiApiKey || "";
+  }
+
+  get elevenlabsApiKey(): string {
+    return this._elevenlabsApiKey || "";
+  }
+}
+
+const secureConfig = new SecureConfig();
+
 export const config = {
   projectDir: PROJECT_DIR,
   tinyclawDir: join(PROJECT_DIR, ".tinyclaw"),
@@ -40,9 +97,11 @@ export const config = {
   corePort: 51777,
   daemonPort: 51778,
 
-  telegramBotToken: env("TELEGRAM_BOT_TOKEN") || "",
-  openaiApiKey: env("OPENAI_API_KEY") || "",
-  elevenlabsApiKey: env("ELEVENLABS_API_KEY") || "",
+  // API keys - use async getters for first load
+  get telegramBotToken() { return secureConfig.telegramBotToken; },
+  get openaiApiKey() { return secureConfig.openaiApiKey; },
+  get elevenlabsApiKey() { return secureConfig.elevenlabsApiKey; },
+
   elevenlabsVoiceId: "BpjGufoPiobT79j2vtj4",
 
   logsDir: join(PROJECT_DIR, ".tinyclaw", "logs"),
@@ -54,4 +113,7 @@ export const config = {
 
   claudeTimeout: 120_000,
   maxResponseLength: 4000,
+
+  // Async API key loaders
+  secrets: secureConfig,
 } as const;

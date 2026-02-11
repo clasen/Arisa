@@ -5,16 +5,18 @@ import { JsonDriver } from 'deepbase-json';
 interface DeepbaseSecureOptions {
   encryptionKey: string;
   path: string;
+  name: string;
 }
 
 export class DeepbaseSecure extends DeepBase {
   constructor(opts: DeepbaseSecureOptions) {
     const encryptionKey = opts.encryptionKey;
-    const { path } = opts;
+    const { path, name } = opts;
 
     // Create JSON driver with encryption
     const driver = new JsonDriver({
       path,
+      name,
       stringify: (obj: any) => {
         const iv = CryptoJS.lib.WordArray.random(128 / 8);
         const encrypted = CryptoJS.AES.encrypt(
