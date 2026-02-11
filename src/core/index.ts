@@ -133,6 +133,15 @@ ${messageText}`;
           return Response.json(response);
         }
 
+        // Handle /cancel command — stop all scheduled tasks
+        if (msg.command === "/cancel") {
+          const removed = await cancelAllChatTasks(msg.chatId);
+          const text = removed > 0
+            ? `Cancelled ${removed} task${removed > 1 ? "s" : ""}.`
+            : "No active tasks to cancel.";
+          return Response.json({ text } as CoreResponse);
+        }
+
         // Handle /codex command — switch to codex backend
         if (msg.command === "/codex") {
           const deps = checkDeps();
@@ -294,6 +303,8 @@ ${messageText}`;
         const foreignCtx = getForeignContext(msg.chatId, backend);
         const enrichedMessage = foreignCtx ? foreignCtx + messageText : messageText;
 
+        log.info(`Routing | backend: ${backend} | foreignCtx: ${!!foreignCtx} | enrichedChars: ${enrichedMessage.length}`);
+
         if (backend === "codex") {
           try {
             agentResponse = await processWithCodex(enrichedMessage);
@@ -327,6 +338,9 @@ ${messageText}`;
 
         // Log exchange for shared history
         addExchange(msg.chatId, messageText, agentResponse, usedBackend);
+
+        log.info(`Response | backend: ${usedBackend} | responseChars: ${agentResponse.length}`);
+        log.debug(`Response raw >>>>\n${agentResponse}\n<<<<`);
 
         // Prepend onboarding info if first message (non-blocking)
         const fullResponse = onboarding

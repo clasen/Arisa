@@ -13,13 +13,14 @@ import { Cron } from "croner";
 import { config } from "../shared/config";
 import { createLogger } from "../shared/logger";
 import { getTasks, updateTask, deleteTask, addTask as dbAddTask } from "../shared/db";
-import { processWithClaude } from "./processor";
+import { processWithClaude, flushChatQueue } from "./processor";
 import type { ScheduledTask } from "../shared/types";
 
 const log = createLogger("scheduler");
 
 let tasks: ScheduledTask[] = [];
 const activeJobs = new Map<string, Cron | ReturnType<typeof setTimeout>>();
+const inFlight = new Set<string>(); // task IDs currently executing
 
 async function loadTasks(): Promise<ScheduledTask[]> {
   try {
@@ -39,10 +40,23 @@ async function saveTask(task: ScheduledTask) {
 }
 
 async function executeTask(task: ScheduledTask) {
+  // Skip if previous execution is still in-flight (prevents queue buildup)
+  if (inFlight.has(task.id)) {
+    log.info(`Skipping task ${task.id}: previous execution still in-flight`);
+    return;
+  }
+
+  // Check task is still active (may have been cancelled)
+  if (!tasks.includes(task)) return;
+
   log.info(`Executing task ${task.id}: ${task.message.substring(0, 60)}`);
+  inFlight.add(task.id);
   try {
-    // Process through Claude to get a real response
-    const result = await processWithClaude(task.message, task.chatId);
+    // Process through Claude to get a real response (source:"task" = low priority)
+    const result = await processWithClaude(task.message, task.chatId, "task");
+
+    // Re-check: task may have been cancelled while Claude was processing
+    if (!tasks.includes(task) || !result) return;
 
     // Send the processed result to Telegram via Daemon
     const response = await fetch(`http://localhost:${config.daemonPort}/send`, {
@@ -58,6 +72,8 @@ async function executeTask(task: ScheduledTask) {
     }
   } catch (error) {
     log.error(`Failed to execute task ${task.id}: ${error}`);
+  } finally {
+    inFlight.delete(task.id);
   }
 }
 
@@ -114,9 +130,14 @@ export async function initScheduler() {
     return true;
   });
 
-  // Delete old tasks from db
+  // Delete old completed tasks from db
   for (const id of tasksToDelete) {
     await deleteTask(id);
+  }
+
+  const activeCron = tasks.filter((t) => t.type === "cron");
+  if (activeCron.length > 0) {
+    log.info(`Restoring ${activeCron.length} cron tasks: ${activeCron.map((t) => `"${t.message}" (${t.cron})`).join(", ")} — send /cancel to stop`);
   }
 
   for (const task of tasks) {
@@ -125,6 +146,17 @@ export async function initScheduler() {
 }
 
 export async function addTask(task: ScheduledTask) {
+  // Deduplicate: if a cron with the same message already exists for this chat, skip
+  if (task.type === "cron") {
+    const duplicate = tasks.find(
+      (t) => t.chatId === task.chatId && t.type === "cron" && t.message === task.message,
+    );
+    if (duplicate) {
+      log.info(`Skipping duplicate cron task for chat ${task.chatId}: "${task.message}"`);
+      return;
+    }
+  }
+
   tasks.push(task);
   scheduleTask(task);
   await dbAddTask(task);
@@ -146,9 +178,15 @@ export async function cancelAllChatTasks(chatId: string): Promise<number> {
       clearTimeout(job as ReturnType<typeof setTimeout>);
     }
     activeJobs.delete(task.id);
+    inFlight.delete(task.id);
     await deleteTask(task.id);
     tasks.splice(i, 1);
     removed += 1;
   }
+
+  // Flush any queued processWithClaude calls for this chat
+  flushChatQueue(chatId);
+
+  log.info(`Cancelled ${removed} tasks for chat ${chatId}`);
   return removed;
 }

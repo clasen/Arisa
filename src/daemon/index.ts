@@ -49,7 +49,12 @@ telegram.onMessage(async (msg) => {
     const html = markdownToTelegramHtml(raw);
     const chunks = chunkMessage(html);
 
+    log.info(`Format | rawChars: ${raw.length} | htmlChars: ${html.length} | chunks: ${chunks.length}`);
+    log.debug(`Format raw >>>>\n${raw}\n<<<<`);
+    log.debug(`Format html >>>>\n${html}\n<<<<`);
+
     for (const chunk of chunks) {
+      log.debug(`Sending chunk (${chunk.length} chars) >>>>\n${chunk}\n<<<<`);
       const sentId = await telegram.send(msg.chatId, chunk);
       if (sentId) {
         saveMessageRecord({

@@ -15,6 +15,16 @@ function escapeHtml(s: string): string {
   return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 }
 
+/** Decode HTML entities so we don't double-encode them when escapeHtml runs. */
+function unescapeHtml(s: string): string {
+  return s
+    .replace(/&amp;/g, "&")
+    .replace(/&lt;/g, "<")
+    .replace(/&gt;/g, ">")
+    .replace(/&quot;/g, '"')
+    .replace(/&#39;/g, "'");
+}
+
 function protectTelegramHtmlTags(text: string): { text: string; tags: string[] } {
   const tags: string[] = [];
   const tagPattern = /<\/?(?:b|i|u|s|code|pre|blockquote)>|<a\s+href="[^"]+">|<\/a>/gi;
@@ -31,6 +41,10 @@ function protectTelegramHtmlTags(text: string): { text: string; tags: string[] }
  * Must also escape HTML entities in non-tag content.
  */
 export function markdownToTelegramHtml(text: string): string {
+  // Step 0: Decode any pre-escaped HTML entities to avoid double-encoding
+  // (e.g. &lt;code&gt; → <code> so protectTelegramHtmlTags can detect them)
+  text = unescapeHtml(text);
+
   // Step 1: Extract code blocks and links before escaping to protect them
   const codeBlocks: string[] = [];
   const inlineCodes: string[] = [];
