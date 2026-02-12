@@ -568,7 +568,7 @@ if (isRoot()) {
     step(true, "Systemd service enabled (auto-starts on reboot)");
 
     process.stdout.write("\nStarting interactive setup as user arisa...\n\n");
-    const su = spawnSync("su", ["-", "arisa", "-c", "arisa"], {
+    const su = spawnSync("su", ["-", "arisa", "-c", "/home/arisa/.bun/bin/arisa"], {
       stdio: "inherit",
     });
 
@@ -593,6 +593,15 @@ Arisa management:
     process.exit(0);
   }
 
+  // No args → systemd management
+  if (isDefaultInvocation) {
+    if (isSystemdActive()) {
+      process.exit(statusSystemdSystem());
+    } else {
+      process.exit(startSystemdSystem());
+    }
+  }
+
   switch (command) {
     case "start":
       process.exit(startSystemdSystem());
@@ -608,25 +617,16 @@ Arisa management:
       break;
     case "daemon":
     case "run": {
-      // Run as arisa user in foreground
-      const su = spawnSync("su", ["-", "arisa", "-c", "arisa"], {
+      // Explicit "arisa daemon/run" → foreground as arisa user
+      const su = spawnSync("su", ["-", "arisa", "-c", "/home/arisa/.bun/bin/arisa"], {
         stdio: "inherit",
       });
       process.exit(su.status ?? 1);
     }
-    default: {
-      // No args or unknown — start if not active, otherwise show status
-      if (isDefaultInvocation) {
-        if (isSystemdActive()) {
-          process.exit(statusSystemdSystem());
-        } else {
-          process.exit(startSystemdSystem());
-        }
-      }
+    default:
       process.stderr.write(`Unknown command: ${command}\n\n`);
       printHelp();
       process.exit(1);
-    }
   }
 }
 
