@@ -134,7 +134,7 @@ async function runClaude(message: string, chatId: string): Promise<string> {
   const historyCount = historyContext ? historyContext.split("\nUser: ").length - 1 : 0;
   log.info(`Model: ${model.model} (${model.reason}) | History: ${historyCount} exchanges`);
 
-  const args = ["--dangerously-skip-permissions"];
+  const args = ["--dangerously-skip-permissions", "--output-format", "text"];
 
   args.push("--model", model.model);
   args.push("-p", prompt);

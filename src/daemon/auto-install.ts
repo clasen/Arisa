@@ -115,7 +115,7 @@ export async function probeCliAuth(): Promise<void> {
     }
     try {
       const args = cli === "claude"
-        ? ["-p", "say ok", "--model", "haiku", "--dangerously-skip-permissions"]
+        ? ["-p", "say ok", "--model", "haiku", "--output-format", "text", "--dangerously-skip-permissions"]
         : ["exec", "--dangerously-bypass-approvals-and-sandbox", "echo ok"];
 
       const cmd = buildBunWrappedAgentCliCommand(cli, args);
