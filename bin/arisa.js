@@ -575,33 +575,38 @@ function isSystemdActive() {
   return result.status === 0;
 }
 
+function canUseSystemdSystem() {
+  if (platform() !== "linux") return false;
+  if (!commandExists("systemctl")) return false;
+  const probe = runCommand("systemctl", ["is-system-running"], { stdio: "pipe" });
+  const state = (probe.stdout || "").trim();
+  return probe.status === 0 || state === "degraded" || state === "running";
+}
+
+function runArisaForeground() {
+  const su = spawnSync("su", ["-", "arisa", "-c", `${ARISA_BUN_ENV} && /home/arisa/.bun/bin/bun /home/arisa/arisa/src/daemon/index.ts`], {
+    stdio: "inherit",
+  });
+  return su.status ?? 1;
+}
+
 // ── Root guard ──────────────────────────────────────────────────────
 
 if (isRoot()) {
   if (!isProvisioned()) {
     provisionArisaUser();
-    writeSystemdSystemUnit();
-    spawnSync("systemctl", ["daemon-reload"], { stdio: "inherit" });
-    spawnSync("systemctl", ["enable", "arisa"], { stdio: "inherit" });
-    step(true, "Systemd service enabled (auto-starts on reboot)");
+    if (canUseSystemdSystem()) {
+      writeSystemdSystemUnit();
+      spawnSync("systemctl", ["daemon-reload"], { stdio: "inherit" });
+      spawnSync("systemctl", ["enable", "arisa"], { stdio: "inherit" });
+      step(true, "Systemd service enabled (auto-starts on reboot)");
+    }
 
     process.stdout.write("\nStarting interactive setup as user arisa...\n\n");
-    const su = spawnSync("su", ["-", "arisa", "-c", `${ARISA_BUN_ENV} && /home/arisa/.bun/bin/bun /home/arisa/arisa/src/daemon/index.ts`], {
-      stdio: "inherit",
-    });
-
-    process.stdout.write(`
-Arisa management:
-  Start:    systemctl start arisa
-  Status:   systemctl status arisa
-  Logs:     journalctl -u arisa -f
-  Restart:  systemctl restart arisa
-  Stop:     systemctl stop arisa
-`);
-    process.exit(su.status ?? 0);
+    process.exit(runArisaForeground());
   }
 
-  // Already provisioned — route commands to system-level systemd
+  // Already provisioned — route commands
   if (command === "help" || command === "--help" || command === "-h") {
     printHelp();
     process.exit(0);
@@ -611,51 +616,48 @@ Arisa management:
     process.exit(0);
   }
 
-  // No args → interactive setup if not configured, otherwise systemd
+  const hasSystemd = canUseSystemdSystem();
+
+  // No args → setup if needed, then systemd or foreground
   if (isDefaultInvocation) {
     if (!isArisaConfigured()) {
       process.stdout.write("Arisa is not configured yet. Starting interactive setup...\n\n");
-      const su = spawnSync("su", ["-", "arisa", "-c", `${ARISA_BUN_ENV} && /home/arisa/.bun/bin/bun /home/arisa/arisa/src/daemon/index.ts`], {
-        stdio: "inherit",
-      });
-      process.stdout.write(`
-Arisa management:
-  Start:    systemctl start arisa
-  Status:   systemctl status arisa
-  Logs:     journalctl -u arisa -f
-  Restart:  systemctl restart arisa
-  Stop:     systemctl stop arisa
-`);
-      process.exit(su.status ?? 0);
+      process.exit(runArisaForeground());
     }
-    if (isSystemdActive()) {
-      process.exit(statusSystemdSystem());
-    } else {
-      process.exit(startSystemdSystem());
+    if (hasSystemd) {
+      if (isSystemdActive()) {
+        process.exit(statusSystemdSystem());
+      } else {
+        process.exit(startSystemdSystem());
+      }
     }
+    // No systemd → foreground
+    process.exit(runArisaForeground());
   }
 
   switch (command) {
     case "start":
-      process.exit(startSystemdSystem());
+      if (hasSystemd) process.exit(startSystemdSystem());
+      process.exit(runArisaForeground());
       break;
     case "stop":
-      process.exit(stopSystemdSystem());
+      if (hasSystemd) process.exit(stopSystemdSystem());
+      process.stderr.write("No systemd available. Stop the foreground process with Ctrl+C.\n");
+      process.exit(1);
       break;
     case "restart":
-      process.exit(restartSystemdSystem());
+      if (hasSystemd) process.exit(restartSystemdSystem());
+      process.stderr.write("No systemd available. Restart the foreground process manually.\n");
+      process.exit(1);
       break;
     case "status":
-      process.exit(statusSystemdSystem());
+      if (hasSystemd) process.exit(statusSystemdSystem());
+      process.stderr.write("No systemd available.\n");
+      process.exit(1);
       break;
     case "daemon":
-    case "run": {
-      // Explicit "arisa daemon/run" → foreground as arisa user
-      const su = spawnSync("su", ["-", "arisa", "-c", `${ARISA_BUN_ENV} && /home/arisa/.bun/bin/bun /home/arisa/arisa/src/daemon/index.ts`], {
-        stdio: "inherit",
-      });
-      process.exit(su.status ?? 1);
-    }
+    case "run":
+      process.exit(runArisaForeground());
     default:
       process.stderr.write(`Unknown command: ${command}\n\n`);
       printHelp();
