@@ -15,6 +15,7 @@ import { buildBunWrappedAgentCliCommand } from "../shared/ai-cli";
 const log = createLogger("daemon");
 
 const AUTH_HINT_PATTERNS = [
+  /codex login is required/i,
   /codex.*login --device-auth/i,
   /codex is not authenticated on this server/i,
   /missing bearer authentication in header/i,
