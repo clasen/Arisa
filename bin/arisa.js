@@ -417,6 +417,13 @@ function isProvisioned() {
   return arisaUserExists() && existsSync("/home/arisa/.bun/bin/bun");
 }
 
+function isArisaConfigured() {
+  const envPath = "/home/arisa/.arisa/.env";
+  if (!existsSync(envPath)) return false;
+  const content = readFileSync(envPath, "utf8");
+  return content.includes("TELEGRAM_BOT_TOKEN=");
+}
+
 function detectSudoGroup() {
   // Debian/Ubuntu use 'sudo', RHEL/Fedora use 'wheel'
   const sudoGroup = spawnSync("getent", ["group", "sudo"], { stdio: "ignore" });
@@ -593,8 +600,23 @@ Arisa management:
     process.exit(0);
   }
 
-  // No args → systemd management
+  // No args → interactive setup if not configured, otherwise systemd
   if (isDefaultInvocation) {
+    if (!isArisaConfigured()) {
+      process.stdout.write("Arisa is not configured yet. Starting interactive setup...\n\n");
+      const su = spawnSync("su", ["-", "arisa", "-c", "/home/arisa/.bun/bin/arisa"], {
+        stdio: "inherit",
+      });
+      process.stdout.write(`
+Arisa management:
+  Start:    systemctl start arisa
+  Status:   systemctl status arisa
+  Logs:     journalctl -u arisa -f
+  Restart:  systemctl restart arisa
+  Stop:     systemctl stop arisa
+`);
+      process.exit(su.status ?? 0);
+    }
     if (isSystemdActive()) {
       process.exit(statusSystemdSystem());
     } else {
