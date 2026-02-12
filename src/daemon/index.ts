@@ -12,6 +12,12 @@
  * @effects Network (Telegram, HTTP servers), spawns Core process
  */
 
+// Log version at startup
+import { readFileSync } from "fs";
+import { join, dirname } from "path";
+const pkgPath = join(dirname(new URL(import.meta.url).pathname), "..", "package.json");
+try { const pkg = JSON.parse(readFileSync(pkgPath, "utf8")); console.log(`Arisa v${pkg.version}`); } catch {}
+
 // Setup runs first — no config dependency, writes .env if needed
 import { runSetup } from "./setup";
 const ready = await runSetup();
