@@ -430,10 +430,10 @@ function step(ok, msg) {
   process.stdout.write(`  ${ok ? "\u2713" : "\u2717"} ${msg}\n`);
 }
 
-function runAs(cmd) {
+function runAsInherit(cmd) {
   return spawnSync("su", ["-", "arisa", "-c", cmd], {
-    stdio: "pipe",
-    timeout: 120_000,
+    stdio: "inherit",
+    timeout: 180_000,
   });
 }
 
@@ -456,10 +456,11 @@ function provisionArisaUser() {
     spawnSync("usermod", ["-aG", group, "arisa"], { stdio: "ignore" });
   }
 
-  // 2. Install bun
-  const bunInstall = runAs("curl -fsSL https://bun.sh/install | bash");
+  // 2. Install bun (downloads ~30 MB, may take a minute)
+  process.stdout.write("  Installing bun (this may take a minute)...\n");
+  const bunInstall = runAsInherit("curl -fsSL https://bun.sh/install | bash");
   if (bunInstall.status !== 0) {
-    step(false, `Failed to install bun: ${(bunInstall.stderr || "").toString().trim()}`);
+    step(false, "Failed to install bun");
     process.exit(1);
   }
   step(true, "Bun installed for arisa");
@@ -470,9 +471,10 @@ function provisionArisaUser() {
   spawnSync("chown", ["-R", "arisa:arisa", dest], { stdio: "pipe" });
 
   // Install deps + global
-  const install = runAs("cd ~/arisa && ~/.bun/bin/bun install && ~/.bun/bin/bun add -g .");
+  process.stdout.write("  Installing dependencies...\n");
+  const install = runAsInherit("cd ~/arisa && ~/.bun/bin/bun install && ~/.bun/bin/bun add -g .");
   if (install.status !== 0) {
-    step(false, `Failed to install: ${(install.stderr || "").toString().trim()}`);
+    step(false, "Failed to install dependencies");
     process.exit(1);
   }
   step(true, "Arisa installed for arisa");
@@ -562,17 +564,23 @@ if (isRoot()) {
     provisionArisaUser();
     writeSystemdSystemUnit();
     spawnSync("systemctl", ["daemon-reload"], { stdio: "inherit" });
-    spawnSync("systemctl", ["enable", "--now", "arisa"], { stdio: "inherit" });
-    step(true, "Systemd service enabled");
+    spawnSync("systemctl", ["enable", "arisa"], { stdio: "inherit" });
+    step(true, "Systemd service enabled (auto-starts on reboot)");
+
+    process.stdout.write("\nStarting interactive setup as user arisa...\n\n");
+    const su = spawnSync("su", ["-", "arisa", "-c", "arisa"], {
+      stdio: "inherit",
+    });
 
     process.stdout.write(`
-Arisa is now running as a service.
+Arisa management:
+  Start:    systemctl start arisa
   Status:   systemctl status arisa
   Logs:     journalctl -u arisa -f
   Restart:  systemctl restart arisa
   Stop:     systemctl stop arisa
 `);
-    process.exit(0);
+    process.exit(su.status ?? 0);
   }
 
   // Already provisioned — route commands to system-level systemd
