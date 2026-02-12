@@ -278,9 +278,10 @@ async function runInteractiveLogin(cli: AgentCliName, vars: Record<string, strin
       if (exitCode === 0) {
         // Step 1: Strip ANSI escape sequences FIRST (their params contain digits/letters)
         const clean = output
-          .replace(/\x1b\[[0-9;?]*[A-Za-z]/g, "")    // CSI: ESC [ params final
-          .replace(/\x1b\][^\x07]*\x07/g, "")          // OSC: ESC ] ... BEL
-          .replace(/\x1b[^[\]]/g, "")                   // Other ESC sequences (ESC + one char)
+          .replace(/\x1b\[[0-9;?]*[A-Za-z]/g, "")       // CSI: ESC [ params final (e.g. ESC[1C)
+          .replace(/\x1b\][^\x07]*\x07/g, "")             // OSC: ESC ] ... BEL
+          .replace(/\x1b[()#][A-Za-z0-9]/g, "")           // 3-byte: ESC ( B, ESC ) 0, ESC # 8
+          .replace(/\x1b./g, "")                           // Remaining 2-byte ESC sequences
           .replace(/[\x00-\x09\x0b-\x0c\x0e-\x1f]/g, ""); // Control chars (keep \n \r)
 
         // Step 2: Find boundaries in clean text

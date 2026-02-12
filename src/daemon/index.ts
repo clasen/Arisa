@@ -42,6 +42,12 @@ const { saveMessageRecord } = await import("../shared/db");
 
 const log = createLogger("daemon");
 
+// Log version
+try {
+  const _pkg = JSON.parse(readFileSync(pkgPath, "utf8"));
+  log.info(`Arisa v${_pkg.version}`);
+} catch {}
+
 // --- Claim process: kill previous daemon, write our PID ---
 claimProcess("daemon");
 
