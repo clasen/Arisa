@@ -1,7 +1,7 @@
 /**
  * @module shared/ai-cli
  * @role Resolve agent CLI binaries and execute them via Bun runtime.
- *       When running as root, wraps calls with su - arisa to satisfy
+ *       When running as root, wraps calls with su arisa to satisfy
  *       Claude CLI's non-root requirement.
  */
 
@@ -12,7 +12,8 @@ export type AgentCliName = "claude" | "codex";
 
 const ARISA_USER_BUN = "/home/arisa/.bun/bin";
 const ARISA_INK_SHIM = "/home/arisa/.arisa-ink-shim.js";
-const ARISA_BUN_ENV = `export BUN_INSTALL=/home/arisa/.bun && export PATH=${ARISA_USER_BUN}:$PATH`;
+const ARISA_HOME = "/home/arisa";
+const ARISA_BUN_ENV = `export HOME=${ARISA_HOME} && export BUN_INSTALL=${ARISA_HOME}/.bun && export PATH=${ARISA_USER_BUN}:$PATH`;
 
 export function isRunningAsRoot(): boolean {
   return process.getuid?.() === 0;
@@ -100,7 +101,8 @@ export function buildBunWrappedAgentCliCommand(cli: AgentCliName, args: string[]
     const cliPath = resolveAgentCliPath(cli) || join(ARISA_USER_BUN, cli);
     const shimPath = existsSync(ARISA_INK_SHIM) ? ARISA_INK_SHIM : INK_SHIM;
     const inner = ["bun", "--preload", shimPath, cliPath, ...args].map(shellEscape).join(" ");
-    return ["su", "-", "arisa", "-c", `${ARISA_BUN_ENV} && ${buildEnvExports()}${inner}`];
+    // su without "-" preserves parent env (tokens, keys); explicit HOME/PATH for arisa
+    return ["su", "arisa", "-s", "/bin/bash", "-c", `${ARISA_BUN_ENV} && ${buildEnvExports()}${inner}`];
   }
 
   const cliPath = resolveAgentCliPath(cli);
