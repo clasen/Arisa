@@ -580,14 +580,10 @@ function canUseSystemdSystem() {
 }
 
 function runArisaForeground() {
-  // Detach child + exit parent immediately to free parent bun memory (~50-100MB).
-  // On 1GB VPS, two bun processes trigger OOM.
-  const child = spawn("su", ["-", "arisa", "-c", `${ARISA_BUN_ENV} && export ARISA_PROJECT_DIR=${SHARED_ARISA_ROOT} && exec /home/arisa/.bun/bin/bun ${sharedDaemonEntry}`], {
+  const result = spawnSync("su", ["-", "arisa", "-c", `${ARISA_BUN_ENV} && export ARISA_PROJECT_DIR=${SHARED_ARISA_ROOT} && exec /home/arisa/.bun/bin/bun ${sharedDaemonEntry}`], {
     stdio: "inherit",
-    detached: true,
   });
-  child.unref();
-  process.exit(0);
+  return result.status ?? 1;
 }
 
 // ── Root guard ──────────────────────────────────────────────────────
@@ -603,7 +599,7 @@ if (isRoot()) {
     }
 
     process.stdout.write("\nStarting interactive setup as user arisa...\n\n");
-    runArisaForeground(); // exits parent process internally
+    process.exit(runArisaForeground());
   }
 
   // Already provisioned — route commands
@@ -622,7 +618,7 @@ if (isRoot()) {
   if (isDefaultInvocation) {
     if (!isArisaConfigured()) {
       process.stdout.write("Arisa is not configured yet. Starting interactive setup...\n\n");
-      runArisaForeground(); // exits parent process internally
+      process.exit(runArisaForeground());
     }
     if (hasSystemd) {
       if (isSystemdActive()) {
@@ -632,13 +628,13 @@ if (isRoot()) {
       }
     }
     // No systemd → foreground
-    runArisaForeground(); // exits parent process internally
+    process.exit(runArisaForeground());
   }
 
   switch (command) {
     case "start":
       if (hasSystemd) process.exit(startSystemdSystem());
-      runArisaForeground(); // exits parent process internally
+      process.exit(runArisaForeground());
       break;
     case "stop":
       if (hasSystemd) process.exit(stopSystemdSystem());
@@ -657,7 +653,7 @@ if (isRoot()) {
       break;
     case "daemon":
     case "run":
-      runArisaForeground(); // exits parent process internally
+      process.exit(runArisaForeground());
     default:
       process.stderr.write(`Unknown command: ${command}\n\n`);
       printHelp();
