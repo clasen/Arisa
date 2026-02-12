@@ -261,6 +261,7 @@ async function runInteractiveLogin(cli: AgentCliName, vars: Record<string, strin
         stdin: "inherit",
         stdout: "pipe",
         stderr: "inherit",
+        env: { ...process.env, COLUMNS: "500" },
       });
 
       let output = "";
@@ -276,10 +277,12 @@ async function runInteractiveLogin(cli: AgentCliName, vars: Record<string, strin
 
       const exitCode = await proc.exited;
       if (exitCode === 0) {
-        // Extract token (sk-ant-oat01-...) — may span multiple lines due to terminal wrapping
-        const tokenMatch = output.match(/sk-ant-[A-Za-z0-9_-]+(?:\n[A-Za-z0-9_-]+)*/);
+        // Strip ANSI escape codes, then extract token
+        // COLUMNS=500 prevents wrapping, but handle it as fallback
+        const clean = output.replace(/\x1b\[[0-9;]*[a-zA-Z]/g, "");
+        const tokenMatch = clean.match(/sk-ant-[A-Za-z0-9_-]+(?:\s*\n\s*[A-Za-z0-9_-]+)*/);
         if (tokenMatch) {
-          vars.CLAUDE_CODE_OAUTH_TOKEN = tokenMatch[0].replace(/\n/g, "");
+          vars.CLAUDE_CODE_OAUTH_TOKEN = tokenMatch[0].replace(/\s+/g, "");
           saveEnv(vars);
           console.log("  ✓ claude token saved to .env");
         }
