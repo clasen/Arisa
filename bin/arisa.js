@@ -450,7 +450,7 @@ function provisionArisaUser() {
 
   // 3. Write ink-shim for non-TTY execution (prevents Ink setRawMode crash)
   const shimPath = "/home/arisa/.arisa-ink-shim.js";
-  writeFileSync(shimPath, 'if(process.stdin&&!process.stdin.setRawMode)process.stdin.setRawMode=()=>process.stdin;\n');
+  writeFileSync(shimPath, 'if(process.stdin&&!process.stdin.isTTY){process.stdin.setRawMode=()=>process.stdin;process.stdin.isTTY=true;}\n');
   spawnSync("chown", ["arisa:arisa", shimPath], { stdio: "ignore" });
   step(true, "Ink shim installed");
 
