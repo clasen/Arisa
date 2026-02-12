@@ -29,6 +29,8 @@ const { sendToCore } = await import("./bridge");
 const { startCore, stopCore, setLifecycleNotify } = await import("./lifecycle");
 const { setAutoFixNotify } = await import("./autofix");
 const { maybeStartCodexDeviceAuth, setCodexLoginNotify } = await import("./codex-login");
+const { maybeStartClaudeSetupToken, maybeFeedClaudeCode, setClaudeLoginNotify, isClaudeLoginPending } = await import("./claude-login");
+const { autoInstallMissingClis, setAutoInstallNotify, setAuthProbeCallback } = await import("./auto-install");
 const { chunkMessage, markdownToTelegramHtml } = await import("../core/format");
 const { saveMessageRecord } = await import("../shared/db");
 
@@ -61,12 +63,36 @@ const sendToAllChats = async (text: string) => {
 
 setLifecycleNotify(sendToAllChats);
 setAutoFixNotify(sendToAllChats);
+setAutoInstallNotify(sendToAllChats);
+setAuthProbeCallback((cli, errorText) => {
+  if (cli === "claude") {
+    // Start Claude setup-token for all known chats
+    for (const chatId of knownChatIds) {
+      maybeStartClaudeSetupToken(errorText, chatId);
+    }
+  } else if (cli === "codex") {
+    // Start Codex device-auth for all known chats
+    for (const chatId of knownChatIds) {
+      maybeStartCodexDeviceAuth(errorText, chatId);
+    }
+  }
+});
 setCodexLoginNotify(async (chatId, text) => {
+  await telegram.send(chatId, text);
+});
+setClaudeLoginNotify(async (chatId, text) => {
   await telegram.send(chatId, text);
 });
 
 telegram.onMessage(async (msg) => {
   knownChatIds.add(msg.chatId);
+
+  // If Claude login is pending and user sends what looks like an OAuth code, feed it
+  if (isClaudeLoginPending() && msg.text && maybeFeedClaudeCode(msg.chatId, msg.text)) {
+    await telegram.send(msg.chatId, "Code received, authenticating...");
+    return;
+  }
+
   // Keep typing indicator alive while Core processes (expires every ~5s)
   const typingInterval = setInterval(() => telegram.sendTyping(msg.chatId), 4000);
 
@@ -82,6 +108,7 @@ telegram.onMessage(async (msg) => {
 
     const raw = response.text || "";
     maybeStartCodexDeviceAuth(raw, msg.chatId);
+    maybeStartClaudeSetupToken(raw, msg.chatId);
     const messageParts = raw.split(/\n---CHUNK---\n/g);
     let sentText = false;
 
@@ -194,6 +221,9 @@ const pushServer = await serveWithRetry({
 });
 
 log.info(`Daemon push server listening on port ${config.daemonPort}`);
+
+// --- Auto-install missing CLIs (non-blocking) ---
+void autoInstallMissingClis();
 
 // --- Start Core process ---
 startCore();

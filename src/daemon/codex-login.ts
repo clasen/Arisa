@@ -60,17 +60,57 @@ export function maybeStartCodexDeviceAuth(rawCoreText: string, chatId?: string):
   });
 }
 
+async function readStreamAndEcho(stream: ReadableStream<Uint8Array> | null, target: NodeJS.WriteStream): Promise<string> {
+  if (!stream) return "";
+  const chunks: string[] = [];
+  const reader = stream.getReader();
+  const decoder = new TextDecoder();
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      const text = decoder.decode(value, { stream: true });
+      chunks.push(text);
+      target.write(text); // Echo to console for server admins
+    }
+  } finally {
+    reader.releaseLock();
+  }
+  return chunks.join("");
+}
+
+function parseAuthInfo(output: string): { url: string; code: string } | null {
+  const urlMatch = output.match(/(https:\/\/auth\.openai\.com\/\S+)/);
+  const codeMatch = output.match(/([A-Z0-9]{4}-[A-Z0-9]{5})/);
+  if (urlMatch && codeMatch) return { url: urlMatch[1], code: codeMatch[1] };
+  return null;
+}
+
+async function notifyPending(text: string): Promise<void> {
+  if (!notifyFn || pendingChatIds.size === 0) return;
+  const chats = Array.from(pendingChatIds);
+  await Promise.all(
+    chats.map(async (chatId) => {
+      try { await notifyFn?.(chatId, text); } catch (e) {
+        log.error(`Failed to notify ${chatId}: ${e}`);
+      }
+    }),
+  );
+}
+
+let authInfoSent = false;
+
 async function runCodexDeviceAuth(): Promise<void> {
   log.warn("Codex auth required. Starting `bun --bun <path-to-codex> login --device-auth` now.");
-  log.warn("Complete device auth using the URL/code printed below in this Arisa terminal.");
+  authInfoSent = false;
 
   let proc: ReturnType<typeof Bun.spawn>;
   try {
     proc = Bun.spawn(buildBunWrappedAgentCliCommand("codex", ["login", "--device-auth"]), {
       cwd: config.projectDir,
       stdin: "inherit",
-      stdout: "inherit",
-      stderr: "inherit",
+      stdout: "pipe",
+      stderr: "pipe",
       env: { ...process.env },
     });
   } catch (error) {
@@ -78,9 +118,30 @@ async function runCodexDeviceAuth(): Promise<void> {
     return;
   }
 
+  // Read stdout and stderr in parallel, echoing to console
+  const [stdoutText, stderrText] = await Promise.all([
+    readStreamAndEcho(proc.stdout, process.stdout),
+    readStreamAndEcho(proc.stderr, process.stderr),
+  ]);
+
+  // Parse auth info from combined output and send to Telegram
+  const combined = stdoutText + "\n" + stderrText;
+  if (!authInfoSent) {
+    const auth = parseAuthInfo(combined);
+    if (auth) {
+      authInfoSent = true;
+      const msg = [
+        "<b>Codex login required</b>\n",
+        `1. Open: ${auth.url}`,
+        `2. Enter code: <code>${auth.code}</code>`,
+      ].join("\n");
+      await notifyPending(msg);
+    }
+  }
+
   const exitCode = await proc.exited;
   if (exitCode === 0) {
-    log.info("Codex device auth finished successfully. You can retry your message.");
+    log.info("Codex device auth finished successfully.");
     await notifySuccess();
   } else {
     log.error(`Codex device auth finished with exit code ${exitCode}`);

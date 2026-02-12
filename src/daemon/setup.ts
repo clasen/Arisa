@@ -12,7 +12,7 @@
 import { existsSync, readFileSync, writeFileSync, mkdirSync } from "fs";
 import { dirname, join } from "path";
 import { dataDir } from "../shared/paths";
-import { secrets } from "../shared/secrets";
+import { secrets, setSecret } from "../shared/secrets";
 
 const ENV_PATH = join(dataDir, ".env");
 const SETUP_DONE_KEY = "ARISA_SETUP_COMPLETE";
@@ -61,7 +61,14 @@ export async function runSetup(): Promise<boolean> {
       return false;
     }
     vars.TELEGRAM_BOT_TOKEN = token;
+    await setSecret("TELEGRAM_BOT_TOKEN", token).catch((e) =>
+      console.warn(`[setup] Could not persist TELEGRAM_BOT_TOKEN to encrypted DB: ${e}`)
+    );
+    console.log("[setup] TELEGRAM_BOT_TOKEN saved to .env + encrypted DB");
     changed = true;
+  } else {
+    const src = telegramSecret ? "encrypted DB" : vars.TELEGRAM_BOT_TOKEN ? ".env" : "env var";
+    console.log(`[setup] TELEGRAM_BOT_TOKEN found in ${src}`);
   }
 
   // Optional: OPENAI_API_KEY
@@ -71,8 +78,15 @@ export async function runSetup(): Promise<boolean> {
     const key = await prompt("OPENAI_API_KEY (enter to skip): ");
     if (key) {
       vars.OPENAI_API_KEY = key;
+      await setSecret("OPENAI_API_KEY", key).catch((e) =>
+        console.warn(`[setup] Could not persist OPENAI_API_KEY to encrypted DB: ${e}`)
+      );
+      console.log("[setup] OPENAI_API_KEY saved to .env + encrypted DB");
       changed = true;
     }
+  } else if (vars.OPENAI_API_KEY || process.env.OPENAI_API_KEY || openaiSecret) {
+    const src = openaiSecret ? "encrypted DB" : vars.OPENAI_API_KEY ? ".env" : "env var";
+    console.log(`[setup] OPENAI_API_KEY found in ${src}`);
   }
 
   if (!setupDone) {

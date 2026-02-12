@@ -72,12 +72,6 @@ export async function getOnboarding(chatId: string): Promise<{ message: string; 
 
   const deps = checkDeps();
 
-  // Everything set up — skip onboarding
-  if (deps.claude && deps.codex && deps.openaiKey) {
-    await markOnboarded(chatId);
-    return null;
-  }
-
   // No CLI at all — block
   if (!deps.claude && !deps.codex) {
     const lines = [
@@ -94,22 +88,14 @@ export async function getOnboarding(chatId: string): Promise<{ message: string; 
     return { message: lines.join("\n"), blocking: true };
   }
 
-  // At least one CLI — inform and continue
+  // At least one CLI — minimal greeting and continue
   await markOnboarded(chatId);
 
   const using = deps.claude ? "Claude" : "Codex";
   const lines = [`<b>Arisa</b> — using <b>${using}</b>`];
 
-  if (!deps.claude) {
-    lines.push("Claude CLI not installed. Add it with <code>bun add -g @anthropic-ai/claude-code</code>");
-  } else if (!deps.codex) {
-    lines.push("Codex CLI not installed. Add it with <code>bun add -g @openai/codex</code>");
-  } else {
+  if (deps.claude && deps.codex) {
     lines.push("Use /codex or /claude to switch backend.");
-  }
-
-  if (!deps.openaiKey) {
-    lines.push("No OpenAI API key — voice and image processing disabled. Add <code>OPENAI_API_KEY</code> to <code>~/.arisa/.env</code> to enable.");
   }
 
   return { message: lines.join("\n"), blocking: false };
