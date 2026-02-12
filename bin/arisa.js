@@ -403,6 +403,227 @@ function printForegroundNotice() {
   process.stdout.write("Use `arisa start` to run it as a background service.\n");
 }
 
+// ── Root detection helpers ──────────────────────────────────────────
+
+function isRoot() {
+  return process.getuid?.() === 0;
+}
+
+function arisaUserExists() {
+  return spawnSync("id", ["arisa"], { stdio: "ignore" }).status === 0;
+}
+
+function isProvisioned() {
+  return arisaUserExists() && existsSync("/home/arisa/.bun/bin/bun");
+}
+
+function detectSudoGroup() {
+  // Debian/Ubuntu use 'sudo', RHEL/Fedora use 'wheel'
+  const sudoGroup = spawnSync("getent", ["group", "sudo"], { stdio: "ignore" });
+  if (sudoGroup.status === 0) return "sudo";
+  const wheelGroup = spawnSync("getent", ["group", "wheel"], { stdio: "ignore" });
+  if (wheelGroup.status === 0) return "wheel";
+  return null;
+}
+
+function step(ok, msg) {
+  process.stdout.write(`  ${ok ? "\u2713" : "\u2717"} ${msg}\n`);
+}
+
+function runAs(cmd) {
+  return spawnSync("su", ["-", "arisa", "-c", cmd], {
+    stdio: "pipe",
+    timeout: 120_000,
+  });
+}
+
+function provisionArisaUser() {
+  process.stdout.write("Running as root \u2014 creating dedicated user 'arisa'...\n");
+
+  // 1. Create user
+  const useradd = spawnSync("useradd", ["-m", "-s", "/bin/bash", "arisa"], {
+    stdio: "pipe",
+  });
+  if (useradd.status !== 0) {
+    step(false, `Failed to create user: ${(useradd.stderr || "").toString().trim()}`);
+    process.exit(1);
+  }
+  step(true, "User arisa created");
+
+  // Add to sudo/wheel group if available
+  const group = detectSudoGroup();
+  if (group) {
+    spawnSync("usermod", ["-aG", group, "arisa"], { stdio: "ignore" });
+  }
+
+  // 2. Install bun
+  const bunInstall = runAs("curl -fsSL https://bun.sh/install | bash");
+  if (bunInstall.status !== 0) {
+    step(false, `Failed to install bun: ${(bunInstall.stderr || "").toString().trim()}`);
+    process.exit(1);
+  }
+  step(true, "Bun installed for arisa");
+
+  // 3. Copy arisa source
+  const dest = "/home/arisa/arisa";
+  spawnSync("cp", ["-r", pkgRoot, dest], { stdio: "pipe" });
+  spawnSync("chown", ["-R", "arisa:arisa", dest], { stdio: "pipe" });
+
+  // Install deps + global
+  const install = runAs("cd ~/arisa && ~/.bun/bin/bun install && ~/.bun/bin/bun add -g .");
+  if (install.status !== 0) {
+    step(false, `Failed to install: ${(install.stderr || "").toString().trim()}`);
+    process.exit(1);
+  }
+  step(true, "Arisa installed for arisa");
+
+  // 4. Migrate data
+  const rootArisa = "/root/.arisa";
+  if (existsSync(rootArisa)) {
+    const destArisa = "/home/arisa/.arisa";
+    spawnSync("cp", ["-r", rootArisa, destArisa], { stdio: "pipe" });
+    spawnSync("chown", ["-R", "arisa:arisa", destArisa], { stdio: "pipe" });
+    step(true, "Data migrated to /home/arisa/.arisa/");
+  }
+}
+
+// ── System-level systemd (for root-provisioned installs) ────────────
+
+const systemdSystemUnitPath = "/etc/systemd/system/arisa.service";
+
+function writeSystemdSystemUnit() {
+  const unit = `[Unit]
+Description=Arisa Agent Runtime
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=arisa
+WorkingDirectory=/home/arisa/arisa
+ExecStart=/home/arisa/.bun/bin/bun /home/arisa/arisa/src/daemon/index.ts
+Restart=always
+RestartSec=5
+Environment=ARISA_PROJECT_DIR=/home/arisa/arisa
+Environment=BUN_INSTALL=/home/arisa/.bun
+Environment=PATH=/home/arisa/.bun/bin:/usr/local/bin:/usr/bin:/bin
+
+[Install]
+WantedBy=multi-user.target
+`;
+  writeFileSync(systemdSystemUnitPath, unit, "utf8");
+}
+
+function runSystemdSystem(commandArgs) {
+  const child = runCommand("systemctl", commandArgs, { stdio: "pipe" });
+  if (child.status !== 0) {
+    const stderr = child.stderr || "Unknown systemd error";
+    process.stderr.write(stderr.endsWith("\n") ? stderr : `${stderr}\n`);
+    return { ok: false, status: child.status ?? 1 };
+  }
+  return { ok: true, status: 0, stdout: child.stdout || "" };
+}
+
+function startSystemdSystem() {
+  const start = runSystemdSystem(["start", "arisa"]);
+  if (!start.ok) return start.status;
+  process.stdout.write("Arisa service started.\n");
+  return 0;
+}
+
+function stopSystemdSystem() {
+  const stop = runSystemdSystem(["stop", "arisa"]);
+  if (!stop.ok) return stop.status;
+  process.stdout.write("Arisa service stopped.\n");
+  return 0;
+}
+
+function restartSystemdSystem() {
+  const restart = runSystemdSystem(["restart", "arisa"]);
+  if (!restart.ok) return restart.status;
+  process.stdout.write("Arisa service restarted.\n");
+  return 0;
+}
+
+function statusSystemdSystem() {
+  const result = runCommand("systemctl", ["status", "arisa"], { stdio: "inherit" });
+  return result.status ?? 1;
+}
+
+function isSystemdActive() {
+  const result = runCommand("systemctl", ["is-active", "arisa"], { stdio: "pipe" });
+  return result.status === 0;
+}
+
+// ── Root guard ──────────────────────────────────────────────────────
+
+if (isRoot()) {
+  if (!isProvisioned()) {
+    provisionArisaUser();
+    writeSystemdSystemUnit();
+    spawnSync("systemctl", ["daemon-reload"], { stdio: "inherit" });
+    spawnSync("systemctl", ["enable", "--now", "arisa"], { stdio: "inherit" });
+    step(true, "Systemd service enabled");
+
+    process.stdout.write(`
+Arisa is now running as a service.
+  Status:   systemctl status arisa
+  Logs:     journalctl -u arisa -f
+  Restart:  systemctl restart arisa
+  Stop:     systemctl stop arisa
+`);
+    process.exit(0);
+  }
+
+  // Already provisioned — route commands to system-level systemd
+  if (command === "help" || command === "--help" || command === "-h") {
+    printHelp();
+    process.exit(0);
+  }
+  if (command === "version" || command === "--version" || command === "-v") {
+    printVersion();
+    process.exit(0);
+  }
+
+  switch (command) {
+    case "start":
+      process.exit(startSystemdSystem());
+      break;
+    case "stop":
+      process.exit(stopSystemdSystem());
+      break;
+    case "restart":
+      process.exit(restartSystemdSystem());
+      break;
+    case "status":
+      process.exit(statusSystemdSystem());
+      break;
+    case "daemon":
+    case "run": {
+      // Run as arisa user in foreground
+      const su = spawnSync("su", ["-", "arisa", "-c", "arisa"], {
+        stdio: "inherit",
+      });
+      process.exit(su.status ?? 1);
+    }
+    default: {
+      // No args or unknown — start if not active, otherwise show status
+      if (isDefaultInvocation) {
+        if (isSystemdActive()) {
+          process.exit(statusSystemdSystem());
+        } else {
+          process.exit(startSystemdSystem());
+        }
+      }
+      process.stderr.write(`Unknown command: ${command}\n\n`);
+      printHelp();
+      process.exit(1);
+    }
+  }
+}
+
+// ── Non-root flow (unchanged) ───────────────────────────────────────
+
 if (command === "help" || command === "--help" || command === "-h") {
   printHelp();
   process.exit(0);

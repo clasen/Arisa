@@ -82,11 +82,11 @@ export async function runSetup(): Promise<boolean> {
     let token: string;
     if (inq) {
       token = await inq.input({
-        message: "Telegram Bot Token (from @BotFather):",
+        message: "Telegram Bot Token (from https://t.me/BotFather):",
         validate: (v) => (v.trim() ? true : "Token is required"),
       });
     } else {
-      console.log("Telegram Bot Token required. Get one from @BotFather on Telegram.");
+      console.log("Telegram Bot Token required. Get one from https://t.me/BotFather on Telegram.");
       token = await readLine("TELEGRAM_BOT_TOKEN: ");
     }
 
