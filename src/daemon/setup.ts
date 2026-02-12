@@ -1,21 +1,29 @@
 /**
  * @module daemon/setup
- * @role Interactive first-run setup. Prompts for missing config via stdin.
+ * @role Interactive first-run setup with inquirer prompts.
  * @responsibilities
  *   - Check required config (TELEGRAM_BOT_TOKEN)
  *   - Check optional config (OPENAI_API_KEY)
- *   - Prompt user interactively and save to runtime .env
- * @dependencies shared/paths (avoids importing config to prevent module caching issues)
- * @effects Reads stdin, writes runtime .env
+ *   - Detect / install missing CLIs (Claude, Codex)
+ *   - Run interactive login flows for installed CLIs
+ *   - Persist tokens to both .env and encrypted DB
+ * @dependencies shared/paths, shared/secrets, shared/ai-cli
+ * @effects Reads stdin, writes runtime .env, spawns install/login processes
  */
 
 import { existsSync, readFileSync, writeFileSync, mkdirSync } from "fs";
 import { dirname, join } from "path";
 import { dataDir } from "../shared/paths";
 import { secrets, setSecret } from "../shared/secrets";
+import { isAgentCliInstalled, buildBunWrappedAgentCliCommand, type AgentCliName } from "../shared/ai-cli";
 
 const ENV_PATH = join(dataDir, ".env");
 const SETUP_DONE_KEY = "ARISA_SETUP_COMPLETE";
+
+const CLI_PACKAGES: Record<AgentCliName, string> = {
+  claude: "@anthropic-ai/claude-code",
+  codex: "@openai/codex",
+};
 
 function loadExistingEnv(): Record<string, string> {
   if (!existsSync(ENV_PATH)) return {};
@@ -36,7 +44,8 @@ function saveEnv(vars: Record<string, string>) {
   writeFileSync(ENV_PATH, content);
 }
 
-async function prompt(question: string): Promise<string> {
+// Fallback readline for non-TTY environments
+async function readLine(question: string): Promise<string> {
   process.stdout.write(question);
   for await (const line of console) {
     return line.trim();
@@ -50,18 +59,44 @@ export async function runSetup(): Promise<boolean> {
   const openaiSecret = await secrets.openai();
   let changed = false;
   const setupDone = vars[SETUP_DONE_KEY] === "1" || process.env[SETUP_DONE_KEY] === "1";
+  const isFirstRun = !setupDone;
 
-  // Required: TELEGRAM_BOT_TOKEN
-  if (!vars.TELEGRAM_BOT_TOKEN && !process.env.TELEGRAM_BOT_TOKEN && !telegramSecret) {
-    console.log("\n🔧 Arisa Setup\n");
-    console.log("Telegram Bot Token required. Get one from @BotFather on Telegram.");
-    const token = await prompt("TELEGRAM_BOT_TOKEN: ");
-    if (!token) {
+  // Try to load inquirer for interactive mode
+  let inq: typeof import("@inquirer/prompts") | null = null;
+  if (process.stdin.isTTY) {
+    try {
+      inq = await import("@inquirer/prompts");
+    } catch {
+      // Fall back to basic prompts
+    }
+  }
+
+  // ─── Phase 1: Tokens ────────────────────────────────────────────
+
+  const hasTelegram = !!(vars.TELEGRAM_BOT_TOKEN || process.env.TELEGRAM_BOT_TOKEN || telegramSecret);
+  const hasOpenAI = !!(vars.OPENAI_API_KEY || process.env.OPENAI_API_KEY || openaiSecret);
+
+  if (!hasTelegram) {
+    if (isFirstRun) console.log("\n🔧 Arisa Setup\n");
+
+    let token: string;
+    if (inq) {
+      token = await inq.input({
+        message: "Telegram Bot Token (from @BotFather):",
+        validate: (v) => (v.trim() ? true : "Token is required"),
+      });
+    } else {
+      console.log("Telegram Bot Token required. Get one from @BotFather on Telegram.");
+      token = await readLine("TELEGRAM_BOT_TOKEN: ");
+    }
+
+    if (!token.trim()) {
       console.log("No token provided. Cannot start without Telegram Bot Token.");
       return false;
     }
-    vars.TELEGRAM_BOT_TOKEN = token;
-    await setSecret("TELEGRAM_BOT_TOKEN", token).catch((e) =>
+
+    vars.TELEGRAM_BOT_TOKEN = token.trim();
+    await setSecret("TELEGRAM_BOT_TOKEN", token.trim()).catch((e) =>
       console.warn(`[setup] Could not persist TELEGRAM_BOT_TOKEN to encrypted DB: ${e}`)
     );
     console.log("[setup] TELEGRAM_BOT_TOKEN saved to .env + encrypted DB");
@@ -71,33 +106,168 @@ export async function runSetup(): Promise<boolean> {
     console.log(`[setup] TELEGRAM_BOT_TOKEN found in ${src}`);
   }
 
-  // Optional: OPENAI_API_KEY
-  if (!vars.OPENAI_API_KEY && !process.env.OPENAI_API_KEY && !openaiSecret && !setupDone) {
-    if (!changed) console.log("\n🔧 Arisa Setup\n");
-    console.log("\nOpenAI API Key (optional — enables voice transcription + image analysis).");
-    const key = await prompt("OPENAI_API_KEY (enter to skip): ");
-    if (key) {
-      vars.OPENAI_API_KEY = key;
-      await setSecret("OPENAI_API_KEY", key).catch((e) =>
+  if (!hasOpenAI && isFirstRun) {
+    let key: string;
+    if (inq) {
+      key = await inq.input({
+        message: "OpenAI API Key (optional — voice + image, enter to skip):",
+      });
+    } else {
+      console.log("\nOpenAI API Key (optional — enables voice transcription + image analysis).");
+      key = await readLine("OPENAI_API_KEY (enter to skip): ");
+    }
+
+    if (key.trim()) {
+      vars.OPENAI_API_KEY = key.trim();
+      await setSecret("OPENAI_API_KEY", key.trim()).catch((e) =>
         console.warn(`[setup] Could not persist OPENAI_API_KEY to encrypted DB: ${e}`)
       );
       console.log("[setup] OPENAI_API_KEY saved to .env + encrypted DB");
       changed = true;
     }
-  } else if (vars.OPENAI_API_KEY || process.env.OPENAI_API_KEY || openaiSecret) {
+  } else if (hasOpenAI) {
     const src = openaiSecret ? "encrypted DB" : vars.OPENAI_API_KEY ? ".env" : "env var";
     console.log(`[setup] OPENAI_API_KEY found in ${src}`);
   }
 
+  // Save tokens
   if (!setupDone) {
     vars[SETUP_DONE_KEY] = "1";
     changed = true;
   }
-
   if (changed) {
     saveEnv(vars);
-    console.log(`\nConfig saved to ${ENV_PATH}\n`);
+    console.log(`\nConfig saved to ${ENV_PATH}`);
+  }
+
+  // ─── Phase 2: CLI Installation (first run, interactive) ─────────
+
+  if (isFirstRun && process.stdin.isTTY) {
+    await setupClis(inq);
   }
 
   return true;
+}
+
+async function setupClis(inq: typeof import("@inquirer/prompts") | null) {
+  let claudeInstalled = isAgentCliInstalled("claude");
+  let codexInstalled = isAgentCliInstalled("codex");
+
+  console.log("\nCLI Status:");
+  console.log(`  ${claudeInstalled ? "✓" : "✗"} Claude${claudeInstalled ? "" : " — not installed"}`);
+  console.log(`  ${codexInstalled ? "✓" : "✗"} Codex${codexInstalled ? "" : " — not installed"}`);
+
+  // Install missing CLIs
+  const missing: AgentCliName[] = [];
+  if (!claudeInstalled) missing.push("claude");
+  if (!codexInstalled) missing.push("codex");
+
+  if (missing.length > 0) {
+    let toInstall: AgentCliName[] = [];
+
+    if (inq) {
+      toInstall = await inq.checkbox({
+        message: "Install missing CLIs? (space to select, enter to confirm)",
+        choices: missing.map((cli) => ({
+          name: `${cli === "claude" ? "Claude" : "Codex"} (${CLI_PACKAGES[cli]})`,
+          value: cli as AgentCliName,
+          checked: true,
+        })),
+      });
+    } else {
+      // Non-inquirer fallback: install all
+      const answer = await readLine("\nInstall missing CLIs? (Y/n): ");
+      if (answer.toLowerCase() !== "n") toInstall = missing;
+    }
+
+    for (const cli of toInstall) {
+      console.log(`\nInstalling ${cli}...`);
+      const ok = await installCli(cli);
+      console.log(ok ? `  ✓ ${cli} installed` : `  ✗ ${cli} install failed`);
+    }
+
+    // Refresh status
+    claudeInstalled = isAgentCliInstalled("claude");
+    codexInstalled = isAgentCliInstalled("codex");
+  }
+
+  // Login CLIs
+  if (claudeInstalled) {
+    let doLogin = true;
+    if (inq) {
+      doLogin = await inq.confirm({ message: "Log in to Claude?", default: true });
+    } else {
+      const answer = await readLine("\nLog in to Claude? (Y/n): ");
+      doLogin = answer.toLowerCase() !== "n";
+    }
+    if (doLogin) {
+      console.log();
+      await runInteractiveLogin("claude");
+    }
+  }
+
+  if (codexInstalled) {
+    let doLogin = true;
+    if (inq) {
+      doLogin = await inq.confirm({ message: "Log in to Codex?", default: true });
+    } else {
+      const answer = await readLine("\nLog in to Codex? (Y/n): ");
+      doLogin = answer.toLowerCase() !== "n";
+    }
+    if (doLogin) {
+      console.log();
+      await runInteractiveLogin("codex");
+    }
+  }
+
+  if (!claudeInstalled && !codexInstalled) {
+    console.log("\n⚠ No CLIs installed. Arisa needs at least one to work.");
+    console.log("  The daemon will auto-install them in the background.\n");
+  } else {
+    console.log("\n✓ Setup complete!\n");
+  }
+}
+
+async function installCli(cli: AgentCliName): Promise<boolean> {
+  try {
+    const proc = Bun.spawn(["bun", "add", "-g", CLI_PACKAGES[cli]], {
+      stdout: "inherit",
+      stderr: "inherit",
+    });
+    const timeout = setTimeout(() => proc.kill(), 120_000);
+    const exitCode = await proc.exited;
+    clearTimeout(timeout);
+    return exitCode === 0;
+  } catch (e) {
+    console.error(`  Install error: ${e}`);
+    return false;
+  }
+}
+
+async function runInteractiveLogin(cli: AgentCliName): Promise<boolean> {
+  const args = cli === "claude"
+    ? ["setup-token"]
+    : ["login", "--device-auth"];
+
+  console.log(`Starting ${cli} login...`);
+
+  try {
+    const proc = Bun.spawn(buildBunWrappedAgentCliCommand(cli, args), {
+      stdin: "inherit",
+      stdout: "inherit",
+      stderr: "inherit",
+    });
+    const exitCode = await proc.exited;
+
+    if (exitCode === 0) {
+      console.log(`  ✓ ${cli} login successful`);
+      return true;
+    } else {
+      console.log(`  ✗ ${cli} login failed (exit ${exitCode})`);
+      return false;
+    }
+  } catch (e) {
+    console.error(`  Login error: ${e}`);
+    return false;
+  }
 }

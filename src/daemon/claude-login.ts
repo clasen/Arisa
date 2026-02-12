@@ -16,6 +16,8 @@ import { buildBunWrappedAgentCliCommand } from "../shared/ai-cli";
 const log = createLogger("daemon");
 
 const AUTH_HINT_PATTERNS = [
+  /not logged in/i,
+  /please run \/login/i,
   /invalid.*api.?key/i,
   /authentication.*failed/i,
   /not authenticated/i,
