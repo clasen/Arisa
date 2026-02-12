@@ -586,6 +586,59 @@ function runArisaForeground() {
   return result.status ?? 1;
 }
 
+// ── Minimal setup (runs as root, no second bun process) ─────────────
+
+function askLine(promptText) {
+  process.stdout.write(promptText);
+  const result = spawnSync("bash", ["-c", "read -r line; echo \"$line\""], {
+    stdio: ["inherit", "pipe", "inherit"],
+  });
+  return (result.stdout || "").toString().trim();
+}
+
+function runMinimalSetup() {
+  const arisaDataDir = "/home/arisa/.arisa";
+  const envPath = join(arisaDataDir, ".env");
+
+  // Load existing .env if any
+  const vars = {};
+  if (existsSync(envPath)) {
+    for (const line of readFileSync(envPath, "utf8").split("\n")) {
+      const match = line.match(/^([A-Z_][A-Z0-9_]*)=(.+)$/);
+      if (match) vars[match[1]] = match[2].trim();
+    }
+  }
+
+  if (!vars.TELEGRAM_BOT_TOKEN) {
+    process.stdout.write("\nArisa Setup\n\n");
+    const token = askLine("Telegram Bot Token (from https://t.me/BotFather): ");
+    if (!token) {
+      process.stdout.write("No token provided. Cannot start without Telegram Bot Token.\n");
+      process.exit(1);
+    }
+    vars.TELEGRAM_BOT_TOKEN = token;
+    process.stdout.write("  Token saved.\n");
+  }
+
+  if (!vars.OPENAI_API_KEY) {
+    const key = askLine("OpenAI API Key (optional, enter to skip): ");
+    if (key) {
+      vars.OPENAI_API_KEY = key;
+      process.stdout.write("  Key saved.\n");
+    }
+  }
+
+  vars.ARISA_SETUP_COMPLETE = "1";
+
+  // Write .env
+  mkdirSync(arisaDataDir, { recursive: true });
+  const content = Object.entries(vars).map(([k, v]) => `${k}=${v}`).join("\n") + "\n";
+  writeFileSync(envPath, content, "utf8");
+  spawnSync("chown", ["-R", "arisa:arisa", arisaDataDir], { stdio: "ignore" });
+
+  process.stdout.write(`\nConfig saved to ${envPath}\n`);
+}
+
 // ── Root guard ──────────────────────────────────────────────────────
 
 if (isRoot()) {
@@ -597,12 +650,14 @@ if (isRoot()) {
       spawnSync("systemctl", ["enable", "arisa"], { stdio: "inherit" });
       step(true, "Systemd service enabled (auto-starts on reboot)");
     }
-
-    process.stdout.write("\nStarting interactive setup as user arisa...\n\n");
-    process.exit(runArisaForeground());
   }
 
-  // Already provisioned — route commands
+  // Minimal setup: collect tokens here (no second bun process)
+  if (!isArisaConfigured()) {
+    runMinimalSetup();
+  }
+
+  // Already provisioned + configured — route commands
   if (command === "help" || command === "--help" || command === "-h") {
     printHelp();
     process.exit(0);
@@ -614,20 +669,20 @@ if (isRoot()) {
 
   const hasSystemd = canUseSystemdSystem();
 
-  // No args → setup if needed, then systemd or foreground
   if (isDefaultInvocation) {
-    if (!isArisaConfigured()) {
-      process.stdout.write("Arisa is not configured yet. Starting interactive setup...\n\n");
-      process.exit(runArisaForeground());
-    }
     if (hasSystemd) {
-      if (isSystemdActive()) {
-        process.exit(statusSystemdSystem());
-      } else {
-        process.exit(startSystemdSystem());
+      if (!isSystemdActive()) {
+        const start = startSystemdSystem();
+        if (start !== 0) process.exit(start);
       }
+      process.stdout.write("\nArisa is running. Management commands:\n");
+      process.stdout.write("  Status:   systemctl status arisa\n");
+      process.stdout.write("  Logs:     journalctl -u arisa -f\n");
+      process.stdout.write("  Restart:  systemctl restart arisa\n");
+      process.stdout.write("  Stop:     systemctl stop arisa\n\n");
+      process.exit(0);
     }
-    // No systemd → foreground
+    // No systemd → foreground (two bun processes, but no other option)
     process.exit(runArisaForeground());
   }
 
