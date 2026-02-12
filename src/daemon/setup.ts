@@ -276,31 +276,35 @@ async function runInteractiveLogin(cli: AgentCliName, vars: Record<string, strin
 
       const exitCode = await proc.exited;
       if (exitCode === 0) {
-        // Strip ALL ANSI escape sequences and control chars, then extract token line-by-line
-        const clean = output
-          .replace(/\x1b\[[\x20-\x3f]*[\x40-\x7e]/g, "")  // CSI sequences
-          .replace(/\x1b[^\x1b]{0,5}/g, "")                 // other ESC sequences
-          .replace(/\r/g, "");                               // carriage returns
-
+        // Find token in raw output — don't rely on ANSI stripping or line parsing.
+        // Just locate "sk-ant-" and the end boundary, then keep only token chars.
+        const startIdx = output.indexOf("sk-ant-");
         let token = "";
-        for (const line of clean.split("\n")) {
-          const t = line.trim();
-          if (t.startsWith("sk-ant-")) {
-            token = t;
-          } else if (token && t && /^[A-Za-z0-9_-]+$/.test(t)) {
-            token += t;  // continuation line (wrapped token)
-          } else if (token) {
-            break;  // end of token (empty line or text)
-          }
+
+        if (startIdx >= 0) {
+          // End boundary: look for known text after the token
+          let endIdx = output.indexOf("Store this token", startIdx);
+          if (endIdx < 0) endIdx = output.indexOf("Use this token", startIdx);
+          if (endIdx < 0) endIdx = startIdx + 300;
+
+          const tokenArea = output.substring(startIdx, endIdx);
+          // Strip EVERYTHING except token-valid chars: A-Z a-z 0-9 _ -
+          token = tokenArea.replace(/[^A-Za-z0-9_-]/g, "");
         }
 
-        if (token) {
-          console.log(`  [debug] token captured: ${token.slice(0, 20)}...${token.slice(-10)} (${token.length} chars)`);
+        if (token && token.startsWith("sk-ant-") && token.length > 50) {
+          console.log(`  [token] ${token.slice(0, 20)}...${token.slice(-6)} (${token.length} chars)`);
           vars.CLAUDE_CODE_OAUTH_TOKEN = token;
           saveEnv(vars);
           console.log("  ✓ claude token saved to .env");
         } else {
-          console.log("  ⚠ could not extract token from output");
+          console.log(`  ⚠ token extraction failed (indexOf=${startIdx}, len=${token.length})`);
+          // Dump raw bytes around expected position for debugging
+          if (startIdx >= 0) {
+            const raw = output.substring(startIdx, startIdx + 200);
+            const hex = [...raw].map(c => c.charCodeAt(0).toString(16).padStart(2, "0")).join(" ");
+            console.log(`  [hex] ${hex.slice(0, 300)}`);
+          }
         }
         console.log(`  ✓ claude login successful`);
         return true;
