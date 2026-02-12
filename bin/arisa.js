@@ -437,8 +437,10 @@ function step(ok, msg) {
   process.stdout.write(`  ${ok ? "\u2713" : "\u2717"} ${msg}\n`);
 }
 
+const ARISA_BUN_ENV = 'export BUN_INSTALL=/home/arisa/.bun && export PATH=/home/arisa/.bun/bin:$PATH';
+
 function runAsInherit(cmd) {
-  return spawnSync("su", ["-", "arisa", "-c", cmd], {
+  return spawnSync("su", ["-", "arisa", "-c", `${ARISA_BUN_ENV} && ${cmd}`], {
     stdio: "inherit",
     timeout: 180_000,
   });
@@ -471,6 +473,15 @@ function provisionArisaUser() {
     process.exit(1);
   }
   step(true, "Bun installed for arisa");
+
+  // Ensure .profile has bun PATH (login shells skip .bashrc non-interactive guard)
+  const profilePath = "/home/arisa/.profile";
+  const profileContent = existsSync(profilePath) ? readFileSync(profilePath, "utf8") : "";
+  if (!profileContent.includes("BUN_INSTALL")) {
+    const bunPath = '\n# bun\nexport BUN_INSTALL="/home/arisa/.bun"\nexport PATH="$BUN_INSTALL/bin:$PATH"\n';
+    writeFileSync(profilePath, profileContent + bunPath, "utf8");
+    spawnSync("chown", ["arisa:arisa", profilePath], { stdio: "ignore" });
+  }
 
   // 3. Copy arisa source
   const dest = "/home/arisa/arisa";
@@ -575,7 +586,7 @@ if (isRoot()) {
     step(true, "Systemd service enabled (auto-starts on reboot)");
 
     process.stdout.write("\nStarting interactive setup as user arisa...\n\n");
-    const su = spawnSync("su", ["-", "arisa", "-c", "/home/arisa/.bun/bin/bun /home/arisa/arisa/src/daemon/index.ts"], {
+    const su = spawnSync("su", ["-", "arisa", "-c", `${ARISA_BUN_ENV} && /home/arisa/.bun/bin/bun /home/arisa/arisa/src/daemon/index.ts`], {
       stdio: "inherit",
     });
 
@@ -604,7 +615,7 @@ Arisa management:
   if (isDefaultInvocation) {
     if (!isArisaConfigured()) {
       process.stdout.write("Arisa is not configured yet. Starting interactive setup...\n\n");
-      const su = spawnSync("su", ["-", "arisa", "-c", "/home/arisa/.bun/bin/bun /home/arisa/arisa/src/daemon/index.ts"], {
+      const su = spawnSync("su", ["-", "arisa", "-c", `${ARISA_BUN_ENV} && /home/arisa/.bun/bin/bun /home/arisa/arisa/src/daemon/index.ts`], {
         stdio: "inherit",
       });
       process.stdout.write(`
@@ -640,7 +651,7 @@ Arisa management:
     case "daemon":
     case "run": {
       // Explicit "arisa daemon/run" → foreground as arisa user
-      const su = spawnSync("su", ["-", "arisa", "-c", "/home/arisa/.bun/bin/bun /home/arisa/arisa/src/daemon/index.ts"], {
+      const su = spawnSync("su", ["-", "arisa", "-c", `${ARISA_BUN_ENV} && /home/arisa/.bun/bin/bun /home/arisa/arisa/src/daemon/index.ts`], {
         stdio: "inherit",
       });
       process.exit(su.status ?? 1);
