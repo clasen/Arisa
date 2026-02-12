@@ -23,7 +23,7 @@ const { config } = await import("../shared/config");
 // Initialize encrypted secrets
 await config.secrets.initialize();
 const { createLogger } = await import("../shared/logger");
-const { serveWithRetry, claimProcess, releaseProcess } = await import("../shared/ports");
+const { serveWithRetry, claimProcess, releaseProcess, cleanupSocket } = await import("../shared/ports");
 const { TelegramChannel } = await import("./channels/telegram");
 const { sendToCore } = await import("./bridge");
 const { startCore, stopCore, setLifecycleNotify } = await import("./lifecycle");
@@ -175,7 +175,7 @@ telegram.onMessage(async (msg) => {
 
 // --- HTTP server for Core → Daemon pushes (scheduler) ---
 const pushServer = await serveWithRetry({
-  port: config.daemonPort,
+  unix: config.daemonSocket,
   async fetch(req) {
     const url = new URL(req.url);
 
@@ -220,7 +220,7 @@ const pushServer = await serveWithRetry({
   },
 });
 
-log.info(`Daemon push server listening on port ${config.daemonPort}`);
+log.info(`Daemon push server listening on ${config.daemonSocket}`);
 
 // --- Auto-install missing CLIs (non-blocking) ---
 void autoInstallMissingClis();
@@ -238,6 +238,8 @@ telegram.connect().catch((error) => {
 function shutdown() {
   log.info("Shutting down Daemon...");
   stopCore();
+  cleanupSocket(config.daemonSocket);
+  cleanupSocket(config.coreSocket);
   releaseProcess("daemon");
   process.exit(0);
 }

@@ -2,7 +2,7 @@
  * @module daemon/bridge
  * @role HTTP client from Daemon to Core with smart fallback to local AI CLI.
  * @responsibilities
- *   - POST messages to Core at :51777/message
+ *   - POST messages to Core via Unix socket
  *   - Respect Core lifecycle state (starting/up/down)
  *   - Wait for Core during startup, fallback only when truly down
  *   - Serialize fallback calls (one CLI process at a time)
@@ -18,7 +18,7 @@ import { getCoreState, getCoreError, waitForCoreReady } from "./lifecycle";
 
 const log = createLogger("daemon");
 
-const CORE_URL = `http://localhost:${config.corePort}`;
+const CORE_URL = "http://localhost/core";
 const STARTUP_WAIT_MS = 15_000;
 const RETRY_DELAY = 3000;
 
@@ -135,7 +135,8 @@ async function postToCore(message: IncomingMessage): Promise<CoreResponse> {
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ message }),
     signal: AbortSignal.timeout(config.claudeTimeout + 5000),
-  });
+    unix: config.coreSocket,
+  } as any);
 
   if (!response.ok) {
     throw new Error(`Core returned ${response.status}`);
@@ -154,7 +155,10 @@ function sleep(ms: number): Promise<void> {
 
 export async function isCoreHealthy(): Promise<boolean> {
   try {
-    const response = await fetch(`${CORE_URL}/health`, { signal: AbortSignal.timeout(2000) });
+    const response = await fetch(`${CORE_URL}/health`, {
+      signal: AbortSignal.timeout(2000),
+      unix: config.coreSocket,
+    } as any);
     return response.ok;
   } catch {
     return false;

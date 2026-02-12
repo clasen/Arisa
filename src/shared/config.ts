@@ -107,6 +107,8 @@ export const config = {
 
   corePort: 51777,
   daemonPort: 51778,
+  coreSocket: join(dataDir, "core.sock"),
+  daemonSocket: join(dataDir, "daemon.sock"),
 
   // API keys - use async getters for first load
   get telegramBotToken() { return secureConfig.telegramBotToken; },

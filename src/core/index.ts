@@ -76,7 +76,7 @@ await initScheduler();
 await initAttachments();
 
 const server = await serveWithRetry({
-  port: config.corePort,
+  unix: config.coreSocket,
   async fetch(req) {
     const url = new URL(req.url);
 
@@ -461,4 +461,4 @@ ${messageText}`;
   },
 });
 
-log.info(`Core server listening on port ${config.corePort}`);
+log.info(`Core server listening on ${config.coreSocket}`);

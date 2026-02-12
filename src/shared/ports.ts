@@ -78,19 +78,37 @@ export function releaseProcess(name: string): void {
 }
 
 /**
- * Bun.serve() with retry — if port is busy, waits for previous process to die.
+ * Remove a Unix socket file if it exists (stale leftover from crash).
+ */
+export function cleanupSocket(socketPath: string): void {
+  try { unlinkSync(socketPath); } catch {}
+}
+
+/**
+ * Bun.serve() with retry — handles both TCP ports and Unix sockets.
+ * For Unix sockets, cleans up stale socket file before first attempt.
  */
 export async function serveWithRetry(
   options: Parameters<typeof Bun.serve>[0],
   retries = 5,
 ): Promise<ReturnType<typeof Bun.serve>> {
+  const socketPath = (options as any).unix as string | undefined;
+
+  // Pre-clean stale Unix socket from a previous crash
+  if (socketPath) cleanupSocket(socketPath);
+
   for (let i = 0; i < retries; i++) {
     try {
       return Bun.serve(options);
     } catch (e: any) {
       if (e?.code !== "EADDRINUSE" || i === retries - 1) throw e;
-      const port = (options as any).port ?? "?";
-      console.log(`[ports] Port ${port} busy, retrying (${i + 1}/${retries})...`);
+      if (socketPath) {
+        console.log(`[ports] Socket ${socketPath} busy, cleaning up and retrying (${i + 1}/${retries})...`);
+        cleanupSocket(socketPath);
+      } else {
+        const port = (options as any).port ?? "?";
+        console.log(`[ports] Port ${port} busy, retrying (${i + 1}/${retries})...`);
+      }
       await new Promise((r) => setTimeout(r, 1000));
     }
   }

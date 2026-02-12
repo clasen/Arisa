@@ -91,9 +91,10 @@ function startHealthCheck() {
       return;
     }
     try {
-      const res = await fetch(`http://localhost:${config.corePort}/health`, {
+      const res = await fetch("http://localhost/core/health", {
         signal: AbortSignal.timeout(2000),
-      });
+        unix: config.coreSocket,
+      } as any);
       if (res.ok) {
         coreState = "up";
         log.info("Core is ready (health check passed)");
