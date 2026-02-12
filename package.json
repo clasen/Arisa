@@ -1,6 +1,6 @@
 {
   "name": "arisa",
-  "version": "2.0.6",
+  "version": "2.0.7",
   "description": "Arisa - dynamic agent runtime with daemon/core architecture that evolves through user interaction",
   "preferGlobal": true,
   "bin": {
@@ -29,8 +29,7 @@
   "dependencies": {
     "croner": "^9.0.0",
     "crypto-js": "^4.2.0",
-    "deepbase": "^3.4.6",
-    "deepbase-json": "^3.4.6",
+    "deepbase": "^3.4.9",
     "elevenlabs": "^1.59.0",
     "grammy": "^1.21.0",
     "openai": "^6.19.0",
