@@ -78,13 +78,29 @@ export function isAgentCliInstalled(cli: AgentCliName): boolean {
 
 const INK_SHIM = join(dirname(new URL(import.meta.url).pathname), "ink-shim.js");
 
+// Env vars that must survive the su - login shell reset
+const PASSTHROUGH_VARS = [
+  "CLAUDE_CODE_OAUTH_TOKEN",
+  "ANTHROPIC_API_KEY",
+  "OPENAI_API_KEY",
+];
+
+function buildEnvExports(): string {
+  const exports: string[] = [];
+  for (const key of PASSTHROUGH_VARS) {
+    const val = process.env[key];
+    if (val) exports.push(`export ${key}=${shellEscape(val)}`);
+  }
+  return exports.length > 0 ? exports.join(" && ") + " && " : "";
+}
+
 export function buildBunWrappedAgentCliCommand(cli: AgentCliName, args: string[]): string[] {
   if (isRunningAsRoot()) {
     // Run as arisa user — Claude CLI refuses to run as root
     const cliPath = resolveAgentCliPath(cli) || join(ARISA_USER_BUN, cli);
     const shimPath = existsSync(ARISA_INK_SHIM) ? ARISA_INK_SHIM : INK_SHIM;
     const inner = ["bun", "--preload", shimPath, cliPath, ...args].map(shellEscape).join(" ");
-    return ["su", "-", "arisa", "-c", `${ARISA_BUN_ENV} && ${inner}`];
+    return ["su", "-", "arisa", "-c", `${ARISA_BUN_ENV} && ${buildEnvExports()}${inner}`];
   }
 
   const cliPath = resolveAgentCliPath(cli);
