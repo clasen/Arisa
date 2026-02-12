@@ -448,8 +448,45 @@ function runAsInherit(cmd) {
   });
 }
 
+function ensureSwap() {
+  // Check if swap already exists
+  const swapon = spawnSync("swapon", ["--show"], { stdio: "pipe" });
+  const swapOutput = (swapon.stdout || "").toString().trim();
+  if (swapOutput.includes("/")) return; // swap already active
+
+  // Create 512MB swap file (essential on 1GB VPS for bun add)
+  process.stdout.write("  Creating swap file (512MB)...\n");
+  const cmds = [
+    ["fallocate", ["-l", "512M", "/swapfile"]],
+    ["chmod", ["600", "/swapfile"]],
+    ["mkswap", ["/swapfile"]],
+    ["swapon", ["/swapfile"]],
+  ];
+  for (const [cmd, cmdArgs] of cmds) {
+    const result = spawnSync(cmd, cmdArgs, { stdio: "pipe" });
+    if (result.status !== 0) {
+      step(false, "Failed to create swap file");
+      return;
+    }
+  }
+
+  // Make persistent across reboots
+  const fstabPath = "/etc/fstab";
+  if (existsSync(fstabPath)) {
+    const fstab = readFileSync(fstabPath, "utf8");
+    if (!fstab.includes("/swapfile")) {
+      writeFileSync(fstabPath, fstab.trimEnd() + "\n/swapfile none swap sw 0 0\n");
+    }
+  }
+
+  step(true, "Swap file created (512MB)");
+}
+
 function provisionArisaUser() {
   process.stdout.write("Running as root \u2014 creating dedicated user 'arisa'...\n");
+
+  // 0. Ensure swap exists (prevents OOM on 1GB VPS during CLI installs)
+  ensureSwap();
 
   // 1. Create user
   const useradd = spawnSync("useradd", ["-m", "-s", "/bin/bash", "arisa"], {
