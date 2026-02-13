@@ -262,11 +262,25 @@ void autoInstallMissingClis();
 // --- Start Core process ---
 startCore();
 
-// --- Connect Telegram ---
-telegram.connect().catch((error) => {
-  log.error(`Telegram connection failed: ${error}`);
-  process.exit(1);
-});
+// --- Connect Telegram (with retry for 409 conflict from stale polling sessions) ---
+(async function connectTelegram(maxRetries = 5) {
+  for (let attempt = 1; attempt <= maxRetries; attempt++) {
+    try {
+      await telegram.connect();
+      return; // connected — polling continues in background
+    } catch (error) {
+      const is409 = String(error).includes("409");
+      if (is409 && attempt < maxRetries) {
+        const wait = attempt * 5;
+        log.warn(`Telegram 409 conflict (attempt ${attempt}/${maxRetries}), retrying in ${wait}s...`);
+        await new Promise((r) => setTimeout(r, wait * 1000));
+        continue;
+      }
+      log.error(`Telegram connection failed: ${error}`);
+      process.exit(1);
+    }
+  }
+})();
 
 // --- Graceful shutdown ---
 function shutdown() {
