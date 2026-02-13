@@ -289,9 +289,16 @@ async function isCliAuthenticated(cli: AgentCliName): Promise<boolean> {
       const exitCode = await proc.exited;
       return exitCode === 0 && stdout.includes('"loggedIn": true');
     }
-    // Codex: needs OPENAI_API_KEY
+    // Codex: has OPENAI_API_KEY or device-auth credentials
     if (cli === "codex") {
-      return !!(process.env.OPENAI_API_KEY);
+      if (process.env.OPENAI_API_KEY) return true;
+      // device-auth stores config in ~/.codex/ — try a quick dry-run
+      const cmd = buildBunWrappedAgentCliCommand("codex", ["--help"], { skipPreload: true });
+      const proc = Bun.spawn(cmd, { stdout: "pipe", stderr: "pipe" });
+      const stderr = await new Response(proc.stderr).text();
+      await proc.exited;
+      // If stderr mentions login/auth, not authenticated
+      return !(/login|authenticate|OPENAI_API_KEY/i.test(stderr));
     }
     return true;
   } catch {

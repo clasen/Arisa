@@ -26,7 +26,7 @@ const PROMPT_PREVIEW_MAX = 220;
 export const CLAUDE_RATE_LIMIT_MESSAGE = "Claude is out of credits right now. Please try again in a few minutes.";
 export const CODEX_AUTH_REQUIRED_MESSAGE = [
   "Codex login is required.",
-  "Check the Arisa daemon logs now and complete the device-auth steps shown there."
+  "Run: codex login --device-auth (or set OPENAI_API_KEY in ~/.arisa/.env) then restart Arisa."
 ].join("\n");
 
 function logActivity(backend: string, model: string | null, durationMs: number, status: string) {
