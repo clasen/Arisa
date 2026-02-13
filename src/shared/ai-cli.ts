@@ -80,9 +80,11 @@ export function isAgentCliInstalled(cli: AgentCliName): boolean {
 
 const INK_SHIM = join(dirname(new URL(import.meta.url).pathname), "ink-shim.js");
 
-// Env vars that must survive the su - login shell reset
+// Env vars that must survive the su - login shell reset.
+// Note: CLAUDE_CODE_OAUTH_TOKEN intentionally excluded — the CLI manages
+// its own credentials via ~/.claude/.credentials.json with token refresh.
+// Injecting a stale accessToken via env var breaks refresh.
 const PASSTHROUGH_VARS = [
-  "CLAUDE_CODE_OAUTH_TOKEN",
   "ANTHROPIC_API_KEY",
   "OPENAI_API_KEY",
 ];
