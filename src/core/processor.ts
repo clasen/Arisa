@@ -273,9 +273,26 @@ export function isCodexAuthRequiredResponse(text: string): boolean {
 }
 
 function summarizeError(raw: string): string {
-  const clean = raw.replace(/\s+/g, " ").trim();
-  if (!clean) return "process ended without details.";
-  // Cap at 200 chars for Telegram readability
+  if (!raw.trim()) return "process ended without details.";
+
+  const lines = raw.split("\n");
+
+  // Filter out Bun stack-trace source code lines (e.g. "3 | import{createRequire...")
+  // and caret pointer lines (e.g. "      ^")
+  const meaningful = lines.filter(
+    (l) => !/^\s*\d+\s*\|/.test(l) && !/^\s*\^+\s*$/.test(l)
+  );
+
+  // Look for explicit error lines first (e.g. "error: ...", "TypeError: ...")
+  const errorLine = meaningful.find((l) =>
+    /^\s*(error|Error|TypeError|ReferenceError|SyntaxError|RangeError|ENOENT|EACCES|fatal)[:]/i.test(l.trim())
+  );
+
+  const summary = errorLine?.trim()
+    || meaningful.filter((l) => l.trim()).join(" ").trim()
+    || "process ended without details.";
+
+  const clean = summary.replace(/\s+/g, " ");
   return clean.length > 200 ? clean.slice(0, 200) + "..." : clean;
 }
 
