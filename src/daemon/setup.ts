@@ -341,7 +341,7 @@ async function runInteractiveLogin(cli: AgentCliName, vars: Record<string, strin
     // `claude setup-token` prints a token but does NOT store it.
     // Ask the user to paste it.
     if (cli === "claude") {
-      console.log("\n  Paste the token shown above (starts with sk-ant-):");
+      console.log("\n  Paste the yellow token shown above (starts with sk-ant-):");
       const token = (await readLine("  > ")).trim();
       if (token.startsWith("sk-ant-") && token.length > 80) {
         vars.CLAUDE_CODE_OAUTH_TOKEN = token;
