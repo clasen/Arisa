@@ -84,6 +84,18 @@ const server = await serveWithRetry({
       return Response.json({ status: "ok", timestamp: Date.now() });
     }
 
+    // Save outgoing message records (called by Daemon after sending to Telegram)
+    if (url.pathname === "/record" && req.method === "POST") {
+      try {
+        const record = await req.json();
+        await saveMessageRecord(record);
+        return Response.json({ ok: true });
+      } catch (error) {
+        log.error(`Record save error: ${error}`);
+        return Response.json({ error: "Save failed" }, { status: 500 });
+      }
+    }
+
     if (url.pathname === "/message" && req.method === "POST") {
       try {
         const body = await req.json();

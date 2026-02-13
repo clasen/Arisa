@@ -38,7 +38,29 @@ const { maybeStartCodexDeviceAuth, setCodexLoginNotify } = await import("./codex
 const { maybeStartClaudeSetupToken, maybeFeedClaudeCode, setClaudeLoginNotify, isClaudeLoginPending } = await import("./claude-login");
 const { autoInstallMissingClis, setAutoInstallNotify, setAuthProbeCallback } = await import("./auto-install");
 const { chunkMessage, markdownToTelegramHtml } = await import("../core/format");
-const { saveMessageRecord } = await import("../shared/db");
+// Message records are saved via Core's /record endpoint to avoid dual-writer
+// conflicts (Daemon and Core sharing the same arisa.json through separate
+// in-memory DeepBase instances would cause one to overwrite the other's data).
+async function saveRecordViaCore(record: {
+  id: string;
+  chatId: string;
+  messageId: number;
+  direction: "in" | "out";
+  sender: string;
+  timestamp: number;
+  text: string;
+}) {
+  try {
+    await fetch("http://localhost/record", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(record),
+      unix: config.coreSocket,
+    } as any);
+  } catch (e) {
+    log.error(`Failed to save record via Core: ${e}`);
+  }
+}
 
 const log = createLogger("daemon");
 
@@ -148,7 +170,7 @@ telegram.onMessage(async (msg) => {
         log.debug(`Sending chunk (${chunk.length} chars) >>>>\n${chunk}\n<<<<`);
         const sentId = await telegram.send(msg.chatId, chunk);
         if (sentId) {
-          saveMessageRecord({
+          saveRecordViaCore({
             id: `${msg.chatId}_${sentId}`,
             chatId: msg.chatId,
             messageId: sentId,
@@ -156,7 +178,7 @@ telegram.onMessage(async (msg) => {
             sender: "Arisa",
             timestamp: Date.now(),
             text: chunk,
-          }).catch((e) => log.error(`Failed to save outgoing message record: ${e}`));
+          });
         }
       }
       sentText = true;
@@ -203,7 +225,7 @@ const pushServer = await serveWithRetry({
         for (const chunk of chunks) {
           const sentId = await telegram.send(body.chatId, chunk);
           if (sentId) {
-            saveMessageRecord({
+            saveRecordViaCore({
               id: `${body.chatId}_${sentId}`,
               chatId: body.chatId,
               messageId: sentId,
@@ -211,7 +233,7 @@ const pushServer = await serveWithRetry({
               sender: "Arisa",
               timestamp: Date.now(),
               text: chunk,
-            }).catch((e) => log.error(`Failed to save outgoing message record: ${e}`));
+            });
           }
         }
 
