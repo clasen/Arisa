@@ -348,7 +348,12 @@ async function runInteractiveLogin(cli: AgentCliName, vars: Record<string, strin
       }
 
       // Extract token from output (format: sk-ant-oat01-...)
-      const tokenMatch = output.match(/(sk-ant-oat01-[A-Za-z0-9_-]+)/);
+      // The CLI wraps long tokens across multiple lines — collect until blank line, strip whitespace.
+      const tokenStartIdx = output.indexOf("sk-ant-oat01-");
+      const tokenArea = tokenStartIdx >= 0
+        ? output.substring(tokenStartIdx, output.indexOf("\n\n", tokenStartIdx) >>> 0 || tokenStartIdx + 200)
+        : "";
+      const tokenMatch = tokenArea ? tokenArea.replace(/\s+/g, "").match(/(sk-ant-oat01-[A-Za-z0-9_-]+)/) : null;
       if (tokenMatch) {
         const token = tokenMatch[1];
         console.log(`  [token] ${token.slice(0, 20)}...${token.slice(-6)} (${token.length} chars)`);
