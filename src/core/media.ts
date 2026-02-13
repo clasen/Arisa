@@ -60,7 +60,7 @@ export async function transcribeAudio(base64: string, filename: string): Promise
     const file = Bun.file(tempPath);
     const transcription = await client.audio.transcriptions.create({
       file: file,
-      model: "whisper-1",
+      model: "gpt-4o-mini-transcribe",
     });
     log.info(`Transcribed audio: "${transcription.text.substring(0, 80)}..."`);
     return transcription.text;

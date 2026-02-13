@@ -10,7 +10,7 @@
  */
 
 import { createLogger } from "../shared/logger";
-import { isAgentCliInstalled, buildBunWrappedAgentCliCommand, type AgentCliName } from "../shared/ai-cli";
+import { isAgentCliInstalled, isRunningAsRoot, buildBunWrappedAgentCliCommand, type AgentCliName } from "../shared/ai-cli";
 
 const log = createLogger("daemon");
 
@@ -19,6 +19,7 @@ const CLI_PACKAGES: Record<AgentCliName, string> = {
   codex: "@openai/codex",
 };
 
+const ARISA_BUN_ENV = 'export BUN_INSTALL=/home/arisa/.bun && export PATH=/home/arisa/.bun/bin:$PATH';
 const INSTALL_TIMEOUT = 120_000; // 2min
 
 type NotifyFn = (text: string) => Promise<void>;
@@ -33,7 +34,12 @@ async function installCli(cli: AgentCliName): Promise<boolean> {
   log.info(`Auto-install: installing ${cli} (${pkg})...`);
 
   try {
-    const proc = Bun.spawn(["bun", "add", "-g", pkg], {
+    // When running as root, install into arisa user's bun (consistent with setup.ts)
+    const cmd = isRunningAsRoot()
+      ? ["su", "-", "arisa", "-c", `${ARISA_BUN_ENV} && bun add -g ${pkg}`]
+      : ["bun", "add", "-g", pkg];
+
+    const proc = Bun.spawn(cmd, {
       stdout: "pipe",
       stderr: "pipe",
       env: { ...process.env },

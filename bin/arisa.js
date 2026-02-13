@@ -428,7 +428,7 @@ const ARISA_BUN_ENV = 'export BUN_INSTALL=/home/arisa/.bun && export PATH=/home/
 function provisionArisaUser() {
   process.stdout.write("Creating user 'arisa' for Claude/Codex CLI execution...\n");
 
-  // 1. Create user
+  // 1. Create user with sudo access
   const useradd = spawnSync("useradd", ["-m", "-s", "/bin/bash", "arisa"], { stdio: "pipe" });
   if (useradd.status !== 0) {
     step(false, `Failed to create user: ${(useradd.stderr || "").toString().trim()}`);
@@ -436,7 +436,16 @@ function provisionArisaUser() {
   }
   step(true, "User arisa created");
 
-  // 2. Install bun for arisa (curl — lightweight, no bun child process)
+  // 2. Grant passwordless sudo (needed for full tool execution in Claude/Codex)
+  try {
+    writeFileSync("/etc/sudoers.d/arisa", "arisa ALL=(ALL) NOPASSWD: ALL\n", { mode: 0o440 });
+    step(true, "Passwordless sudo granted");
+  } catch (e) {
+    // Not fatal — sudo may not be installed in minimal containers
+    step(false, `Sudo setup skipped: ${e.message || e}`);
+  }
+
+  // 3. Install bun for arisa (curl — lightweight, no bun child process)
   process.stdout.write("  Installing bun for arisa (this may take a minute)...\n");
   const bunInstall = spawnSync("su", ["-", "arisa", "-c", "curl -fsSL https://bun.sh/install | bash"], {
     stdio: "inherit",
@@ -448,7 +457,7 @@ function provisionArisaUser() {
   }
   step(true, "Bun installed for arisa");
 
-  // 3. Write ink-shim for non-TTY execution (prevents Ink setRawMode crash)
+  // 4. Write ink-shim for non-TTY execution (prevents Ink setRawMode crash)
   const shimPath = "/home/arisa/.arisa-ink-shim.js";
   writeFileSync(shimPath, 'if(process.stdin&&!process.stdin.isTTY){process.stdin.setRawMode=()=>process.stdin;process.stdin.isTTY=true;}\n');
   spawnSync("chown", ["arisa:arisa", shimPath], { stdio: "ignore" });
