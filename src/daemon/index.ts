@@ -32,7 +32,7 @@ const { createLogger } = await import("../shared/logger");
 const { serveWithRetry, claimProcess, releaseProcess, cleanupSocket } = await import("../shared/ports");
 const { TelegramChannel } = await import("./channels/telegram");
 const { sendToCore } = await import("./bridge");
-const { startCore, stopCore, setLifecycleNotify } = await import("./lifecycle");
+const { startCore, stopCore, setLifecycleNotify, waitForCoreReady } = await import("./lifecycle");
 const { setAutoFixNotify } = await import("./autofix");
 const { maybeStartCodexDeviceAuth, setCodexLoginNotify } = await import("./codex-login");
 const { maybeStartClaudeSetupToken, maybeFeedClaudeCode, setClaudeLoginNotify, isClaudeLoginPending } = await import("./claude-login");
@@ -256,11 +256,11 @@ const pushServer = await serveWithRetry({
 
 log.info(`Daemon push server listening on ${config.daemonSocket}`);
 
-// --- Auto-install missing CLIs (non-blocking) ---
-void autoInstallMissingClis();
-
 // --- Start Core process ---
 startCore();
+
+// --- Auto-install missing CLIs (after Core is up to avoid OOM on low-RAM VPS) ---
+waitForCoreReady(30_000).then(() => void autoInstallMissingClis());
 
 // --- Connect Telegram (with retry for 409 conflict from stale polling sessions) ---
 (async function connectTelegram(maxRetries = 5) {
