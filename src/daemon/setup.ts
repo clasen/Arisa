@@ -320,29 +320,11 @@ async function runInteractiveLogin(cli: AgentCliName, vars: Record<string, strin
   console.log(`Starting ${cli} login...`);
 
   try {
-    const isClaudeSetupToken = cli === "claude";
-
-    // For claude setup-token: pipe stdout to capture token while echoing to terminal.
-    // For others (codex): inherit stdout for full native rendering.
     const proc = Bun.spawn(buildBunWrappedAgentCliCommand(cli, args, { skipPreload: true }), {
       stdin: "inherit",
-      stdout: isClaudeSetupToken ? "pipe" : "inherit",
+      stdout: "inherit",
       stderr: "inherit",
-      env: isClaudeSetupToken ? { ...process.env, NO_COLOR: "1" } : undefined,
     });
-
-    let output = "";
-    if (isClaudeSetupToken) {
-      const reader = (proc.stdout as ReadableStream<Uint8Array>).getReader();
-      const decoder = new TextDecoder();
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-        const chunk = decoder.decode(value, { stream: true });
-        process.stdout.write(chunk);
-        output += chunk;
-      }
-    }
 
     const exitCode = await proc.exited;
 
@@ -353,40 +335,24 @@ async function runInteractiveLogin(cli: AgentCliName, vars: Record<string, strin
 
     console.log(`  ✓ ${cli} login successful`);
 
-    // `claude setup-token` prints a long-lived (1 year) token but does NOT
-    // store it. Extract from captured output and save to .env.
-    if (isClaudeSetupToken) {
-      // Ink CLI embeds ANSI escape sequences (cursor, colors, OSC) even with
-      // NO_COLOR. Strip everything non-printable before searching for the token.
-      const clean = output
-        .replace(/\x1b\[[0-9;]*[A-Za-z]/g, "")  // CSI sequences
-        .replace(/\x1b\][^\x07]*\x07/g, "")      // OSC sequences
-        .replace(/\x1b[()][A-Z0-9]/g, "")        // Charset sequences
-        .replace(/\r/g, "");                      // Carriage returns
-
-      // Token lines are purely [A-Za-z0-9_-] with no spaces.
-      const idx = clean.indexOf("sk-ant-");
-      if (idx >= 0) {
-        const lines = clean.substring(idx).split("\n");
-        let token = "";
-        for (const line of lines) {
-          const trimmed = line.trim();
-          if (trimmed && /^[A-Za-z0-9_-]+$/.test(trimmed)) {
-            token += trimmed;
-          } else {
-            break;
-          }
-        }
-        if (token.startsWith("sk-ant-") && token.length > 80) {
-          vars.CLAUDE_CODE_OAUTH_TOKEN = token;
-          process.env.CLAUDE_CODE_OAUTH_TOKEN = token;
-          saveEnv(vars);
-          console.log(`  ✓ token saved to .env (${token.length} chars)`);
-        } else {
-          console.log(`  ⚠ token looks invalid (${token.length} chars) — set CLAUDE_CODE_OAUTH_TOKEN manually in ~/.arisa/.env`);
-        }
+    // `claude setup-token` prints a token but does NOT store it.
+    // Ask the user to paste it.
+    if (cli === "claude") {
+      console.log("\n  Paste the token shown above (starts with sk-ant-):");
+      const token = (await readLine("  > ")).trim();
+      if (token.startsWith("sk-ant-") && token.length > 80) {
+        vars.CLAUDE_CODE_OAUTH_TOKEN = token;
+        process.env.CLAUDE_CODE_OAUTH_TOKEN = token;
+        saveEnv(vars);
+        console.log(`  ✓ token saved to .env (${token.length} chars)`);
+      } else if (token) {
+        // Save it anyway, user knows best
+        vars.CLAUDE_CODE_OAUTH_TOKEN = token;
+        process.env.CLAUDE_CODE_OAUTH_TOKEN = token;
+        saveEnv(vars);
+        console.log(`  ⚠ token saved (${token.length} chars) — verify it works`);
       } else {
-        console.log("  ⚠ could not find token in output — set CLAUDE_CODE_OAUTH_TOKEN manually in ~/.arisa/.env");
+        console.log("  ⚠ no token — set CLAUDE_CODE_OAUTH_TOKEN in ~/.arisa/.env");
       }
     }
 
