@@ -328,7 +328,7 @@ async function runInteractiveLogin(cli: AgentCliName, vars: Record<string, strin
       stdin: "inherit",
       stdout: isClaudeSetupToken ? "pipe" : "inherit",
       stderr: "inherit",
-      env: isClaudeSetupToken ? { ...process.env, FORCE_COLOR: "1" } : undefined,
+      env: isClaudeSetupToken ? { ...process.env, NO_COLOR: "1" } : undefined,
     });
 
     let output = "";
