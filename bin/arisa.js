@@ -416,14 +416,15 @@ function arisaUserExists() {
 }
 
 function isArisaUserProvisioned() {
-  return arisaUserExists() && existsSync("/home/arisa/.bun/bin/bun");
+  return arisaUserExists();
 }
 
 function step(ok, msg) {
   process.stdout.write(`  ${ok ? "\u2713" : "\u2717"} ${msg}\n`);
 }
 
-const ARISA_BUN_ENV = 'export BUN_INSTALL=/home/arisa/.bun && export PATH=/home/arisa/.bun/bin:$PATH';
+const ROOT_BUN_INSTALL = process.env.BUN_INSTALL || join(homeDir, ".bun");
+const ARISA_BUN_ENV = `export BUN_INSTALL=${ROOT_BUN_INSTALL} && export PATH=${ROOT_BUN_INSTALL}/bin:$PATH`;
 
 function provisionArisaUser() {
   process.stdout.write("Creating user 'arisa' for Claude/Codex CLI execution...\n");
@@ -445,19 +446,18 @@ function provisionArisaUser() {
     step(false, `Sudo setup skipped: ${e.message || e}`);
   }
 
-  // 3. Install bun for arisa (curl — lightweight, no bun child process)
-  process.stdout.write("  Installing bun for arisa (this may take a minute)...\n");
-  const bunInstall = spawnSync("su", ["-", "arisa", "-c", "curl -fsSL https://bun.sh/install | bash"], {
-    stdio: "inherit",
-    timeout: 180_000,
-  });
-  if (bunInstall.status !== 0) {
-    step(false, "Failed to install bun");
-    process.exit(1);
-  }
-  step(true, "Bun installed for arisa");
+  // 3. Give arisa access to root's bun (no separate install needed)
+  grantBunAccess();
+  step(true, "Access to root's bun granted");
 
   process.stdout.write("  Done. Core will run as arisa; Claude/Codex calls are direct.\n\n");
+}
+
+function grantBunAccess() {
+  // Allow arisa to traverse into /root (execute only, not read)
+  spawnSync("chmod", ["o+x", homeDir], { stdio: "ignore" });
+  // Allow arisa to read+execute root's bun and globally installed CLIs
+  spawnSync("chmod", ["-R", "o+rX", ROOT_BUN_INSTALL], { stdio: "ignore" });
 }
 
 // Provision arisa user if running as root and not yet done
@@ -468,6 +468,8 @@ if (isRoot() && !isArisaUserProvisioned()) {
 // When root + arisa exists: route all runtime data through arisa's home
 // so Core (running as arisa) and Daemon (root) share the same data dir.
 if (isRoot() && arisaUserExists()) {
+  // Ensure arisa can access root's bun on every startup
+  grantBunAccess();
   const arisaDataDir = "/home/arisa/.arisa";
   const rootDataDir = join("/root", ".arisa");
 
@@ -538,7 +540,7 @@ switch (command) {
     // preserves parent env (ARISA_DATA_DIR, tokens, API keys).
     let child;
     if (isRoot() && arisaUserExists()) {
-      const bunEnv = "export HOME=/home/arisa && export BUN_INSTALL=/home/arisa/.bun && export PATH=/home/arisa/.bun/bin:$PATH";
+      const bunEnv = `export HOME=/home/arisa && ${ARISA_BUN_ENV}`;
       const cmd = `${bunEnv} && cd ${pkgRoot} && exec bun --watch ${daemonEntry}`;
       child = spawnSync("su", ["arisa", "-s", "/bin/bash", "-c", cmd], {
         stdio: "inherit",

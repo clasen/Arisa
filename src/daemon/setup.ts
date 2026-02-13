@@ -230,9 +230,8 @@ async function setupClis(inq: typeof import("@inquirer/prompts") | null, vars: R
 
 async function installCli(cli: AgentCliName): Promise<boolean> {
   try {
-    const cmd = isRunningAsRoot()
-      ? ["su", "-", "arisa", "-c", `export BUN_INSTALL=/home/arisa/.bun && export PATH=/home/arisa/.bun/bin:$PATH && bun add -g ${CLI_PACKAGES[cli]}`]
-      : ["bun", "add", "-g", CLI_PACKAGES[cli]];
+    // Install into root's bun (arisa has read+execute access)
+    const cmd = ["bun", "add", "-g", CLI_PACKAGES[cli]];
     const proc = Bun.spawn(cmd, {
       stdout: "inherit",
       stderr: "inherit",

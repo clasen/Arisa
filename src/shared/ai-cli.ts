@@ -10,9 +10,11 @@ import { delimiter, dirname, join } from "path";
 
 export type AgentCliName = "claude" | "codex";
 
-const ARISA_USER_BUN = "/home/arisa/.bun/bin";
 const ARISA_HOME = "/home/arisa";
-const ARISA_BUN_ENV = `export HOME=${ARISA_HOME} && export BUN_INSTALL=${ARISA_HOME}/.bun && export PATH=${ARISA_USER_BUN}:$PATH`;
+// Use root's bun — arisa user has traverse+read access via chmod o+x /root, o+rX /root/.bun
+const ROOT_BUN_INSTALL = process.env.BUN_INSTALL || "/root/.bun";
+const ROOT_BUN_BIN = `${ROOT_BUN_INSTALL}/bin`;
+const ARISA_BUN_ENV = `export HOME=${ARISA_HOME} && export BUN_INSTALL=${ROOT_BUN_INSTALL} && export PATH=${ROOT_BUN_BIN}:$PATH`;
 
 export function isRunningAsRoot(): boolean {
   return process.getuid?.() === 0;
@@ -43,7 +45,7 @@ function candidatePaths(cli: AgentCliName): string[] {
     // When root, CLIs are installed under arisa user's bun
     return unique([
       cliOverrideEnvVar(cli),
-      join(ARISA_USER_BUN, cli),
+      join(ROOT_BUN_BIN, cli),
     ]);
   }
 
@@ -98,7 +100,7 @@ export function buildBunWrappedAgentCliCommand(cli: AgentCliName, args: string[]
   if (isRunningAsRoot()) {
     // Run as arisa user — Claude CLI refuses to run as root.
     // This path is used by Daemon fallback calls; Core runs as arisa directly.
-    const cliPath = resolveAgentCliPath(cli) || join(ARISA_USER_BUN, cli);
+    const cliPath = resolveAgentCliPath(cli) || join(ROOT_BUN_BIN, cli);
     const inner = ["bun", "--bun", INK_SHIM, cliPath, ...args].map(shellEscape).join(" ");
     // su without "-" preserves parent env (tokens, keys); explicit HOME/PATH for arisa
     return ["su", "arisa", "-s", "/bin/bash", "-c", `${ARISA_BUN_ENV} && ${buildEnvExports()}${inner}`];

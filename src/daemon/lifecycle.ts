@@ -131,7 +131,8 @@ export function startCore() {
     // (encryption keys, DB, PID files, etc.) before Core reads them.
     spawnSync("chown", ["-R", "arisa:arisa", config.arisaDir], { stdio: "ignore" });
 
-    const bunEnv = "export HOME=/home/arisa && export BUN_INSTALL=/home/arisa/.bun && export PATH=/home/arisa/.bun/bin:$PATH";
+    const bunInstall = process.env.BUN_INSTALL || "/root/.bun";
+    const bunEnv = `export HOME=/home/arisa && export BUN_INSTALL=${bunInstall} && export PATH=${bunInstall}/bin:$PATH`;
     const inner = `${bunEnv} && cd ${config.projectDir} && exec bun --watch ${coreEntry}`;
     cmd = ["su", "arisa", "-s", "/bin/bash", "-c", inner];
     log.info(`Starting Core as arisa: bun --watch ${coreEntry}`);
