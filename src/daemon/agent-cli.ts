@@ -110,7 +110,7 @@ export async function runWithCliFallback(prompt: string, timeoutMs: number): Pro
       }
 
       const reason = result.exitCode === 0
-        ? "empty output"
+        ? `empty output${result.stderr ? ` (stderr: ${summarizeError(result.stderr)})` : ""}`
         : `exit=${result.exitCode}: ${summarizeError(result.stderr || result.output)}`;
       failures.push(`${getAgentCliLabel(cli)} ${reason}`);
     } catch (error) {
