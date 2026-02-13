@@ -1,11 +1,11 @@
 /**
  * @module daemon/setup
- * @role Interactive first-run setup with inquirer prompts.
+ * @role Idempotent startup setup — runs every boot, checks real state.
  * @responsibilities
  *   - Check required config (TELEGRAM_BOT_TOKEN)
  *   - Check optional config (OPENAI_API_KEY)
  *   - Detect / install missing CLIs (Claude, Codex)
- *   - Run interactive login flows for installed CLIs
+ *   - Check CLI auth and offer login if needed
  *   - Persist tokens to both .env and encrypted DB
  * @dependencies shared/paths, shared/secrets, shared/ai-cli
  * @effects Reads stdin, writes runtime .env, spawns install/login processes
@@ -18,7 +18,6 @@ import { secrets, setSecret } from "../shared/secrets";
 import { isAgentCliInstalled, buildBunWrappedAgentCliCommand, type AgentCliName } from "../shared/ai-cli";
 
 const ENV_PATH = join(dataDir, ".env");
-const SETUP_DONE_KEY = "ARISA_SETUP_COMPLETE";
 
 const CLI_PACKAGES: Record<AgentCliName, string> = {
   claude: "@anthropic-ai/claude-code",
@@ -32,6 +31,8 @@ function loadExistingEnv(): Record<string, string> {
     const match = line.match(/^([A-Z_][A-Z0-9_]*)=(.+)$/);
     if (match) vars[match[1]] = match[2].trim();
   }
+  // Clean up legacy flag — state is now derived from actual config
+  delete vars["ARISA_SETUP_COMPLETE"];
   return vars;
 }
 
@@ -61,8 +62,6 @@ export async function runSetup(): Promise<boolean> {
   const telegramSecret = await secrets.telegram();
   const openaiSecret = await secrets.openai();
   let changed = false;
-  const setupDone = vars[SETUP_DONE_KEY] === "1" || process.env[SETUP_DONE_KEY] === "1";
-  const isFirstRun = !setupDone;
 
   // Try to load inquirer for interactive mode
   let inq: typeof import("@inquirer/prompts") | null = null;
@@ -80,7 +79,7 @@ export async function runSetup(): Promise<boolean> {
   const hasOpenAI = !!(vars.OPENAI_API_KEY || process.env.OPENAI_API_KEY || openaiSecret);
 
   if (!hasTelegram) {
-    if (isFirstRun) console.log("\n🔧 Arisa Setup\n");
+    console.log("\n🔧 Arisa Setup\n");
 
     let token: string;
     if (inq) {
@@ -109,170 +108,119 @@ export async function runSetup(): Promise<boolean> {
     console.log(`[setup] TELEGRAM_BOT_TOKEN found in ${src}`);
   }
 
-  if (!hasOpenAI && isFirstRun) {
-    let key: string;
-    if (inq) {
-      key = await inq.input({
-        message: "OpenAI API Key (optional — voice + image, enter to skip):",
-      });
-    } else {
-      console.log("\nOpenAI API Key (optional — enables voice transcription + image analysis).");
-      key = await readLine("OPENAI_API_KEY (enter to skip): ");
-    }
+  if (!hasOpenAI) {
+    if (process.stdin.isTTY) {
+      let key: string;
+      if (inq) {
+        key = await inq.input({
+          message: "OpenAI API Key (optional — voice + image, enter to skip):",
+        });
+      } else {
+        console.log("\nOpenAI API Key (optional — enables voice transcription + image analysis).");
+        key = await readLine("OPENAI_API_KEY (enter to skip): ");
+      }
 
-    if (key.trim()) {
-      vars.OPENAI_API_KEY = key.trim();
-      await setSecret("OPENAI_API_KEY", key.trim()).catch((e) =>
-        console.warn(`[setup] Could not persist OPENAI_API_KEY to encrypted DB: ${e}`)
-      );
-      console.log("[setup] OPENAI_API_KEY saved to .env + encrypted DB");
-      changed = true;
+      if (key.trim()) {
+        vars.OPENAI_API_KEY = key.trim();
+        await setSecret("OPENAI_API_KEY", key.trim()).catch((e) =>
+          console.warn(`[setup] Could not persist OPENAI_API_KEY to encrypted DB: ${e}`)
+        );
+        console.log("[setup] OPENAI_API_KEY saved to .env + encrypted DB");
+        changed = true;
+      }
     }
-  } else if (hasOpenAI) {
+  } else {
     const src = openaiSecret ? "encrypted DB" : vars.OPENAI_API_KEY ? ".env" : "env var";
     console.log(`[setup] OPENAI_API_KEY found in ${src}`);
   }
 
-  // Save tokens
-  if (!setupDone) {
-    vars[SETUP_DONE_KEY] = "1";
-    changed = true;
-  }
   if (changed) {
     saveEnv(vars);
     console.log(`\nConfig saved to ${ENV_PATH}`);
   }
 
-  // ─── Phase 2: CLI Installation + Auth ───────────────────────────
+  // ─── Phase 2: CLI Installation ──────────────────────────────────
 
   if (process.stdin.isTTY) {
-    if (isFirstRun) {
-      // First run: offer to install missing CLIs + login
-      await setupClis(inq, vars);
-    } else {
-      // Subsequent runs: check if any installed CLI needs auth, offer login
-      await checkCliAuth(inq, vars);
+    let claudeInstalled = isAgentCliInstalled("claude");
+    let codexInstalled = isAgentCliInstalled("codex");
+
+    console.log("\nCLI Status:");
+    console.log(`  ${claudeInstalled ? "✓" : "✗"} Claude${claudeInstalled ? "" : " — not installed"}`);
+    console.log(`  ${codexInstalled ? "✓" : "✗"} Codex${codexInstalled ? "" : " — not installed"}`);
+
+    const missing: AgentCliName[] = [];
+    if (!claudeInstalled) missing.push("claude");
+    if (!codexInstalled) missing.push("codex");
+
+    if (missing.length > 0) {
+      let toInstall: AgentCliName[] = [];
+
+      if (inq) {
+        toInstall = await inq.checkbox({
+          message: "Install missing CLIs? (space to select, enter to confirm)",
+          choices: missing.map((cli) => ({
+            name: `${cli === "claude" ? "Claude" : "Codex"} (${CLI_PACKAGES[cli]})`,
+            value: cli as AgentCliName,
+            checked: true,
+          })),
+        });
+      } else {
+        const answer = await readLine("\nInstall missing CLIs? (Y/n): ");
+        if (answer.toLowerCase() !== "n") toInstall = missing;
+      }
+
+      for (const cli of toInstall) {
+        console.log(`\nInstalling ${cli}...`);
+        const ok = await installCli(cli);
+        console.log(ok ? `  ✓ ${cli} installed` : `  ✗ ${cli} install failed`);
+      }
+
+      // Refresh status
+      claudeInstalled = isAgentCliInstalled("claude");
+      codexInstalled = isAgentCliInstalled("codex");
+    }
+
+    // ─── Phase 3: CLI Authentication ────────────────────────────────
+
+    const installed: AgentCliName[] = [];
+    if (claudeInstalled) installed.push("claude");
+    if (codexInstalled) installed.push("codex");
+
+    for (const cli of installed) {
+      const authed = await isCliAuthenticated(cli);
+      if (authed) {
+        console.log(`[setup] ${cli} ✓ authenticated`);
+        continue;
+      }
+
+      console.log(`[setup] ${cli} ✗ not authenticated`);
+      let doLogin = true;
+      if (inq) {
+        doLogin = await inq.confirm({ message: `Log in to ${cli === "claude" ? "Claude" : "Codex"}?`, default: true });
+      } else {
+        const answer = await readLine(`\nLog in to ${cli === "claude" ? "Claude" : "Codex"}? (Y/n): `);
+        doLogin = answer.toLowerCase() !== "n";
+      }
+      if (doLogin) {
+        console.log();
+        await runInteractiveLogin(cli, vars);
+      }
+    }
+
+    if (installed.length === 0) {
+      console.log("\n⚠ No CLIs installed. Arisa needs at least one to work.");
+      console.log("  The daemon will auto-install them in the background.\n");
     }
   }
 
   return true;
 }
 
-async function setupClis(inq: typeof import("@inquirer/prompts") | null, vars: Record<string, string>) {
-  let claudeInstalled = isAgentCliInstalled("claude");
-  let codexInstalled = isAgentCliInstalled("codex");
-
-  console.log("\nCLI Status:");
-  console.log(`  ${claudeInstalled ? "✓" : "✗"} Claude${claudeInstalled ? "" : " — not installed"}`);
-  console.log(`  ${codexInstalled ? "✓" : "✗"} Codex${codexInstalled ? "" : " — not installed"}`);
-
-  // Install missing CLIs
-  const missing: AgentCliName[] = [];
-  if (!claudeInstalled) missing.push("claude");
-  if (!codexInstalled) missing.push("codex");
-
-  if (missing.length > 0) {
-    let toInstall: AgentCliName[] = [];
-
-    if (inq) {
-      toInstall = await inq.checkbox({
-        message: "Install missing CLIs? (space to select, enter to confirm)",
-        choices: missing.map((cli) => ({
-          name: `${cli === "claude" ? "Claude" : "Codex"} (${CLI_PACKAGES[cli]})`,
-          value: cli as AgentCliName,
-          checked: true,
-        })),
-      });
-    } else {
-      // Non-inquirer fallback: install all
-      const answer = await readLine("\nInstall missing CLIs? (Y/n): ");
-      if (answer.toLowerCase() !== "n") toInstall = missing;
-    }
-
-    for (const cli of toInstall) {
-      console.log(`\nInstalling ${cli}...`);
-      const ok = await installCli(cli);
-      console.log(ok ? `  ✓ ${cli} installed` : `  ✗ ${cli} install failed`);
-    }
-
-    // Refresh status
-    claudeInstalled = isAgentCliInstalled("claude");
-    codexInstalled = isAgentCliInstalled("codex");
-  }
-
-  // Login CLIs
-  if (claudeInstalled) {
-    let doLogin = true;
-    if (inq) {
-      doLogin = await inq.confirm({ message: "Log in to Claude?", default: true });
-    } else {
-      const answer = await readLine("\nLog in to Claude? (Y/n): ");
-      doLogin = answer.toLowerCase() !== "n";
-    }
-    if (doLogin) {
-      console.log();
-      await runInteractiveLogin("claude", vars);
-    }
-  }
-
-  if (codexInstalled) {
-    let doLogin = true;
-    if (inq) {
-      doLogin = await inq.confirm({ message: "Log in to Codex?", default: true });
-    } else {
-      const answer = await readLine("\nLog in to Codex? (Y/n): ");
-      doLogin = answer.toLowerCase() !== "n";
-    }
-    if (doLogin) {
-      console.log();
-      await runInteractiveLogin("codex", vars);
-    }
-  }
-
-  if (!claudeInstalled && !codexInstalled) {
-    console.log("\n⚠ No CLIs installed. Arisa needs at least one to work.");
-    console.log("  The daemon will auto-install them in the background.\n");
-  } else {
-    console.log("\n✓ Setup complete!\n");
-  }
-}
-
-/**
- * On non-first runs, check if installed CLIs are authenticated.
- * If not, offer to login interactively.
- */
-async function checkCliAuth(inq: typeof import("@inquirer/prompts") | null, vars: Record<string, string>) {
-  const clis: AgentCliName[] = [];
-  if (isAgentCliInstalled("claude")) clis.push("claude");
-  if (isAgentCliInstalled("codex")) clis.push("codex");
-  if (clis.length === 0) return;
-
-  for (const cli of clis) {
-    const authed = await isCliAuthenticated(cli);
-    if (authed) {
-      console.log(`[setup] ${cli} ✓ authenticated`);
-      continue;
-    }
-
-    console.log(`[setup] ${cli} ✗ not authenticated`);
-    let doLogin = true;
-    if (inq) {
-      doLogin = await inq.confirm({ message: `Log in to ${cli === "claude" ? "Claude" : "Codex"}?`, default: true });
-    } else {
-      const answer = await readLine(`\nLog in to ${cli === "claude" ? "Claude" : "Codex"}? (Y/n): `);
-      doLogin = answer.toLowerCase() !== "n";
-    }
-    if (doLogin) {
-      console.log();
-      await runInteractiveLogin(cli, vars);
-    }
-  }
-}
-
 /**
  * Quick probe: is this CLI authenticated?
  * Claude: check CLAUDE_CODE_OAUTH_TOKEN env/.env, or `claude auth status`
- * Codex: no simple auth check, assume OK if installed
+ * Codex: check OPENAI_API_KEY
  */
 async function isCliAuthenticated(cli: AgentCliName): Promise<boolean> {
   try {
@@ -316,7 +264,6 @@ async function installCli(cli: AgentCliName): Promise<boolean> {
     return false;
   }
 }
-
 
 async function runInteractiveLogin(cli: AgentCliName, vars: Record<string, string>): Promise<boolean> {
   const args = cli === "claude"
