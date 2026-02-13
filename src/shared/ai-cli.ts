@@ -101,6 +101,9 @@ export interface AgentCliOptions {
   skipPreload?: boolean;
 }
 
+/** Env vars to suppress Ink/TTY in non-interactive CLI spawns. Merge into Bun.spawn env. */
+export const CLI_SPAWN_ENV: Record<string, string> = { CI: "true", TERM: "dumb" };
+
 /**
  * Detect native executables (Mach-O, ELF) by reading magic bytes.
  * Claude Code CLI v2+ ships as a native binary, not a JS script.
@@ -139,11 +142,12 @@ export function buildBunWrappedAgentCliCommand(cli: AgentCliName, args: string[]
 
   if (isRunningAsRoot()) {
     // Run as arisa user — Claude CLI refuses to run as root.
+    const ciEnv = options?.skipPreload ? "" : "export CI=true && export TERM=dumb && ";
     const inner = native
       ? [cliPath, ...args].map(shellEscape).join(" ")
       : ["bun", "--bun", ...(!options?.skipPreload ? ["--preload", INK_SHIM] : []), cliPath, ...args].map(shellEscape).join(" ");
     // su without "-" preserves parent env (tokens, keys); explicit HOME/PATH for arisa
-    return ["su", "arisa", "-s", "/bin/bash", "-c", `${ARISA_BUN_ENV} && ${buildEnvExports()}${inner}`];
+    return ["su", "arisa", "-s", "/bin/bash", "-c", `${ARISA_BUN_ENV} && ${ciEnv}${buildEnvExports()}${inner}`];
   }
 
   if (native) {

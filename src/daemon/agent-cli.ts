@@ -14,6 +14,7 @@ import { createLogger } from "../shared/logger";
 import {
   buildBunWrappedAgentCliCommand,
   resolveAgentCliPath,
+  CLI_SPAWN_ENV,
   type AgentCliName,
 } from "../shared/ai-cli";
 
@@ -71,7 +72,7 @@ async function runSingleCli(
     cwd: config.projectDir,
     stdout: "pipe",
     stderr: "pipe",
-    env: { ...process.env },
+    env: { ...process.env, ...CLI_SPAWN_ENV },
   });
 
   const timeout = setTimeout(() => proc.kill(), timeoutMs);

@@ -16,7 +16,7 @@ import { getRecentHistory } from "./history";
 import { shouldContinue } from "./context";
 import { config } from "../shared/config";
 import { createLogger } from "../shared/logger";
-import { buildBunWrappedAgentCliCommand } from "../shared/ai-cli";
+import { buildBunWrappedAgentCliCommand, CLI_SPAWN_ENV } from "../shared/ai-cli";
 import { existsSync, mkdirSync, readFileSync, appendFileSync } from "fs";
 import { join } from "path";
 
@@ -151,7 +151,7 @@ async function runClaude(message: string, chatId: string): Promise<string> {
     stdin: "pipe",
     stdout: "pipe",
     stderr: "pipe",
-    env: { ...process.env },
+    env: { ...process.env, ...CLI_SPAWN_ENV },
   });
   proc.stdin.end();
 
@@ -221,6 +221,7 @@ export async function processWithCodex(message: string): Promise<string> {
     cwd: config.projectDir,
     stdout: "pipe",
     stderr: "pipe",
+    env: { ...process.env, ...CLI_SPAWN_ENV },
   });
 
   const timeout = setTimeout(() => {
