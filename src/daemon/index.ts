@@ -1,15 +1,15 @@
 /**
  * @module daemon/index
- * @role Entry point for the Daemon process.
+ * @role Single-process entry point: Daemon + Core in one bun runtime.
  * @responsibilities
  *   - Run interactive setup if config is missing
  *   - Start the Telegram channel adapter
- *   - Spawn Core process with --watch
- *   - Run HTTP server on :7778 for Core → Daemon pushes (scheduler)
+ *   - Load Core in-process (HTTP server, Claude CLI, scheduler)
+ *   - Run HTTP server for Core → Daemon pushes (scheduler)
  *   - Route incoming messages to Core via bridge
  *   - Route Core responses back to channel
- * @dependencies All daemon/* modules, shared/*
- * @effects Network (Telegram, HTTP servers), spawns Core process
+ * @dependencies All daemon/* modules, core/*, shared/*
+ * @effects Network (Telegram, HTTP servers), spawns Claude CLI
  */
 
 // Log version at startup
@@ -32,8 +32,7 @@ const { createLogger } = await import("../shared/logger");
 const { serveWithRetry, claimProcess, releaseProcess, cleanupSocket } = await import("../shared/ports");
 const { TelegramChannel } = await import("./channels/telegram");
 const { sendToCore } = await import("./bridge");
-const { startCore, stopCore, setLifecycleNotify, waitForCoreReady } = await import("./lifecycle");
-const { setAutoFixNotify } = await import("./autofix");
+// lifecycle/autofix removed — Core runs in-process, --watch handles restarts
 const { maybeStartCodexDeviceAuth, setCodexLoginNotify } = await import("./codex-login");
 const { maybeStartClaudeSetupToken, maybeFeedClaudeCode, setClaudeLoginNotify, isClaudeLoginPending } = await import("./claude-login");
 const { autoInstallMissingClis, setAutoInstallNotify, setAuthProbeCallback } = await import("./auto-install");
@@ -95,8 +94,6 @@ const sendToAllChats = async (text: string) => {
   }
 };
 
-setLifecycleNotify(sendToAllChats);
-setAutoFixNotify(sendToAllChats);
 setAutoInstallNotify(sendToAllChats);
 setAuthProbeCallback((cli, errorText) => {
   if (cli === "claude") {
@@ -256,11 +253,13 @@ const pushServer = await serveWithRetry({
 
 log.info(`Daemon push server listening on ${config.daemonSocket}`);
 
-// --- Start Core process ---
-startCore();
+// --- Load Core in-process (single bun process, no child spawn) ---
+log.info("Loading Core...");
+await import("../core/index.ts");
+log.info("Core loaded");
 
-// --- Auto-install missing CLIs (after Core is up to avoid OOM on low-RAM VPS) ---
-waitForCoreReady(30_000).then(() => void autoInstallMissingClis());
+// --- Auto-install missing CLIs (delayed to avoid peak memory) ---
+setTimeout(() => void autoInstallMissingClis(), 5000);
 
 // --- Connect Telegram (with retry for 409 conflict from stale polling sessions) ---
 (async function connectTelegram(maxRetries = 5) {
@@ -284,8 +283,7 @@ waitForCoreReady(30_000).then(() => void autoInstallMissingClis());
 
 // --- Graceful shutdown ---
 function shutdown() {
-  log.info("Shutting down Daemon...");
-  stopCore();
+  log.info("Shutting down...");
   cleanupSocket(config.daemonSocket);
   cleanupSocket(config.coreSocket);
   releaseProcess("daemon");

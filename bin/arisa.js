@@ -533,12 +533,23 @@ switch (command) {
     if (isDefaultInvocation) {
       printForegroundNotice();
     }
-    // Run daemon in-process — avoids an extra bun child (~150MB saved)
-    await import(daemonEntry);
-    break;
+    // Single bun process: daemon + core in-process with --watch.
+    // When root, run as arisa (Claude CLI refuses root). su without "-"
+    // preserves parent env (ARISA_DATA_DIR, tokens, API keys).
+    let child;
+    if (isRoot() && arisaUserExists()) {
+      const bunEnv = "export HOME=/home/arisa && export BUN_INSTALL=/home/arisa/.bun && export PATH=/home/arisa/.bun/bin:$PATH";
+      const cmd = `${bunEnv} && cd ${pkgRoot} && exec bun --watch ${daemonEntry}`;
+      child = spawnSync("su", ["arisa", "-s", "/bin/bash", "-c", cmd], {
+        stdio: "inherit",
+        env: process.env,
+      });
+    } else {
+      child = runWithBun(["--watch", daemonEntry, ...rest]);
+    }
+    process.exit(child.status === null ? 1 : child.status);
   }
   case "core": {
-    // Run core in-process
     await import(coreEntry);
     break;
   }
