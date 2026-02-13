@@ -15,6 +15,7 @@ import { config } from "../shared/config";
 import { createLogger } from "../shared/logger";
 import { attemptAutoFix } from "./autofix";
 import { isRunningAsRoot } from "../shared/ai-cli";
+import { spawnSync } from "child_process";
 import { join } from "path";
 
 const log = createLogger("daemon");
@@ -126,6 +127,10 @@ export function startCore() {
   // (tokens, ARISA_DATA_DIR, API keys). We only override HOME/BUN/PATH.
   let cmd: string[];
   if (isRunningAsRoot()) {
+    // Ensure arisa owns all data dir files created during Daemon init
+    // (encryption keys, DB, PID files, etc.) before Core reads them.
+    spawnSync("chown", ["-R", "arisa:arisa", config.arisaDir], { stdio: "ignore" });
+
     const bunEnv = "export HOME=/home/arisa && export BUN_INSTALL=/home/arisa/.bun && export PATH=/home/arisa/.bun/bin:$PATH";
     const inner = `${bunEnv} && cd ${config.projectDir} && exec bun --watch ${coreEntry}`;
     cmd = ["su", "arisa", "-s", "/bin/bash", "-c", inner];

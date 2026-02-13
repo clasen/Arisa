@@ -495,6 +495,10 @@ if (isRoot() && arisaUserExists()) {
 
   // All processes use arisa's data dir (inherited by Daemon → Core)
   process.env.ARISA_DATA_DIR = arisaDataDir;
+
+  // Permissive umask so files Daemon (root) creates at runtime in the shared
+  // data dir are readable/writable by Core (arisa). Safe in Docker containers.
+  process.umask(0o000);
 }
 
 // Then fall through to normal daemon startup
