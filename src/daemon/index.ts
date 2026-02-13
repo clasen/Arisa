@@ -24,10 +24,12 @@ const ready = await runSetup();
 if (!ready) process.exit(1);
 
 // Dynamic imports so config loads AFTER setup has written .env
+console.log("Loading configuration...");
 const { config } = await import("../shared/config");
 
 // Initialize encrypted secrets
 await config.secrets.initialize();
+console.log("Initializing modules...");
 const { createLogger } = await import("../shared/logger");
 const { serveWithRetry, claimProcess, releaseProcess, cleanupSocket } = await import("../shared/ports");
 const { TelegramChannel } = await import("./channels/telegram");
@@ -35,6 +37,7 @@ const { sendToCore } = await import("./bridge");
 // lifecycle/autofix removed — Core runs in-process, --watch handles restarts
 const { autoInstallMissingClis, setAutoInstallNotify } = await import("./auto-install");
 const { chunkMessage, markdownToTelegramHtml } = await import("../core/format");
+console.log("Connecting to Telegram...");
 // Message records are saved via Core's /record endpoint to avoid dual-writer
 // conflicts (Daemon and Core sharing the same arisa.json through separate
 // in-memory DeepBase instances would cause one to overwrite the other's data).
