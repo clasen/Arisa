@@ -398,10 +398,6 @@ function restartService() {
   return restartDetachedFallback();
 }
 
-function printForegroundNotice() {
-  process.stdout.write("Starting Arisa in foreground. Press Ctrl+C to stop.\n");
-  process.stdout.write("Use `arisa start` to run it as a background service.\n");
-}
 
 // ── Root: create arisa user for Core process execution ──────────────
 // Daemon runs as root. Core runs as user arisa (Claude CLI refuses root).
@@ -532,9 +528,6 @@ switch (command) {
     break;
   case "daemon":
   case "run": {
-    if (isDefaultInvocation) {
-      printForegroundNotice();
-    }
     // Single bun process: daemon + core in-process with --watch.
     // When root, run as arisa (Claude CLI refuses root). su without "-"
     // preserves parent env (ARISA_DATA_DIR, tokens, API keys).
