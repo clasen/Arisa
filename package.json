@@ -1,11 +1,11 @@
 {
   "name": "arisa",
-  "version": "3.0.0",
+  "version": "3.0.2",
   "description": "Telegram + Pi Agent modular assistant",
   "type": "module",
   "main": "src/index.js",
   "bin": {
-    "arisa": "./src/index.js"
+    "arisa": "bin/arisa.js"
   },
   "scripts": {
     "start": "node src/index.js",
