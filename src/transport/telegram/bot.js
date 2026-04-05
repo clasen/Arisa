@@ -1,6 +1,7 @@
 import { Bot, InputFile } from "grammy";
 import { authorizeChat } from "./auth.js";
 import { captureIncomingArtifact } from "./media.js";
+import { renderTelegramHtml, splitTelegramText } from "./text-format.js";
 
 function quotedMessageSummary(message) {
   if (!message) return [];
@@ -151,7 +152,9 @@ export async function createTelegramBot({ config, artifactStore, toolRegistry, a
       const text = await collectText(session, prompt);
       if (text) {
         logger?.log("telegram", `sending text reply for chat ${ctx.chat.id}`);
-        await ctx.reply(text.slice(0, 4000));
+        for (const chunk of splitTelegramText(text)) {
+          await ctx.reply(renderTelegramHtml(chunk), { parse_mode: "HTML" });
+        }
       }
     });
   }
