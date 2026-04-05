@@ -1,3 +1,5 @@
+#!/usr/bin/env node
+
 import { bootstrapIfNeeded } from "./runtime/bootstrap.js";
 import { createApp } from "./runtime/create-app.js";
 
