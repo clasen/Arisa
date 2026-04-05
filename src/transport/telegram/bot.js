@@ -68,6 +68,19 @@ async function collectText(session, prompt) {
   return text.trim();
 }
 
+async function withTyping(ctx, work) {
+  await ctx.api.sendChatAction(ctx.chat.id, "typing");
+  const timer = setInterval(() => {
+    ctx.api.sendChatAction(ctx.chat.id, "typing").catch(() => {});
+  }, 4000);
+
+  try {
+    return await work();
+  } finally {
+    clearInterval(timer);
+  }
+}
+
 export async function createTelegramBot({ config, artifactStore, toolRegistry, agentManager, saveConfig, updateConfig }) {
   const bot = new Bot(config.telegram.apiKey);
   const perChatState = new Map();
@@ -95,10 +108,11 @@ export async function createTelegramBot({ config, artifactStore, toolRegistry, a
     const telegram = {
       sendAudio: async (filePath, caption) => ctx.replyWithAudio(new InputFile(filePath), { caption })
     };
-    await ctx.api.sendChatAction(ctx.chat.id, "typing");
-    const { session } = await agentManager.getSessionContext(ctx.chat.id, telegram);
-    const text = await collectText(session, prompt);
-    if (text) await ctx.reply(text.slice(0, 4000));
+    return withTyping(ctx, async () => {
+      const { session } = await agentManager.getSessionContext(ctx.chat.id, telegram);
+      const text = await collectText(session, prompt);
+      if (text) await ctx.reply(text.slice(0, 4000));
+    });
   }
 
   async function enqueueOrProcess(ctx) {
