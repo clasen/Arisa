@@ -72,10 +72,10 @@ node index.js run --request-file <json>
 - all runtime state lives under `~/.arisa/`
 - Telegram runtime config is stored in `~/.arisa/state/config.json`
 - artifact index is stored in `~/.arisa/state/artifacts.json`
-- incoming Telegram attachments are staged in `~/.arisa/inbox/`
-- persisted artifacts live in `~/.arisa/artifacts/`
+- incoming Telegram attachments are stored directly in `~/.arisa/artifacts/`
 - tool-specific secrets/config live in `~/.arisa/tools/<tool>/config.js`
-- tool outputs and temp request files also live under `~/.arisa/tools/<tool>/`
+- tool runtime temp files and generated outputs live in `~/.arisa/tmp/tools/<tool>/`
+- durable files should end up in `~/.arisa/artifacts/`
 - Pi authentication can use either:
   - an API key entered during bootstrap
   - or Pi's existing OAuth login when supported, such as `openai-codex`
@@ -152,8 +152,8 @@ cli/
 ~/.arisa/
   state/
   artifacts/
-  inbox/
   tools/
+  tmp/
 ```
 
 ## Philosophy

@@ -1,5 +1,5 @@
 import path from "node:path";
-import { mkdir } from "node:fs/promises";
+import { mkdir, unlink } from "node:fs/promises";
 import { createAgentSession, SessionManager, defineTool } from "@mariozechner/pi-coding-agent";
 import { Type } from "@sinclair/typebox";
 import { createPiRuntime, hasProviderAuth } from "./pi-runtime.js";
@@ -158,6 +158,7 @@ export class AgentManager {
               metadata: { tool: params.name }
             });
             result.output.artifactId = generated.id;
+            await unlink(result.output.filePath).catch(() => {});
           }
 
           return {
@@ -182,6 +183,7 @@ export class AgentManager {
             return { content: [{ type: "text", text: JSON.stringify(result, null, 2) }], details: result };
           }
           await telegram.sendAudio(result.output.filePath, params.text);
+          await unlink(result.output.filePath).catch(() => {});
           return { content: [{ type: "text", text: "Audio enviado por Telegram." }], details: result };
         }
       })

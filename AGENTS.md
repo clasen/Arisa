@@ -93,10 +93,15 @@ Prefer responses like:
 
 For example, if the user asks for live weather and no weather tool exists, the correct attitude is to propose building a weather tool for the bot rather than only saying real-time access is unavailable.
 
+When creating or editing tools, follow the shared path helpers in `src/runtime/paths.js` and `src/core/tools/tool-config.js`:
+- config in `~/.arisa/tools/<tool>/config.js`
+- temp/runtime files in `~/.arisa/tmp/tools/<tool>/`
+- durable generated files should become artifacts in `~/.arisa/artifacts/`
+
 Consult the local skill for that workflow when building new tools.
 
 ## Safety
 - Do not install or run arbitrary tools outside registered `cli/*` manifests in V1.
 - Prefer tool manifests and CLI help over assumptions.
-- Keep tool configs inside `cli/<tool>/config.js`.
+- Keep tool configs inside `~/.arisa/tools/<tool>/config.js`.
 - Be proactive about extending capabilities, but do it through the project's tool architecture, not through ad hoc one-off behavior.

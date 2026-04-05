@@ -1,17 +1,9 @@
-import { mkdir, writeFile } from "node:fs/promises";
-import path from "node:path";
-import { inboxDir } from "../../runtime/paths.js";
-
-async function downloadToFile(ctx, fileId, fileName) {
-  await mkdir(inboxDir, { recursive: true });
+async function downloadToBuffer(ctx, fileId) {
   const file = await ctx.api.getFile(fileId);
   const url = `https://api.telegram.org/file/bot${ctx.api.token}/${file.file_path}`;
   const response = await fetch(url);
   if (!response.ok) throw new Error(`Download failed: ${response.status}`);
-  const buffer = Buffer.from(await response.arrayBuffer());
-  const target = path.join(inboxDir, fileName);
-  await writeFile(target, buffer);
-  return target;
+  return Buffer.from(await response.arrayBuffer());
 }
 
 export async function captureIncomingArtifact(ctx, artifactStore) {
@@ -24,10 +16,10 @@ export async function captureIncomingArtifact(ctx, artifactStore) {
 
   if (ctx.message?.voice) {
     const fileName = `${ctx.chat.id}-${ctx.msg.message_id}.ogg`;
-    const tempPath = await downloadToFile(ctx, ctx.message.voice.file_id, fileName);
-    return artifactStore.createFromFile({
-      originalPath: tempPath,
+    const content = await downloadToBuffer(ctx, ctx.message.voice.file_id);
+    return artifactStore.createGeneratedFile({
       fileName,
+      content,
       kind: "audio",
       mimeType: "audio/ogg",
       source: baseSource,
@@ -37,10 +29,10 @@ export async function captureIncomingArtifact(ctx, artifactStore) {
 
   if (ctx.message?.document) {
     const fileName = ctx.message.document.file_name || `${ctx.chat.id}-${ctx.msg.message_id}`;
-    const tempPath = await downloadToFile(ctx, ctx.message.document.file_id, fileName);
-    return artifactStore.createFromFile({
-      originalPath: tempPath,
+    const content = await downloadToBuffer(ctx, ctx.message.document.file_id);
+    return artifactStore.createGeneratedFile({
       fileName,
+      content,
       kind: "document",
       mimeType: ctx.message.document.mime_type || "application/octet-stream",
       source: baseSource,
@@ -51,10 +43,10 @@ export async function captureIncomingArtifact(ctx, artifactStore) {
   if (ctx.message?.photo?.length) {
     const photo = ctx.message.photo.at(-1);
     const fileName = `${ctx.chat.id}-${ctx.msg.message_id}.jpg`;
-    const tempPath = await downloadToFile(ctx, photo.file_id, fileName);
-    return artifactStore.createFromFile({
-      originalPath: tempPath,
+    const content = await downloadToBuffer(ctx, photo.file_id);
+    return artifactStore.createGeneratedFile({
       fileName,
+      content,
       kind: "image",
       mimeType: "image/jpeg",
       source: baseSource,
