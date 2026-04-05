@@ -8,7 +8,7 @@ const toolName = "openai-tts";
 const config = await loadToolConfig(toolName, defaults);
 
 function printHelp() {
-  console.log(`openai-tts\n\nUso:\n  node index.js --help\n  node index.js run --request-file <json>\n\nInput esperado:\n  {\n    \"text\": \"hola\",\n    \"artifact\": { \"text\": \"hola\" },\n    \"args\": { \"voice\": \"alloy\" }\n  }\n\nConfig en ${getToolConfigPath(toolName)}:\n  OPENAI_API_KEY\n  MODEL\n  VOICE\n`);
+  console.log(`openai-tts\n\nUsage:\n  node index.js --help\n  node index.js run --request-file <json>\n\nExpected input:\n  {\n    \"text\": \"hello\",\n    \"artifact\": { \"text\": \"hello\" },\n    \"args\": { \"voice\": \"alloy\" }\n  }\n\nOutput:\n  - generates OGG/Opus audio\n  - suggests Telegram voice-note delivery via output.delivery.method = \"voice\"\n\nConfig at ${getToolConfigPath(toolName)}:\n  OPENAI_API_KEY\n  MODEL\n  VOICE\n`);
 }
 
 async function run(requestFile) {
@@ -34,7 +34,7 @@ async function run(requestFile) {
       model: config.MODEL,
       voice: request.args?.voice || config.VOICE,
       input: inputText,
-      format: "mp3"
+      format: "opus"
     })
   });
 
@@ -46,10 +46,19 @@ async function run(requestFile) {
 
   const outDir = getToolOutDir(toolName);
   await mkdir(outDir, { recursive: true });
-  const filePath = path.join(outDir, `speech-${Date.now()}.mp3`);
+  const filePath = path.join(outDir, `speech-${Date.now()}.ogg`);
   const buffer = Buffer.from(await response.arrayBuffer());
   await writeFile(filePath, buffer);
-  console.log(JSON.stringify({ ok: true, output: { filePath, fileName: path.basename(filePath), mimeType: "audio/mpeg", kind: "audio" } }));
+  console.log(JSON.stringify({
+    ok: true,
+    output: {
+      filePath,
+      fileName: path.basename(filePath),
+      mimeType: "audio/ogg",
+      kind: "audio",
+      delivery: { method: "voice" }
+    }
+  }));
 }
 
 const args = process.argv.slice(2);

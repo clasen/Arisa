@@ -18,7 +18,8 @@ function runProcess(command, args, options = {}) {
 }
 
 export class ToolRegistry {
-  constructor() {
+  constructor({ logger } = {}) {
+    this.logger = logger;
     this.tools = new Map();
   }
 
@@ -29,6 +30,7 @@ export class ToolRegistry {
     try {
       entries = await readdir(toolsRoot, { withFileTypes: true });
     } catch {
+      this.logger?.log("tools", `tools directory not found: ${toolsRoot}`);
       return;
     }
 
@@ -55,6 +57,8 @@ export class ToolRegistry {
         // ignore invalid tool dirs in v1
       }
     }
+
+    this.logger?.log("tools", `loaded ${this.tools.size} tool(s)`);
   }
 
   list() {
@@ -92,6 +96,7 @@ export class ToolRegistry {
   async run({ name, request }) {
     const tool = this.get(name);
     if (!tool) throw new Error(`Tool not found: ${name}`);
+    this.logger?.log("tools", `running ${name}`);
     const tmpDir = getToolTmpDir(name);
     await mkdir(tmpDir, { recursive: true });
     const requestFile = path.join(tmpDir, `.request-${Date.now()}.json`);
@@ -103,6 +108,7 @@ export class ToolRegistry {
     await unlink(requestFile).catch(() => {});
     try {
       const parsed = JSON.parse(result.stdout || result.stderr);
+      this.logger?.log("tools", `${name} -> ${parsed.ok === false ? "error" : "ok"}`);
       return parsed;
     } catch {
       return {

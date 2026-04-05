@@ -9,7 +9,7 @@
       "type": "string",
       "required": true,
       "secret": true,
-      "prompt": "Necesito tu OPENAI_API_KEY para transcribir audio."
+      "prompt": "I need your OPENAI_API_KEY to transcribe audio."
     }
   }
 }

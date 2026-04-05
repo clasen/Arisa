@@ -6,10 +6,11 @@ import { createPiRuntime, hasProviderAuth } from "./pi-runtime.js";
 import { getChatDir, piAgentDir as agentDir } from "../../runtime/paths.js";
 
 export class AgentManager {
-  constructor({ config, artifactStore, toolRegistry }) {
+  constructor({ config, artifactStore, toolRegistry, logger }) {
     this.config = config;
     this.artifactStore = artifactStore;
     this.toolRegistry = toolRegistry;
+    this.logger = logger;
     this.sessions = new Map();
   }
 
@@ -19,6 +20,7 @@ export class AgentManager {
   }
 
   async validatePiAgent() {
+    this.logger?.log("agent", "validating Pi session");
     const { authStorage, modelRegistry } = createPiRuntime({
       provider: this.config.pi.provider,
       apiKey: this.config.pi.apiKey
@@ -41,7 +43,10 @@ export class AgentManager {
   }
 
   async getSessionContext(chatId, telegram) {
-    if (this.sessions.has(chatId)) return this.sessions.get(chatId);
+    if (this.sessions.has(chatId)) {
+      this.logger?.log("agent", `reusing session for chat ${chatId}`);
+      return this.sessions.get(chatId);
+    }
 
     await mkdir(agentDir, { recursive: true });
     const { authStorage, modelRegistry } = createPiRuntime({
@@ -57,6 +62,7 @@ export class AgentManager {
     const cwd = getChatDir(chatId);
     await mkdir(cwd, { recursive: true });
 
+    this.logger?.log("agent", `creating session for chat ${chatId}`);
     const customTools = this.createTools(telegram);
     const { session } = await createAgentSession({
       cwd,
@@ -122,6 +128,7 @@ export class AgentManager {
         }),
         execute: async (_id, params) => {
           await this.toolRegistry.load();
+          this.logger?.log("agent", `run_tool ${params.name}`);
           let artifact = null;
           if (params.artifactId) {
             artifact = await this.artifactStore.get(params.artifactId);
@@ -167,13 +174,22 @@ export class AgentManager {
         }
       }),
       defineTool({
-        name: "send_audio_reply",
-        label: "Send audio reply",
-        description: "Generate speech from text with a CLI tool and send it to the current Telegram chat.",
-        parameters: Type.Object({ text: Type.String(), toolName: Type.Optional(Type.String()) }),
+        name: "send_media_reply",
+        label: "Send media reply",
+        description: "Run a CLI tool that generates a file and send it to the current Telegram chat using the tool's delivery hint or an explicit method.",
+        parameters: Type.Object({
+          text: Type.String(),
+          toolName: Type.Optional(Type.String()),
+          method: Type.Optional(Type.Union([
+            Type.Literal("voice"),
+            Type.Literal("audio"),
+            Type.Literal("document")
+          ]))
+        }),
         execute: async (_id, params) => {
           await this.toolRegistry.load();
           const toolName = params.toolName || "openai-tts";
+          this.logger?.log("agent", `send_media_reply via ${toolName}`);
           const result = await this.toolRegistry.run({
             name: toolName,
             request: { text: params.text, args: {} }
@@ -181,9 +197,13 @@ export class AgentManager {
           if (!result.ok || !result.output?.filePath) {
             return { content: [{ type: "text", text: JSON.stringify(result, null, 2) }], details: result };
           }
-          await telegram.sendAudio(result.output.filePath, params.text);
+          const method = params.method || result.output?.delivery?.method || "audio";
+          await telegram.sendMedia(result.output.filePath, { method, caption: params.text });
           await unlink(result.output.filePath).catch(() => {});
-          return { content: [{ type: "text", text: "Audio enviado por Telegram." }], details: result };
+          return {
+            content: [{ type: "text", text: `Media sent to Telegram as ${method}.` }],
+            details: { ...result, sent: { method } }
+          };
         }
       })
     ];

@@ -8,7 +8,7 @@ const toolName = "openai-transcribe";
 const config = await loadToolConfig(toolName, defaults);
 
 function printHelp() {
-  console.log(`openai-transcribe\n\nUso:\n  node index.js --help\n  node index.js run --request-file <json>\n\nInput esperado:\n  {\n    \"artifact\": { \"path\": \"/abs/audio.ogg\", \"mimeType\": \"audio/ogg\" },\n    \"args\": {}\n  }\n\nConfig en ${getToolConfigPath(toolName)}:\n  OPENAI_API_KEY\n  MODEL\n`);
+  console.log(`openai-transcribe\n\nUsage:\n  node index.js --help\n  node index.js run --request-file <json>\n\nExpected input:\n  {\n    \"artifact\": { \"path\": \"/abs/audio.ogg\", \"mimeType\": \"audio/ogg\" },\n    \"args\": {}\n  }\n\nConfig at ${getToolConfigPath(toolName)}:\n  OPENAI_API_KEY\n  MODEL\n`);
 }
 
 async function run(requestFile) {

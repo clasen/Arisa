@@ -4,18 +4,22 @@ import { ToolRegistry } from "../core/tools/tool-registry.js";
 import { AgentManager } from "../core/agent/agent-manager.js";
 import { createTelegramBot } from "../transport/telegram/bot.js";
 
-export async function createApp() {
+export async function createApp({ logger } = {}) {
+  logger?.log("app", "loading config");
   const config = await loadConfig();
   const artifactStore = new ArtifactStore();
-  const toolRegistry = new ToolRegistry();
+  const toolRegistry = new ToolRegistry({ logger });
   await toolRegistry.load();
+  logger?.log("app", `loaded ${toolRegistry.list().length} tools`);
 
-  const agentManager = new AgentManager({ config, artifactStore, toolRegistry });
-  const bot = await createTelegramBot({ config, artifactStore, toolRegistry, agentManager, saveConfig, updateConfig });
+  const agentManager = new AgentManager({ config, artifactStore, toolRegistry, logger });
+  const bot = await createTelegramBot({ config, artifactStore, toolRegistry, agentManager, saveConfig, updateConfig, logger });
 
   return {
     async start() {
+      logger?.log("app", `validating Pi model ${config.pi.provider}/${config.pi.model}`);
       await agentManager.validatePiAgent();
+      logger?.log("app", "starting Telegram bot");
       await bot.start();
     }
   };

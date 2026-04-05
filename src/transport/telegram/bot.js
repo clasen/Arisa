@@ -2,6 +2,34 @@ import { Bot, InputFile } from "grammy";
 import { authorizeChat } from "./auth.js";
 import { captureIncomingArtifact } from "./media.js";
 
+function quotedMessageSummary(message) {
+  if (!message) return [];
+
+  const fromName = message.from?.username
+    ? `@${message.from.username}`
+    : [message.from?.first_name, message.from?.last_name].filter(Boolean).join(" ") || "unknown";
+
+  const parts = [
+    `quotedMessageId: ${message.message_id}`,
+    `quotedFrom: ${fromName}`
+  ];
+
+  if (message.text) parts.push(`quotedText: ${message.text}`);
+  if (message.caption) parts.push(`quotedCaption: ${message.caption}`);
+  if (message.voice) parts.push(`quotedKind: voice`);
+  if (message.audio) parts.push(`quotedKind: audio`);
+  if (message.photo?.length) parts.push(`quotedKind: image`);
+  if (message.document) parts.push(`quotedKind: document`);
+  if (message.video) parts.push(`quotedKind: video`);
+  if (message.sticker) parts.push(`quotedKind: sticker`);
+
+  if (!message.text && !message.caption) {
+    parts.push(`Important: this message replies to a Telegram message with no textual body available in the update. Use the quoted kind and metadata as context.`);
+  }
+
+  return parts;
+}
+
 function buildPrompt({ ctx, artifact, transcript }) {
   const parts = [
     `New Telegram message.`,
@@ -12,6 +40,7 @@ function buildPrompt({ ctx, artifact, transcript }) {
   ];
 
   if (ctx.message?.text) parts.push(`text: ${ctx.message.text}`);
+  parts.push(...quotedMessageSummary(ctx.message?.reply_to_message));
   if (artifact?.path) parts.push(`artifactPath: ${artifact.path}`);
   if (artifact?.id) parts.push(`artifactId: ${artifact.id}`);
   if (artifact?.mimeType) parts.push(`mimeType: ${artifact.mimeType}`);
@@ -24,7 +53,7 @@ function buildPrompt({ ctx, artifact, transcript }) {
 
   parts.push(`If you need a CLI tool, use list_tools/tool_help/run_tool.`);
   parts.push(`If a tool config is missing, ask the user naturally and then use set_tool_config.`);
-  parts.push(`If the user wants audio output, use send_audio_reply.`);
+  parts.push(`If the user wants a generated media reply, use send_media_reply.`);
   return parts.join("\n");
 }
 
@@ -81,7 +110,7 @@ async function withTyping(ctx, work) {
   }
 }
 
-export async function createTelegramBot({ config, artifactStore, toolRegistry, agentManager, saveConfig, updateConfig }) {
+export async function createTelegramBot({ config, artifactStore, toolRegistry, agentManager, saveConfig, updateConfig, logger }) {
   const bot = new Bot(config.telegram.apiKey);
   const perChatState = new Map();
 
@@ -93,8 +122,11 @@ export async function createTelegramBot({ config, artifactStore, toolRegistry, a
   }
 
   async function buildIncomingPrompt(ctx) {
+    logger?.log("telegram", `message ${ctx.msg.message_id} in chat ${ctx.chat.id}`);
     const artifact = await captureIncomingArtifact(ctx, artifactStore);
+    if (artifact) logger?.log("telegram", `captured artifact ${artifact.kind}${artifact.id ? ` ${artifact.id}` : ""}`);
     const { transcript, toolResult } = await maybeTranscribeIncomingAudio({ artifact, toolRegistry, artifactStore });
+    if (transcript) logger?.log("telegram", `audio transcribed to artifact ${transcript.id}`);
     if (artifact?.kind === "audio" && !transcript) {
       if (toolResult?.missingConfig?.includes("OPENAI_API_KEY")) {
         throw new Error("I need the OpenAI API key for ~/.arisa/tools/openai-transcribe/config.js before I can transcribe incoming audio.");
@@ -106,12 +138,21 @@ export async function createTelegramBot({ config, artifactStore, toolRegistry, a
 
   async function processPrompt(ctx, prompt) {
     const telegram = {
-      sendAudio: async (filePath, caption) => ctx.replyWithAudio(new InputFile(filePath), { caption })
+      sendMedia: async (filePath, { method = "audio", caption } = {}) => {
+        logger?.log("telegram", `sending ${method} reply for chat ${ctx.chat.id}`);
+        const input = new InputFile(filePath);
+        if (method === "voice") return ctx.replyWithVoice(input, { caption });
+        if (method === "document") return ctx.replyWithDocument(input, { caption });
+        return ctx.replyWithAudio(input, { caption });
+      }
     };
     return withTyping(ctx, async () => {
       const { session } = await agentManager.getSessionContext(ctx.chat.id, telegram);
       const text = await collectText(session, prompt);
-      if (text) await ctx.reply(text.slice(0, 4000));
+      if (text) {
+        logger?.log("telegram", `sending text reply for chat ${ctx.chat.id}`);
+        await ctx.reply(text.slice(0, 4000));
+      }
     });
   }
 
@@ -120,6 +161,7 @@ export async function createTelegramBot({ config, artifactStore, toolRegistry, a
     const incomingPrompt = await buildIncomingPrompt(ctx);
 
     if (chatState.processing) {
+      logger?.log("telegram", `chat ${ctx.chat.id} busy, queueing message ${ctx.msg.message_id}`);
       chatState.nextPrompt = chatState.nextPrompt
         ? `${chatState.nextPrompt}\n\n${incomingPrompt}`
         : incomingPrompt;
@@ -127,10 +169,12 @@ export async function createTelegramBot({ config, artifactStore, toolRegistry, a
     }
 
     chatState.processing = true;
+    logger?.log("telegram", `processing message ${ctx.msg.message_id} in chat ${ctx.chat.id}`);
     let currentPrompt = incomingPrompt;
 
     while (currentPrompt) {
       try {
+        logger?.log("telegram", `prompt dispatch for chat ${ctx.chat.id}`);
         await processPrompt(ctx, currentPrompt);
       } finally {
         if (chatState.nextPrompt) {
@@ -146,6 +190,7 @@ export async function createTelegramBot({ config, artifactStore, toolRegistry, a
   }
 
   bot.catch((error) => {
+    logger?.error("telegram", `bot error: ${error instanceof Error ? error.message : String(error)}`);
     console.error("Telegram bot error:", error);
   });
 
@@ -208,6 +253,7 @@ export async function createTelegramBot({ config, artifactStore, toolRegistry, a
 
   return {
     async start() {
+      logger?.log("telegram", "bot polling started");
       await bot.start();
     }
   };
