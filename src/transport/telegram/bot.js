@@ -1,0 +1,200 @@
+import { Bot, InputFile } from "grammy";
+import { authorizeChat } from "./auth.js";
+import { captureIncomingArtifact } from "./media.js";
+
+function buildPrompt({ ctx, artifact, transcript }) {
+  const parts = [
+    `New Telegram message.`,
+    `chatId: ${ctx.chat.id}`,
+    `userId: ${ctx.from.id}`,
+    `username: ${ctx.from.username || "(no username)"}`,
+    `messageId: ${ctx.msg.message_id}`
+  ];
+
+  if (ctx.message?.text) parts.push(`text: ${ctx.message.text}`);
+  if (artifact?.path) parts.push(`artifactPath: ${artifact.path}`);
+  if (artifact?.id) parts.push(`artifactId: ${artifact.id}`);
+  if (artifact?.mimeType) parts.push(`mimeType: ${artifact.mimeType}`);
+  if (artifact?.kind) parts.push(`kind: ${artifact.kind}`);
+  if (transcript) {
+    parts.push(`transcriptArtifactId: ${transcript.id}`);
+    parts.push(`transcriptText: ${transcript.text}`);
+    parts.push(`Important: the incoming audio has already been transcribed. Use the transcript as the user message content. Do not answer with a raw transcription unless the user explicitly asked for one.`);
+  }
+
+  parts.push(`If you need a CLI tool, use list_tools/tool_help/run_tool.`);
+  parts.push(`If a tool config is missing, ask the user naturally and then use set_tool_config.`);
+  parts.push(`If the user wants audio output, use send_audio_reply.`);
+  return parts.join("\n");
+}
+
+async function maybeTranscribeIncomingAudio({ artifact, toolRegistry, artifactStore }) {
+  if (!artifact || artifact.kind !== "audio") return { transcript: null };
+
+  const result = await toolRegistry.run({
+    name: "openai-transcribe",
+    request: {
+      artifact,
+      args: {}
+    }
+  });
+
+  if (!result.ok) {
+    return { transcript: null, toolResult: result };
+  }
+
+  if (!result.output?.text) {
+    return { transcript: null, toolResult: { ok: false, error: "Transcription returned no text." } };
+  }
+
+  const transcript = await artifactStore.createText({
+    text: result.output.text,
+    source: { type: "tool", toolName: "openai-transcribe" },
+    metadata: { fromArtifactId: artifact.id, tool: "openai-transcribe" }
+  });
+
+  return { transcript, toolResult: result };
+}
+
+async function collectText(session, prompt) {
+  let text = "";
+  const unsubscribe = session.subscribe((event) => {
+    if (event.type === "message_update" && event.assistantMessageEvent.type === "text_delta") {
+      text += event.assistantMessageEvent.delta;
+    }
+  });
+  await session.prompt(prompt);
+  unsubscribe();
+  return text.trim();
+}
+
+export async function createTelegramBot({ config, artifactStore, toolRegistry, agentManager, saveConfig, updateConfig }) {
+  const bot = new Bot(config.telegram.apiKey);
+  const perChatState = new Map();
+
+  function getChatState(chatId) {
+    if (!perChatState.has(chatId)) {
+      perChatState.set(chatId, { processing: false, nextPrompt: "" });
+    }
+    return perChatState.get(chatId);
+  }
+
+  async function buildIncomingPrompt(ctx) {
+    const artifact = await captureIncomingArtifact(ctx, artifactStore);
+    const { transcript, toolResult } = await maybeTranscribeIncomingAudio({ artifact, toolRegistry, artifactStore });
+    if (artifact?.kind === "audio" && !transcript) {
+      if (toolResult?.missingConfig?.includes("OPENAI_API_KEY")) {
+        throw new Error("I need the OpenAI API key for cli/openai-transcribe/config.js before I can transcribe incoming audio.");
+      }
+      throw new Error(toolResult?.error || "Audio transcription failed.");
+    }
+    return buildPrompt({ ctx, artifact, transcript });
+  }
+
+  async function processPrompt(ctx, prompt) {
+    const telegram = {
+      sendAudio: async (filePath, caption) => ctx.replyWithAudio(new InputFile(filePath), { caption })
+    };
+    await ctx.api.sendChatAction(ctx.chat.id, "typing");
+    const { session } = await agentManager.getSessionContext(ctx.chat.id, telegram);
+    const text = await collectText(session, prompt);
+    if (text) await ctx.reply(text.slice(0, 4000));
+  }
+
+  async function enqueueOrProcess(ctx) {
+    const chatState = getChatState(ctx.chat.id);
+    const incomingPrompt = await buildIncomingPrompt(ctx);
+
+    if (chatState.processing) {
+      chatState.nextPrompt = chatState.nextPrompt
+        ? `${chatState.nextPrompt}\n\n${incomingPrompt}`
+        : incomingPrompt;
+      return ctx.reply("Queued. I will process this right after the current task finishes.");
+    }
+
+    chatState.processing = true;
+    let currentPrompt = incomingPrompt;
+
+    while (currentPrompt) {
+      try {
+        await processPrompt(ctx, currentPrompt);
+      } finally {
+        if (chatState.nextPrompt) {
+          currentPrompt = chatState.nextPrompt;
+          chatState.nextPrompt = "";
+        } else {
+          currentPrompt = "";
+        }
+      }
+    }
+
+    chatState.processing = false;
+  }
+
+  bot.catch((error) => {
+    console.error("Telegram bot error:", error);
+  });
+
+  bot.command("start", async (ctx) => {
+    const auth = await authorizeChat({ config, chatId: ctx.chat.id, saveConfig });
+    if (!auth.ok) return ctx.reply("Private bot. Access denied.");
+    return ctx.reply(auth.firstTime ? "This chat is now authorized for Arisa." : "Arisa is ready.");
+  });
+
+  bot.command("pi_api_key", async (ctx) => {
+    const auth = await authorizeChat({ config, chatId: ctx.chat.id, saveConfig });
+    if (!auth.ok) return ctx.reply("Private bot. Access denied.");
+
+    const apiKey = ctx.match?.trim();
+    if (!apiKey) {
+      return ctx.reply("Usage: /pi_api_key <your_api_key>");
+    }
+
+    const nextConfig = await updateConfig((current) => {
+      current.pi.apiKey = apiKey;
+    });
+    config.pi.apiKey = nextConfig.pi.apiKey;
+    agentManager.setConfig(nextConfig);
+    return ctx.reply(`Saved Pi API key for ${nextConfig.pi.provider}.`);
+  });
+
+  bot.command("pi_model", async (ctx) => {
+    const auth = await authorizeChat({ config, chatId: ctx.chat.id, saveConfig });
+    if (!auth.ok) return ctx.reply("Private bot. Access denied.");
+
+    const value = ctx.match?.trim();
+    if (!value || !value.includes("/")) {
+      return ctx.reply("Usage: /pi_model <provider/model>");
+    }
+
+    const [provider, model] = value.split("/");
+    const nextConfig = await updateConfig((current) => {
+      current.pi.provider = provider.trim();
+      current.pi.model = model.trim();
+    });
+    config.pi.provider = nextConfig.pi.provider;
+    config.pi.model = nextConfig.pi.model;
+    agentManager.setConfig(nextConfig);
+    return ctx.reply(`Saved Pi model ${nextConfig.pi.provider}/${nextConfig.pi.model}.`);
+  });
+
+  bot.on("message", async (ctx) => {
+    const auth = await authorizeChat({ config, chatId: ctx.chat.id, saveConfig });
+    if (!auth.ok) return ctx.reply("Private bot. Access denied.");
+
+    try {
+      await enqueueOrProcess(ctx);
+    } catch (error) {
+      const chatState = getChatState(ctx.chat.id);
+      chatState.processing = false;
+      const message = error instanceof Error ? error.message : String(error);
+      await ctx.reply(`Error: ${message}`);
+    }
+  });
+
+  return {
+    async start() {
+      await bot.start();
+    }
+  };
+}

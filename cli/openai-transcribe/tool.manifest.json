@@ -1,0 +1,15 @@
+{
+  "name": "openai-transcribe",
+  "description": "Transcribe audio files with OpenAI audio transcription API.",
+  "entry": "index.js",
+  "input": ["audio/ogg", "audio/mpeg", "audio/wav", "audio/mp4"],
+  "output": ["text/plain"],
+  "configSchema": {
+    "OPENAI_API_KEY": {
+      "type": "string",
+      "required": true,
+      "secret": true,
+      "prompt": "Necesito tu OPENAI_API_KEY para transcribir audio."
+    }
+  }
+}

@@ -1,0 +1,20 @@
+{
+  "name": "openai-tts",
+  "description": "Convert text into MP3 audio using OpenAI speech API.",
+  "entry": "index.js",
+  "input": ["text/plain"],
+  "output": ["audio/mpeg"],
+  "configSchema": {
+    "OPENAI_API_KEY": {
+      "type": "string",
+      "required": true,
+      "secret": true,
+      "prompt": "Necesito tu OPENAI_API_KEY para generar audio."
+    },
+    "VOICE": {
+      "type": "string",
+      "required": false,
+      "prompt": "Voz a usar, por ejemplo alloy."
+    }
+  }
+}

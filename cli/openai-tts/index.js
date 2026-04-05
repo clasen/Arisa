@@ -1,0 +1,58 @@
+import { mkdir, readFile, writeFile } from "node:fs/promises";
+import path from "node:path";
+import config from "./config.js";
+
+function printHelp() {
+  console.log(`openai-tts\n\nUso:\n  node index.js --help\n  node index.js run --request-file <json>\n\nInput esperado:\n  {\n    \"text\": \"hola\",\n    \"artifact\": { \"text\": \"hola\" },\n    \"args\": { \"voice\": \"alloy\" }\n  }\n\nConfig en cli/openai-tts/config.js:\n  OPENAI_API_KEY\n  MODEL\n  VOICE\n`);
+}
+
+async function run(requestFile) {
+  if (!config.OPENAI_API_KEY) {
+    console.log(JSON.stringify({ ok: false, missingConfig: ["OPENAI_API_KEY"], configPath: path.resolve("config.js") }));
+    return;
+  }
+
+  const request = JSON.parse(await readFile(requestFile, "utf8"));
+  const inputText = request.text || request.artifact?.text;
+  if (!inputText) {
+    console.log(JSON.stringify({ ok: false, error: "text or artifact.text is required" }));
+    return;
+  }
+
+  const response = await fetch("https://api.openai.com/v1/audio/speech", {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${config.OPENAI_API_KEY}`,
+      "Content-Type": "application/json"
+    },
+    body: JSON.stringify({
+      model: config.MODEL,
+      voice: request.args?.voice || config.VOICE,
+      input: inputText,
+      format: "mp3"
+    })
+  });
+
+  if (!response.ok) {
+    const payload = await response.text();
+    console.log(JSON.stringify({ ok: false, error: payload }));
+    return;
+  }
+
+  const outDir = path.resolve("out");
+  await mkdir(outDir, { recursive: true });
+  const filePath = path.join(outDir, `speech-${Date.now()}.mp3`);
+  const buffer = Buffer.from(await response.arrayBuffer());
+  await writeFile(filePath, buffer);
+  console.log(JSON.stringify({ ok: true, output: { filePath, fileName: path.basename(filePath), mimeType: "audio/mpeg", kind: "audio" } }));
+}
+
+const args = process.argv.slice(2);
+if (!args.length || args.includes("--help") || args[0] === "help") {
+  printHelp();
+} else if (args[0] === "run") {
+  const fileIndex = args.indexOf("--request-file");
+  await run(args[fileIndex + 1]);
+} else {
+  printHelp();
+}

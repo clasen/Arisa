@@ -1,0 +1,8 @@
+{
+  "name": "web-browser",
+  "description": "Search the web and open web pages as readable text.",
+  "entry": "index.js",
+  "input": ["text/plain"],
+  "output": ["text/plain"],
+  "configSchema": {}
+}

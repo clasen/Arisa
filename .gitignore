@@ -1,0 +1,31 @@
+# Dependencies
+node_modules/
+
+# Runtime state, artifacts index, and downloaded media (see src/core/artifacts)
+data/
+
+# Per-tool secrets and API keys — use tool manifests + bootstrap for structure
+cli/*/config.js
+
+# Environment overrides
+.env
+.env.*
+!.env.example
+
+# Logs & package manager debug
+*.log
+npm-debug.log*
+pnpm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# OS
+.DS_Store
+Thumbs.db
+
+# IDE / editor
+.idea/
+
+# Test & coverage
+coverage/
+.nyc_output/
