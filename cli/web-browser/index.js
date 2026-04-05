@@ -1,7 +1,7 @@
 import { readFile } from "node:fs/promises";
 
 function printHelp() {
-  console.log(`web-browser\n\nUso:\n  node index.js --help\n  node index.js run --request-file <json>\n\nInput esperado:\n  {\n    "text": "weather toronto" | "https://example.com",\n    "artifact": { "text": "weather toronto" },\n    "args": {\n      "mode": "search" | "open",\n      "url": "https://example.com",\n      "maxResults": "5"\n    }\n  }\n\nComportamiento:\n  - Si el input parece una URL, abre la página.\n  - Si no, hace una búsqueda web.\n  - Para abrir páginas usa r.jina.ai cuando es posible, con fallback a fetch directo.\n`);
+  console.log(`web-browser\n\nUsage:\n  node index.js --help\n  node index.js run --request-file <json>\n\nExpected input:\n  {\n    "text": "weather toronto" | "https://example.com",\n    "artifact": { "text": "weather toronto" },\n    "args": {\n      "mode": "search" | "open",\n      "url": "https://example.com",\n      "maxResults": "5"\n    }\n  }\n\nBehavior:\n  - If the input looks like a URL, open the page.\n  - Otherwise, perform a web search.\n  - When possible, opening pages uses r.jina.ai with a direct fetch fallback.\n`);
 }
 
 function decodeHtml(text = "") {
@@ -75,17 +75,17 @@ async function searchWeb(query, maxResults = 5) {
   }
 
   if (!results.length) {
-    return `Búsqueda: ${query}\n\nNo encontré resultados parseables.`;
+    return `Search: ${query}\n\nNo parseable results were found.`;
   }
 
   return [
-    `Búsqueda: ${query}`,
+    `Search: ${query}`,
     "",
     ...results.flatMap((item, index) => [
       `${index + 1}. ${item.title}`,
       `URL: ${item.url}`,
-      `Resumen: ${item.snippet}`,
-      item.displayUrl ? `Mostrado: ${item.displayUrl}` : null,
+      `Snippet: ${item.snippet}`,
+      item.displayUrl ? `Displayed: ${item.displayUrl}` : null,
       ""
     ].filter(Boolean))
   ].join("\n").trim();
@@ -110,8 +110,8 @@ async function openWebPage(inputUrl) {
     source = "direct-fetch";
   }
 
-  const shortened = body.length > 12000 ? `${body.slice(0, 12000)}\n\n[contenido truncado]` : body;
-  return [`Página: ${targetUrl}`, `Fuente: ${source}`, "", shortened].join("\n").trim();
+  const shortened = body.length > 12000 ? `${body.slice(0, 12000)}\n\n[content truncated]` : body;
+  return [`Page: ${targetUrl}`, `Source: ${source}`, "", shortened].join("\n").trim();
 }
 
 async function run(requestFile) {
