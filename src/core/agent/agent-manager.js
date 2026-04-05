@@ -1,31 +1,10 @@
 import path from "node:path";
 import { mkdir } from "node:fs/promises";
-import { AuthStorage, createAgentSession, ModelRegistry, SessionManager, defineTool } from "@mariozechner/pi-coding-agent";
+import { createAgentSession, SessionManager, defineTool } from "@mariozechner/pi-coding-agent";
 import { Type } from "@sinclair/typebox";
+import { createPiRuntime, hasProviderAuth } from "./pi-runtime.js";
 
 const agentDir = path.resolve("data/pi-agent");
-
-function getOAuthProviderForModelProvider(provider) {
-  if (provider === "openai-codex") return "openai-codex";
-  if (provider === "anthropic") return "anthropic";
-  if (provider === "google") return "google-gemini-cli";
-  if (provider === "google-antigravity") return "google-antigravity";
-  if (provider === "github-copilot") return "github-copilot";
-  return provider;
-}
-
-function normalizePiConfig(pi) {
-  const provider = pi.provider === "codex" ? "openai" : pi.provider;
-  let model = pi.model;
-  if (pi.provider === "codex") {
-    if (model === "5.4") model = "gpt-5.4";
-    else if (model === "5.4-mini") model = "gpt-5.4-mini";
-    else if (model === "5.4-nano") model = "gpt-5.4-nano";
-    else if (model === "5.4-pro") model = "gpt-5.4-pro";
-    else if (!model.startsWith("gpt-")) model = `gpt-${model}`;
-  }
-  return { provider, model };
-}
 
 export class AgentManager {
   constructor({ config, artifactStore, toolRegistry }) {
@@ -41,20 +20,16 @@ export class AgentManager {
   }
 
   async validatePiAgent() {
-    const authStorage = AuthStorage.create();
-    const normalized = normalizePiConfig(this.config.pi);
-    if (this.config.pi.apiKey) {
-      authStorage.setRuntimeApiKey(normalized.provider, this.config.pi.apiKey);
-    }
-
-    const modelRegistry = ModelRegistry.create(authStorage);
-    const model = modelRegistry.find(normalized.provider, normalized.model);
+    const { authStorage, modelRegistry } = createPiRuntime({
+      provider: this.config.pi.provider,
+      apiKey: this.config.pi.apiKey
+    });
+    const model = modelRegistry.find(this.config.pi.provider, this.config.pi.model);
     if (!model) {
-      throw new Error(`Model not found: ${this.config.pi.provider}/${this.config.pi.model} (resolved to ${normalized.provider}/${normalized.model})`);
+      throw new Error(`Model not found: ${this.config.pi.provider}/${this.config.pi.model}`);
     }
-    const oauthProvider = getOAuthProviderForModelProvider(normalized.provider);
-    if (!this.config.pi.apiKey && !modelRegistry.hasConfiguredAuth(normalized.provider) && !authStorage.hasAuth(oauthProvider)) {
-      throw new Error(`No auth found for ${normalized.provider}. Provide a Pi API key in bootstrap, or authenticate with the internal /login flow during bootstrap.`);
+    if (!this.config.pi.apiKey && !hasProviderAuth(this.config.pi.provider, { authStorage, modelRegistry })) {
+      throw new Error(`No auth found for ${this.config.pi.provider}. Provide a Pi API key in bootstrap, or authenticate with Pi login for this provider during bootstrap.`);
     }
 
     const { session } = await createAgentSession({
@@ -70,17 +45,14 @@ export class AgentManager {
     if (this.sessions.has(chatId)) return this.sessions.get(chatId);
 
     await mkdir(agentDir, { recursive: true });
-    const authStorage = AuthStorage.create();
-    const normalized = normalizePiConfig(this.config.pi);
-    if (this.config.pi.apiKey) {
-      authStorage.setRuntimeApiKey(normalized.provider, this.config.pi.apiKey);
-    }
-    const modelRegistry = ModelRegistry.create(authStorage);
-    const model = modelRegistry.find(normalized.provider, normalized.model);
-    if (!model) throw new Error(`Model not found: ${this.config.pi.provider}/${this.config.pi.model} (resolved to ${normalized.provider}/${normalized.model})`);
-    const oauthProvider = getOAuthProviderForModelProvider(normalized.provider);
-    if (!this.config.pi.apiKey && !modelRegistry.hasConfiguredAuth(normalized.provider) && !authStorage.hasAuth(oauthProvider)) {
-      throw new Error(`No auth found for ${normalized.provider}. Re-run bootstrap and complete login for this provider before Telegram starts.`);
+    const { authStorage, modelRegistry } = createPiRuntime({
+      provider: this.config.pi.provider,
+      apiKey: this.config.pi.apiKey
+    });
+    const model = modelRegistry.find(this.config.pi.provider, this.config.pi.model);
+    if (!model) throw new Error(`Model not found: ${this.config.pi.provider}/${this.config.pi.model}`);
+    if (!this.config.pi.apiKey && !hasProviderAuth(this.config.pi.provider, { authStorage, modelRegistry })) {
+      throw new Error(`No auth found for ${this.config.pi.provider}. Re-run bootstrap and complete login for this provider before Telegram starts.`);
     }
 
     const cwd = path.resolve("data/chats", String(chatId));
@@ -131,7 +103,7 @@ export class AgentManager {
       defineTool({
         name: "set_tool_config",
         label: "Set tool config",
-        description: "Write a value into cli/<tool>/config.js.",
+        description: "Write a value into ~/.arisa/tools/<tool>/config.js.",
         parameters: Type.Object({ name: Type.String(), field: Type.String(), value: Type.String() }),
         execute: async (_id, params) => {
           await this.toolRegistry.load();

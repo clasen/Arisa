@@ -1,14 +1,18 @@
 import { readFile, stat } from "node:fs/promises";
-import path from "node:path";
-import config from "./config.js";
+import defaults from "./config.js";
+import { loadToolConfig } from "../../src/core/tools/tool-config.js";
+import { getToolConfigPath } from "../../src/runtime/paths.js";
+
+const toolName = "openai-transcribe";
+const config = await loadToolConfig(toolName, defaults);
 
 function printHelp() {
-  console.log(`openai-transcribe\n\nUso:\n  node index.js --help\n  node index.js run --request-file <json>\n\nInput esperado:\n  {\n    \"artifact\": { \"path\": \"/abs/audio.ogg\", \"mimeType\": \"audio/ogg\" },\n    \"args\": {}\n  }\n\nConfig en cli/openai-transcribe/config.js:\n  OPENAI_API_KEY\n  MODEL\n`);
+  console.log(`openai-transcribe\n\nUso:\n  node index.js --help\n  node index.js run --request-file <json>\n\nInput esperado:\n  {\n    \"artifact\": { \"path\": \"/abs/audio.ogg\", \"mimeType\": \"audio/ogg\" },\n    \"args\": {}\n  }\n\nConfig en ${getToolConfigPath(toolName)}:\n  OPENAI_API_KEY\n  MODEL\n`);
 }
 
 async function run(requestFile) {
   if (!config.OPENAI_API_KEY) {
-    console.log(JSON.stringify({ ok: false, missingConfig: ["OPENAI_API_KEY"], configPath: path.resolve("config.js") }));
+    console.log(JSON.stringify({ ok: false, missingConfig: ["OPENAI_API_KEY"], configPath: getToolConfigPath(toolName) }));
     return;
   }
 

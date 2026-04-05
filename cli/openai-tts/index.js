@@ -1,14 +1,19 @@
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
-import config from "./config.js";
+import defaults from "./config.js";
+import { loadToolConfig } from "../../src/core/tools/tool-config.js";
+import { getToolConfigPath, getToolOutDir } from "../../src/runtime/paths.js";
+
+const toolName = "openai-tts";
+const config = await loadToolConfig(toolName, defaults);
 
 function printHelp() {
-  console.log(`openai-tts\n\nUso:\n  node index.js --help\n  node index.js run --request-file <json>\n\nInput esperado:\n  {\n    \"text\": \"hola\",\n    \"artifact\": { \"text\": \"hola\" },\n    \"args\": { \"voice\": \"alloy\" }\n  }\n\nConfig en cli/openai-tts/config.js:\n  OPENAI_API_KEY\n  MODEL\n  VOICE\n`);
+  console.log(`openai-tts\n\nUso:\n  node index.js --help\n  node index.js run --request-file <json>\n\nInput esperado:\n  {\n    \"text\": \"hola\",\n    \"artifact\": { \"text\": \"hola\" },\n    \"args\": { \"voice\": \"alloy\" }\n  }\n\nConfig en ${getToolConfigPath(toolName)}:\n  OPENAI_API_KEY\n  MODEL\n  VOICE\n`);
 }
 
 async function run(requestFile) {
   if (!config.OPENAI_API_KEY) {
-    console.log(JSON.stringify({ ok: false, missingConfig: ["OPENAI_API_KEY"], configPath: path.resolve("config.js") }));
+    console.log(JSON.stringify({ ok: false, missingConfig: ["OPENAI_API_KEY"], configPath: getToolConfigPath(toolName) }));
     return;
   }
 
@@ -39,7 +44,7 @@ async function run(requestFile) {
     return;
   }
 
-  const outDir = path.resolve("out");
+  const outDir = getToolOutDir(toolName);
   await mkdir(outDir, { recursive: true });
   const filePath = path.join(outDir, `speech-${Date.now()}.mp3`);
   const buffer = Buffer.from(await response.arrayBuffer());

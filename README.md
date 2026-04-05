@@ -1,6 +1,16 @@
 # Arisa
 
-Arisa is a modular Telegram assistant powered by Pi Agent.
+Arisa is a personal Telegram assistant powered by Pi Agent.
+
+## Origin
+
+The initial inspiration was [OpenClaw](https://github.com/openclaw/openclaw). OpenClaw has interesting ideas but carries too much weight: when it generates tools they end up disorganized, and the overall framework feels overloaded for personal use.
+
+The real heart of OpenClaw is Pi Agent — a [minimal terminal coding harness](https://www.youtube.com/watch?v=Dli5slNaJu0) that lets an AI agent reason and act with very little infrastructure. That part is genuinely good.
+
+Telegram bots, on the other hand, work extremely well as a human interface. Simple, reliable, always in your pocket.
+
+So Arisa keeps exactly those two things — Pi Agent and Telegram — and nothing more. No pre-loaded opinions about what the agent should do or which tools it should have. The idea is that the agent builds itself around the user, not the other way around.
 
 It is designed around a simple idea:
 
@@ -10,7 +20,7 @@ It is designed around a simple idea:
 - **capabilities live in isolated CLI tools**
 - **tools can be chained through pipes**
 
-Arisa is meant to grow like Lego blocks. If a capability does not exist yet, the system should prefer adding a new tool instead of stopping at "I can't do that".
+If a capability does not exist yet, the system adds a new tool for it. The agent grows from real use, not from assumptions.
 
 ## Core concept
 
@@ -59,8 +69,13 @@ node index.js run --request-file <json>
 ```
 
 ### Configuration model
-- Telegram runtime config is stored in `data/state/config.json`
-- tool-specific secrets/config live in `cli/<tool>/config.js`
+- all runtime state lives under `~/.arisa/`
+- Telegram runtime config is stored in `~/.arisa/state/config.json`
+- artifact index is stored in `~/.arisa/state/artifacts.json`
+- incoming Telegram attachments are staged in `~/.arisa/inbox/`
+- persisted artifacts live in `~/.arisa/artifacts/`
+- tool-specific secrets/config live in `~/.arisa/tools/<tool>/config.js`
+- tool outputs and temp request files also live under `~/.arisa/tools/<tool>/`
 - Pi authentication can use either:
   - an API key entered during bootstrap
   - or Pi's existing OAuth login when supported, such as `openai-codex`
@@ -83,10 +98,11 @@ On first run, Arisa will:
 
 1. ask for a Telegram bot token
 2. ask for the maximum number of authorized chat ids
-3. show a list of Pi models
-4. resolve authentication for the selected Pi provider
-5. validate that Pi Agent works
-6. only then start listening to Telegram
+3. show Pi providers discovered from Pi Agent's model registry
+4. show the models available for the selected provider
+5. resolve authentication for the selected Pi provider
+6. validate that Pi Agent works
+7. only then start listening to Telegram
 
 Telegram bot tokens can be created with:
 
@@ -133,21 +149,24 @@ src/
 cli/
   openai-transcribe/
   openai-tts/
-data/
+~/.arisa/
   state/
   artifacts/
-  chats/
+  inbox/
+  tools/
 ```
 
 ## Philosophy
 
-Arisa should not default to passive answers like "I can't do that" when a missing capability can realistically be implemented as a new tool.
+The agent should not come preloaded with vices or assumptions. It starts minimal and grows through real use — shaped by the user, not by the framework.
 
-The preferred behavior is:
+When a capability is missing:
 
 1. check whether an existing tool can solve the task
-2. if not, propose creating the missing tool
+2. if not, build the missing tool
 3. keep the solution inside the tool architecture
+
+No "I can't do that" when the thing is realistically buildable.
 
 ## Notes
 

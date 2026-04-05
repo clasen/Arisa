@@ -1,9 +1,7 @@
 import { mkdir, readFile, writeFile, copyFile } from "node:fs/promises";
 import path from "node:path";
 import crypto from "node:crypto";
-
-const rootDir = path.resolve("data/artifacts");
-const indexFile = path.resolve("data/state/artifacts.json");
+import { artifactsDir as rootDir, artifactsIndexFile as indexFile } from "../../runtime/paths.js";
 
 async function loadIndex() {
   try {

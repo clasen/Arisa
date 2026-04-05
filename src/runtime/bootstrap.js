@@ -1,12 +1,10 @@
-import { mkdir, readFile, writeFile } from "node:fs/promises";
-import path from "node:path";
+import { readFile, writeFile } from "node:fs/promises";
 import readline from "node:readline/promises";
 import { stdin as input, stdout as output } from "node:process";
 import { spawn } from "node:child_process";
-import { AuthStorage, ModelRegistry } from "@mariozechner/pi-coding-agent";
-
-const stateDir = path.resolve("data/state");
-const configFile = path.join(stateDir, "config.json");
+import { AuthStorage } from "@mariozechner/pi-coding-agent";
+import { createPiRuntime, hasProviderAuth, listPiProviders, listProviderModels, supportsProviderOAuth } from "../core/agent/pi-runtime.js";
+import { configFile, ensureArisaHome } from "./paths.js";
 
 async function exists(file) {
   try {
@@ -17,49 +15,6 @@ async function exists(file) {
   }
 }
 
-function getBootstrapModels() {
-  const authStorage = AuthStorage.create();
-  const modelRegistry = ModelRegistry.create(authStorage);
-  const preferred = [
-    ["openai-codex", "gpt-5.4"],
-    ["openai-codex", "gpt-5.4-mini"],
-    ["openai", "gpt-4.1"],
-    ["anthropic", "claude-sonnet-4-6"],
-    ["anthropic", "claude-opus-4-6"],
-    ["google", "gemini-3.1-pro-preview"],
-  ];
-
-  const models = preferred
-    .map(([provider, model]) => modelRegistry.find(provider, model))
-    .filter(Boolean)
-    .map((model) => ({ provider: model.provider, id: model.id, label: `${model.provider}/${model.id}` }));
-
-  if (!models.length) {
-    return modelRegistry.getAll().slice(0, 10).map((model) => ({
-      provider: model.provider,
-      id: model.id,
-      label: `${model.provider}/${model.id}`,
-    }));
-  }
-
-  return models;
-}
-
-function getOAuthProviderForModelProvider(provider) {
-  if (provider === "openai-codex") return "openai-codex";
-  if (provider === "anthropic") return "anthropic";
-  if (provider === "google") return "google-gemini-cli";
-  if (provider === "google-antigravity") return "google-antigravity";
-  if (provider === "github-copilot") return "github-copilot";
-  return provider;
-}
-
-function hasExistingPiAuth(provider) {
-  const authStorage = AuthStorage.create();
-  const modelRegistry = ModelRegistry.create(authStorage);
-  const oauthProvider = getOAuthProviderForModelProvider(provider);
-  return modelRegistry.hasConfiguredAuth(provider) || authStorage.hasAuth(oauthProvider);
-}
 
 async function maybeOpenExternal(url) {
   if (!url) return;
@@ -79,9 +34,7 @@ async function maybeOpenExternal(url) {
 
 async function runInternalPiLogin(provider, rl) {
   const authStorage = AuthStorage.create();
-  const oauthProvider = getOAuthProviderForModelProvider(provider);
-  const available = authStorage.getOAuthProviders();
-  const selected = available.find((item) => item.id === oauthProvider);
+  const selected = authStorage.getOAuthProviders().find((item) => item.id === provider);
   if (!selected) {
     throw new Error(`No internal OAuth login flow is available for ${provider}.`);
   }
@@ -93,7 +46,7 @@ async function runInternalPiLogin(provider, rl) {
     manualCodeReject = reject;
   });
 
-  await authStorage.login(oauthProvider, {
+  await authStorage.login(provider, {
     onAuth: async ({ url, instructions }) => {
       console.log(`${instructions || "Open this URL to continue authentication:"}\n${url}\n`);
       await maybeOpenExternal(url);
@@ -127,7 +80,7 @@ async function runInternalPiLogin(provider, rl) {
 }
 
 export async function bootstrapIfNeeded({ force = false } = {}) {
-  await mkdir(stateDir, { recursive: true });
+  await ensureArisaHome();
   if (!force && await exists(configFile)) return;
 
   const rl = readline.createInterface({ input, output });
@@ -137,58 +90,63 @@ export async function bootstrapIfNeeded({ force = false } = {}) {
     return value || fallback;
   };
 
-  const askYesNo = async (label, fallback = true) => {
-    const hint = fallback ? "Y/n" : "y/N";
-    const value = (await rl.question(`${label} (${hint}): `)).trim().toLowerCase();
-    if (!value) return fallback;
-    return value === "y" || value === "yes";
-  };
-
   console.log("\n== Arisa bootstrap ==\n");
   console.log("Telegram bot token tip: get it from https://t.me/BotFather");
   const telegramApiKey = await ask("Telegram API key / bot token");
   const telegramMaxChatIds = Number(await ask("Maximum authorized chat IDs", "1"));
 
-  const models = getBootstrapModels();
-  console.log("\nAvailable Pi models:");
-  models.forEach((model, index) => {
-    const authStatus = hasExistingPiAuth(model.provider) ? "auth: configured" : "auth: missing";
-    const providerLabel = model.provider;
-    console.log(`${index + 1}. ${providerLabel}/${model.id} (${authStatus})`);
+  const runtime = createPiRuntime();
+  const providers = listPiProviders(runtime);
+  console.log("\nAvailable Pi providers:");
+  providers.forEach((item, index) => {
+    const authLabel = item.authConfigured ? "auth: configured" : item.supportsOAuth ? "auth: login or API key" : "auth: API key";
+    console.log(`${index + 1}. ${item.provider} (${item.modelCount} models, ${authLabel})`);
   });
-  const selectedIndex = Number(await ask("Select Pi model by number", "1"));
-  const selectedModel = models[Math.max(0, Math.min(models.length - 1, selectedIndex - 1))];
-  const selectedAuthReady = hasExistingPiAuth(selectedModel.provider);
+
+  const selectedProviderIndex = Number(await ask("Select Pi provider by number", "1"));
+  const selectedProvider = providers[Math.max(0, Math.min(providers.length - 1, selectedProviderIndex - 1))];
+  const models = listProviderModels(selectedProvider.provider, runtime);
+  console.log(`\nAvailable models for ${selectedProvider.provider}:`);
+  models.forEach((model, index) => {
+    const capabilities = [model.reasoning ? "reasoning" : null, model.input?.includes("image") ? "image" : null].filter(Boolean).join(", ");
+    const suffix = capabilities ? ` [${capabilities}]` : "";
+    console.log(`${index + 1}. ${model.id}${suffix}`);
+  });
+
+  const selectedModelIndex = Number(await ask("Select Pi model by number", "1"));
+  const selectedModel = models[Math.max(0, Math.min(models.length - 1, selectedModelIndex - 1))];
+  const selectedAuthReady = hasProviderAuth(selectedProvider.provider, runtime);
+  const providerSupportsOAuth = supportsProviderOAuth(selectedProvider.provider, runtime);
   console.log(`Selected model: ${selectedModel.provider}/${selectedModel.id}`);
-  console.log(`Existing Pi auth for ${selectedModel.provider}: ${selectedAuthReady ? "yes" : "no"}`);
-  console.log("Pi auth tip: if this provider supports Pi login, leaving the API key empty will start the internal login flow.");
+  console.log(`Existing Pi auth for ${selectedProvider.provider}: ${selectedAuthReady ? "yes" : "no"}`);
+  if (providerSupportsOAuth) {
+    console.log("Pi auth tip: leaving the API key empty will start Pi's internal login flow for this provider.");
+  }
 
   let piApiKey = "";
   while (true) {
-    piApiKey = (await rl.question(`Pi API key for ${selectedModel.provider} (optional): `)).trim();
+    piApiKey = (await rl.question(`Pi API key for ${selectedProvider.provider} (optional): `)).trim();
     if (piApiKey) break;
-    if (hasExistingPiAuth(selectedModel.provider)) break;
+    if (hasProviderAuth(selectedProvider.provider, createPiRuntime())) break;
 
-    const oauthProvider = getOAuthProviderForModelProvider(selectedModel.provider);
-    const supportsInternalLogin = oauthProvider !== selectedModel.provider || ["anthropic", "openai-codex", "google-gemini-cli", "google-antigravity", "github-copilot"].includes(oauthProvider);
-    if (!supportsInternalLogin) {
-      console.log(`No existing Pi auth found for ${selectedModel.provider}. This provider requires an API key.`);
+    if (!providerSupportsOAuth) {
+      console.log(`No existing Pi auth found for ${selectedProvider.provider}. This provider requires an API key.`);
       continue;
     }
 
-    console.log(`No existing Pi auth found for ${selectedModel.provider}. Starting internal Pi login...`);
+    console.log(`No existing Pi auth found for ${selectedProvider.provider}. Starting internal Pi login...`);
     try {
-      await runInternalPiLogin(selectedModel.provider, rl);
+      await runInternalPiLogin(selectedProvider.provider, rl);
     } catch (error) {
       console.log(`Internal Pi login failed: ${error instanceof Error ? error.message : String(error)}`);
     }
 
-    if (hasExistingPiAuth(selectedModel.provider)) {
-      console.log(`Detected Pi auth for ${selectedModel.provider}. Continuing bootstrap.`);
+    if (hasProviderAuth(selectedProvider.provider, createPiRuntime())) {
+      console.log(`Detected Pi auth for ${selectedProvider.provider}. Continuing bootstrap.`);
       break;
     }
 
-    console.log(`Pi auth for ${selectedModel.provider} is still missing after login.`);
+    console.log(`Pi auth for ${selectedProvider.provider} is still missing after login.`);
   }
 
   const config = {
@@ -198,7 +156,7 @@ export async function bootstrapIfNeeded({ force = false } = {}) {
       authorizedChatIds: []
     },
     pi: {
-      provider: selectedModel.provider,
+      provider: selectedProvider.provider,
       model: selectedModel.id,
       apiKey: piApiKey
     },

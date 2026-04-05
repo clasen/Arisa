@@ -1,7 +1,6 @@
 import { mkdir, writeFile } from "node:fs/promises";
 import path from "node:path";
-
-const inboxDir = path.resolve("data/inbox");
+import { inboxDir } from "../../runtime/paths.js";
 
 async function downloadToFile(ctx, fileId, fileName) {
   await mkdir(inboxDir, { recursive: true });

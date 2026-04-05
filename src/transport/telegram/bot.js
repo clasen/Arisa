@@ -97,7 +97,7 @@ export async function createTelegramBot({ config, artifactStore, toolRegistry, a
     const { transcript, toolResult } = await maybeTranscribeIncomingAudio({ artifact, toolRegistry, artifactStore });
     if (artifact?.kind === "audio" && !transcript) {
       if (toolResult?.missingConfig?.includes("OPENAI_API_KEY")) {
-        throw new Error("I need the OpenAI API key for cli/openai-transcribe/config.js before I can transcribe incoming audio.");
+        throw new Error("I need the OpenAI API key for ~/.arisa/tools/openai-transcribe/config.js before I can transcribe incoming audio.");
       }
       throw new Error(toolResult?.error || "Audio transcription failed.");
     }

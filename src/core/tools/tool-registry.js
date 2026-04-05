@@ -1,6 +1,8 @@
-import { readdir, readFile, writeFile, unlink } from "node:fs/promises";
+import { mkdir, readdir, readFile, unlink, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { spawn } from "node:child_process";
+import { getToolConfigPath, getToolTmpDir } from "../../runtime/paths.js";
+import { loadToolConfig, parseConfigModule, writeToolConfig } from "./tool-config.js";
 
 const cliRoot = path.resolve("cli");
 
@@ -13,16 +15,6 @@ function runProcess(command, args, options = {}) {
     child.stderr.on("data", (d) => { stderr += d.toString(); });
     child.on("close", (code) => resolve({ code, stdout, stderr }));
   });
-}
-
-function parseConfigModule(source) {
-  const normalized = source.replace(/^export\s+default/, "return");
-  return new Function(normalized)();
-}
-
-function serializeConfigModule(config) {
-  const lines = Object.entries(config).map(([key, value]) => `  ${key}: ${JSON.stringify(value)}`);
-  return `export default {\n${lines.join(",\n")}\n};\n`;
 }
 
 export class ToolRegistry {
@@ -47,12 +39,15 @@ export class ToolRegistry {
       try {
         const manifest = JSON.parse(await readFile(manifestPath, "utf8"));
         const configSource = await readFile(configPath, "utf8");
-        const config = parseConfigModule(configSource);
+        const defaults = parseConfigModule(configSource);
+        const config = await loadToolConfig(manifest.name, defaults);
         this.tools.set(manifest.name, {
           ...manifest,
           dir: toolDir,
           entry: path.join(toolDir, manifest.entry || "index.js"),
-          configPath,
+          localConfigPath: configPath,
+          configPath: getToolConfigPath(manifest.name),
+          defaults,
           config
         });
       } catch {
@@ -87,15 +82,18 @@ export class ToolRegistry {
     if (!tool) throw new Error(`Tool not found: ${name}`);
     const config = { ...(tool.config || {}) };
     config[field] = value;
-    await writeFile(tool.configPath, serializeConfigModule(config), "utf8");
+    const configPath = await writeToolConfig(name, config);
     tool.config = config;
-    return { ok: true, tool: name, field, configPath: tool.configPath };
+    tool.configPath = configPath;
+    return { ok: true, tool: name, field, configPath };
   }
 
   async run({ name, request }) {
     const tool = this.get(name);
     if (!tool) throw new Error(`Tool not found: ${name}`);
-    const requestFile = path.join(tool.dir, `.request-${Date.now()}.json`);
+    const tmpDir = getToolTmpDir(name);
+    await mkdir(tmpDir, { recursive: true });
+    const requestFile = path.join(tmpDir, `.request-${Date.now()}.json`);
     await writeFile(requestFile, `${JSON.stringify(request, null, 2)}\n`, "utf8");
     const result = await runProcess("node", [tool.entry, "run", "--request-file", requestFile], {
       cwd: tool.dir,
