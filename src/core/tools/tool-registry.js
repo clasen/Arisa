@@ -4,7 +4,7 @@ import { spawn } from "node:child_process";
 import { getToolConfigPath, getToolTmpDir } from "../../runtime/paths.js";
 import { loadToolConfig, parseConfigModule, writeToolConfig } from "./tool-config.js";
 
-const cliRoot = path.resolve("cli");
+const toolsRoot = path.resolve("tools");
 
 function runProcess(command, args, options = {}) {
   return new Promise((resolve) => {
@@ -24,16 +24,17 @@ export class ToolRegistry {
 
   async load() {
     this.tools.clear();
+
     let entries = [];
     try {
-      entries = await readdir(cliRoot, { withFileTypes: true });
+      entries = await readdir(toolsRoot, { withFileTypes: true });
     } catch {
       return;
     }
 
     for (const entry of entries) {
       if (!entry.isDirectory()) continue;
-      const toolDir = path.join(cliRoot, entry.name);
+      const toolDir = path.join(toolsRoot, entry.name);
       const manifestPath = path.join(toolDir, "tool.manifest.json");
       const configPath = path.join(toolDir, "config.js");
       try {

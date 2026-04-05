@@ -46,7 +46,7 @@ This distinction is important. Some transformations belong to the transport/inpu
 - media is stored as artifacts
 
 ### Tool model
-Each tool lives in its own folder under `cli/<tool-name>` and contains:
+Each tool lives in its own folder under `tools/<tool-name>` and contains:
 
 - `package.json`
 - `config.js`
@@ -57,7 +57,7 @@ Each tool is isolated from the root project and from other tools.
 That isolation is part of the architecture:
 
 - each tool has its own folder
-- each tool keeps its own `config.js`
+- each tool has a local `config.js` only for defaults/template values
 - each tool can have its own dependencies
 - one tool can be changed or replaced without tightly coupling the rest of the system
 
@@ -74,6 +74,7 @@ node index.js run --request-file <json>
 - artifact index is stored in `~/.arisa/state/artifacts.json`
 - incoming Telegram attachments are stored directly in `~/.arisa/artifacts/`
 - tool-specific secrets/config live in `~/.arisa/tools/<tool>/config.js`
+- bundled tools and generated tools should both use the same source layout under `tools/<tool>/`
 - tool runtime temp files and generated outputs live in `~/.arisa/tmp/tools/<tool>/`
 - durable files should end up in `~/.arisa/artifacts/`
 - Pi authentication can use either:
@@ -146,7 +147,7 @@ src/
   runtime/      bootstrap + app startup
   transport/    Telegram integration
   core/         agent, tools, artifacts, config
-cli/
+tools/
   openai-transcribe/
   openai-tts/
 ~/.arisa/

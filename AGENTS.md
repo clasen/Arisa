@@ -5,7 +5,7 @@
 - `src/core/agent/*`: Pi Agent sessions, one per authorized chat.
 - `src/core/artifacts/*`: every incoming or generated message/file becomes an artifact.
 - `src/core/tools/*`: CLI tool registry, help lookup, config writes, execution.
-- `cli/*`: isolated tools. Each tool has `package.json`, `config.js`, `tool.manifest.json`, and `index.js`.
+- `tools/*`: isolated tools. Each tool has `package.json`, `config.js`, `tool.manifest.json`, and `index.js`.
 
 ## Main rule: everything is piped through artifacts
 A pipe transforms one input artifact into one output artifact.
@@ -70,7 +70,7 @@ Example manual pipe:
 ## Missing config flow
 If `run_tool` returns `missingConfig`, the agent should:
 1. ask the user naturally in Telegram for the missing value
-2. write the value into `cli/<tool>/config.js` with `set_tool_config`
+2. write the value into `~/.arisa/tools/<tool>/config.js` with `set_tool_config`
 3. retry the tool
 
 Do not assume a rigid question/answer protocol. Continue the conversation naturally and infer the config value from the user reply when possible.
@@ -83,7 +83,7 @@ Do not assume a rigid question/answer protocol. Continue the conversation natura
 ## Tool creation
 Do not assume specific future tools such as YouTube support exist.
 If the user asks for a capability that is not currently available, first check whether an existing registered tool can satisfy the task.
-If no existing tool can do it, the default attitude should be to propose creating a new CLI tool under `cli/<tool-name>` following the project conventions.
+If no existing tool can do it, the default attitude should be to propose creating a new CLI tool under `tools/<tool-name>` following the project conventions.
 All newly created tools must document their help text, usage instructions, manifests, and user-facing operational strings in English.
 Do not stop at "I cannot do that" when the task is realistically implementable through a new tool.
 Prefer responses like:
@@ -101,7 +101,7 @@ When creating or editing tools, follow the shared path helpers in `src/runtime/p
 Consult the local skill for that workflow when building new tools.
 
 ## Safety
-- Do not install or run arbitrary tools outside registered `cli/*` manifests in V1.
+- Do not install or run arbitrary tools outside registered `tools/*` manifests in V1.
 - Prefer tool manifests and CLI help over assumptions.
 - Keep tool configs inside `~/.arisa/tools/<tool>/config.js`.
 - Be proactive about extending capabilities, but do it through the project's tool architecture, not through ad hoc one-off behavior.

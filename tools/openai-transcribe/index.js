@@ -1,3 +1,4 @@
+import path from "node:path";
 import { readFile, stat } from "node:fs/promises";
 import defaults from "./config.js";
 import { loadToolConfig } from "../../src/core/tools/tool-config.js";

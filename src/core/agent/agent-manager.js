@@ -3,8 +3,7 @@ import { mkdir, unlink } from "node:fs/promises";
 import { createAgentSession, SessionManager, defineTool } from "@mariozechner/pi-coding-agent";
 import { Type } from "@sinclair/typebox";
 import { createPiRuntime, hasProviderAuth } from "./pi-runtime.js";
-
-const agentDir = path.resolve("data/pi-agent");
+import { getChatDir, piAgentDir as agentDir } from "../../runtime/paths.js";
 
 export class AgentManager {
   constructor({ config, artifactStore, toolRegistry }) {
@@ -55,7 +54,7 @@ export class AgentManager {
       throw new Error(`No auth found for ${this.config.pi.provider}. Re-run bootstrap and complete login for this provider before Telegram starts.`);
     }
 
-    const cwd = path.resolve("data/chats", String(chatId));
+    const cwd = getChatDir(chatId);
     await mkdir(cwd, { recursive: true });
 
     const customTools = this.createTools(telegram);
