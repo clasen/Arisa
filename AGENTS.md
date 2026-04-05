@@ -84,6 +84,7 @@ Do not assume a rigid question/answer protocol. Continue the conversation natura
 Do not assume specific future tools such as YouTube support exist.
 If the user asks for a capability that is not currently available, first check whether an existing registered tool can satisfy the task.
 If no existing tool can do it, the default attitude should be to propose creating a new CLI tool under `cli/<tool-name>` following the project conventions.
+All newly created tools must document their help text, usage instructions, manifests, and user-facing operational strings in English.
 Do not stop at "I cannot do that" when the task is realistically implementable through a new tool.
 Prefer responses like:
 - identify that no current tool satisfies the request
