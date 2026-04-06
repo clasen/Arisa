@@ -1,10 +1,15 @@
 import { mkdir, readdir, readFile, unlink, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { spawn } from "node:child_process";
-import { getToolConfigPath, getToolTmpDir } from "../../runtime/paths.js";
+import { fileURLToPath } from "node:url";
+import { getToolConfigPath, getToolTmpDir, toolsDir as userToolsRoot } from "../../runtime/paths.js";
 import { loadToolConfig, parseConfigModule, writeToolConfig } from "./tool-config.js";
 
-const toolsRoot = path.resolve("tools");
+const bundledToolsRoot = fileURLToPath(new URL("../../../tools", import.meta.url));
+const toolRoots = [
+  { root: userToolsRoot, kind: "user" },
+  { root: bundledToolsRoot, kind: "bundled" }
+];
 
 function runProcess(command, args, options = {}) {
   return new Promise((resolve) => {
@@ -26,35 +31,39 @@ export class ToolRegistry {
   async load() {
     this.tools.clear();
 
-    let entries = [];
-    try {
-      entries = await readdir(toolsRoot, { withFileTypes: true });
-    } catch {
-      this.logger?.log("tools", `tools directory not found: ${toolsRoot}`);
-      return;
-    }
-
-    for (const entry of entries) {
-      if (!entry.isDirectory()) continue;
-      const toolDir = path.join(toolsRoot, entry.name);
-      const manifestPath = path.join(toolDir, "tool.manifest.json");
-      const configPath = path.join(toolDir, "config.js");
+    for (const { root, kind } of toolRoots) {
+      let entries = [];
       try {
-        const manifest = JSON.parse(await readFile(manifestPath, "utf8"));
-        const configSource = await readFile(configPath, "utf8");
-        const defaults = parseConfigModule(configSource);
-        const config = await loadToolConfig(manifest.name, defaults);
-        this.tools.set(manifest.name, {
-          ...manifest,
-          dir: toolDir,
-          entry: path.join(toolDir, manifest.entry || "index.js"),
-          localConfigPath: configPath,
-          configPath: getToolConfigPath(manifest.name),
-          defaults,
-          config
-        });
+        entries = await readdir(root, { withFileTypes: true });
       } catch {
-        // ignore invalid tool dirs in v1
+        this.logger?.log("tools", `${kind} tools directory not found: ${root}`);
+        continue;
+      }
+
+      for (const entry of entries) {
+        if (!entry.isDirectory()) continue;
+        const toolDir = path.join(root, entry.name);
+        const manifestPath = path.join(toolDir, "tool.manifest.json");
+        const configPath = path.join(toolDir, "config.js");
+        try {
+          const manifest = JSON.parse(await readFile(manifestPath, "utf8"));
+          if (this.tools.has(manifest.name)) continue;
+          const configSource = await readFile(configPath, "utf8");
+          const defaults = parseConfigModule(configSource);
+          const config = await loadToolConfig(manifest.name, defaults);
+          this.tools.set(manifest.name, {
+            ...manifest,
+            dir: toolDir,
+            entry: path.join(toolDir, manifest.entry || "index.js"),
+            localConfigPath: configPath,
+            configPath: getToolConfigPath(manifest.name),
+            defaults,
+            config,
+            sourceKind: kind
+          });
+        } catch {
+          // ignore invalid tool dirs in v1
+        }
       }
     }
 

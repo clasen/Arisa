@@ -10,7 +10,7 @@ export const serviceLogFile = path.join(stateDir, "arisa.log");
 export const artifactsDir = path.join(arisaHomeDir, "artifacts");
 export const artifactsIndexFile = path.join(stateDir, "artifacts.json");
 export const piAgentDir = path.join(stateDir, "pi-agent");
-export const chatsDir = path.join(stateDir, "chats");
+export const chatsDir = path.join(arisaHomeDir, "chats");
 export const toolsDir = path.join(arisaHomeDir, "tools");
 export const tmpDir = path.join(arisaHomeDir, "tmp");
 
@@ -27,7 +27,7 @@ export function getToolConfigPath(toolName) {
 }
 
 export function getToolRuntimeDir(toolName) {
-  return path.join(tmpDir, "tools", toolName);
+  return getToolDir(toolName);
 }
 
 export function getToolOutDir(toolName) {

@@ -1,11 +1,11 @@
 # Arisa AGENTS
 
 ## Architecture
-- `src/transport/telegram/*`: Telegram inbound and outbound transport.
-- `src/core/agent/*`: Pi Agent sessions, one per authorized chat.
-- `src/core/artifacts/*`: every incoming or generated message/file becomes an artifact.
-- `src/core/tools/*`: CLI tool registry, help lookup, config writes, execution.
-- `tools/*`: isolated tools. Each tool has `package.json`, `config.js`, `tool.manifest.json`, and `index.js`.
+- Telegram transport handles inbound and outbound messaging.
+- Pi Agent keeps one session per authorized chat.
+- Every incoming or generated message or file becomes an artifact.
+- A tool registry handles tool discovery, help lookup, config writes, and execution.
+- Tools are isolated and each one has its own manifest, entrypoint, and config defaults.
 
 ## Main rule: everything is piped through artifacts
 A pipe transforms one input artifact into one output artifact.
@@ -70,27 +70,14 @@ Example manual pipe:
 ## Missing config flow
 If `run_tool` returns `missingConfig`, the agent should:
 1. ask the user naturally in Telegram for the missing value
-2. write the value into `~/.arisa/tools/<tool>/config.js` with `set_tool_config`
+2. write the value with `set_tool_config`
 3. retry the tool
 
 Do not assume a rigid question/answer protocol. Continue the conversation naturally and infer the config value from the user reply when possible.
 
-## Long-running work
-If a task is likely to take noticeable time — for example creating a new tool, editing multiple files, or doing multi-step work — the agent should first acknowledge the request briefly and naturally, then continue the work.
-
-The acknowledgment should:
-- be short and clear
-- tell the user the work is starting
-- mention when the task may take a while
-
-Examples:
-- "Understood. I'll build that tool now. This may take a couple of minutes."
-- "Got it. I'll inspect the project and make the change now."
-
 ## Tool creation
-Do not assume specific future tools such as YouTube support exist.
 If the user asks for a capability that is not currently available, first check whether an existing registered tool can satisfy the task.
-If no existing tool can do it, the default attitude should be to propose creating a new CLI tool under `tools/<tool-name>` following the project conventions.
+If no existing tool can do it, the default attitude should be to propose creating a new CLI tool following the project conventions.
 All newly created tools must document their help text, usage instructions, manifests, and user-facing operational strings in English.
 Do not stop at "I cannot do that" when the task is realistically implementable through a new tool.
 Prefer responses like:
@@ -100,15 +87,11 @@ Prefer responses like:
 
 For example, if the user asks for live weather and no weather tool exists, the correct attitude is to propose building a weather tool for the bot rather than only saying real-time access is unavailable.
 
-When creating or editing tools, follow the shared path helpers in `src/runtime/paths.js` and `src/core/tools/tool-config.js`:
-- config in `~/.arisa/tools/<tool>/config.js`
-- temp/runtime files in `~/.arisa/tmp/tools/<tool>/`
-- durable generated files should become artifacts in `~/.arisa/artifacts/`
-
+When creating or editing tools, use the shared path helpers and the runtime paths provided in the prompt instead of assuming fixed locations.
 Consult the local skill for that workflow when building new tools.
 
 ## Safety
-- Do not install or run arbitrary tools outside registered `tools/*` manifests in V1.
+- Do not install or run arbitrary tools outside registered tool manifests in V1.
 - Prefer tool manifests and CLI help over assumptions.
-- Keep tool configs inside `~/.arisa/tools/<tool>/config.js`.
+- Keep tool config and runtime data inside the user runtime area.
 - Be proactive about extending capabilities, but do it through the project's tool architecture, not through ad hoc one-off behavior.

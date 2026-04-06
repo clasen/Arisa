@@ -46,7 +46,9 @@ This distinction is important. Some transformations belong to the transport/inpu
 - media is stored as artifacts
 
 ### Tool model
-Each tool lives in its own folder under `tools/<tool-name>` and contains:
+Bundled tools live under `<arisa-install-dir>/tools/<tool-name>` and user-created tools live under `~/.arisa/tools/<tool-name>`.
+
+Each tool folder contains:
 
 - `package.json`
 - `config.js`
@@ -57,7 +59,8 @@ Each tool is isolated from the root project and from other tools.
 That isolation is part of the architecture:
 
 - each tool has its own folder
-- each tool has a local `config.js` only for defaults/template values
+- bundled tools have a local `config.js` for defaults/template values
+- user-created tools can live entirely inside `~/.arisa/tools/<tool>/`
 - each tool can have its own dependencies
 - one tool can be changed or replaced without tightly coupling the rest of the system
 
@@ -74,8 +77,8 @@ node index.js run --request-file <json>
 - artifact index is stored in `~/.arisa/state/artifacts.json`
 - incoming Telegram attachments are stored directly in `~/.arisa/artifacts/`
 - tool-specific secrets/config live in `~/.arisa/tools/<tool>/config.js`
-- bundled tools and generated tools should both use the same source layout under `tools/<tool>/`
-- tool runtime temp files and generated outputs live in `~/.arisa/tmp/tools/<tool>/`
+- user-created tools also live under `~/.arisa/tools/<tool>/`
+- tool runtime temp files and generated outputs live under `~/.arisa/tools/<tool>/` (for example `tmp/` and `out/`)
 - durable files should end up in `~/.arisa/artifacts/`
 - Pi authentication can use either:
   - an API key entered during bootstrap

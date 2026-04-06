@@ -4,6 +4,7 @@ import { createAgentSession, SessionManager, defineTool } from "@mariozechner/pi
 import { Type } from "@sinclair/typebox";
 import { createPiRuntime, hasProviderAuth } from "./pi-runtime.js";
 import { loadProjectInstructions } from "./project-instructions.js";
+import { buildAgentRuntimeContext } from "./runtime-context.js";
 import { getChatDir, piAgentDir as agentDir } from "../../runtime/paths.js";
 
 export class AgentManager {
@@ -76,8 +77,10 @@ export class AgentManager {
     });
 
     const instructions = await loadProjectInstructions();
+    const runtimeContext = buildAgentRuntimeContext(chatId);
     this.logger?.log("agent", `injecting project instructions for chat ${chatId}`);
-    await session.prompt(`${instructions}\n\nAcknowledge with exactly: OK`);
+    this.logger?.log("agent", `runtime context for chat ${chatId}:\n${runtimeContext}`);
+    await session.prompt(`${instructions}\n\n${runtimeContext}\n\nAcknowledge with exactly: OK`);
 
     const ctx = { session };
     this.sessions.set(chatId, ctx);
