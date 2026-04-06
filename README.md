@@ -6,11 +6,11 @@ Arisa is a personal Telegram assistant powered by Pi Agent.
 
 The initial inspiration was [OpenClaw](https://github.com/openclaw/openclaw). OpenClaw has interesting ideas but carries too much weight: when it generates tools they end up disorganized, and the overall framework feels overloaded for personal use.
 
-The real heart of OpenClaw is Pi Agent — a [minimal terminal coding harness](https://www.youtube.com/watch?v=Dli5slNaJu0) that lets an AI agent reason and act with very little infrastructure. That part is genuinely good.
+The real heart of OpenClaw is Pi Agent: a [minimal terminal coding harness](https://www.youtube.com/watch?v=Dli5slNaJu0) that lets an AI agent reason and act with very little infrastructure. That part is genuinely good.
 
 Telegram bots, on the other hand, work extremely well as a human interface. Simple, reliable, always in your pocket.
 
-So Arisa keeps exactly those two things — Pi Agent and Telegram — and nothing more. No pre-loaded opinions about what the agent should do or which tools it should have. The idea is that the agent builds itself around the user, not the other way around.
+So Arisa keeps exactly those two things (Pi Agent & Telegram) and nothing more. No pre-loaded opinions about what the agent should do or which tools it should have. The idea is that the agent builds itself around the user, not the other way around.
 
 It is designed around a simple idea:
 
@@ -169,7 +169,9 @@ tools/
 
 ## Philosophy
 
-The agent should not come preloaded with vices or assumptions. It starts minimal and grows through real use — shaped by the user, not by the framework.
+The agent should not come preloaded with vices or assumptions. It starts minimal and grows through real use: shaped by the user, not by the framework.
+
+For consistency, the entire Arisa codebase was built using Pi Agent itself, running on Codex: the model bundled with ChatGPT Plus. The goal was to see how far a model that most people already have access to could go when given a good harness. The experience was genuinely satisfying: having the agent reason about, extend, and improve its own system is exactly the kind of recursive loop the project is designed for.
 
 When a capability is missing:
 
