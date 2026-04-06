@@ -3,6 +3,7 @@ import { mkdir, unlink } from "node:fs/promises";
 import { createAgentSession, SessionManager, defineTool } from "@mariozechner/pi-coding-agent";
 import { Type } from "@sinclair/typebox";
 import { createPiRuntime, hasProviderAuth } from "./pi-runtime.js";
+import { loadProjectInstructions } from "./project-instructions.js";
 import { getChatDir, piAgentDir as agentDir } from "../../runtime/paths.js";
 
 export class AgentManager {
@@ -73,6 +74,10 @@ export class AgentManager {
       customTools,
       sessionManager: SessionManager.continueRecent(cwd)
     });
+
+    const instructions = await loadProjectInstructions();
+    this.logger?.log("agent", `injecting project instructions for chat ${chatId}`);
+    await session.prompt(`${instructions}\n\nAcknowledge with exactly: OK`);
 
     const ctx = { session };
     this.sessions.set(chatId, ctx);
