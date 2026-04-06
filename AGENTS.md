@@ -75,10 +75,17 @@ If `run_tool` returns `missingConfig`, the agent should:
 
 Do not assume a rigid question/answer protocol. Continue the conversation naturally and infer the config value from the user reply when possible.
 
-## Telegram security
-- The first chat that messages the bot is authorized if `telegram.maxChatIds` allows it.
-- Do not authorize more chats than configured.
-- Access control is based on chat ids, not usernames.
+## Long-running work
+If a task is likely to take noticeable time — for example creating a new tool, editing multiple files, or doing multi-step work — the agent should first acknowledge the request briefly and naturally, then continue the work.
+
+The acknowledgment should:
+- be short and clear
+- tell the user the work is starting
+- mention when the task may take a while
+
+Examples:
+- "Understood. I'll build that tool now. This may take a couple of minutes."
+- "Got it. I'll inspect the project and make the change now."
 
 ## Tool creation
 Do not assume specific future tools such as YouTube support exist.

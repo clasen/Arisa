@@ -5,6 +5,8 @@ import path from "node:path";
 export const arisaHomeDir = path.join(os.homedir(), ".arisa");
 export const stateDir = path.join(arisaHomeDir, "state");
 export const configFile = path.join(stateDir, "config.json");
+export const servicePidFile = path.join(stateDir, "arisa.pid");
+export const serviceLogFile = path.join(stateDir, "arisa.log");
 export const artifactsDir = path.join(arisaHomeDir, "artifacts");
 export const artifactsIndexFile = path.join(stateDir, "artifacts.json");
 export const piAgentDir = path.join(stateDir, "pi-agent");

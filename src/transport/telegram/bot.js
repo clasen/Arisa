@@ -115,6 +115,15 @@ export async function createTelegramBot({ config, artifactStore, toolRegistry, a
   const bot = new Bot(config.telegram.apiKey);
   const perChatState = new Map();
 
+  function getIncomingChatMeta(ctx) {
+    return {
+      languageCode: ctx.from?.language_code || "",
+      username: ctx.from?.username || "",
+      firstName: ctx.from?.first_name || "",
+      lastName: ctx.from?.last_name || ""
+    };
+  }
+
   function getChatState(chatId) {
     if (!perChatState.has(chatId)) {
       perChatState.set(chatId, { processing: false, nextPrompt: "" });
@@ -137,6 +146,13 @@ export async function createTelegramBot({ config, artifactStore, toolRegistry, a
     return buildPrompt({ ctx, artifact, transcript });
   }
 
+  async function sendTextReply(send, chatId, text) {
+    logger?.log("telegram", `sending text reply for chat ${chatId}`);
+    for (const chunk of splitTelegramText(text)) {
+      await send(renderTelegramHtml(chunk), { parse_mode: "HTML" });
+    }
+  }
+
   async function processPrompt(ctx, prompt) {
     const telegram = {
       sendMedia: async (filePath, { method = "audio", caption } = {}) => {
@@ -151,10 +167,7 @@ export async function createTelegramBot({ config, artifactStore, toolRegistry, a
       const { session } = await agentManager.getSessionContext(ctx.chat.id, telegram);
       const text = await collectText(session, prompt);
       if (text) {
-        logger?.log("telegram", `sending text reply for chat ${ctx.chat.id}`);
-        for (const chunk of splitTelegramText(text)) {
-          await ctx.reply(renderTelegramHtml(chunk), { parse_mode: "HTML" });
-        }
+        await sendTextReply((message, extra) => ctx.reply(message, extra), ctx.chat.id, text);
       }
     });
   }
@@ -198,51 +211,14 @@ export async function createTelegramBot({ config, artifactStore, toolRegistry, a
   });
 
   bot.command("start", async (ctx) => {
-    const auth = await authorizeChat({ config, chatId: ctx.chat.id, saveConfig });
-    if (!auth.ok) return ctx.reply("Private bot. Access denied.");
+    const auth = await authorizeChat({ config, chatId: ctx.chat.id, saveConfig, chatMeta: getIncomingChatMeta(ctx) });
+    if (!auth.ok) return;
     return ctx.reply(auth.firstTime ? "This chat is now authorized for Arisa." : "Arisa is ready.");
   });
 
-  bot.command("pi_api_key", async (ctx) => {
-    const auth = await authorizeChat({ config, chatId: ctx.chat.id, saveConfig });
-    if (!auth.ok) return ctx.reply("Private bot. Access denied.");
-
-    const apiKey = ctx.match?.trim();
-    if (!apiKey) {
-      return ctx.reply("Usage: /pi_api_key <your_api_key>");
-    }
-
-    const nextConfig = await updateConfig((current) => {
-      current.pi.apiKey = apiKey;
-    });
-    config.pi.apiKey = nextConfig.pi.apiKey;
-    agentManager.setConfig(nextConfig);
-    return ctx.reply(`Saved Pi API key for ${nextConfig.pi.provider}.`);
-  });
-
-  bot.command("pi_model", async (ctx) => {
-    const auth = await authorizeChat({ config, chatId: ctx.chat.id, saveConfig });
-    if (!auth.ok) return ctx.reply("Private bot. Access denied.");
-
-    const value = ctx.match?.trim();
-    if (!value || !value.includes("/")) {
-      return ctx.reply("Usage: /pi_model <provider/model>");
-    }
-
-    const [provider, model] = value.split("/");
-    const nextConfig = await updateConfig((current) => {
-      current.pi.provider = provider.trim();
-      current.pi.model = model.trim();
-    });
-    config.pi.provider = nextConfig.pi.provider;
-    config.pi.model = nextConfig.pi.model;
-    agentManager.setConfig(nextConfig);
-    return ctx.reply(`Saved Pi model ${nextConfig.pi.provider}/${nextConfig.pi.model}.`);
-  });
-
   bot.on("message", async (ctx) => {
-    const auth = await authorizeChat({ config, chatId: ctx.chat.id, saveConfig });
-    if (!auth.ok) return ctx.reply("Private bot. Access denied.");
+    const auth = await authorizeChat({ config, chatId: ctx.chat.id, saveConfig, chatMeta: getIncomingChatMeta(ctx) });
+    if (!auth.ok) return;
 
     try {
       await enqueueOrProcess(ctx);
@@ -256,6 +232,40 @@ export async function createTelegramBot({ config, artifactStore, toolRegistry, a
 
   return {
     async start() {
+      config.telegram.chatMeta ||= {};
+      for (const chatId of config.telegram.authorizedChatIds || []) {
+        try {
+          logger?.log("telegram", `generating startup message for chat ${chatId}`);
+          const chatMeta = config.telegram.chatMeta[chatId] || {};
+          const telegram = {
+            sendMedia: async (filePath, { method = "audio", caption } = {}) => {
+              logger?.log("telegram", `sending ${method} reply for chat ${chatId}`);
+              const input = new InputFile(filePath);
+              if (method === "voice") return bot.api.sendVoice(chatId, input, { caption });
+              if (method === "document") return bot.api.sendDocument(chatId, input, { caption });
+              return bot.api.sendAudio(chatId, input, { caption });
+            }
+          };
+          const { session } = await agentManager.getSessionContext(chatId, telegram);
+          const welcomePrompt = [
+            "System event: Arisa has just started.",
+            `chatId: ${chatId}`,
+            `preferredTelegramLanguageCode: ${chatMeta.languageCode || "unknown"}`,
+            chatMeta.username ? `username: ${chatMeta.username}` : null,
+            chatMeta.firstName ? `firstName: ${chatMeta.firstName}` : null,
+            "Send a short welcome-back message for Telegram.",
+            "Keep it brief, warm, and natural.",
+            "Use the user's Telegram language when possible.",
+            "Do not mention internal implementation details."
+          ].filter(Boolean).join("\n");
+          const text = await collectText(session, welcomePrompt);
+          if (text) {
+            await sendTextReply((message, extra) => bot.api.sendMessage(chatId, message, extra), chatId, text);
+          }
+        } catch (error) {
+          logger?.log("telegram", `startup message failed for chat ${chatId}: ${error instanceof Error ? error.message : String(error)}`);
+        }
+      }
       logger?.log("telegram", "bot polling started");
       await bot.start();
     }

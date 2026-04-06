@@ -15,6 +15,23 @@ async function exists(file) {
   }
 }
 
+function sortBootstrapModels(provider, models) {
+  const preferred = {
+    "openai-codex": ["gpt-5.4"]
+  };
+
+  const priority = preferred[provider] || [];
+  const positions = new Map(models.map((model, index) => [model.id, index]));
+
+  return [...models].sort((a, b) => {
+    const aIndex = priority.indexOf(a.id);
+    const bIndex = priority.indexOf(b.id);
+    const aRank = aIndex === -1 ? Number.MAX_SAFE_INTEGER : aIndex;
+    const bRank = bIndex === -1 ? Number.MAX_SAFE_INTEGER : bIndex;
+    if (aRank !== bRank) return aRank - bRank;
+    return (positions.get(b.id) || 0) - (positions.get(a.id) || 0);
+  });
+}
 
 async function maybeOpenExternal(url) {
   if (!url) return;
@@ -105,7 +122,7 @@ export async function bootstrapIfNeeded({ force = false } = {}) {
 
   const selectedProviderIndex = Number(await ask("Select Pi provider by number", "1"));
   const selectedProvider = providers[Math.max(0, Math.min(providers.length - 1, selectedProviderIndex - 1))];
-  const models = listProviderModels(selectedProvider.provider, runtime);
+  const models = sortBootstrapModels(selectedProvider.provider, listProviderModels(selectedProvider.provider, runtime));
   console.log(`\nAvailable models for ${selectedProvider.provider}:`);
   models.forEach((model, index) => {
     const capabilities = [model.reasoning ? "reasoning" : null, model.input?.includes("image") ? "image" : null].filter(Boolean).join(", ");
@@ -153,7 +170,8 @@ export async function bootstrapIfNeeded({ force = false } = {}) {
     telegram: {
       apiKey: telegramApiKey,
       maxChatIds: telegramMaxChatIds,
-      authorizedChatIds: []
+      authorizedChatIds: [],
+      chatMeta: {}
     },
     pi: {
       provider: selectedProvider.provider,

@@ -93,6 +93,16 @@ Then run:
 arisa
 ```
 
+Command modes:
+
+```bash
+arisa            # foreground, blocking
+arisa start      # start in background
+arisa stop       # stop background service
+arisa status     # show background service status
+arisa flush      # remove ~/.arisa
+```
+
 ## Bootstrap flow
 
 On first run, Arisa will:
