@@ -108,6 +108,17 @@ arisa install <source>   # install a Pi package into Arisa's runtime
 arisa remove <source>    # remove a Pi package from Arisa's runtime
 ```
 
+## Experimental features
+
+### Pi Agent packages
+
+Arisa can install **Pi Agent packages** from the public registry into your user runtime (`~/.arisa/`), using the same package manager as Pi Agent. Browse and discover packages at [pi.dev/packages](https://pi.dev/packages).
+
+- `arisa install <source>` installs a package (by registry name or other source supported by Pi).
+- `arisa remove <source>` removes a previously installed package.
+
+Treat this as **experimental**: the registry, package formats, and install behavior follow Pi Agent and may change. Not every listed package is tailored to Arisa’s Telegram transport and artifact-based tools; prefer packages you understand and verify after install.
+
 ## Bootstrap flow
 
 On first run, Arisa will:

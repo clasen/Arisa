@@ -1,4 +1,5 @@
 import { Bot, InputFile } from "grammy";
+import path from "node:path";
 import { authorizeChat } from "./auth.js";
 import { captureIncomingArtifact } from "./media.js";
 import { renderTelegramHtml, splitTelegramText } from "./text-format.js";
@@ -146,10 +147,28 @@ export async function createTelegramBot({ config, artifactStore, toolRegistry, a
     return buildPrompt({ ctx, artifact, transcript });
   }
 
-  async function sendTextReply(send, chatId, text) {
+  async function sendTextReply({ sendText, sendDocument, chatId, text }) {
+    const attachmentThreshold = 12000;
+
+    if (text.length > attachmentThreshold) {
+      logger?.log("telegram", `sending long reply as markdown attachment for chat ${chatId}`);
+      const artifact = await artifactStore.createGeneratedFile({
+        fileName: `reply-${Date.now()}.md`,
+        content: text,
+        kind: "document",
+        mimeType: "text/markdown",
+        source: { type: "assistant", chatId },
+        metadata: { delivery: "telegram-document" }
+      });
+      await sendDocument(new InputFile(artifact.path, path.basename(artifact.path)), {
+        caption: "Response attached as Markdown."
+      });
+      return;
+    }
+
     logger?.log("telegram", `sending text reply for chat ${chatId}`);
     for (const chunk of splitTelegramText(text)) {
-      await send(renderTelegramHtml(chunk), { parse_mode: "HTML" });
+      await sendText(renderTelegramHtml(chunk), { parse_mode: "HTML" });
     }
   }
 
@@ -167,7 +186,12 @@ export async function createTelegramBot({ config, artifactStore, toolRegistry, a
       const { session } = await agentManager.getSessionContext(ctx.chat.id, telegram);
       const text = await collectText(session, prompt);
       if (text) {
-        await sendTextReply((message, extra) => ctx.reply(message, extra), ctx.chat.id, text);
+        await sendTextReply({
+          sendText: (message, extra) => ctx.reply(message, extra),
+          sendDocument: (file, extra) => ctx.replyWithDocument(file, extra),
+          chatId: ctx.chat.id,
+          text
+        });
       }
     });
   }
@@ -260,7 +284,12 @@ export async function createTelegramBot({ config, artifactStore, toolRegistry, a
           ].filter(Boolean).join("\n");
           const text = await collectText(session, welcomePrompt);
           if (text) {
-            await sendTextReply((message, extra) => bot.api.sendMessage(chatId, message, extra), chatId, text);
+            await sendTextReply({
+              sendText: (message, extra) => bot.api.sendMessage(chatId, message, extra),
+              sendDocument: (file, extra) => bot.api.sendDocument(chatId, file, extra),
+              chatId,
+              text
+            });
           }
         } catch (error) {
           logger?.log("telegram", `startup message failed for chat ${chatId}: ${error instanceof Error ? error.message : String(error)}`);
