@@ -1,17 +1,16 @@
 import { fileURLToPath } from "node:url";
-import { arisaHomeDir, artifactsDir, getChatDir, stateDir, toolsDir } from "../../runtime/paths.js";
+import { arisaHomeDir, artifactsDir, stateDir, toolsDir } from "../../runtime/paths.js";
 
 export const arisaInstallDir = fileURLToPath(new URL("../../..", import.meta.url));
 export const bundledToolsDir = fileURLToPath(new URL("../../../tools", import.meta.url));
 
-export function buildAgentRuntimeContext(chatId) {
+export function buildAgentRuntimeContext() {
   return [
     `arisaHomeDir: ${arisaHomeDir}`,
     `arisaInstallDir: ${arisaInstallDir}`,
     `bundledToolsDir: ${bundledToolsDir}`,
     `userToolsDir: ${toolsDir}`,
     `artifactsDir: ${artifactsDir}`,
-    `stateDir: ${stateDir}`,
-    `chatWorkspaceDir: ${getChatDir(chatId)}`
+    `stateDir: ${stateDir}`
   ].join("\n");
 }

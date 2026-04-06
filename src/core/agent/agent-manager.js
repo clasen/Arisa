@@ -1,11 +1,11 @@
 import path from "node:path";
-import { mkdir, unlink } from "node:fs/promises";
+import { unlink } from "node:fs/promises";
 import { createAgentSession, SessionManager, defineTool } from "@mariozechner/pi-coding-agent";
 import { Type } from "@sinclair/typebox";
 import { createPiRuntime, hasProviderAuth } from "./pi-runtime.js";
 import { loadProjectInstructions } from "./project-instructions.js";
-import { buildAgentRuntimeContext } from "./runtime-context.js";
-import { getChatDir, piAgentDir as agentDir } from "../../runtime/paths.js";
+import { arisaInstallDir, buildAgentRuntimeContext } from "./runtime-context.js";
+import { arisaHomeDir } from "../../runtime/paths.js";
 
 export class AgentManager {
   constructor({ config, artifactStore, toolRegistry, logger }) {
@@ -50,7 +50,6 @@ export class AgentManager {
       return this.sessions.get(chatId);
     }
 
-    await mkdir(agentDir, { recursive: true });
     const { authStorage, modelRegistry } = createPiRuntime({
       provider: this.config.pi.provider,
       apiKey: this.config.pi.apiKey
@@ -61,23 +60,20 @@ export class AgentManager {
       throw new Error(`No auth found for ${this.config.pi.provider}. Re-run bootstrap and complete login for this provider before Telegram starts.`);
     }
 
-    const cwd = getChatDir(chatId);
-    await mkdir(cwd, { recursive: true });
-
     this.logger?.log("agent", `creating session for chat ${chatId}`);
     const customTools = this.createTools(telegram);
     const { session } = await createAgentSession({
-      cwd,
-      agentDir,
+      cwd: arisaInstallDir,
+      agentDir: arisaHomeDir,
       authStorage,
       modelRegistry,
       model,
       customTools,
-      sessionManager: SessionManager.continueRecent(cwd)
+      sessionManager: SessionManager.inMemory()
     });
 
     const instructions = await loadProjectInstructions();
-    const runtimeContext = buildAgentRuntimeContext(chatId);
+    const runtimeContext = buildAgentRuntimeContext();
     this.logger?.log("agent", `injecting project instructions for chat ${chatId}`);
     this.logger?.log("agent", `runtime context for chat ${chatId}:\n${runtimeContext}`);
     await session.prompt(`${instructions}\n\n${runtimeContext}\n\nAcknowledge with exactly: OK`);

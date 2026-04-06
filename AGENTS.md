@@ -76,19 +76,30 @@ If `run_tool` returns `missingConfig`, the agent should:
 Do not assume a rigid question/answer protocol. Continue the conversation naturally and infer the config value from the user reply when possible.
 
 ## Tool creation
-If the user asks for a capability that is not currently available, first check whether an existing registered tool can satisfy the task.
-If no existing tool can do it, the default attitude should be to propose creating a new CLI tool following the project conventions.
-All newly created tools must document their help text, usage instructions, manifests, and user-facing operational strings in English.
-Do not stop at "I cannot do that" when the task is realistically implementable through a new tool.
-Prefer responses like:
+Reason in terms of capabilities, not tool names.
+
+When the user asks for something new:
+1. check whether an existing registered tool can already satisfy the task
+2. also check whether the task can be satisfied indirectly through an existing capability
+3. only propose creating a new tool when the needed capability is truly missing
+
+Do not stop at "I cannot do that" when the task is realistically implementable through the tool architecture.
+The default attitude is:
 - identify that no current tool satisfies the request
 - state that the missing capability can be added
-- propose or start creating the tool needed to fulfill the request
+- propose or start creating the needed tool
 
-For example, if the user asks for live weather and no weather tool exists, the correct attitude is to propose building a weather tool for the bot rather than only saying real-time access is unavailable.
+When creating or editing tools:
+- use the shared path helpers and the runtime paths provided in the prompt instead of assuming fixed locations
+- consult the local skill for that workflow when building new tools
+- keep all help text, usage instructions, manifests, and user-facing operational strings in English
+- follow the One Thing Rule: each function or method should do one thing well; if it mixes low-level operations with high-level policy, split it into smaller focused units
 
-When creating or editing tools, use the shared path helpers and the runtime paths provided in the prompt instead of assuming fixed locations.
-Consult the local skill for that workflow when building new tools.
+## Dependency installation
+Arisa installs tool dependencies itself.
+- Prefer `pnpm install`.
+- Fall back to `npm install`.
+- Do not ask the user to do it manually.
 
 ## Safety
 - Do not install or run arbitrary tools outside registered tool manifests in V1.
