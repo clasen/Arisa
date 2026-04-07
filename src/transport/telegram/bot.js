@@ -213,18 +213,19 @@ export async function createTelegramBot({ config, artifactStore, toolRegistry, a
 
   async function enqueueOrProcess(ctx) {
     const chatState = getChatState(ctx.chat.id);
-    const incomingPrompt = await buildIncomingPrompt(ctx);
 
     if (chatState.processing) {
+      const incomingPrompt = await buildIncomingPrompt(ctx);
       logger?.log("telegram", `chat ${ctx.chat.id} busy, queueing message ${ctx.msg.message_id}`);
       chatState.nextPrompt = chatState.nextPrompt
         ? `${chatState.nextPrompt}\n\n${incomingPrompt}`
         : incomingPrompt;
-      return ctx.reply("Queued. I will process this right after the current task finishes.");
+      return;
     }
 
     chatState.processing = true;
     logger?.log("telegram", `processing message ${ctx.msg.message_id} in chat ${ctx.chat.id}`);
+    const incomingPrompt = await buildIncomingPrompt(ctx);
     let currentPrompt = incomingPrompt;
 
     while (currentPrompt) {

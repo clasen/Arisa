@@ -47,7 +47,7 @@ async function fetchText(url) {
   const response = await fetch(url, {
     headers: {
       "user-agent": "Mozilla/5.0",
-      "accept-language": "es-AR,es;q=0.9,en;q=0.8"
+      "accept-language": "en-US,en;q=0.9"
     },
     redirect: "follow"
   });
