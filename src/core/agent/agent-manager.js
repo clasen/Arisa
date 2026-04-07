@@ -21,6 +21,10 @@ export class AgentManager {
     this.sessions.clear();
   }
 
+  resetSession(chatId) {
+    this.sessions.delete(chatId);
+  }
+
   async validatePiAgent() {
     this.logger?.log("agent", "validating Pi session");
     const { authStorage, modelRegistry } = createPiRuntime({

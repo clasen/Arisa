@@ -32,14 +32,20 @@ function quotedMessageSummary(message) {
   return parts;
 }
 
+function getTelegramCommand(ctx) {
+  const text = ctx.message?.text || "";
+  const entity = ctx.message?.entities?.[0];
+  if (entity?.type !== "bot_command" || entity.offset !== 0 || !text.startsWith("/")) return "";
+  return text.slice(1, entity.length).split("@")[0].trim().toLowerCase();
+}
+
 function buildPrompt({ ctx, artifact, transcript, toolResult }) {
   const parts = [
-    `New Telegram message.`,
+    `New Session..`,
     `chatId: ${ctx.chat.id}`,
     `userId: ${ctx.from.id}`,
     `username: ${ctx.from.username || "(no username)"}`,
-    `messageId: ${ctx.msg.message_id}`,
-    `preferredTelegramLanguageCode: ${ctx.from?.language_code || "unknown"}`
+    `messageId: ${ctx.msg.message_id}`
   ];
 
   if (ctx.message?.text) parts.push(`text: ${ctx.message.text}`);
@@ -62,6 +68,15 @@ function buildPrompt({ ctx, artifact, transcript, toolResult }) {
   parts.push(`If a tool config is missing, ask the user naturally and then use set_tool_config.`);
   parts.push(`If the user wants a generated media reply, use send_media_reply.`);
   return parts.join("\n");
+}
+
+function buildNewSessionPrompt(ctx) {
+  return [
+    "System event: /new requested.",
+    "Session was reset.",
+    `preferredTelegramLanguageCode: ${ctx.from?.language_code || "unknown"}`,
+    "Reply with a brief, warm confirmation in the user's language."
+  ].join("\n");
 }
 
 async function maybeTranscribeIncomingAudio({ artifact, toolRegistry, artifactStore }) {
@@ -229,6 +244,12 @@ export async function createTelegramBot({ config, artifactStore, toolRegistry, a
     chatState.processing = false;
   }
 
+  async function handleNewCommand(ctx) {
+    agentManager.resetSession(ctx.chat.id);
+    perChatState.set(ctx.chat.id, { processing: false, nextPrompt: "" });
+    await processPrompt(ctx, buildNewSessionPrompt(ctx));
+  }
+
   bot.catch((error) => {
     logger?.error("telegram", `bot error: ${error instanceof Error ? error.message : String(error)}`);
     console.error("Telegram bot error:", error);
@@ -240,9 +261,18 @@ export async function createTelegramBot({ config, artifactStore, toolRegistry, a
     return ctx.reply(auth.firstTime ? "This chat is now authorized for Arisa." : "Arisa is ready.");
   });
 
+  bot.command("new", async (ctx) => {
+    const auth = await authorizeChat({ config, chatId: ctx.chat.id, saveConfig, chatMeta: getIncomingChatMeta(ctx) });
+    if (!auth.ok) return;
+    await handleNewCommand(ctx);
+  });
+
   bot.on("message", async (ctx) => {
     const auth = await authorizeChat({ config, chatId: ctx.chat.id, saveConfig, chatMeta: getIncomingChatMeta(ctx) });
     if (!auth.ok) return;
+
+    const command = getTelegramCommand(ctx);
+    if (command) return;
 
     try {
       await enqueueOrProcess(ctx);
@@ -295,8 +325,11 @@ export async function createTelegramBot({ config, artifactStore, toolRegistry, a
           logger?.log("telegram", `startup message failed for chat ${chatId}: ${error instanceof Error ? error.message : String(error)}`);
         }
       }
+      await bot.api.setMyCommands([
+        { command: "new", description: "Start a new chat context" }
+      ]);
       logger?.log("telegram", "bot polling started");
-      await bot.start();
+      await bot.start({ drop_pending_updates: true });
     }
   };
 }
