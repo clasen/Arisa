@@ -10,7 +10,6 @@ export const serviceLogFile = path.join(stateDir, "arisa.log");
 export const artifactsDir = path.join(arisaHomeDir, "artifacts");
 export const artifactsIndexFile = path.join(stateDir, "artifacts.json");
 export const toolsDir = path.join(arisaHomeDir, "tools");
-export const tmpDir = path.join(arisaHomeDir, "tmp");
 
 export function getToolDir(toolName) {
   return path.join(toolsDir, toolName);
@@ -36,6 +35,5 @@ export async function ensureArisaHome() {
   await mkdir(stateDir, { recursive: true });
   await mkdir(artifactsDir, { recursive: true });
   await mkdir(toolsDir, { recursive: true });
-  await mkdir(tmpDir, { recursive: true });
 }
 

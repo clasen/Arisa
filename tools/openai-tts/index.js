@@ -2,6 +2,7 @@ import { mkdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 import defaults from "./config.js";
 import { loadToolConfig } from "../../src/core/tools/tool-config.js";
+import { toolError, toolNeedsConfig, toolOk } from "../../src/core/tools/tool-result.js";
 import { getToolConfigPath, getToolOutDir } from "../../src/runtime/paths.js";
 
 const toolName = "openai-tts";
@@ -13,14 +14,18 @@ function printHelp() {
 
 async function run(requestFile) {
   if (!config.OPENAI_API_KEY) {
-    console.log(JSON.stringify({ ok: false, missingConfig: ["OPENAI_API_KEY"], configPath: getToolConfigPath(toolName) }));
+    console.log(JSON.stringify(toolNeedsConfig({
+      tool: toolName,
+      missingConfig: ["OPENAI_API_KEY"],
+      configPath: getToolConfigPath(toolName)
+    })));
     return;
   }
 
   const request = JSON.parse(await readFile(requestFile, "utf8"));
   const inputText = request.text || request.artifact?.text;
   if (!inputText) {
-    console.log(JSON.stringify({ ok: false, error: "text or artifact.text is required" }));
+    console.log(JSON.stringify(toolError("text or artifact.text is required")));
     return;
   }
 
@@ -40,7 +45,7 @@ async function run(requestFile) {
 
   if (!response.ok) {
     const payload = await response.text();
-    console.log(JSON.stringify({ ok: false, error: payload }));
+    console.log(JSON.stringify(toolError(payload)));
     return;
   }
 
@@ -49,16 +54,13 @@ async function run(requestFile) {
   const filePath = path.join(outDir, `speech-${Date.now()}.ogg`);
   const buffer = Buffer.from(await response.arrayBuffer());
   await writeFile(filePath, buffer);
-  console.log(JSON.stringify({
-    ok: true,
-    output: {
-      filePath,
-      fileName: path.basename(filePath),
-      mimeType: "audio/ogg",
-      kind: "audio",
-      delivery: { method: "voice" }
-    }
-  }));
+  console.log(JSON.stringify(toolOk({
+    filePath,
+    fileName: path.basename(filePath),
+    mimeType: "audio/ogg",
+    kind: "audio",
+    delivery: { method: "voice" }
+  })));
 }
 
 const args = process.argv.slice(2);

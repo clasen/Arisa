@@ -123,7 +123,7 @@ export class AgentManager {
       defineTool({
         name: "run_tool",
         label: "Run tool",
-        description: "Run a CLI tool using text input or an artifactId. If config is missing, ask the user naturally and then use set_tool_config.",
+        description: "Run a CLI tool using text input or an artifactId. Inspect the returned status/resolution fields. If a tool reports missing config, ask the user naturally, use set_tool_config, and retry.",
         parameters: Type.Object({
           name: Type.String(),
           artifactId: Type.Optional(Type.String()),

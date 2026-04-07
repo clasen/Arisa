@@ -1,4 +1,5 @@
 import { readFile } from "node:fs/promises";
+import { toolError, toolOk } from "../../src/core/tools/tool-result.js";
 
 function printHelp() {
   console.log(`web-browser\n\nUsage:\n  node index.js --help\n  node index.js run --request-file <json>\n\nExpected input:\n  {\n    "text": "weather toronto" | "https://example.com",\n    "artifact": { "text": "weather toronto" },\n    "args": {\n      "mode": "search" | "open",\n      "url": "https://example.com",\n      "maxResults": "5"\n    }\n  }\n\nBehavior:\n  - If the input looks like a URL, open the page.\n  - Otherwise, perform a web search.\n  - When possible, opening pages uses r.jina.ai with a direct fetch fallback.\n`);
@@ -121,7 +122,7 @@ async function run(requestFile) {
   const maxResults = Number.parseInt(request.args?.maxResults || "5", 10);
 
   if (!rawInput.trim()) {
-    console.log(JSON.stringify({ ok: false, error: "text, artifact.text, or args.url is required" }));
+    console.log(JSON.stringify(toolError("text, artifact.text, or args.url is required")));
     return;
   }
 
@@ -129,9 +130,9 @@ async function run(requestFile) {
     const outputText = mode === "open"
       ? await openWebPage(rawInput)
       : await searchWeb(rawInput, Number.isFinite(maxResults) ? maxResults : 5);
-    console.log(JSON.stringify({ ok: true, output: { text: outputText } }));
+    console.log(JSON.stringify(toolOk({ text: outputText })));
   } catch (error) {
-    console.log(JSON.stringify({ ok: false, error: error.message || String(error) }));
+    console.log(JSON.stringify(toolError(error.message || String(error))));
   }
 }
 

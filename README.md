@@ -1,6 +1,6 @@
 # Arisa
 
-Arisa is a personal Telegram assistant powered by Pi Agent.
+Arisa is a personal Telegram assistant powered by [Pi Agent](https://pi.dev).
 
 ## Origin
 
@@ -70,6 +70,29 @@ Each tool must support:
 node index.js --help
 node index.js run --request-file <json>
 ```
+
+Tool responses should be JSON with a stable shape so Pi Agent can interpret failures generically:
+
+```json
+{ "ok": true, "status": "ok", "output": { "text": "..." } }
+```
+
+```json
+{
+  "ok": false,
+  "status": "needs_config",
+  "error": "Missing tool configuration for openai-transcribe.",
+  "missingConfig": ["OPENAI_API_KEY"],
+  "configPath": "~/.arisa/tools/openai-transcribe/config.js",
+  "resolution": {
+    "type": "user_config_required",
+    "tool": "openai-transcribe",
+    "missingConfig": ["OPENAI_API_KEY"]
+  }
+}
+```
+
+For regular failures, tools should return `ok: false`, a `status`, and an `error`. This contract is used for both existing and future tools.
 
 ### Configuration model
 - all runtime state lives under `~/.arisa/`

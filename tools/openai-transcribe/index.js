@@ -2,6 +2,7 @@ import path from "node:path";
 import { readFile, stat } from "node:fs/promises";
 import defaults from "./config.js";
 import { loadToolConfig } from "../../src/core/tools/tool-config.js";
+import { toolError, toolNeedsConfig, toolOk } from "../../src/core/tools/tool-result.js";
 import { getToolConfigPath } from "../../src/runtime/paths.js";
 
 const toolName = "openai-transcribe";
@@ -13,14 +14,18 @@ function printHelp() {
 
 async function run(requestFile) {
   if (!config.OPENAI_API_KEY) {
-    console.log(JSON.stringify({ ok: false, missingConfig: ["OPENAI_API_KEY"], configPath: getToolConfigPath(toolName) }));
+    console.log(JSON.stringify(toolNeedsConfig({
+      tool: toolName,
+      missingConfig: ["OPENAI_API_KEY"],
+      configPath: getToolConfigPath(toolName)
+    })));
     return;
   }
 
   const request = JSON.parse(await readFile(requestFile, "utf8"));
   const artifact = request.artifact;
   if (!artifact?.path) {
-    console.log(JSON.stringify({ ok: false, error: "artifact.path is required" }));
+    console.log(JSON.stringify(toolError("artifact.path is required")));
     return;
   }
 
@@ -38,11 +43,11 @@ async function run(requestFile) {
 
   const payload = await response.json();
   if (!response.ok) {
-    console.log(JSON.stringify({ ok: false, error: payload.error?.message || "OpenAI transcription failed" }));
+    console.log(JSON.stringify(toolError(payload.error?.message || "OpenAI transcription failed")));
     return;
   }
 
-  console.log(JSON.stringify({ ok: true, output: { text: payload.text || "" } }));
+  console.log(JSON.stringify(toolOk({ text: payload.text || "" })));
 }
 
 const args = process.argv.slice(2);

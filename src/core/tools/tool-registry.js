@@ -4,6 +4,7 @@ import { spawn } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { getToolConfigPath, getToolTmpDir, toolsDir as userToolsRoot } from "../../runtime/paths.js";
 import { loadToolConfig, parseConfigModule, writeToolConfig } from "./tool-config.js";
+import { normalizeToolResult } from "./tool-result.js";
 
 const bundledToolsRoot = fileURLToPath(new URL("../../../tools", import.meta.url));
 const toolRoots = [
@@ -117,15 +118,16 @@ export class ToolRegistry {
     await unlink(requestFile).catch(() => {});
     try {
       const parsed = JSON.parse(result.stdout || result.stderr);
-      this.logger?.log("tools", `${name} -> ${parsed.ok === false ? "error" : "ok"}`);
-      return parsed;
+      const normalized = normalizeToolResult(name, parsed);
+      this.logger?.log("tools", `${name} -> ${normalized.ok === false ? normalized.status || "error" : "ok"}`);
+      return normalized;
     } catch {
-      return {
+      return normalizeToolResult(name, {
         ok: false,
         error: `Invalid tool response for ${name}`,
         stdout: result.stdout,
         stderr: result.stderr
-      };
+      });
     }
   }
 }

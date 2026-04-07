@@ -2,7 +2,7 @@ import { Bot, InputFile } from "grammy";
 import path from "node:path";
 import { authorizeChat } from "./auth.js";
 import { captureIncomingArtifact } from "./media.js";
-import { renderTelegramHtml, splitTelegramText } from "./text-format.js";
+import { renderTelegramHtml } from "./text-format.js";
 
 function quotedMessageSummary(message) {
   if (!message) return [];
@@ -32,13 +32,14 @@ function quotedMessageSummary(message) {
   return parts;
 }
 
-function buildPrompt({ ctx, artifact, transcript }) {
+function buildPrompt({ ctx, artifact, transcript, toolResult }) {
   const parts = [
     `New Telegram message.`,
     `chatId: ${ctx.chat.id}`,
     `userId: ${ctx.from.id}`,
     `username: ${ctx.from.username || "(no username)"}`,
-    `messageId: ${ctx.msg.message_id}`
+    `messageId: ${ctx.msg.message_id}`,
+    `preferredTelegramLanguageCode: ${ctx.from?.language_code || "unknown"}`
   ];
 
   if (ctx.message?.text) parts.push(`text: ${ctx.message.text}`);
@@ -51,6 +52,10 @@ function buildPrompt({ ctx, artifact, transcript }) {
     parts.push(`transcriptArtifactId: ${transcript.id}`);
     parts.push(`transcriptText: ${transcript.text}`);
     parts.push(`Important: the incoming audio has already been transcribed. Use the transcript as the user message content. Do not answer with a raw transcription unless the user explicitly asked for one.`);
+  }
+  if (artifact?.kind === "audio" && !transcript && toolResult) {
+    parts.push(`audioNormalizationResult: ${JSON.stringify(toolResult)}`);
+    parts.push(`Important: pre-reasoning audio normalization could not be completed, so you do not have a transcript for this voice/audio message.`);
   }
 
   parts.push(`If you need a CLI tool, use list_tools/tool_help/run_tool.`);
@@ -75,7 +80,7 @@ async function maybeTranscribeIncomingAudio({ artifact, toolRegistry, artifactSt
   }
 
   if (!result.output?.text) {
-    return { transcript: null, toolResult: { ok: false, error: "Transcription returned no text." } };
+    return { transcript: null, toolResult: { ok: false, status: "failed", error: "Transcription returned no text." } };
   }
 
   const transcript = await artifactStore.createText({
@@ -139,18 +144,15 @@ export async function createTelegramBot({ config, artifactStore, toolRegistry, a
     const { transcript, toolResult } = await maybeTranscribeIncomingAudio({ artifact, toolRegistry, artifactStore });
     if (transcript) logger?.log("telegram", `audio transcribed to artifact ${transcript.id}`);
     if (artifact?.kind === "audio" && !transcript) {
-      if (toolResult?.missingConfig?.includes("OPENAI_API_KEY")) {
-        throw new Error("I need the OpenAI API key for ~/.arisa/tools/openai-transcribe/config.js before I can transcribe incoming audio.");
-      }
-      throw new Error(toolResult?.error || "Audio transcription failed.");
+      logger?.log("telegram", `audio normalization unavailable for chat ${ctx.chat.id}: ${toolResult?.error || toolResult?.missingConfig?.join(", ") || "unknown error"}`);
     }
-    return buildPrompt({ ctx, artifact, transcript });
+    return buildPrompt({ ctx, artifact, transcript, toolResult });
   }
 
   async function sendTextReply({ sendText, sendDocument, chatId, text }) {
-    const attachmentThreshold = 12000;
+    const maxInlineReplyLength = 3500;
 
-    if (text.length > attachmentThreshold) {
+    if (text.length > maxInlineReplyLength) {
       logger?.log("telegram", `sending long reply as markdown attachment for chat ${chatId}`);
       const artifact = await artifactStore.createGeneratedFile({
         fileName: `reply-${Date.now()}.md`,
@@ -167,9 +169,7 @@ export async function createTelegramBot({ config, artifactStore, toolRegistry, a
     }
 
     logger?.log("telegram", `sending text reply for chat ${chatId}`);
-    for (const chunk of splitTelegramText(text)) {
-      await sendText(renderTelegramHtml(chunk), { parse_mode: "HTML" });
-    }
+    await sendText(renderTelegramHtml(text), { parse_mode: "HTML" });
   }
 
   async function processPrompt(ctx, prompt) {
@@ -250,7 +250,7 @@ export async function createTelegramBot({ config, artifactStore, toolRegistry, a
       const chatState = getChatState(ctx.chat.id);
       chatState.processing = false;
       const message = error instanceof Error ? error.message : String(error);
-      await ctx.reply(`Error: ${message}`);
+      await ctx.reply(message);
     }
   });
 
