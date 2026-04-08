@@ -79,6 +79,17 @@ function buildNewSessionPrompt(ctx) {
   ].join("\n");
 }
 
+function buildAsyncTaskPrompt(task) {
+  return [
+    "Scheduled task fired.",
+    `taskId: ${task.id}`,
+    `chatId: ${task.payload.chatId}`,
+    task.payload.prompt ? `text: ${task.payload.prompt}` : null,
+    "Treat this as a new request for the chat and fulfill it now.",
+    "If needed, use tools."
+  ].filter(Boolean).join("\n");
+}
+
 async function maybeTranscribeIncomingAudio({ artifact, toolRegistry, artifactStore }) {
   if (!artifact || artifact.kind !== "audio") return { transcript: null };
 
@@ -132,7 +143,7 @@ async function withTyping(ctx, work) {
   }
 }
 
-export async function createTelegramBot({ config, artifactStore, toolRegistry, agentManager, saveConfig, updateConfig, logger }) {
+export async function createTelegramBot({ config, artifactStore, toolRegistry, taskStore, agentManager, saveConfig, updateConfig, logger }) {
   const bot = new Bot(config.telegram.apiKey);
   const perChatState = new Map();
 
@@ -187,52 +198,58 @@ export async function createTelegramBot({ config, artifactStore, toolRegistry, a
     await sendText(renderTelegramHtml(text), { parse_mode: "HTML" });
   }
 
-  async function processPrompt(ctx, prompt) {
-    const telegram = {
+  function createTelegramSessionBridge(chatId) {
+    return {
       sendMedia: async (filePath, { method = "audio", caption } = {}) => {
-        logger?.log("telegram", `sending ${method} reply for chat ${ctx.chat.id}`);
+        logger?.log("telegram", `sending ${method} reply for chat ${chatId}`);
         const input = new InputFile(filePath);
-        if (method === "voice") return ctx.replyWithVoice(input, { caption });
-        if (method === "document") return ctx.replyWithDocument(input, { caption });
-        return ctx.replyWithAudio(input, { caption });
+        if (method === "voice") return bot.api.sendVoice(chatId, input, { caption });
+        if (method === "document") return bot.api.sendDocument(chatId, input, { caption });
+        return bot.api.sendAudio(chatId, input, { caption });
       }
     };
-    return withTyping(ctx, async () => {
-      const { session } = await agentManager.getSessionContext(ctx.chat.id, telegram);
+  }
+
+  async function processPromptForChat({ chatId, prompt, ctx = null }) {
+    const work = async () => {
+      const { session } = await agentManager.getSessionContext(chatId, createTelegramSessionBridge(chatId));
       const text = await collectText(session, prompt);
       if (text) {
         await sendTextReply({
-          sendText: (message, extra) => ctx.reply(message, extra),
-          sendDocument: (file, extra) => ctx.replyWithDocument(file, extra),
-          chatId: ctx.chat.id,
+          sendText: (message, extra) => bot.api.sendMessage(chatId, message, extra),
+          sendDocument: (file, extra) => bot.api.sendDocument(chatId, file, extra),
+          chatId,
           text
         });
       }
-    });
+    };
+
+    if (ctx) return withTyping(ctx, work);
+    return work();
   }
 
-  async function enqueueOrProcess(ctx) {
-    const chatState = getChatState(ctx.chat.id);
+  async function enqueuePrompt({ chatId, prompt, label, ctx = null }) {
+    const chatState = getChatState(chatId);
 
     if (chatState.processing) {
-      const incomingPrompt = await buildIncomingPrompt(ctx);
-      logger?.log("telegram", `chat ${ctx.chat.id} busy, queueing message ${ctx.msg.message_id}`);
+      logger?.log("telegram", `chat ${chatId} busy, queueing ${label}`);
       chatState.nextPrompt = chatState.nextPrompt
-        ? `${chatState.nextPrompt}\n\n${incomingPrompt}`
-        : incomingPrompt;
+        ? `${chatState.nextPrompt}\n\n${prompt}`
+        : prompt;
       return;
     }
 
     chatState.processing = true;
-    logger?.log("telegram", `processing message ${ctx.msg.message_id} in chat ${ctx.chat.id}`);
-    const incomingPrompt = await buildIncomingPrompt(ctx);
-    let currentPrompt = incomingPrompt;
+    logger?.log("telegram", `processing ${label} in chat ${chatId}`);
+    let currentPrompt = prompt;
+    let currentCtx = ctx;
 
     while (currentPrompt) {
       try {
-        logger?.log("telegram", `prompt dispatch for chat ${ctx.chat.id}`);
-        await processPrompt(ctx, currentPrompt);
+        logger?.log("telegram", `prompt dispatch for chat ${chatId}`);
+        await processPromptForChat({ chatId, prompt: currentPrompt, ctx: currentCtx });
       } finally {
+        currentCtx = null;
         if (chatState.nextPrompt) {
           currentPrompt = chatState.nextPrompt;
           chatState.nextPrompt = "";
@@ -245,10 +262,36 @@ export async function createTelegramBot({ config, artifactStore, toolRegistry, a
     chatState.processing = false;
   }
 
+  async function enqueueOrProcess(ctx) {
+    const chatState = getChatState(ctx.chat.id);
+
+    if (chatState.processing) {
+      const incomingPrompt = await buildIncomingPrompt(ctx);
+      return enqueuePrompt({
+        chatId: ctx.chat.id,
+        prompt: incomingPrompt,
+        label: `message ${ctx.msg.message_id}`
+      });
+    }
+
+    const incomingPrompt = await buildIncomingPrompt(ctx);
+    return enqueuePrompt({
+      chatId: ctx.chat.id,
+      prompt: incomingPrompt,
+      label: `message ${ctx.msg.message_id}`,
+      ctx
+    });
+  }
+
   async function handleNewCommand(ctx) {
     agentManager.resetSession(ctx.chat.id);
     perChatState.set(ctx.chat.id, { processing: false, nextPrompt: "" });
-    await processPrompt(ctx, buildNewSessionPrompt(ctx));
+    await enqueuePrompt({
+      chatId: ctx.chat.id,
+      prompt: buildNewSessionPrompt(ctx),
+      label: "new-session command",
+      ctx
+    });
   }
 
   bot.catch((error) => {
@@ -292,16 +335,6 @@ export async function createTelegramBot({ config, artifactStore, toolRegistry, a
         try {
           logger?.log("telegram", `generating startup message for chat ${chatId}`);
           const chatMeta = config.telegram.chatMeta[chatId] || {};
-          const telegram = {
-            sendMedia: async (filePath, { method = "audio", caption } = {}) => {
-              logger?.log("telegram", `sending ${method} reply for chat ${chatId}`);
-              const input = new InputFile(filePath);
-              if (method === "voice") return bot.api.sendVoice(chatId, input, { caption });
-              if (method === "document") return bot.api.sendDocument(chatId, input, { caption });
-              return bot.api.sendAudio(chatId, input, { caption });
-            }
-          };
-          const { session } = await agentManager.getSessionContext(chatId, telegram);
           const welcomePrompt = [
             "System event: Arisa has just started.",
             `chatId: ${chatId}`,
@@ -313,15 +346,7 @@ export async function createTelegramBot({ config, artifactStore, toolRegistry, a
             "Use the user's Telegram language when possible.",
             "Do not mention internal implementation details."
           ].filter(Boolean).join("\n");
-          const text = await collectText(session, welcomePrompt);
-          if (text) {
-            await sendTextReply({
-              sendText: (message, extra) => bot.api.sendMessage(chatId, message, extra),
-              sendDocument: (file, extra) => bot.api.sendDocument(chatId, file, extra),
-              chatId,
-              text
-            });
-          }
+          await enqueuePrompt({ chatId, prompt: welcomePrompt, label: "startup message" });
         } catch (error) {
           logger?.log("telegram", `startup message failed for chat ${chatId}: ${error instanceof Error ? error.message : String(error)}`);
         }
@@ -329,6 +354,26 @@ export async function createTelegramBot({ config, artifactStore, toolRegistry, a
       await bot.api.setMyCommands([
         { command: "new", description: "Start a new chat context" }
       ]);
+      setInterval(async () => {
+        const tasks = await taskStore.claimDue(10);
+        for (const task of tasks) {
+          try {
+            if (task.kind !== "agent_task" || !task.payload?.chatId || !task.payload?.prompt) {
+              await taskStore.fail(task.id, `Unsupported task: ${task.kind}`);
+              continue;
+            }
+            logger?.log("tasks", `running task ${task.id} for chat ${task.payload.chatId}`);
+            await enqueuePrompt({
+              chatId: task.payload.chatId,
+              prompt: buildAsyncTaskPrompt(task),
+              label: `scheduled task ${task.id}`
+            });
+            await taskStore.complete(task.id);
+          } catch (error) {
+            await taskStore.fail(task.id, error instanceof Error ? error.message : String(error));
+          }
+        }
+      }, 1000).unref();
       logger?.log("telegram", "bot polling started");
       await bot.start({ drop_pending_updates: true });
     }

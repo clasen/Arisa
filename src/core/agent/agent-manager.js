@@ -8,10 +8,11 @@ import { arisaInstallDir, buildAgentRuntimeContext } from "./runtime-context.js"
 import { arisaHomeDir } from "../../runtime/paths.js";
 
 export class AgentManager {
-  constructor({ config, artifactStore, toolRegistry, logger }) {
+  constructor({ config, artifactStore, toolRegistry, taskStore, logger }) {
     this.config = config;
     this.artifactStore = artifactStore;
     this.toolRegistry = toolRegistry;
+    this.taskStore = taskStore;
     this.logger = logger;
     this.sessions = new Map();
   }
@@ -65,7 +66,7 @@ export class AgentManager {
     }
 
     this.logger?.log("agent", `creating session for chat ${chatId}`);
-    const customTools = this.createTools(telegram);
+    const customTools = this.createTools(telegram, chatId);
     const { session } = await createAgentSession({
       cwd: arisaInstallDir,
       agentDir: arisaHomeDir,
@@ -87,7 +88,7 @@ export class AgentManager {
     return ctx;
   }
 
-  createTools(telegram) {
+  createTools(telegram, chatId) {
     return [
       defineTool({
         name: "list_tools",
@@ -175,9 +176,69 @@ export class AgentManager {
             await unlink(result.output.filePath).catch(() => {});
           }
 
+          if (result.asyncTask || result.asyncTasks?.length) {
+            const scheduled = await this.taskStore.addMany(
+              result.asyncTasks || [result.asyncTask],
+              {
+                payload: { chatId },
+                source: { type: "tool", toolName: params.name, chatId }
+              }
+            );
+            result.asyncTasks = scheduled;
+            delete result.asyncTask;
+          }
+
           return {
             content: [{ type: "text", text: JSON.stringify(result, null, 2) }],
             details: result
+          };
+        }
+      }),
+      defineTool({
+        name: "list_scheduled_tasks",
+        label: "List scheduled tasks",
+        description: "List scheduled async tasks for the current Telegram chat.",
+        parameters: Type.Object({
+          status: Type.Optional(Type.String())
+        }),
+        execute: async (_id, params) => {
+          const tasks = await this.taskStore.list({ chatId, status: params.status });
+          return {
+            content: [{ type: "text", text: JSON.stringify(tasks, null, 2) }],
+            details: { tasks }
+          };
+        }
+      }),
+      defineTool({
+        name: "cancel_scheduled_task",
+        label: "Cancel scheduled task",
+        description: "Cancel one scheduled async task by id for the current Telegram chat.",
+        parameters: Type.Object({ id: Type.String() }),
+        execute: async (_id, params) => {
+          const existing = await this.taskStore.get(params.id);
+          if (!existing || existing.payload?.chatId !== chatId) {
+            return {
+              content: [{ type: "text", text: JSON.stringify({ ok: false, error: "Task not found" }) }],
+              details: { ok: false, error: "Task not found" }
+            };
+          }
+          const task = await this.taskStore.cancel(params.id);
+          return {
+            content: [{ type: "text", text: JSON.stringify({ ok: true, task }, null, 2) }],
+            details: { ok: true, task }
+          };
+        }
+      }),
+      defineTool({
+        name: "cancel_all_scheduled_tasks",
+        label: "Cancel all scheduled tasks",
+        description: "Cancel all pending or running async tasks for the current Telegram chat.",
+        parameters: Type.Object({}),
+        execute: async () => {
+          const tasks = await this.taskStore.cancelAll({ chatId });
+          return {
+            content: [{ type: "text", text: JSON.stringify({ ok: true, cancelled: tasks.length }, null, 2) }],
+            details: { ok: true, tasks }
           };
         }
       }),

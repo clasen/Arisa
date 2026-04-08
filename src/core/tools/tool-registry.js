@@ -119,7 +119,11 @@ export class ToolRegistry {
     try {
       const parsed = JSON.parse(result.stdout || result.stderr);
       const normalized = normalizeToolResult(name, parsed);
-      this.logger?.log("tools", `${name} -> ${normalized.ok === false ? normalized.status || "error" : "ok"}`);
+      if (normalized.ok === false) {
+        this.logger?.log("tools", `${name} -> ${normalized.status || "error"}: ${normalized.error || "unknown error"}`);
+      } else {
+        this.logger?.log("tools", `${name} -> ok`);
+      }
       return normalized;
     } catch {
       return normalizeToolResult(name, {

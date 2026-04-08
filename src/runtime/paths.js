@@ -9,6 +9,7 @@ export const servicePidFile = path.join(stateDir, "arisa.pid");
 export const serviceLogFile = path.join(stateDir, "arisa.log");
 export const artifactsDir = path.join(arisaHomeDir, "artifacts");
 export const artifactsIndexFile = path.join(stateDir, "artifacts.json");
+export const tasksFile = path.join(stateDir, "tasks.json");
 export const toolsDir = path.join(arisaHomeDir, "tools");
 
 export function getToolDir(toolName) {

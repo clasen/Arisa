@@ -1,6 +1,6 @@
 {
   "name": "arisa",
-  "version": "3.0.12",
+  "version": "3.0.14",
   "description": "Telegram + Pi Agent modular assistant",
   "type": "module",
   "main": "src/index.js",
@@ -30,8 +30,8 @@
     "pi.dev",
     "clasen"
   ],
-  "author": "",
-  "license": "GLP",
+  "author": "Martin Clasen",
+  "license": "MIT",
   "packageManager": "pnpm@10.32.1",
   "dependencies": {
     "@mariozechner/pi-coding-agent": "^0.65.0",
