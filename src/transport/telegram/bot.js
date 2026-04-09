@@ -376,7 +376,10 @@ export async function createTelegramBot({ config, artifactStore, toolRegistry, t
       }, 1000).unref();
       if (webhookUrl && setHttpRequestHandler) {
         const webhookPath = `/telegram-${config.telegram.token.slice(-8)}`;
-        const handleUpdate = webhookCallback(bot, "http");
+        const handleUpdate = webhookCallback(bot, "http", {
+          timeoutMilliseconds: 60_000,
+          onTimeout: "return",
+        });
         setHttpRequestHandler((req, res) => {
           const parsed = new URL(req.url, "http://localhost");
           if (req.method === "POST" && parsed.pathname === webhookPath) {
