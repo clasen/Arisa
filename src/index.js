@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 
+import { createServer } from "node:http";
 import { bootstrapIfNeeded } from "./runtime/bootstrap.js";
 import { createApp } from "./runtime/create-app.js";
 import { createLogger } from "./runtime/logger.js";
@@ -15,6 +16,22 @@ const verbose = Boolean(cli.flags.verbose);
 const serviceRunner = Boolean(cli.flags["service-runner"]);
 const bootstrapOverrides = toBootstrapOverrides(cli.nestedFlags);
 const logger = createLogger({ verbose });
+
+const httpPort = Number(process.env.PORT);
+let httpRequestHandler = null;
+
+function setHttpRequestHandler(handler) {
+  httpRequestHandler = handler;
+}
+
+if (httpPort && bootstrapOverrides.telegram) {
+  createServer((req, res) => {
+    if (httpRequestHandler) return httpRequestHandler(req, res);
+    res.writeHead(200, { "Content-Type": "text/plain" });
+    res.end("ok");
+  }).listen(httpPort)
+    .on("listening", () => logger.log("http", `health server on port ${httpPort}`));
+}
 
 function parseCliArgs(rawArgs) {
   const flags = {};
@@ -63,9 +80,11 @@ function toBootstrapOverrides(nestedFlags) {
   return overrides;
 }
 
+const bootstrapHttpOptions = httpPort ? { httpPort, setHttpRequestHandler } : {};
+
 async function runForeground() {
   logger.log("app", `starting${verbose ? " in verbose mode" : ""}`);
-  await bootstrapIfNeeded({ force: forceBootstrap, cliConfigOverrides: bootstrapOverrides });
+  await bootstrapIfNeeded({ force: forceBootstrap, cliConfigOverrides: bootstrapOverrides, ...bootstrapHttpOptions });
   try {
     const app = await createApp({ logger });
     await app.start();
@@ -74,7 +93,7 @@ async function runForeground() {
     if (message.includes("No auth found")) {
       console.log(`\n${message}\n`);
       console.log("Reopening bootstrap so you can provide a Pi API key or switch to a provider you already authenticated with.\n");
-      await bootstrapIfNeeded({ force: true, cliConfigOverrides: bootstrapOverrides });
+      await bootstrapIfNeeded({ force: true, cliConfigOverrides: bootstrapOverrides, ...bootstrapHttpOptions });
       const app = await createApp({ logger });
       await app.start();
       return;
@@ -91,7 +110,7 @@ async function main() {
   }
 
   if (command === "start") {
-    await bootstrapIfNeeded({ force: forceBootstrap, cliConfigOverrides: bootstrapOverrides });
+    await bootstrapIfNeeded({ force: forceBootstrap, cliConfigOverrides: bootstrapOverrides, ...bootstrapHttpOptions });
     const result = await startService({ verbose });
     if (!result.ok) {
       console.log(`Arisa is already running in background (pid ${result.pid}).`);

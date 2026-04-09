@@ -1,5 +1,4 @@
 import { readFile, writeFile } from "node:fs/promises";
-import { createServer } from "node:http";
 import readline from "node:readline/promises";
 import { stdin as input, stdout as output } from "node:process";
 import { spawn } from "node:child_process";
@@ -123,7 +122,7 @@ async function maybeOpenExternal(url) {
   });
 }
 
-function startAuthRelay(port) {
+function installAuthRelay(httpPort, setHttpRequestHandler) {
   let authUrl = "";
   let resolveRedirectUrl;
   const redirectUrlPromise = new Promise((resolve) => {
@@ -141,8 +140,8 @@ function startAuthRelay(port) {
     "</body></html>"
   ].join("");
 
-  const server = createServer((req, res) => {
-    const parsed = new URL(req.url, `http://localhost:${port}`);
+  setHttpRequestHandler((req, res) => {
+    const parsed = new URL(req.url, `http://localhost:${httpPort}`);
 
     if (req.method === "GET" && parsed.pathname === "/auth/callback" && parsed.searchParams.has("code")) {
       const callbackUrl = `http://localhost:1455${parsed.pathname}${parsed.search}`;
@@ -183,19 +182,15 @@ function startAuthRelay(port) {
       return;
     }
 
-    res.writeHead(404);
-    res.end("Not found");
+    res.writeHead(200, { "Content-Type": "text/plain" });
+    res.end("ok");
   });
 
-  return new Promise((resolve) => {
-    server.listen(port, () => {
-      resolve({
-        setAuthUrl(url) { authUrl = url; },
-        waitForRedirectUrl() { return redirectUrlPromise; },
-        close() { return new Promise((r) => server.close(r)); }
-      });
-    });
-  });
+  return {
+    setAuthUrl(url) { authUrl = url; },
+    waitForRedirectUrl() { return redirectUrlPromise; },
+    uninstall() { setHttpRequestHandler(null); }
+  };
 }
 
 async function runInternalPiLogin(provider, { rl = null, authRelay = null } = {}) {
@@ -256,7 +251,7 @@ async function runInternalPiLogin(provider, { rl = null, authRelay = null } = {}
   });
 }
 
-export async function bootstrapIfNeeded({ force = false, cliConfigOverrides = {} } = {}) {
+export async function bootstrapIfNeeded({ force = false, cliConfigOverrides = {}, httpPort = 0, setHttpRequestHandler } = {}) {
   await ensureArisaHome();
   if (!force && await exists(configFile)) return;
 
@@ -272,14 +267,18 @@ export async function bootstrapIfNeeded({ force = false, cliConfigOverrides = {}
           `No auth found for ${resolvedPi.provider}. Provide --pi.apiKey for non-interactive bootstrap, or use a provider that supports OAuth.`
         );
       }
-      const relayPort = Number(process.env.PORT) || 10000;
-      const authRelay = await startAuthRelay(relayPort);
-      console.log(`No existing Pi auth found for ${resolvedPi.provider}. Starting auth relay on port ${relayPort}.`);
+      if (!httpPort || !setHttpRequestHandler) {
+        throw new Error(
+          `No auth found for ${resolvedPi.provider}. Auth relay requires an HTTP server on PORT. Provide --pi.apiKey or set the PORT environment variable.`
+        );
+      }
+      const authRelay = installAuthRelay(httpPort, setHttpRequestHandler);
+      console.log(`No existing Pi auth found for ${resolvedPi.provider}. Auth relay active on port ${httpPort}.`);
       console.log(`Open your server URL in a browser to complete Pi authentication.\n`);
       try {
         await runInternalPiLogin(resolvedPi.provider, { authRelay });
       } finally {
-        await authRelay.close();
+        authRelay.uninstall();
       }
       if (!hasProviderAuth(resolvedPi.provider, createPiRuntime())) {
         throw new Error(
