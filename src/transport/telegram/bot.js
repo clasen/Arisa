@@ -144,7 +144,7 @@ async function withTyping(ctx, work) {
 }
 
 export async function createTelegramBot({ config, artifactStore, toolRegistry, taskStore, agentManager, saveConfig, updateConfig, logger, webhookUrl, setHttpRequestHandler }) {
-  const bot = new Bot(config.telegram.apiKey);
+  const bot = new Bot(config.telegram.token);
   const perChatState = new Map();
 
   function getIncomingChatMeta(ctx) {
@@ -375,7 +375,7 @@ export async function createTelegramBot({ config, artifactStore, toolRegistry, t
         }
       }, 1000).unref();
       if (webhookUrl && setHttpRequestHandler) {
-        const webhookPath = `/telegram-${config.telegram.apiKey.slice(-8)}`;
+        const webhookPath = `/telegram-${config.telegram.token.slice(-8)}`;
         const handleUpdate = webhookCallback(bot, "http");
         setHttpRequestHandler((req, res) => {
           const parsed = new URL(req.url, "http://localhost");

@@ -29,7 +29,7 @@ function parseMaxChatIds(value, fallback = 1) {
 function buildConfig({ telegramApiKey, telegramMaxChatIds, provider, model, piApiKey }) {
   return {
     telegram: {
-      apiKey: telegramApiKey,
+      token: telegramApiKey,
       maxChatIds: telegramMaxChatIds,
       authorizedChatIds: [],
       chatMeta: {}
@@ -255,7 +255,7 @@ export async function bootstrapIfNeeded({ force = false, cliConfigOverrides = {}
   await ensureArisaHome();
   if (!force && await exists(configFile)) return;
 
-  const telegramApiKeyFromCli = normalizeString(cliConfigOverrides?.telegram?.apiKey);
+  const telegramApiKeyFromCli = normalizeString(cliConfigOverrides?.telegram?.token);
   if (telegramApiKeyFromCli) {
     const runtime = createPiRuntime();
     const resolvedPi = resolvePiDefaults(runtime, cliConfigOverrides?.pi || {});

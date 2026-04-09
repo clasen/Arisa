@@ -126,10 +126,10 @@ On first run, Arisa will:
 
 ### Non-interactive bootstrap (CLI overrides)
 
-You can skip the interactive questions by providing `--telegram.apiKey` and optional overrides:
+You can skip the interactive questions by providing `--telegram.token` and optional overrides:
 
 ```bash
-node src/index.js --telegram.apiKey <token>
+node src/index.js --telegram.token <token>
 ```
 
 With this mode, Arisa creates `~/.arisa/state/config.json` without prompts and applies these defaults when not provided:
@@ -141,7 +141,7 @@ With this mode, Arisa creates `~/.arisa/state/config.json` without prompts and a
 Supported overrides:
 
 ```bash
-node src/index.js --telegram.apiKey <token> --telegram.maxChatIds 3 --pi.provider openai-codex --pi.model gpt-5.4 --pi.apiKey <optional-provider-key>
+node src/index.js --telegram.token <token> --telegram.maxChatIds 3 --pi.provider openai-codex --pi.model gpt-5.4 --pi.apiKey <optional-provider-key>
 ```
 
 Notes:
