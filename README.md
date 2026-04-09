@@ -148,6 +148,7 @@ Notes:
 
 - interactive bootstrap remains unchanged when no CLI overrides are provided
 - `--bootstrap` can be combined with overrides to regenerate config non-interactively
+- when `--pi.apiKey` is omitted and the provider supports Pi OAuth, Arisa prints the login URL and waits for browser authentication
 - unknown `--pi.provider` or `--pi.model` values are ignored and replaced by safe defaults
 
 Telegram bot tokens can be created with:

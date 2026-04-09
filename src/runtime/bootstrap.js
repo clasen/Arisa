@@ -108,7 +108,7 @@ async function maybeOpenExternal(url) {
   });
 }
 
-async function runInternalPiLogin(provider, rl) {
+async function runInternalPiLogin(provider, { rl = null, allowManualInput = true } = {}) {
   const authStorage = AuthStorage.create();
   const selected = authStorage.getOAuthProviders().find((item) => item.id === provider);
   if (!selected) {
@@ -126,12 +126,14 @@ async function runInternalPiLogin(provider, rl) {
     onAuth: async ({ url, instructions }) => {
       console.log(`${instructions || "Open this URL to continue authentication:"}\n${url}\n`);
       await maybeOpenExternal(url);
-      if (selected.usesCallbackServer) {
+      if (selected.usesCallbackServer && allowManualInput && rl) {
         const pasted = (await rl.question("Paste the redirect URL here if the browser does not return automatically, or press Enter to keep waiting: ")).trim();
         if (pasted && manualCodeResolve) {
           manualCodeResolve(pasted);
           manualCodeResolve = undefined;
         }
+      } else if (selected.usesCallbackServer && !allowManualInput) {
+        console.log("Waiting for Pi login callback from your browser...");
       }
     },
     onDeviceCode: async ({ userCode, verificationUri }) => {
@@ -140,6 +142,9 @@ async function runInternalPiLogin(provider, rl) {
       await maybeOpenExternal(verificationUri);
     },
     onPrompt: async ({ message }) => {
+      if (!rl) {
+        throw new Error(`Pi login for ${provider} requires interactive input: ${message}`);
+      }
       return (await rl.question(`${message} `)).trim();
     },
     onProgress: (message) => {
@@ -164,7 +169,22 @@ export async function bootstrapIfNeeded({ force = false, cliConfigOverrides = {}
     const runtime = createPiRuntime();
     const resolvedPi = resolvePiDefaults(runtime, cliConfigOverrides?.pi || {});
     const telegramMaxChatIds = parseMaxChatIds(cliConfigOverrides?.telegram?.maxChatIds, 1);
-    const piApiKey = normalizeString(cliConfigOverrides?.pi?.apiKey);
+    let piApiKey = normalizeString(cliConfigOverrides?.pi?.apiKey);
+    if (!piApiKey && !hasProviderAuth(resolvedPi.provider, runtime)) {
+      if (!supportsProviderOAuth(resolvedPi.provider, runtime)) {
+        throw new Error(
+          `No auth found for ${resolvedPi.provider}. Provide --pi.apiKey for non-interactive bootstrap, or rerun bootstrap interactively to configure auth.`
+        );
+      }
+      console.log(`No existing Pi auth found for ${resolvedPi.provider}. Starting internal Pi login...`);
+      await runInternalPiLogin(resolvedPi.provider, { allowManualInput: false });
+      if (!hasProviderAuth(resolvedPi.provider, createPiRuntime())) {
+        throw new Error(
+          `Pi login did not complete for ${resolvedPi.provider}. Finish authentication in the browser and retry, or provide --pi.apiKey.`
+        );
+      }
+      console.log(`Detected Pi auth for ${resolvedPi.provider}. Continuing bootstrap.`);
+    }
     const config = buildConfig({
       telegramApiKey: telegramApiKeyFromCli,
       telegramMaxChatIds,
@@ -230,7 +250,7 @@ export async function bootstrapIfNeeded({ force = false, cliConfigOverrides = {}
 
     console.log(`No existing Pi auth found for ${selectedProvider.provider}. Starting internal Pi login...`);
     try {
-      await runInternalPiLogin(selectedProvider.provider, rl);
+      await runInternalPiLogin(selectedProvider.provider, { rl });
     } catch (error) {
       console.log(`Internal Pi login failed: ${error instanceof Error ? error.message : String(error)}`);
     }
