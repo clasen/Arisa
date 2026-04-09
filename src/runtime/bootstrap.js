@@ -1,4 +1,5 @@
 import { readFile, writeFile } from "node:fs/promises";
+import { createServer } from "node:http";
 import readline from "node:readline/promises";
 import { stdin as input, stdout as output } from "node:process";
 import { spawn } from "node:child_process";
@@ -122,7 +123,72 @@ async function maybeOpenExternal(url) {
   });
 }
 
-async function runInternalPiLogin(provider, { rl = null, allowManualInput = true } = {}) {
+function startAuthRelay(port) {
+  let authUrl = "";
+  let resolveRedirectUrl;
+  const redirectUrlPromise = new Promise((resolve) => {
+    resolveRedirectUrl = resolve;
+  });
+
+  const page = (body) => [
+    "<!DOCTYPE html><html><head><meta charset='utf-8'><meta name='viewport' content='width=device-width'>",
+    "<title>Arisa Auth</title>",
+    "<style>body{font-family:system-ui,sans-serif;max-width:600px;margin:40px auto;padding:0 20px;line-height:1.6}",
+    "input[type=text]{width:100%;padding:8px;box-sizing:border-box;margin:8px 0}",
+    "button{padding:8px 24px;cursor:pointer}code{background:#f0f0f0;padding:2px 6px;border-radius:3px}</style>",
+    "</head><body>",
+    body,
+    "</body></html>"
+  ].join("");
+
+  const server = createServer((req, res) => {
+    const parsed = new URL(req.url, `http://localhost:${port}`);
+
+    if (req.method === "GET" && parsed.pathname === "/") {
+      res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
+      res.end(page([
+        "<h2>Arisa &mdash; Pi Authentication</h2>",
+        authUrl
+          ? `<p><strong>1.</strong> <a href="${authUrl}" target="_blank">Click here to log in with Pi</a></p>`
+          : "<p>Waiting for authentication URL&hellip;</p>",
+        "<p><strong>2.</strong> After login your browser will redirect to a <code>localhost</code> URL that won't load. That's expected.</p>",
+        "<p><strong>3.</strong> Copy the full URL from your browser's address bar and paste it below:</p>",
+        '<form method="POST" action="/auth/relay">',
+        '<input type="text" name="url" placeholder="Paste the localhost redirect URL here&hellip;" required />',
+        "<button type='submit'>Submit</button>",
+        "</form>"
+      ].join("\n")));
+      return;
+    }
+
+    if (req.method === "POST" && parsed.pathname === "/auth/relay") {
+      let body = "";
+      req.on("data", (chunk) => { body += chunk; });
+      req.on("end", () => {
+        const url = (new URLSearchParams(body).get("url") || "").trim();
+        if (url) resolveRedirectUrl(url);
+        res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
+        res.end(page("<h2>Authentication received</h2><p>You can close this page. Arisa is starting&hellip;</p>"));
+      });
+      return;
+    }
+
+    res.writeHead(404);
+    res.end("Not found");
+  });
+
+  return new Promise((resolve) => {
+    server.listen(port, () => {
+      resolve({
+        setAuthUrl(url) { authUrl = url; },
+        waitForRedirectUrl() { return redirectUrlPromise; },
+        close() { return new Promise((r) => server.close(r)); }
+      });
+    });
+  });
+}
+
+async function runInternalPiLogin(provider, { rl = null, authRelay = null } = {}) {
   const authStorage = AuthStorage.create();
   const selected = authStorage.getOAuthProviders().find((item) => item.id === provider);
   if (!selected) {
@@ -140,14 +206,20 @@ async function runInternalPiLogin(provider, { rl = null, allowManualInput = true
     onAuth: async ({ url, instructions }) => {
       console.log(`${instructions || "Open this URL to continue authentication:"}\n${url}\n`);
       await maybeOpenExternal(url);
-      if (selected.usesCallbackServer && allowManualInput && rl) {
+      if (authRelay) {
+        authRelay.setAuthUrl(url);
+        console.log("Waiting for authentication via the web relay...");
+        const redirectUrl = await authRelay.waitForRedirectUrl();
+        if (redirectUrl && manualCodeResolve) {
+          manualCodeResolve(redirectUrl);
+          manualCodeResolve = undefined;
+        }
+      } else if (selected.usesCallbackServer && rl) {
         const pasted = (await rl.question("Paste the redirect URL here if the browser does not return automatically, or press Enter to keep waiting: ")).trim();
         if (pasted && manualCodeResolve) {
           manualCodeResolve(pasted);
           manualCodeResolve = undefined;
         }
-      } else if (selected.usesCallbackServer && !allowManualInput) {
-        console.log("Waiting for Pi login callback from your browser...");
       }
     },
     onDeviceCode: async ({ userCode, verificationUri }) => {
@@ -183,18 +255,25 @@ export async function bootstrapIfNeeded({ force = false, cliConfigOverrides = {}
     const runtime = createPiRuntime();
     const resolvedPi = resolvePiDefaults(runtime, cliConfigOverrides?.pi || {});
     const telegramMaxChatIds = parseMaxChatIds(cliConfigOverrides?.telegram?.maxChatIds, 1);
-    let piApiKey = normalizeString(cliConfigOverrides?.pi?.apiKey);
+    const piApiKey = normalizeString(cliConfigOverrides?.pi?.apiKey);
     if (!piApiKey && !hasProviderAuth(resolvedPi.provider, runtime)) {
       if (!supportsProviderOAuth(resolvedPi.provider, runtime)) {
         throw new Error(
-          `No auth found for ${resolvedPi.provider}. Provide --pi.apiKey for non-interactive bootstrap, or rerun bootstrap interactively to configure auth.`
+          `No auth found for ${resolvedPi.provider}. Provide --pi.apiKey for non-interactive bootstrap, or use a provider that supports OAuth.`
         );
       }
-      console.log(`No existing Pi auth found for ${resolvedPi.provider}. Starting internal Pi login...`);
-      await runInternalPiLogin(resolvedPi.provider, { allowManualInput: false });
+      const relayPort = Number(process.env.PORT) || 10000;
+      const authRelay = await startAuthRelay(relayPort);
+      console.log(`No existing Pi auth found for ${resolvedPi.provider}. Starting auth relay on port ${relayPort}.`);
+      console.log(`Open your server URL in a browser to complete Pi authentication.\n`);
+      try {
+        await runInternalPiLogin(resolvedPi.provider, { authRelay });
+      } finally {
+        await authRelay.close();
+      }
       if (!hasProviderAuth(resolvedPi.provider, createPiRuntime())) {
         throw new Error(
-          `Pi login did not complete for ${resolvedPi.provider}. Finish authentication in the browser and retry, or provide --pi.apiKey.`
+          `Pi login did not complete for ${resolvedPi.provider}. Retry or provide --pi.apiKey.`
         );
       }
       console.log(`Detected Pi auth for ${resolvedPi.provider}. Continuing bootstrap.`);
