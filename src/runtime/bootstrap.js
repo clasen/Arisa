@@ -44,7 +44,7 @@ function buildConfig({ telegramApiKey, telegramMaxChatIds, provider, model, piAp
 }
 
 function resolvePiDefaults(runtime, { provider: preferredProvider = "", model: preferredModel = "" } = {}) {
-  const providers = listPiProviders(runtime);
+  const providers = sortBootstrapProviders(listPiProviders(runtime));
   if (!providers.length) {
     throw new Error("No Pi providers are available for bootstrap.");
   }
@@ -72,6 +72,20 @@ function resolvePiDefaults(runtime, { provider: preferredProvider = "", model: p
 
   const selectedModel = modelExists ? preferredModelValue : models[0].id;
   return { provider: selectedProvider, model: selectedModel };
+}
+
+function sortBootstrapProviders(providers) {
+  const preferredOrder = ["openai-codex"];
+  const positions = new Map(providers.map((provider, index) => [provider.provider, index]));
+
+  return [...providers].sort((a, b) => {
+    const aPref = preferredOrder.indexOf(a.provider);
+    const bPref = preferredOrder.indexOf(b.provider);
+    const aRank = aPref === -1 ? Number.MAX_SAFE_INTEGER : aPref;
+    const bRank = bPref === -1 ? Number.MAX_SAFE_INTEGER : bPref;
+    if (aRank !== bRank) return aRank - bRank;
+    return (positions.get(a.provider) || 0) - (positions.get(b.provider) || 0);
+  });
 }
 
 function sortBootstrapModels(provider, models) {
@@ -210,7 +224,7 @@ export async function bootstrapIfNeeded({ force = false, cliConfigOverrides = {}
   const telegramMaxChatIds = Number(await ask("Maximum authorized chat IDs", "1"));
 
   const runtime = createPiRuntime();
-  const providers = listPiProviders(runtime);
+  const providers = sortBootstrapProviders(listPiProviders(runtime));
   console.log("\nAvailable Pi providers:");
   providers.forEach((item, index) => {
     const authLabel = item.authConfigured ? "auth: configured" : item.supportsOAuth ? "auth: login or API key" : "auth: API key";

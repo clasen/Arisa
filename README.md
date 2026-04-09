@@ -134,7 +134,7 @@ node src/index.js --telegram.apiKey <token>
 
 With this mode, Arisa creates `~/.arisa/state/config.json` without prompts and applies these defaults when not provided:
 
-- `pi.provider`: first provider from the current Pi provider list
+- `pi.provider`: `openai-codex` when available, otherwise first provider from the current Pi provider list
 - `pi.model`: first model after bootstrap sorting (currently prioritizes `openai-codex/gpt-5.4`)
 - `telegram.maxChatIds`: `1`
 
