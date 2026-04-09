@@ -144,6 +144,14 @@ function startAuthRelay(port) {
   const server = createServer((req, res) => {
     const parsed = new URL(req.url, `http://localhost:${port}`);
 
+    if (req.method === "GET" && parsed.pathname === "/auth/callback" && parsed.searchParams.has("code")) {
+      const callbackUrl = `http://localhost:1455${parsed.pathname}${parsed.search}`;
+      resolveRedirectUrl(callbackUrl);
+      res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
+      res.end(page("<h2>Authentication received</h2><p>You can close this page. Arisa is starting&hellip;</p>"));
+      return;
+    }
+
     if (req.method === "GET" && parsed.pathname === "/") {
       res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
       res.end(page([
@@ -152,7 +160,9 @@ function startAuthRelay(port) {
           ? `<p><strong>1.</strong> <a href="${authUrl}" target="_blank">Click here to log in with Pi</a></p>`
           : "<p>Waiting for authentication URL&hellip;</p>",
         "<p><strong>2.</strong> After login your browser will redirect to a <code>localhost</code> URL that won't load. That's expected.</p>",
-        "<p><strong>3.</strong> Copy the full URL from your browser's address bar and paste it below:</p>",
+        "<p><strong>3.</strong> In your browser's address bar, replace <code>localhost:1455</code> with your server's domain and press Enter.</p>",
+        "<hr>",
+        "<p><em>Or paste the full redirect URL here:</em></p>",
         '<form method="POST" action="/auth/relay">',
         '<input type="text" name="url" placeholder="Paste the localhost redirect URL here&hellip;" required />',
         "<button type='submit'>Submit</button>",
