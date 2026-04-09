@@ -5,7 +5,7 @@ import { TaskStore } from "../core/tasks/task-store.js";
 import { AgentManager } from "../core/agent/agent-manager.js";
 import { createTelegramBot } from "../transport/telegram/bot.js";
 
-export async function createApp({ logger } = {}) {
+export async function createApp({ logger, webhookUrl, setHttpRequestHandler } = {}) {
   logger?.log("app", "loading config");
   const config = await loadConfig();
   const artifactStore = new ArtifactStore();
@@ -15,7 +15,7 @@ export async function createApp({ logger } = {}) {
   logger?.log("app", `loaded ${toolRegistry.list().length} tools`);
 
   const agentManager = new AgentManager({ config, artifactStore, toolRegistry, taskStore, logger });
-  const bot = await createTelegramBot({ config, artifactStore, toolRegistry, taskStore, agentManager, saveConfig, updateConfig, logger });
+  const bot = await createTelegramBot({ config, artifactStore, toolRegistry, taskStore, agentManager, saveConfig, updateConfig, logger, webhookUrl, setHttpRequestHandler });
 
   return {
     async start() {

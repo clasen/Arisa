@@ -81,12 +81,14 @@ function toBootstrapOverrides(nestedFlags) {
 }
 
 const bootstrapHttpOptions = httpPort ? { httpPort, setHttpRequestHandler } : {};
+const webhookUrl = bootstrapOverrides.webhook?.url || process.env.RENDER_EXTERNAL_URL || "";
+const appHttpOptions = httpPort ? { webhookUrl, setHttpRequestHandler } : {};
 
 async function runForeground() {
   logger.log("app", `starting${verbose ? " in verbose mode" : ""}`);
   await bootstrapIfNeeded({ force: forceBootstrap, cliConfigOverrides: bootstrapOverrides, ...bootstrapHttpOptions });
   try {
-    const app = await createApp({ logger });
+    const app = await createApp({ logger, ...appHttpOptions });
     await app.start();
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
@@ -94,7 +96,7 @@ async function runForeground() {
       console.log(`\n${message}\n`);
       console.log("Reopening bootstrap so you can provide a Pi API key or switch to a provider you already authenticated with.\n");
       await bootstrapIfNeeded({ force: true, cliConfigOverrides: bootstrapOverrides, ...bootstrapHttpOptions });
-      const app = await createApp({ logger });
+      const app = await createApp({ logger, ...appHttpOptions });
       await app.start();
       return;
     }

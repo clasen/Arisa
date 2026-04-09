@@ -1,4 +1,4 @@
-import { Bot, InputFile } from "grammy";
+import { Bot, InputFile, webhookCallback } from "grammy";
 import path from "node:path";
 import { authorizeChat } from "./auth.js";
 import { captureIncomingArtifact } from "./media.js";
@@ -143,7 +143,7 @@ async function withTyping(ctx, work) {
   }
 }
 
-export async function createTelegramBot({ config, artifactStore, toolRegistry, taskStore, agentManager, saveConfig, updateConfig, logger }) {
+export async function createTelegramBot({ config, artifactStore, toolRegistry, taskStore, agentManager, saveConfig, updateConfig, logger, webhookUrl, setHttpRequestHandler }) {
   const bot = new Bot(config.telegram.apiKey);
   const perChatState = new Map();
 
@@ -374,8 +374,23 @@ export async function createTelegramBot({ config, artifactStore, toolRegistry, t
           }
         }
       }, 1000).unref();
-      logger?.log("telegram", "bot polling started");
-      await bot.start({ drop_pending_updates: true });
+      if (webhookUrl && setHttpRequestHandler) {
+        const webhookPath = `/telegram-${config.telegram.apiKey.slice(-8)}`;
+        const handleUpdate = webhookCallback(bot, "http");
+        setHttpRequestHandler((req, res) => {
+          const parsed = new URL(req.url, "http://localhost");
+          if (req.method === "POST" && parsed.pathname === webhookPath) {
+            return handleUpdate(req, res);
+          }
+          res.writeHead(200, { "Content-Type": "text/plain" });
+          res.end("ok");
+        });
+        await bot.api.setWebhook(`${webhookUrl}${webhookPath}`);
+        logger?.log("telegram", `webhook mode: ${webhookUrl}${webhookPath}`);
+      } else {
+        logger?.log("telegram", "bot polling started");
+        await bot.start({ drop_pending_updates: true });
+      }
     }
   };
 }
