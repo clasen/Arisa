@@ -8,15 +8,64 @@ import { flushArisaHome } from "./runtime/flush.js";
 import { installPiPackage, removePiPackage } from "./runtime/pi-package-manager.js";
 
 const args = process.argv.slice(2);
-const command = args.find((arg) => !arg.startsWith("--")) || "run";
-const forceBootstrap = args.includes("--bootstrap");
-const verbose = args.includes("--verbose");
-const serviceRunner = args.includes("--service-runner");
+const cli = parseCliArgs(args);
+const command = cli.positionals[0] || "run";
+const forceBootstrap = Boolean(cli.flags.bootstrap);
+const verbose = Boolean(cli.flags.verbose);
+const serviceRunner = Boolean(cli.flags["service-runner"]);
+const bootstrapOverrides = toBootstrapOverrides(cli.nestedFlags);
 const logger = createLogger({ verbose });
+
+function parseCliArgs(rawArgs) {
+  const flags = {};
+  const nestedFlags = {};
+  const positionals = [];
+
+  for (let index = 0; index < rawArgs.length; index += 1) {
+    const token = rawArgs[index];
+    if (!token.startsWith("--")) {
+      positionals.push(token);
+      continue;
+    }
+
+    const flagName = token.slice(2);
+    if (!flagName) continue;
+    if (flagName.includes(".")) {
+      const next = rawArgs[index + 1];
+      const hasValue = typeof next === "string" && !next.startsWith("--");
+      if (hasValue) {
+        nestedFlags[flagName] = next;
+        index += 1;
+      }
+      continue;
+    }
+
+    flags[flagName] = true;
+  }
+
+  return { flags, nestedFlags, positionals };
+}
+
+function toBootstrapOverrides(nestedFlags) {
+  const overrides = {};
+  for (const [flatKey, value] of Object.entries(nestedFlags)) {
+    const parts = flatKey.split(".");
+    let cursor = overrides;
+    for (let index = 0; index < parts.length - 1; index += 1) {
+      const key = parts[index];
+      if (!cursor[key] || typeof cursor[key] !== "object") {
+        cursor[key] = {};
+      }
+      cursor = cursor[key];
+    }
+    cursor[parts[parts.length - 1]] = value;
+  }
+  return overrides;
+}
 
 async function runForeground() {
   logger.log("app", `starting${verbose ? " in verbose mode" : ""}`);
-  await bootstrapIfNeeded({ force: forceBootstrap });
+  await bootstrapIfNeeded({ force: forceBootstrap, cliConfigOverrides: bootstrapOverrides });
   try {
     const app = await createApp({ logger });
     await app.start();
@@ -25,7 +74,7 @@ async function runForeground() {
     if (message.includes("No auth found")) {
       console.log(`\n${message}\n`);
       console.log("Reopening bootstrap so you can provide a Pi API key or switch to a provider you already authenticated with.\n");
-      await bootstrapIfNeeded({ force: true });
+      await bootstrapIfNeeded({ force: true, cliConfigOverrides: bootstrapOverrides });
       const app = await createApp({ logger });
       await app.start();
       return;
@@ -42,7 +91,7 @@ async function main() {
   }
 
   if (command === "start") {
-    await bootstrapIfNeeded({ force: forceBootstrap });
+    await bootstrapIfNeeded({ force: forceBootstrap, cliConfigOverrides: bootstrapOverrides });
     const result = await startService({ verbose });
     if (!result.ok) {
       console.log(`Arisa is already running in background (pid ${result.pid}).`);
@@ -85,7 +134,7 @@ async function main() {
   }
 
   if (command === "install") {
-    const source = args.filter((arg) => !arg.startsWith("--")).slice(1)[0];
+    const source = cli.positionals[1];
     if (!source) {
       console.log("Usage: arisa install <pi-package-source>");
       return;
@@ -96,7 +145,7 @@ async function main() {
   }
 
   if (command === "remove") {
-    const source = args.filter((arg) => !arg.startsWith("--")).slice(1)[0];
+    const source = cli.positionals[1];
     if (!source) {
       console.log("Usage: arisa remove <pi-package-source>");
       return;

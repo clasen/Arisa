@@ -124,6 +124,32 @@ On first run, Arisa will:
 6. validate that Pi Agent works
 7. only then start listening to Telegram
 
+### Non-interactive bootstrap (CLI overrides)
+
+You can skip the interactive questions by providing `--telegram.apiKey` and optional overrides:
+
+```bash
+node src/index.js --telegram.apiKey <token>
+```
+
+With this mode, Arisa creates `~/.arisa/state/config.json` without prompts and applies these defaults when not provided:
+
+- `pi.provider`: first provider from the current Pi provider list
+- `pi.model`: first model after bootstrap sorting (currently prioritizes `openai-codex/gpt-5.4`)
+- `telegram.maxChatIds`: `1`
+
+Supported overrides:
+
+```bash
+node src/index.js --telegram.apiKey <token> --telegram.maxChatIds 3 --pi.provider openai-codex --pi.model gpt-5.4 --pi.apiKey <optional-provider-key>
+```
+
+Notes:
+
+- interactive bootstrap remains unchanged when no CLI overrides are provided
+- `--bootstrap` can be combined with overrides to regenerate config non-interactively
+- unknown `--pi.provider` or `--pi.model` values are ignored and replaced by safe defaults
+
 Telegram bot tokens can be created with:
 
 - https://t.me/BotFather

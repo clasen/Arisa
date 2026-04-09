@@ -15,6 +15,65 @@ async function exists(file) {
   }
 }
 
+function normalizeString(value) {
+  if (typeof value !== "string") return "";
+  return value.trim();
+}
+
+function parseMaxChatIds(value, fallback = 1) {
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed) || parsed <= 0) return fallback;
+  return parsed;
+}
+
+function buildConfig({ telegramApiKey, telegramMaxChatIds, provider, model, piApiKey }) {
+  return {
+    telegram: {
+      apiKey: telegramApiKey,
+      maxChatIds: telegramMaxChatIds,
+      authorizedChatIds: [],
+      chatMeta: {}
+    },
+    pi: {
+      provider,
+      model,
+      apiKey: piApiKey
+    },
+    createdAt: new Date().toISOString()
+  };
+}
+
+function resolvePiDefaults(runtime, { provider: preferredProvider = "", model: preferredModel = "" } = {}) {
+  const providers = listPiProviders(runtime);
+  if (!providers.length) {
+    throw new Error("No Pi providers are available for bootstrap.");
+  }
+
+  const preferredProviderValue = normalizeString(preferredProvider);
+  const providerExists = providers.some((item) => item.provider === preferredProviderValue);
+  if (preferredProviderValue && !providerExists) {
+    console.log(`Ignoring unknown Pi provider override: ${preferredProviderValue}`);
+  }
+
+  const selectedProvider = providerExists
+    ? preferredProviderValue
+    : providers[0].provider;
+
+  const models = sortBootstrapModels(selectedProvider, listProviderModels(selectedProvider, runtime));
+  if (!models.length) {
+    throw new Error(`No Pi models are available for provider ${selectedProvider}.`);
+  }
+
+  const preferredModelValue = normalizeString(preferredModel);
+  const modelExists = models.some((item) => item.id === preferredModelValue);
+  if (preferredModelValue && !modelExists) {
+    console.log(`Ignoring unknown Pi model override for ${selectedProvider}: ${preferredModelValue}`);
+  }
+
+  const selectedModel = modelExists ? preferredModelValue : models[0].id;
+  return { provider: selectedProvider, model: selectedModel };
+}
+
 function sortBootstrapModels(provider, models) {
   const preferred = {
     "openai-codex": ["gpt-5.4"]
@@ -96,9 +155,27 @@ async function runInternalPiLogin(provider, rl) {
   });
 }
 
-export async function bootstrapIfNeeded({ force = false } = {}) {
+export async function bootstrapIfNeeded({ force = false, cliConfigOverrides = {} } = {}) {
   await ensureArisaHome();
   if (!force && await exists(configFile)) return;
+
+  const telegramApiKeyFromCli = normalizeString(cliConfigOverrides?.telegram?.apiKey);
+  if (telegramApiKeyFromCli) {
+    const runtime = createPiRuntime();
+    const resolvedPi = resolvePiDefaults(runtime, cliConfigOverrides?.pi || {});
+    const telegramMaxChatIds = parseMaxChatIds(cliConfigOverrides?.telegram?.maxChatIds, 1);
+    const piApiKey = normalizeString(cliConfigOverrides?.pi?.apiKey);
+    const config = buildConfig({
+      telegramApiKey: telegramApiKeyFromCli,
+      telegramMaxChatIds,
+      provider: resolvedPi.provider,
+      model: resolvedPi.model,
+      piApiKey
+    });
+    await writeFile(configFile, `${JSON.stringify(config, null, 2)}\n`, "utf8");
+    console.log(`\nConfig saved to ${configFile} (non-interactive bootstrap)\n`);
+    return;
+  }
 
   const rl = readline.createInterface({ input, output });
   const ask = async (label, fallback = "") => {
@@ -166,20 +243,13 @@ export async function bootstrapIfNeeded({ force = false } = {}) {
     console.log(`Pi auth for ${selectedProvider.provider} is still missing after login.`);
   }
 
-  const config = {
-    telegram: {
-      apiKey: telegramApiKey,
-      maxChatIds: telegramMaxChatIds,
-      authorizedChatIds: [],
-      chatMeta: {}
-    },
-    pi: {
-      provider: selectedProvider.provider,
-      model: selectedModel.id,
-      apiKey: piApiKey
-    },
-    createdAt: new Date().toISOString()
-  };
+  const config = buildConfig({
+    telegramApiKey,
+    telegramMaxChatIds,
+    provider: selectedProvider.provider,
+    model: selectedModel.id,
+    piApiKey
+  });
 
   await writeFile(configFile, `${JSON.stringify(config, null, 2)}\n`, "utf8");
   rl.close();
