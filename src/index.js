@@ -81,7 +81,7 @@ function toBootstrapOverrides(nestedFlags) {
 }
 
 const bootstrapHttpOptions = httpPort ? { httpPort, setHttpRequestHandler } : {};
-const webhookUrl = bootstrapOverrides.webhook?.url || process.env.RENDER_EXTERNAL_URL || "";
+const webhookUrl = bootstrapOverrides.webhook?.url || "";
 const appHttpOptions = httpPort ? { webhookUrl, setHttpRequestHandler } : {};
 
 async function runForeground() {
