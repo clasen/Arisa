@@ -65,6 +65,7 @@ function buildPrompt({ ctx, artifact, transcript, toolResult }) {
   }
 
   parts.push(`If you need a CLI tool, use list_tools/tool_help/run_tool.`);
+  parts.push(`For direct system interaction or file management, use system_shell/read/write/edit/bash.`);
   parts.push(`If a tool config is missing, ask the user naturally and then use set_tool_config.`);
   parts.push(`If the user wants a generated media reply, use send_media_reply.`);
   return parts.join("\n");

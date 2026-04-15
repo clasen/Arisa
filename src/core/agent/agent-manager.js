@@ -1,6 +1,6 @@
 import path from "node:path";
 import { unlink } from "node:fs/promises";
-import { createAgentSession, SessionManager, defineTool } from "@mariozechner/pi-coding-agent";
+import { createAgentSession, SessionManager, defineTool, createCodingTools } from "@mariozechner/pi-coding-agent";
 import { Type } from "@sinclair/typebox";
 import { createPiRuntime, hasProviderAuth } from "./pi-runtime.js";
 import { loadProjectInstructions } from "./project-instructions.js";
@@ -67,12 +67,14 @@ export class AgentManager {
 
     this.logger?.log("agent", `creating session for chat ${chatId}`);
     const customTools = this.createTools(telegram, chatId);
+    const coreTools = createCodingTools(arisaInstallDir);
     const { session } = await createAgentSession({
       cwd: arisaInstallDir,
       agentDir: arisaHomeDir,
       authStorage,
       modelRegistry,
       model,
+      tools: coreTools,
       customTools,
       sessionManager: SessionManager.inMemory()
     });
@@ -90,6 +92,37 @@ export class AgentManager {
 
   createTools(telegram, chatId) {
     return [
+      defineTool({
+        name: "system_shell",
+        label: "System Shell",
+        description: "Execute arbitrary commands on the host system. Automatically uses PowerShell on Windows and Bash on Unix. Use this for system queries (RAM, CPU, files, processes).",
+        parameters: Type.Object({
+          command: Type.String({ description: "The command to execute." })
+        }),
+        execute: async (_id, params) => {
+          this.logger?.log("agent", `shell: ${params.command}`);
+          const { exec } = await import("node:child_process");
+          const { promisify } = await import("node:util");
+          const os = await import("node:os");
+          const execAsync = promisify(exec);
+          const isWin = os.platform() === "win32";
+          const shell = isWin ? "powershell.exe" : true;
+          
+          try {
+            const { stdout, stderr } = await execAsync(params.command, { shell });
+            return {
+              content: [{ type: "text", text: stdout || stderr || "(Success, no output)" }],
+              details: { stdout, stderr }
+            };
+          } catch (error) {
+            return {
+              content: [{ type: "text", text: error.message }],
+              details: { error: error.message, stdout: error.stdout, stderr: error.stderr },
+              isError: true
+            };
+          }
+        }
+      }),
       defineTool({
         name: "list_tools",
         label: "List tools",

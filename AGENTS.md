@@ -45,6 +45,16 @@ Current conceptual behavior:
 If inbound media was normalized before reasoning, Pi Agent should use the normalized result as the actual message content.
 For example, if a voice note was transcribed, Pi Agent should answer the meaning of the transcript, not simply return the raw transcript unless the user explicitly asked for transcription.
 
+## Tooling
+Arisa has two types of tools:
+1. **Core Coding Tools**: `read`, `write`, `edit`, `bash`. Use these for file operations and managing the Arisa codebase or your own scripts.
+2. **Arisa Modular Tools**: `run_tool`, `list_tools`, `tool_help`. These bridge to isolated CLI tools in `tools/`.
+3. **System Tools**: `system_shell`. Use this for direct system interaction (RAM, CPU, processes).
+
+If you need a capability that doesn't exist as a modular tool, you can:
+- Use `system_shell` to perform the task directly.
+- Use the core coding tools to CREATE a new modular tool in the `tools/` directory.
+
 ## How to inspect CLI tools
 Before using a tool, inspect its help:
 - via the custom tool: `tool_help`
