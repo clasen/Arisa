@@ -40,6 +40,10 @@ function getTelegramCommand(ctx) {
   return text.slice(1, entity.length).split("@")[0].trim().toLowerCase();
 }
 
+function getIncomingMessageText(message) {
+  return message?.text || message?.caption || "";
+}
+
 function buildPrompt({ ctx, artifact, transcript, toolResult }) {
   const parts = [
     `Incoming Telegram message.`,
@@ -49,7 +53,8 @@ function buildPrompt({ ctx, artifact, transcript, toolResult }) {
     `messageId: ${ctx.msg.message_id}`
   ];
 
-  if (ctx.message?.text) parts.push(`text: ${ctx.message.text}`);
+  const messageText = getIncomingMessageText(ctx.message);
+  if (messageText) parts.push(`text: ${messageText}`);
   parts.push(...quotedMessageSummary(ctx.message?.reply_to_message));
   if (artifact?.path) parts.push(`artifactPath: ${artifact.path}`);
   if (artifact?.id) parts.push(`artifactId: ${artifact.id}`);

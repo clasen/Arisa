@@ -6,6 +6,10 @@ async function downloadToBuffer(ctx, fileId) {
   return Buffer.from(await response.arrayBuffer());
 }
 
+function incomingCaptionMetadata(ctx) {
+  return ctx.message?.caption ? { caption: ctx.message.caption } : {};
+}
+
 export async function captureIncomingArtifact(ctx, artifactStore) {
   const chatId = ctx.chat.id;
   const store = artifactStore.forChat(chatId);
@@ -25,7 +29,7 @@ export async function captureIncomingArtifact(ctx, artifactStore) {
       kind: "audio",
       mimeType: "audio/ogg",
       source: baseSource,
-      metadata: { duration: ctx.message.voice.duration }
+      metadata: { duration: ctx.message.voice.duration, ...incomingCaptionMetadata(ctx) }
     });
   }
 
@@ -38,7 +42,7 @@ export async function captureIncomingArtifact(ctx, artifactStore) {
       kind: "document",
       mimeType: ctx.message.document.mime_type || "application/octet-stream",
       source: baseSource,
-      metadata: {}
+      metadata: incomingCaptionMetadata(ctx)
     });
   }
 
@@ -52,7 +56,7 @@ export async function captureIncomingArtifact(ctx, artifactStore) {
       kind: "image",
       mimeType: "image/jpeg",
       source: baseSource,
-      metadata: { width: photo.width, height: photo.height }
+      metadata: { width: photo.width, height: photo.height, ...incomingCaptionMetadata(ctx) }
     });
   }
 
