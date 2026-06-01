@@ -54,6 +54,17 @@ Every CLI must support:
 - `node index.js --help`
 - `node index.js run --request-file <json>`
 
+### Tools that need daemons
+Some tools need a persistent process, for example to keep a browser session alive or a local model warm.
+Implement these tools with the shared daemon runtime instead of custom ad hoc process management:
+- use `src/core/tools/daemon-runtime.js`
+- keep runtime files under the tool state directory (`stateDir/<toolName>`)
+- expose normal CLI behavior through `run --request-file`; callers should not manage daemon internals
+- use the runtime for `daemon.pid`, `daemon.log`, `status.json`, and `commands/*.request|processing|result.json`
+- keep one daemon owner per tool/session and avoid opening a second client over the same resource
+- use `beforeStart` only for tool-specific cleanup such as stale browser locks, without deleting persistent session/model data
+- keep daemon tools headless/server-safe by default when they are meant to run on VPS machines
+
 ## Pipe behavior in V1
 V1 does not have a full automatic planner yet. The agent should:
 1. understand whether the needed pipe belongs to pre-reasoning normalization or post-reasoning tool chaining

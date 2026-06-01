@@ -15,6 +15,7 @@ const forceBootstrap = Boolean(cli.flags.bootstrap);
 const verbose = Boolean(cli.flags.verbose);
 const serviceRunner = Boolean(cli.flags["service-runner"]);
 const bootstrapOverrides = toBootstrapOverrides(cli.nestedFlags);
+const runtimeOverrides = toRuntimeOverrides(cli.nestedFlags);
 const logger = createLogger({ verbose });
 
 const httpPort = Number(process.env.PORT);
@@ -80,23 +81,45 @@ function toBootstrapOverrides(nestedFlags) {
   return overrides;
 }
 
+function toRuntimeOverrides(nestedFlags) {
+  return toBootstrapOverrides(nestedFlags);
+}
+
+function toServiceRunnerArgs(nestedFlags) {
+  const args = [];
+  if (nestedFlags["pi.model"]) {
+    args.push("--pi.model", nestedFlags["pi.model"]);
+  }
+  return args;
+}
+
 const bootstrapHttpOptions = httpPort ? { httpPort, setHttpRequestHandler } : {};
 const webhookUrl = bootstrapOverrides.webhook?.url || "";
 const appHttpOptions = httpPort ? { webhookUrl, setHttpRequestHandler } : {};
 
 async function runForeground() {
+  const hasRuntimePiOverrides = Boolean(
+    runtimeOverrides?.pi?.model
+    || runtimeOverrides?.pi?.provider
+    || runtimeOverrides?.pi?.apiKey
+  );
   logger.log("app", `starting${verbose ? " in verbose mode" : ""}`);
   await bootstrapIfNeeded({ force: forceBootstrap, cliConfigOverrides: bootstrapOverrides, ...bootstrapHttpOptions });
   try {
-    const app = await createApp({ logger, ...appHttpOptions });
+    const app = await createApp({ logger, runtimeOverrides, ...appHttpOptions });
     await app.start();
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     if (message.includes("No auth found")) {
       console.log(`\n${message}\n`);
+      if (hasRuntimePiOverrides) {
+        console.log("Skipping automatic bootstrap because Pi runtime overrides were provided.");
+        console.log("Keeping existing Telegram config. Run `arisa --bootstrap` manually if you want to update persisted auth/config.\n");
+        throw error;
+      }
       console.log("Reopening bootstrap so you can provide a Pi API key or switch to a provider you already authenticated with.\n");
       await bootstrapIfNeeded({ force: true, cliConfigOverrides: bootstrapOverrides, ...bootstrapHttpOptions });
-      const app = await createApp({ logger, ...appHttpOptions });
+      const app = await createApp({ logger, runtimeOverrides, ...appHttpOptions });
       await app.start();
       return;
     }
@@ -113,7 +136,7 @@ async function main() {
 
   if (command === "start") {
     await bootstrapIfNeeded({ force: forceBootstrap, cliConfigOverrides: bootstrapOverrides, ...bootstrapHttpOptions });
-    const result = await startService({ verbose });
+    const result = await startService({ verbose, cliArgs: toServiceRunnerArgs(cli.nestedFlags) });
     if (!result.ok) {
       console.log(`Arisa is already running in background (pid ${result.pid}).`);
       return;

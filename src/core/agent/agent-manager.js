@@ -5,7 +5,21 @@ import { Type } from "@sinclair/typebox";
 import { createPiRuntime, hasProviderAuth } from "./pi-runtime.js";
 import { loadProjectInstructions } from "./project-instructions.js";
 import { arisaInstallDir, buildAgentRuntimeContext } from "./runtime-context.js";
-import { arisaHomeDir } from "../../runtime/paths.js";
+import { arisaHomeDir, getChatPiSessionsDir } from "../../runtime/paths.js";
+
+function isLocalBaseUrl(value) {
+  if (typeof value !== "string" || !value.trim()) return false;
+  try {
+    const parsed = new URL(value);
+    return parsed.hostname === "127.0.0.1" || parsed.hostname === "localhost";
+  } catch {
+    return false;
+  }
+}
+
+function requiresProviderAuth(model) {
+  return !isLocalBaseUrl(model?.baseUrl);
+}
 
 export class AgentManager {
   constructor({ config, artifactStore, toolRegistry, taskStore, logger }) {
@@ -15,15 +29,30 @@ export class AgentManager {
     this.taskStore = taskStore;
     this.logger = logger;
     this.sessions = new Map();
+    this.pendingNewSessions = new Set();
   }
 
   setConfig(config) {
     this.config = config;
     this.sessions.clear();
+    this.pendingNewSessions.clear();
   }
 
   resetSession(chatId) {
-    this.sessions.delete(chatId);
+    const sessionKey = String(chatId);
+    this.sessions.delete(sessionKey);
+    this.pendingNewSessions.add(sessionKey);
+  }
+
+  createSessionManager(chatId) {
+    const sessionKey = String(chatId);
+    const sessionDir = getChatPiSessionsDir(sessionKey);
+    if (this.pendingNewSessions.has(sessionKey)) {
+      this.logger?.log("agent", `starting new persisted session for chat ${sessionKey}`);
+      return { sessionManager: SessionManager.create(arisaInstallDir, sessionDir), isNewSession: true };
+    }
+    this.logger?.log("agent", `recovering persisted session for chat ${sessionKey}`);
+    return { sessionManager: SessionManager.continueRecent(arisaInstallDir, sessionDir), isNewSession: false };
   }
 
   async validatePiAgent() {
@@ -36,7 +65,7 @@ export class AgentManager {
     if (!model) {
       throw new Error(`Model not found: ${this.config.pi.provider}/${this.config.pi.model}`);
     }
-    if (!this.config.pi.apiKey && !hasProviderAuth(this.config.pi.provider, { authStorage, modelRegistry })) {
+    if (requiresProviderAuth(model) && !this.config.pi.apiKey && !hasProviderAuth(this.config.pi.provider, { authStorage, modelRegistry })) {
       throw new Error(`No auth found for ${this.config.pi.provider}. Provide a Pi API key in bootstrap, or authenticate with Pi login for this provider during bootstrap.`);
     }
 
@@ -50,22 +79,32 @@ export class AgentManager {
   }
 
   async getSessionContext(chatId, telegram) {
-    if (this.sessions.has(chatId)) {
-      this.logger?.log("agent", `reusing session for chat ${chatId}`);
-      return this.sessions.get(chatId);
+    const sessionKey = String(chatId);
+    const effectiveModelId = this.config.pi.model;
+    if (this.sessions.has(sessionKey)) {
+      const existing = this.sessions.get(sessionKey);
+      if (existing?.modelId === effectiveModelId) {
+        this.logger?.log("agent", `reusing session for chat ${sessionKey}`);
+        return existing;
+      }
+      this.logger?.log("agent", `model changed for chat ${sessionKey}: ${existing?.modelId || "unknown"} -> ${effectiveModelId}; recreating session`);
+      this.sessions.delete(sessionKey);
+      this.pendingNewSessions.add(sessionKey);
     }
 
     const { authStorage, modelRegistry } = createPiRuntime({
       provider: this.config.pi.provider,
       apiKey: this.config.pi.apiKey
     });
-    const model = modelRegistry.find(this.config.pi.provider, this.config.pi.model);
-    if (!model) throw new Error(`Model not found: ${this.config.pi.provider}/${this.config.pi.model}`);
-    if (!this.config.pi.apiKey && !hasProviderAuth(this.config.pi.provider, { authStorage, modelRegistry })) {
+    const model = modelRegistry.find(this.config.pi.provider, effectiveModelId);
+    if (!model) throw new Error(`Model not found: ${this.config.pi.provider}/${effectiveModelId}`);
+    if (requiresProviderAuth(model) && !this.config.pi.apiKey && !hasProviderAuth(this.config.pi.provider, { authStorage, modelRegistry })) {
       throw new Error(`No auth found for ${this.config.pi.provider}. Re-run bootstrap and complete login for this provider before Telegram starts.`);
     }
 
-    this.logger?.log("agent", `creating session for chat ${chatId}`);
+    const { sessionManager, isNewSession } = this.createSessionManager(sessionKey);
+    const hasExistingSession = sessionManager.buildSessionContext().messages.length > 0;
+    this.logger?.log("agent", `${hasExistingSession ? "resuming" : "creating"} session for chat ${sessionKey} with model ${effectiveModelId}`);
     const customTools = this.createTools(telegram, chatId);
     const { session } = await createAgentSession({
       cwd: arisaInstallDir,
@@ -74,21 +113,28 @@ export class AgentManager {
       modelRegistry,
       model,
       customTools,
-      sessionManager: SessionManager.inMemory()
+      sessionManager
     });
 
-    const instructions = await loadProjectInstructions();
-    const runtimeContext = buildAgentRuntimeContext();
-    this.logger?.log("agent", `injecting project instructions for chat ${chatId}`);
-    this.logger?.log("agent", `runtime context for chat ${chatId}:\n${runtimeContext}`);
-    await session.prompt(`${instructions}\n\n${runtimeContext}\n\nAcknowledge with exactly: OK`);
+    if (!hasExistingSession) {
+      const instructions = await loadProjectInstructions();
+      const runtimeContext = buildAgentRuntimeContext();
+      this.logger?.log("agent", `injecting project instructions for chat ${sessionKey}`);
+      this.logger?.log("agent", `runtime context for chat ${sessionKey}:\n${runtimeContext}`);
+      await session.prompt(`${instructions}\n\n${runtimeContext}\n\nAcknowledge with exactly: OK`);
+    }
 
-    const ctx = { session };
-    this.sessions.set(chatId, ctx);
+    const ctx = { session, modelId: effectiveModelId };
+    this.sessions.set(sessionKey, ctx);
+    if (isNewSession) {
+      this.pendingNewSessions.delete(sessionKey);
+    }
     return ctx;
   }
 
   createTools(telegram, chatId) {
+    const chatArtifactStore = this.artifactStore.forChat(chatId);
+
     return [
       defineTool({
         name: "list_tools",
@@ -117,11 +163,11 @@ export class AgentManager {
       defineTool({
         name: "set_tool_config",
         label: "Set tool config",
-        description: "Write a value into ~/.arisa/tools/<tool>/config.js.",
+        description: "Write a tool config value scoped to the current chat.",
         parameters: Type.Object({ name: Type.String(), field: Type.String(), value: Type.String() }),
         execute: async (_id, params) => {
           await this.toolRegistry.load();
-          const result = await this.toolRegistry.setConfig(params.name, params.field, params.value);
+          const result = await this.toolRegistry.setConfig(params.name, params.field, params.value, chatId);
           return { content: [{ type: "text", text: JSON.stringify(result) }], details: result };
         }
       }),
@@ -140,7 +186,7 @@ export class AgentManager {
           this.logger?.log("agent", `run_tool ${params.name}`);
           let artifact = null;
           if (params.artifactId) {
-            artifact = await this.artifactStore.get(params.artifactId);
+            artifact = await chatArtifactStore.get(params.artifactId);
             if (!artifact) {
               return { content: [{ type: "text", text: `Artifact not found: ${params.artifactId}` }], details: { ok: false } };
             }
@@ -151,11 +197,12 @@ export class AgentManager {
               artifact,
               text: params.text,
               args: params.args || {}
-            }
+            },
+            chatId
           });
 
           if (result.output?.text) {
-            const outArtifact = await this.artifactStore.createText({
+            const outArtifact = await chatArtifactStore.createText({
               text: result.output.text,
               source: { type: "tool", toolName: params.name },
               metadata: { tool: params.name }
@@ -164,7 +211,7 @@ export class AgentManager {
           }
 
           if (result.output?.filePath) {
-            const generated = await this.artifactStore.createFromFile({
+            const generated = await chatArtifactStore.createFromFile({
               originalPath: result.output.filePath,
               fileName: result.output.fileName || path.basename(result.output.filePath),
               kind: result.output.kind || "file",
@@ -261,7 +308,8 @@ export class AgentManager {
           this.logger?.log("agent", `send_media_reply via ${toolName}`);
           const result = await this.toolRegistry.run({
             name: toolName,
-            request: { text: params.text, args: {} }
+            request: { text: params.text, args: {} },
+            chatId
           });
           if (!result.ok || !result.output?.filePath) {
             return { content: [{ type: "text", text: JSON.stringify(result, null, 2) }], details: result };

@@ -7,17 +7,19 @@ async function downloadToBuffer(ctx, fileId) {
 }
 
 export async function captureIncomingArtifact(ctx, artifactStore) {
+  const chatId = ctx.chat.id;
+  const store = artifactStore.forChat(chatId);
   const baseSource = {
     type: "telegram",
-    chatId: ctx.chat.id,
+    chatId,
     messageId: ctx.msg.message_id,
     userId: ctx.from.id
   };
 
   if (ctx.message?.voice) {
-    const fileName = `${ctx.chat.id}-${ctx.msg.message_id}.ogg`;
+    const fileName = `${chatId}-${ctx.msg.message_id}.ogg`;
     const content = await downloadToBuffer(ctx, ctx.message.voice.file_id);
-    return artifactStore.createGeneratedFile({
+    return store.createGeneratedFile({
       fileName,
       content,
       kind: "audio",
@@ -28,9 +30,9 @@ export async function captureIncomingArtifact(ctx, artifactStore) {
   }
 
   if (ctx.message?.document) {
-    const fileName = ctx.message.document.file_name || `${ctx.chat.id}-${ctx.msg.message_id}`;
+    const fileName = ctx.message.document.file_name || `${chatId}-${ctx.msg.message_id}`;
     const content = await downloadToBuffer(ctx, ctx.message.document.file_id);
-    return artifactStore.createGeneratedFile({
+    return store.createGeneratedFile({
       fileName,
       content,
       kind: "document",
@@ -42,9 +44,9 @@ export async function captureIncomingArtifact(ctx, artifactStore) {
 
   if (ctx.message?.photo?.length) {
     const photo = ctx.message.photo.at(-1);
-    const fileName = `${ctx.chat.id}-${ctx.msg.message_id}.jpg`;
+    const fileName = `${chatId}-${ctx.msg.message_id}.jpg`;
     const content = await downloadToBuffer(ctx, photo.file_id);
-    return artifactStore.createGeneratedFile({
+    return store.createGeneratedFile({
       fileName,
       content,
       kind: "image",
@@ -55,7 +57,7 @@ export async function captureIncomingArtifact(ctx, artifactStore) {
   }
 
   if (ctx.message?.text) {
-    return artifactStore.createText({
+    return store.createText({
       text: ctx.message.text,
       source: baseSource,
       metadata: {}

@@ -2,7 +2,7 @@ import { mkdir, readdir, readFile, unlink, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { spawn } from "node:child_process";
 import { fileURLToPath } from "node:url";
-import { getToolConfigPath, getToolTmpDir, toolsDir as userToolsRoot } from "../../runtime/paths.js";
+import { getToolConfigPath, getToolTmpDir, getChatToolTmpDir, toolsDir as userToolsRoot } from "../../runtime/paths.js";
 import { loadToolConfig, parseConfigModule, writeToolConfig } from "./tool-config.js";
 import { normalizeToolResult } from "./tool-result.js";
 
@@ -92,22 +92,33 @@ export class ToolRegistry {
     return result.stdout || result.stderr;
   }
 
-  async setConfig(name, field, value) {
+  async resolveConfigForChat(name, chatId) {
     const tool = this.get(name);
     if (!tool) throw new Error(`Tool not found: ${name}`);
-    const config = { ...(tool.config || {}) };
-    config[field] = value;
-    const configPath = await writeToolConfig(name, config);
-    tool.config = config;
-    tool.configPath = configPath;
+    if (chatId == null) return tool.config || {};
+    return loadToolConfig(name, tool.defaults || {}, chatId);
+  }
+
+  async setConfig(name, field, value, chatId = null) {
+    const tool = this.get(name);
+    if (!tool) throw new Error(`Tool not found: ${name}`);
+    const current = chatId != null
+      ? await this.resolveConfigForChat(name, chatId)
+      : { ...(tool.config || {}) };
+    current[field] = value;
+    const configPath = await writeToolConfig(name, current, chatId);
+    if (chatId == null) {
+      tool.config = current;
+      tool.configPath = configPath;
+    }
     return { ok: true, tool: name, field, configPath };
   }
 
-  async run({ name, request }) {
+  async run({ name, request, chatId = null }) {
     const tool = this.get(name);
     if (!tool) throw new Error(`Tool not found: ${name}`);
     this.logger?.log("tools", `running ${name}`);
-    const tmpDir = getToolTmpDir(name);
+    const tmpDir = chatId != null ? getChatToolTmpDir(chatId, name) : getToolTmpDir(name);
     await mkdir(tmpDir, { recursive: true });
     const requestFile = path.join(tmpDir, `.request-${Date.now()}.json`);
     await writeFile(requestFile, `${JSON.stringify(request, null, 2)}\n`, "utf8");

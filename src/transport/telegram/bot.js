@@ -3,6 +3,7 @@ import path from "node:path";
 import { authorizeChat } from "./auth.js";
 import { captureIncomingArtifact } from "./media.js";
 import { renderTelegramHtml } from "./text-format.js";
+import { normalizeArtifactForReasoning } from "../../core/artifacts/normalize-for-reasoning.js";
 
 function quotedMessageSummary(message) {
   if (!message) return [];
@@ -41,7 +42,7 @@ function getTelegramCommand(ctx) {
 
 function buildPrompt({ ctx, artifact, transcript, toolResult }) {
   const parts = [
-    `New Session..`,
+    `Incoming Telegram message.`,
     `chatId: ${ctx.chat.id}`,
     `userId: ${ctx.from.id}`,
     `username: ${ctx.from.username || "(no username)"}`,
@@ -79,43 +80,61 @@ function buildNewSessionPrompt(ctx) {
   ].join("\n");
 }
 
-function buildAsyncTaskPrompt(task) {
-  return [
+async function buildAsyncTaskPrompt({ task, artifactStore, toolRegistry, logger }) {
+  const parts = [
     "Scheduled task fired.",
     `taskId: ${task.id}`,
     `chatId: ${task.payload.chatId}`,
-    task.payload.prompt ? `text: ${task.payload.prompt}` : null,
-    "Treat this as a new request for the chat and fulfill it now.",
-    "If needed, use tools."
-  ].filter(Boolean).join("\n");
+    task.payload.prompt ? `text: ${task.payload.prompt}` : null
+  ];
+
+  if (task.payload.artifactId) {
+    const chatArtifactStore = artifactStore.forChat(task.payload.chatId);
+    const artifact = await chatArtifactStore.get(task.payload.artifactId);
+    if (artifact) {
+      parts.push(`artifactPath: ${artifact.path || ""}`);
+      parts.push(`artifactId: ${artifact.id}`);
+      parts.push(`mimeType: ${artifact.mimeType}`);
+      parts.push(`kind: ${artifact.kind}`);
+
+      const { normalizedArtifact, toolResult } = await normalizeArtifactForReasoning({
+        artifact,
+        desiredMimeType: "text/plain",
+        toolRegistry,
+        chatArtifactStore,
+        chatId: task.payload.chatId
+      });
+
+      if (normalizedArtifact) {
+        logger?.log("tasks", `artifact ${artifact.id} normalized to ${normalizedArtifact.id}`);
+        parts.push(`transcriptArtifactId: ${normalizedArtifact.id}`);
+        parts.push(`transcriptText: ${normalizedArtifact.text}`);
+        parts.push("Important: the attached audio artifact has already been normalized for reasoning. Use the transcript as the message content.");
+      } else if (artifact.kind === "audio" && toolResult) {
+        parts.push(`audioNormalizationResult: ${JSON.stringify(toolResult)}`);
+        parts.push("Important: pre-reasoning audio normalization could not be completed, so you do not have a transcript for this audio artifact.");
+      }
+    } else {
+      parts.push(`artifactId: ${task.payload.artifactId}`);
+      parts.push("Important: referenced artifact was not found.");
+    }
+  }
+
+  parts.push("Treat this as a new request for the chat and fulfill it now.");
+  parts.push("If needed, use tools.");
+  return parts.filter(Boolean).join("\n");
 }
 
-async function maybeTranscribeIncomingAudio({ artifact, toolRegistry, artifactStore }) {
-  if (!artifact || artifact.kind !== "audio") return { transcript: null };
-
-  const result = await toolRegistry.run({
-    name: "openai-transcribe",
-    request: {
-      artifact,
-      args: {}
-    }
+async function normalizeIncomingArtifact({ artifact, toolRegistry, chatArtifactStore, chatId }) {
+  if (!artifact) return { transcript: null, toolResult: null };
+  const { normalizedArtifact, toolResult } = await normalizeArtifactForReasoning({
+    artifact,
+    desiredMimeType: "text/plain",
+    toolRegistry,
+    chatArtifactStore,
+    chatId
   });
-
-  if (!result.ok) {
-    return { transcript: null, toolResult: result };
-  }
-
-  if (!result.output?.text) {
-    return { transcript: null, toolResult: { ok: false, status: "failed", error: "Transcription returned no text." } };
-  }
-
-  const transcript = await artifactStore.createText({
-    text: result.output.text,
-    source: { type: "tool", toolName: "openai-transcribe" },
-    metadata: { fromArtifactId: artifact.id, tool: "openai-transcribe" }
-  });
-
-  return { transcript, toolResult: result };
+  return { transcript: normalizedArtifact, toolResult };
 }
 
 async function collectText(session, prompt) {
@@ -164,10 +183,12 @@ export async function createTelegramBot({ config, artifactStore, toolRegistry, t
   }
 
   async function buildIncomingPrompt(ctx) {
-    logger?.log("telegram", `message ${ctx.msg.message_id} in chat ${ctx.chat.id}`);
+    const chatId = ctx.chat.id;
+    logger?.log("telegram", `message ${ctx.msg.message_id} in chat ${chatId}`);
+    const chatArtifactStore = artifactStore.forChat(chatId);
     const artifact = await captureIncomingArtifact(ctx, artifactStore);
     if (artifact) logger?.log("telegram", `captured artifact ${artifact.kind}${artifact.id ? ` ${artifact.id}` : ""}`);
-    const { transcript, toolResult } = await maybeTranscribeIncomingAudio({ artifact, toolRegistry, artifactStore });
+    const { transcript, toolResult } = await normalizeIncomingArtifact({ artifact, toolRegistry, chatArtifactStore, chatId });
     if (transcript) logger?.log("telegram", `audio transcribed to artifact ${transcript.id}`);
     if (artifact?.kind === "audio" && !transcript) {
       logger?.log("telegram", `audio normalization unavailable for chat ${ctx.chat.id}: ${toolResult?.error || toolResult?.missingConfig?.join(", ") || "unknown error"}`);
@@ -180,7 +201,8 @@ export async function createTelegramBot({ config, artifactStore, toolRegistry, t
 
     if (text.length > maxInlineReplyLength) {
       logger?.log("telegram", `sending long reply as markdown attachment for chat ${chatId}`);
-      const artifact = await artifactStore.createGeneratedFile({
+      const chatArtifactStore = artifactStore.forChat(chatId);
+      const artifact = await chatArtifactStore.createGeneratedFile({
         fileName: `reply-${Date.now()}.md`,
         content: text,
         kind: "document",
@@ -365,7 +387,7 @@ export async function createTelegramBot({ config, artifactStore, toolRegistry, t
             logger?.log("tasks", `running task ${task.id} for chat ${task.payload.chatId}`);
             await enqueuePrompt({
               chatId: task.payload.chatId,
-              prompt: buildAsyncTaskPrompt(task),
+              prompt: await buildAsyncTaskPrompt({ task, artifactStore, toolRegistry, logger }),
               label: `scheduled task ${task.id}`
             });
             await taskStore.complete(task.id);

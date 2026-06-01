@@ -56,6 +56,10 @@ export class TaskStore {
     if (!this.tasks) this.tasks = await loadTasksFile();
   }
 
+  async reload() {
+    this.tasks = await loadTasksFile();
+  }
+
   async save() {
     await saveTasksFile(this.tasks || []);
   }
@@ -77,7 +81,7 @@ export class TaskStore {
   }
 
   async claimDue(limit = 10) {
-    await this.init();
+    await this.reload();
     const now = Date.now();
     const due = [];
 
@@ -126,7 +130,7 @@ export class TaskStore {
   }
 
   async list(filter = {}) {
-    await this.init();
+    await this.reload();
     return this.tasks.filter((task) => {
       if (filter.chatId && task.payload?.chatId !== filter.chatId) return false;
       if (filter.status && task.status !== filter.status) return false;
@@ -136,12 +140,12 @@ export class TaskStore {
   }
 
   async get(taskId) {
-    await this.init();
+    await this.reload();
     return this.tasks.find((item) => item.id === taskId) || null;
   }
 
   async cancel(taskId) {
-    await this.init();
+    await this.reload();
     const index = this.tasks.findIndex((item) => item.id === taskId);
     if (index === -1) return null;
     const [task] = this.tasks.splice(index, 1);
@@ -150,7 +154,7 @@ export class TaskStore {
   }
 
   async cancelAll(filter = {}) {
-    await this.init();
+    await this.reload();
     const removed = [];
     this.tasks = this.tasks.filter((task) => {
       if (filter.chatId && task.payload?.chatId !== filter.chatId) return true;

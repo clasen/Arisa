@@ -1,6 +1,6 @@
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
-import { getToolConfigPath } from "../../runtime/paths.js";
+import { getToolConfigPath, getChatToolConfigPath } from "../../runtime/paths.js";
 
 export function parseConfigModule(source) {
   const normalized = source.replace(/^export\s+default/, "return");
@@ -21,14 +21,22 @@ export async function readConfigModule(filePath, fallback = {}) {
   }
 }
 
-export async function loadToolConfig(toolName, defaults = {}) {
-  const configPath = getToolConfigPath(toolName);
-  const stored = await readConfigModule(configPath, {});
-  return { ...defaults, ...stored };
+export async function loadToolConfig(toolName, defaults = {}, chatId = null) {
+  const globalPath = getToolConfigPath(toolName);
+  const globalStored = await readConfigModule(globalPath, {});
+  const merged = { ...defaults, ...globalStored };
+
+  if (chatId == null) return merged;
+
+  const chatPath = getChatToolConfigPath(chatId, toolName);
+  const chatStored = await readConfigModule(chatPath, {});
+  return { ...merged, ...chatStored };
 }
 
-export async function writeToolConfig(toolName, config) {
-  const configPath = getToolConfigPath(toolName);
+export async function writeToolConfig(toolName, config, chatId = null) {
+  const configPath = chatId != null
+    ? getChatToolConfigPath(chatId, toolName)
+    : getToolConfigPath(toolName);
   await mkdir(path.dirname(configPath), { recursive: true });
   await writeFile(configPath, serializeConfigModule(config), "utf8");
   return configPath;

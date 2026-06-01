@@ -101,6 +101,16 @@ arisa install <source>   # install a Pi package into Arisa's runtime
 arisa remove <source>    # remove a Pi package from Arisa's runtime
 ```
 
+Runtime model override (current process only):
+
+```bash
+arisa --pi.model lmstudio/google/gemma-4-26b-a4b
+```
+
+Notes:
+
+- it only affects the current Arisa process and does not update `~/.arisa/state/config.json`
+
 ## Experimental features
 
 ### Pi Agent packages
