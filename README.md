@@ -145,13 +145,13 @@ node src/index.js --telegram.token <token>
 With this mode, Arisa creates `~/.arisa/state/config.json` without prompts and applies these defaults when not provided:
 
 - `pi.provider`: `openai-codex` when available, otherwise first provider from the current Pi provider list
-- `pi.model`: first model after bootstrap sorting (currently prioritizes `openai-codex/gpt-5.4`)
+- `pi.model`: first model after bootstrap sorting (currently prioritizes `openai-codex/gpt-5.5`)
 - `telegram.maxChatIds`: `1`
 
 Supported overrides:
 
 ```bash
-node src/index.js --telegram.token <token> --telegram.maxChatIds 3 --pi.provider openai-codex --pi.model gpt-5.4 --pi.apiKey <optional-provider-key>
+node src/index.js --telegram.token <token> --telegram.maxChatIds 3 --pi.provider openai-codex --pi.model gpt-5.5 --pi.apiKey <optional-provider-key>
 ```
 
 Notes:
@@ -171,7 +171,7 @@ For providers with internal Pi login support, such as Codex, leaving the API key
 
 For example, selecting:
 
-- `openai-codex/gpt-5.4`
+- `openai-codex/gpt-5.5`
 
 allows Arisa to authenticate through Pi's Codex OAuth flow instead of requiring a normal OpenAI API key.
 

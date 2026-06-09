@@ -33,6 +33,26 @@ export async function captureIncomingArtifact(ctx, artifactStore) {
     });
   }
 
+  if (ctx.message?.video) {
+    const video = ctx.message.video;
+    const fileName = video.file_name || `${chatId}-${ctx.msg.message_id}.mp4`;
+    const content = await downloadToBuffer(ctx, video.file_id);
+    return store.createGeneratedFile({
+      fileName,
+      content,
+      kind: "video",
+      mimeType: video.mime_type || "video/mp4",
+      source: baseSource,
+      metadata: {
+        duration: video.duration,
+        width: video.width,
+        height: video.height,
+        fileSize: video.file_size,
+        ...incomingCaptionMetadata(ctx)
+      }
+    });
+  }
+
   if (ctx.message?.document) {
     const fileName = ctx.message.document.file_name || `${chatId}-${ctx.msg.message_id}`;
     const content = await downloadToBuffer(ctx, ctx.message.document.file_id);

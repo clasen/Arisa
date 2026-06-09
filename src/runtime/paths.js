@@ -10,6 +10,7 @@ export const serviceLogFile = path.join(stateDir, "arisa.log");
 export const tasksFile = path.join(stateDir, "tasks.json");
 export const toolsDir = path.join(arisaHomeDir, "tools");
 export const chatsDir = path.join(arisaHomeDir, "chats");
+export const toolStateDir = path.join(stateDir, "tools");
 
 export function getChatDir(chatId) {
   return path.join(chatsDir, String(chatId));
@@ -21,6 +22,10 @@ export function getChatArtifactsDir(chatId) {
 
 export function getChatArtifactsIndexFile(chatId) {
   return path.join(getChatDir(chatId), "state", "artifacts.json");
+}
+
+export function getChatToolStateDir(chatId, toolName) {
+  return path.join(getChatDir(chatId), "state", "tools", toolName);
 }
 
 export function getChatPiSessionsDir(chatId) {
@@ -35,24 +40,28 @@ export function getToolConfigPath(toolName) {
   return path.join(getToolDir(toolName), "config.js");
 }
 
+export function getChatConfigDir(chatId) {
+  return path.join(getChatDir(chatId), "config");
+}
+
+export function getChatTmpDir(chatId) {
+  return path.join(getChatDir(chatId), "tmp");
+}
+
 export function getChatToolConfigPath(chatId, toolName) {
-  return path.join(getChatDir(chatId), "tools", toolName, "config.js");
+  return path.join(getChatConfigDir(chatId), "tools", toolName, "config.js");
 }
 
-export function getToolRuntimeDir(toolName) {
-  return getToolDir(toolName);
-}
-
-export function getToolOutDir(toolName) {
-  return path.join(getToolRuntimeDir(toolName), "out");
+export function getToolStateDir(toolName) {
+  return path.join(toolStateDir, toolName);
 }
 
 export function getToolTmpDir(toolName) {
-  return path.join(getToolRuntimeDir(toolName), "tmp");
+  return path.join(getToolStateDir(toolName), "tmp");
 }
 
 export function getChatToolTmpDir(chatId, toolName) {
-  return path.join(getChatDir(chatId), "tools", toolName, "tmp");
+  return path.join(getChatTmpDir(chatId), "tools", toolName);
 }
 
 export async function ensureArisaHome() {

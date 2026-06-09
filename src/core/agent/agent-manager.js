@@ -132,6 +132,49 @@ export class AgentManager {
     return ctx;
   }
 
+  async runTool({ name, request, chatId }) {
+    await this.toolRegistry.load();
+    this.logger?.log("agent", `run_tool ${name}`);
+    const chatArtifactStore = this.artifactStore.forChat(chatId);
+    const result = await this.toolRegistry.run({ name, request, chatId });
+
+    if (result.output?.text) {
+      const outArtifact = await chatArtifactStore.createText({
+        text: result.output.text,
+        source: { type: "tool", toolName: name },
+        metadata: { tool: name }
+      });
+      result.output.artifactId = outArtifact.id;
+    }
+
+    if (result.output?.filePath) {
+      const generated = await chatArtifactStore.createFromFile({
+        originalPath: result.output.filePath,
+        fileName: result.output.fileName || path.basename(result.output.filePath),
+        kind: result.output.kind || "file",
+        mimeType: result.output.mimeType || "application/octet-stream",
+        source: { type: "tool", toolName: name },
+        metadata: { tool: name }
+      });
+      result.output.artifactId = generated.id;
+      await unlink(result.output.filePath).catch(() => {});
+    }
+
+    if (result.asyncTask || result.asyncTasks?.length) {
+      const scheduled = await this.taskStore.addMany(
+        result.asyncTasks || [result.asyncTask],
+        {
+          payload: { chatId },
+          source: { type: "tool", toolName: name, chatId }
+        }
+      );
+      result.asyncTasks = scheduled;
+      delete result.asyncTask;
+    }
+
+    return result;
+  }
+
   createTools(telegram, chatId) {
     const chatArtifactStore = this.artifactStore.forChat(chatId);
 
@@ -161,6 +204,18 @@ export class AgentManager {
         }
       }),
       defineTool({
+        name: "tool_skills",
+        label: "Tool skills",
+        description: "Show skills assigned to a CLI tool via its manifest skillHints.",
+        parameters: Type.Object({ name: Type.String() }),
+        execute: async (_id, params) => {
+          await this.toolRegistry.load();
+          const skills = await this.toolRegistry.resolveSkills(params.name);
+          const visible = skills.map(({ content, ...item }) => item);
+          return { content: [{ type: "text", text: JSON.stringify(visible, null, 2) }], details: visible };
+        }
+      }),
+      defineTool({
         name: "set_tool_config",
         label: "Set tool config",
         description: "Write a tool config value scoped to the current chat.",
@@ -182,8 +237,6 @@ export class AgentManager {
           args: Type.Optional(Type.Record(Type.String(), Type.String()))
         }),
         execute: async (_id, params) => {
-          await this.toolRegistry.load();
-          this.logger?.log("agent", `run_tool ${params.name}`);
           let artifact = null;
           if (params.artifactId) {
             artifact = await chatArtifactStore.get(params.artifactId);
@@ -191,7 +244,7 @@ export class AgentManager {
               return { content: [{ type: "text", text: `Artifact not found: ${params.artifactId}` }], details: { ok: false } };
             }
           }
-          const result = await this.toolRegistry.run({
+          const result = await this.runTool({
             name: params.name,
             request: {
               artifact,
@@ -200,40 +253,6 @@ export class AgentManager {
             },
             chatId
           });
-
-          if (result.output?.text) {
-            const outArtifact = await chatArtifactStore.createText({
-              text: result.output.text,
-              source: { type: "tool", toolName: params.name },
-              metadata: { tool: params.name }
-            });
-            result.output.artifactId = outArtifact.id;
-          }
-
-          if (result.output?.filePath) {
-            const generated = await chatArtifactStore.createFromFile({
-              originalPath: result.output.filePath,
-              fileName: result.output.fileName || path.basename(result.output.filePath),
-              kind: result.output.kind || "file",
-              mimeType: result.output.mimeType || "application/octet-stream",
-              source: { type: "tool", toolName: params.name },
-              metadata: { tool: params.name }
-            });
-            result.output.artifactId = generated.id;
-            await unlink(result.output.filePath).catch(() => {});
-          }
-
-          if (result.asyncTask || result.asyncTasks?.length) {
-            const scheduled = await this.taskStore.addMany(
-              result.asyncTasks || [result.asyncTask],
-              {
-                payload: { chatId },
-                source: { type: "tool", toolName: params.name, chatId }
-              }
-            );
-            result.asyncTasks = scheduled;
-            delete result.asyncTask;
-          }
 
           return {
             content: [{ type: "text", text: JSON.stringify(result, null, 2) }],

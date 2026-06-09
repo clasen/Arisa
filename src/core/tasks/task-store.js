@@ -27,7 +27,7 @@ function normalizeTask(task, defaults = {}) {
     createdAt: task.createdAt || new Date().toISOString(),
     updatedAt: new Date().toISOString(),
     kind: task.kind,
-    runAt: task.runAt,
+    runAt: task.runAt || new Date().toISOString(),
     payload: {
       ...(defaults.payload || {}),
       ...(task.payload || {})

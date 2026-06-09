@@ -1,10 +1,11 @@
-import { mkdir, readdir, readFile, unlink, writeFile } from "node:fs/promises";
+import { mkdir, readdir, readFile, rmdir, unlink, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { spawn } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { getToolConfigPath, getToolTmpDir, getChatToolTmpDir, toolsDir as userToolsRoot } from "../../runtime/paths.js";
 import { loadToolConfig, parseConfigModule, writeToolConfig } from "./tool-config.js";
 import { normalizeToolResult } from "./tool-result.js";
+import { SkillRegistry } from "../skills/skill-registry.js";
 
 const bundledToolsRoot = fileURLToPath(new URL("../../../tools", import.meta.url));
 const toolRoots = [
@@ -27,6 +28,7 @@ export class ToolRegistry {
   constructor({ logger } = {}) {
     this.logger = logger;
     this.tools = new Map();
+    this.skillRegistry = new SkillRegistry();
   }
 
   async load() {
@@ -52,8 +54,10 @@ export class ToolRegistry {
           const configSource = await readFile(configPath, "utf8");
           const defaults = parseConfigModule(configSource);
           const config = await loadToolConfig(manifest.name, defaults);
+          const skillHints = this.skillRegistry.normalizeHints(manifest);
           this.tools.set(manifest.name, {
             ...manifest,
+            skillHints,
             dir: toolDir,
             entry: path.join(toolDir, manifest.entry || "index.js"),
             localConfigPath: configPath,
@@ -77,7 +81,8 @@ export class ToolRegistry {
       description: tool.description,
       input: tool.input,
       output: tool.output,
-      configSchema: tool.configSchema || {}
+      configSchema: tool.configSchema || {},
+      skillHints: tool.skillHints || []
     }));
   }
 
@@ -89,7 +94,29 @@ export class ToolRegistry {
     const tool = this.get(name);
     if (!tool) throw new Error(`Tool not found: ${name}`);
     const result = await runProcess("node", [tool.entry, "--help"], { cwd: tool.dir, env: process.env });
-    return result.stdout || result.stderr;
+    const help = result.stdout || result.stderr;
+    const skills = await this.resolveSkills(name);
+    if (!skills.length) return help;
+    const skillHelp = skills.map((item) => [
+      `- ${item.name}${item.when ? ` (${item.when})` : ""}`,
+      item.description ? `  ${item.description}` : null,
+      item.found ? `  path: ${item.path}` : "  warning: skill not found"
+    ].filter(Boolean).join("\n")).join("\n");
+    return `${help}\n\nAssigned skills:\n${skillHelp}\n`;
+  }
+
+  async resolveSkills(name) {
+    const tool = this.get(name);
+    if (!tool) throw new Error(`Tool not found: ${name}`);
+    const hints = await this.skillRegistry.resolveHints(tool.skillHints || []);
+    return hints.map((hint) => ({
+      name: hint.name,
+      when: hint.when,
+      found: hint.found,
+      description: hint.skill?.description || "",
+      path: hint.skill?.path || "",
+      content: hint.skill?.content || ""
+    }));
   }
 
   async resolveConfigForChat(name, chatId) {
@@ -121,12 +148,19 @@ export class ToolRegistry {
     const tmpDir = chatId != null ? getChatToolTmpDir(chatId, name) : getToolTmpDir(name);
     await mkdir(tmpDir, { recursive: true });
     const requestFile = path.join(tmpDir, `.request-${Date.now()}.json`);
-    await writeFile(requestFile, `${JSON.stringify(request, null, 2)}\n`, "utf8");
+    const skills = await this.resolveSkills(name);
+    const enrichedRequest = { ...request, chatId, skills };
+    await writeFile(requestFile, `${JSON.stringify(enrichedRequest, null, 2)}\n`, "utf8");
     const result = await runProcess("node", [tool.entry, "run", "--request-file", requestFile], {
       cwd: tool.dir,
       env: process.env
     });
     await unlink(requestFile).catch(() => {});
+    await rmdir(tmpDir).catch(() => {});
+    if (chatId != null) {
+      await rmdir(path.dirname(tmpDir)).catch(() => {});
+      await rmdir(path.dirname(path.dirname(tmpDir))).catch(() => {});
+    }
     try {
       const parsed = JSON.parse(result.stdout || result.stderr);
       const normalized = normalizeToolResult(name, parsed);

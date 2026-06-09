@@ -3,10 +3,10 @@ import { spawn } from "node:child_process";
 import { openSync } from "node:fs";
 import { mkdir, readFile, readdir, rename, rm, unlink, writeFile } from "node:fs/promises";
 import path from "node:path";
-import { stateDir } from "../../runtime/paths.js";
+import { getToolStateDir } from "../../runtime/paths.js";
 
 export function daemonPaths(toolName) {
-  const root = path.join(stateDir, toolName);
+  const root = getToolStateDir(toolName);
   return {
     root,
     commandsDir: path.join(root, "commands"),

@@ -3,7 +3,7 @@ import path from "node:path";
 import { authorizeChat } from "./auth.js";
 import { captureIncomingArtifact } from "./media.js";
 import { renderTelegramHtml } from "./text-format.js";
-import { normalizeArtifactForReasoning } from "../../core/artifacts/normalize-for-reasoning.js";
+import { normalizeArtifactForReasoning, shouldNormalizeArtifactToText } from "../../core/artifacts/normalize-for-reasoning.js";
 
 function quotedMessageSummary(message) {
   if (!message) return [];
@@ -63,11 +63,11 @@ function buildPrompt({ ctx, artifact, transcript, toolResult }) {
   if (transcript) {
     parts.push(`transcriptArtifactId: ${transcript.id}`);
     parts.push(`transcriptText: ${transcript.text}`);
-    parts.push(`Important: the incoming audio has already been transcribed. Use the transcript as the user message content. Do not answer with a raw transcription unless the user explicitly asked for one.`);
+    parts.push(`Important: the incoming media has already been transcribed. Use the transcript as the user message content. Do not answer with a raw transcription unless the user explicitly asked for one.`);
   }
-  if (artifact?.kind === "audio" && !transcript && toolResult) {
-    parts.push(`audioNormalizationResult: ${JSON.stringify(toolResult)}`);
-    parts.push(`Important: pre-reasoning audio normalization could not be completed, so you do not have a transcript for this voice/audio message.`);
+  if (shouldNormalizeArtifactToText(artifact) && !transcript && toolResult) {
+    parts.push(`mediaNormalizationResult: ${JSON.stringify(toolResult)}`);
+    parts.push(`Important: pre-reasoning media normalization could not be completed, so you do not have a transcript for this audio/video message.`);
   }
 
   parts.push(`If you need a CLI tool, use list_tools/tool_help/run_tool.`);
@@ -114,10 +114,10 @@ async function buildAsyncTaskPrompt({ task, artifactStore, toolRegistry, logger 
         logger?.log("tasks", `artifact ${artifact.id} normalized to ${normalizedArtifact.id}`);
         parts.push(`transcriptArtifactId: ${normalizedArtifact.id}`);
         parts.push(`transcriptText: ${normalizedArtifact.text}`);
-        parts.push("Important: the attached audio artifact has already been normalized for reasoning. Use the transcript as the message content.");
-      } else if (artifact.kind === "audio" && toolResult) {
-        parts.push(`audioNormalizationResult: ${JSON.stringify(toolResult)}`);
-        parts.push("Important: pre-reasoning audio normalization could not be completed, so you do not have a transcript for this audio artifact.");
+        parts.push("Important: the attached media artifact has already been normalized for reasoning. Use the transcript as the message content.");
+      } else if (shouldNormalizeArtifactToText(artifact) && toolResult) {
+        parts.push(`mediaNormalizationResult: ${JSON.stringify(toolResult)}`);
+        parts.push("Important: pre-reasoning media normalization could not be completed, so you do not have a transcript for this audio/video artifact.");
       }
     } else {
       parts.push(`artifactId: ${task.payload.artifactId}`);
@@ -128,6 +128,18 @@ async function buildAsyncTaskPrompt({ task, artifactStore, toolRegistry, logger 
   parts.push("Treat this as a new request for the chat and fulfill it now.");
   parts.push("If needed, use tools.");
   return parts.filter(Boolean).join("\n");
+}
+
+function buildAsyncEventPrompt(task) {
+  return [
+    "External event arrived.",
+    `taskId: ${task.id}`,
+    `chatId: ${task.payload.chatId}`,
+    task.payload.prompt ? `event: ${task.payload.prompt}` : null,
+    "A polling checker detected this external event. Evaluate it and decide the next action.",
+    "If it warrants no action, you may stay silent.",
+    "If needed, use tools."
+  ].filter(Boolean).join("\n");
 }
 
 async function normalizeIncomingArtifact({ artifact, toolRegistry, chatArtifactStore, chatId }) {
@@ -194,9 +206,9 @@ export async function createTelegramBot({ config, artifactStore, toolRegistry, t
     const artifact = await captureIncomingArtifact(ctx, artifactStore);
     if (artifact) logger?.log("telegram", `captured artifact ${artifact.kind}${artifact.id ? ` ${artifact.id}` : ""}`);
     const { transcript, toolResult } = await normalizeIncomingArtifact({ artifact, toolRegistry, chatArtifactStore, chatId });
-    if (transcript) logger?.log("telegram", `audio transcribed to artifact ${transcript.id}`);
-    if (artifact?.kind === "audio" && !transcript) {
-      logger?.log("telegram", `audio normalization unavailable for chat ${ctx.chat.id}: ${toolResult?.error || toolResult?.missingConfig?.join(", ") || "unknown error"}`);
+    if (transcript) logger?.log("telegram", `media transcribed to artifact ${transcript.id}`);
+    if (shouldNormalizeArtifactToText(artifact) && !transcript) {
+      logger?.log("telegram", `media normalization unavailable for chat ${ctx.chat.id}: ${toolResult?.error || toolResult?.missingConfig?.join(", ") || "unknown error"}`);
     }
     return buildPrompt({ ctx, artifact, transcript, toolResult });
   }
@@ -310,6 +322,73 @@ export async function createTelegramBot({ config, artifactStore, toolRegistry, t
     });
   }
 
+  async function dispatchTask(task) {
+    const chatId = task.payload?.chatId;
+    if (!chatId) {
+      await taskStore.fail(task.id, `Task missing chatId: ${task.kind}`);
+      return;
+    }
+
+    if (task.kind === "agent_task") {
+      if (!task.payload.prompt) {
+        await taskStore.fail(task.id, "agent_task missing prompt");
+        return;
+      }
+      logger?.log("tasks", `running task ${task.id} for chat ${chatId}`);
+      await enqueuePrompt({
+        chatId,
+        prompt: await buildAsyncTaskPrompt({ task, artifactStore, toolRegistry, logger }),
+        label: `scheduled task ${task.id}`
+      });
+      await taskStore.complete(task.id);
+      return;
+    }
+
+    if (task.kind === "agent_event") {
+      logger?.log("tasks", `agent event ${task.id} for chat ${chatId}`);
+      await enqueuePrompt({
+        chatId,
+        prompt: buildAsyncEventPrompt(task),
+        label: `agent event ${task.id}`
+      });
+      await taskStore.complete(task.id);
+      return;
+    }
+
+    if (task.kind === "poll_tool") {
+      const toolName = task.payload?.toolName;
+      if (!toolName) {
+        await taskStore.fail(task.id, "poll_tool missing toolName");
+        return;
+      }
+      logger?.log("tasks", `polling tool ${toolName} (task ${task.id}) for chat ${chatId}`);
+      try {
+        await agentManager.runTool({
+          name: toolName,
+          request: { args: task.payload.args || {} },
+          chatId
+        });
+      } catch (error) {
+        logger?.log("tasks", `poll_tool ${toolName} failed: ${error instanceof Error ? error.message : String(error)}`);
+      }
+      await taskStore.complete(task.id);
+      return;
+    }
+
+    await taskStore.fail(task.id, `Unsupported task: ${task.kind}`);
+  }
+
+  async function dispatchDueTasks() {
+    const tasks = await taskStore.claimDue(10);
+    for (const task of tasks) {
+      try {
+        await dispatchTask(task);
+      } catch (error) {
+        await taskStore.fail(task.id, error instanceof Error ? error.message : String(error));
+      }
+    }
+  }
+
   async function handleNewCommand(ctx) {
     agentManager.resetSession(ctx.chat.id);
     perChatState.set(ctx.chat.id, { processing: false, nextPrompt: "" });
@@ -381,25 +460,10 @@ export async function createTelegramBot({ config, artifactStore, toolRegistry, t
       await bot.api.setMyCommands([
         { command: "new", description: "Start a new chat context" }
       ]);
-      setInterval(async () => {
-        const tasks = await taskStore.claimDue(10);
-        for (const task of tasks) {
-          try {
-            if (task.kind !== "agent_task" || !task.payload?.chatId || !task.payload?.prompt) {
-              await taskStore.fail(task.id, `Unsupported task: ${task.kind}`);
-              continue;
-            }
-            logger?.log("tasks", `running task ${task.id} for chat ${task.payload.chatId}`);
-            await enqueuePrompt({
-              chatId: task.payload.chatId,
-              prompt: await buildAsyncTaskPrompt({ task, artifactStore, toolRegistry, logger }),
-              label: `scheduled task ${task.id}`
-            });
-            await taskStore.complete(task.id);
-          } catch (error) {
-            await taskStore.fail(task.id, error instanceof Error ? error.message : String(error));
-          }
-        }
+      setInterval(() => {
+        dispatchDueTasks().catch((error) => {
+          logger?.error("tasks", `dispatch failed: ${error instanceof Error ? error.message : String(error)}`);
+        });
       }, 1000).unref();
       if (webhookUrl && setHttpRequestHandler) {
         const webhookPath = `/telegram-${config.telegram.token.slice(-8)}`;

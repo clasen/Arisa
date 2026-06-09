@@ -90,7 +90,7 @@ function sortBootstrapProviders(providers) {
 
 function sortBootstrapModels(provider, models) {
   const preferred = {
-    "openai-codex": ["gpt-5.4"]
+    "openai-codex": ["gpt-5.5"]
   };
 
   const priority = preferred[provider] || [];

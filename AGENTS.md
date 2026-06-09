@@ -3,9 +3,32 @@
 ## Architecture
 - Telegram transport handles inbound and outbound messaging.
 - Pi Agent keeps one session per authorized chat.
-- Every incoming or generated message or file becomes an artifact.
+- Incoming messages and files (text, voice, photo, document) and generated files become artifacts.
 - A tool registry handles tool discovery, help lookup, config writes, and execution.
 - Tools are isolated and each one has its own manifest, entrypoint, and config defaults.
+
+## Runtime directory rules
+Keep Arisa runtime paths predictable:
+- `~/.arisa/tools/<toolName>`: installed user tool package only (manifest, entrypoint, config defaults, dependencies).
+- `~/.arisa/state`: global Arisa service state only (`config.json`, `tasks.json`, `arisa.pid`, logs, service-level state).
+- `~/.arisa/state/tools/<toolName>`: global tool infrastructure state only, such as daemon files, shared browser sessions, model caches, and daemon queues. Do not store chat/user content here.
+- `~/.arisa/chats/<chatId>/artifacts`: artifacts for that chat. Artifacts are never global; different chat IDs must not share artifact files or indexes.
+- `~/.arisa/chats/<chatId>/state`: chat state such as artifact indexes and Pi sessions.
+- `~/.arisa/chats/<chatId>/state/tools/<toolName>`: persistent tool data scoped to one chat, such as tool databases, indexes, inboxes, generated sites, vaults, or any user/chat content.
+- `~/.arisa/chats/<chatId>/config/tools/<toolName>`: chat-scoped tool config overrides.
+- `~/.arisa/chats/<chatId>/tmp/tools/<toolName>`: ephemeral per-chat tool request scratch space. Create it only while a request is running and remove it when empty.
+
+Do not create ad hoc roots like `~/.arisa/state/<toolName>`, `~/.arisa/state/chats`, or runtime state inside `~/.arisa/tools/<toolName>`.
+
+Use the path helpers from `src/runtime/paths.js` instead of reconstructing these paths by hand:
+- `getToolStateDir(toolName)` for global tool infrastructure state only
+- `getChatToolStateDir(chatId, toolName)` for persistent per-chat tool data
+- `getToolTmpDir(toolName)` for global ephemeral tool scratch
+- `getChatToolTmpDir(chatId, toolName)` for per-chat ephemeral scratch
+- `getChatToolConfigPath(chatId, toolName)` for chat config overrides
+- `getChatArtifactsDir(chatId)` and `getChatArtifactsIndexFile(chatId)` for artifacts
+
+Tool requests receive `chatId` from the registry. Tools that persist or index user content must store it under `getChatToolStateDir(chatId, toolName)`. Shared tool daemons may live under `getToolStateDir(toolName)`, but any user data they store must still be partitioned by chat.
 
 ## Main rule: everything is piped through artifacts
 A pipe transforms one input artifact into one output artifact.
@@ -18,6 +41,7 @@ Each tool declares in `tool.manifest.json`:
 - `input`: supported input types
 - `output`: produced output types
 - `configSchema`: required config fields
+- `skillHints`: optional skills to apply when using or editing the tool
 
 ## Conceptual pipe model
 There are two different moments where pipes can happen:
@@ -34,12 +58,11 @@ There are two different moments where pipes can happen:
    - Pi Agent may decide to chain tools to achieve a user goal.
    - Example: text -> TTS audio, or future multi-step workflows.
 
-This distinction is critical. Not every pipe should be decided by Pi Agent at runtime. Some pipes are part of the transport/input normalization layer and must happen before reasoning.
+Not every pipe should be decided by Pi Agent at runtime. Some pipes are part of the transport/input normalization layer and must happen before reasoning.
 
 ## Telegram inbound pipeline
-Current conceptual behavior:
 - text -> send directly to Pi Agent
-- audio/voice -> transcribe first -> send transcript to Pi Agent
+- voice -> transcribe first -> send transcript to Pi Agent
 - image/document/other media -> keep as artifacts, and add normalization pipes when needed
 
 If inbound media was normalized before reasoning, Pi Agent should use the normalized result as the actual message content.
@@ -50,23 +73,23 @@ Before using a tool, inspect its help:
 - via the custom tool: `tool_help`
 - or by running the CLI with `--help`
 
-Every CLI must support:
+Every CLI must support (the entrypoint comes from `manifest.entry`, currently always `index.js`):
 - `node index.js --help`
 - `node index.js run --request-file <json>`
 
 ### Tools that need daemons
-Some tools need a persistent process, for example to keep a browser session alive or a local model warm.
-Implement these tools with the shared daemon runtime instead of custom ad hoc process management:
+A future tool may need a persistent process, for example to keep a browser session alive or a local model warm. The shared daemon runtime exists for this, but no bundled tool uses it yet.
+When such a tool is built, implement it with the shared daemon runtime instead of custom ad hoc process management:
 - use `src/core/tools/daemon-runtime.js`
-- keep runtime files under the tool state directory (`stateDir/<toolName>`)
+- keep runtime files under the tool state directory (`~/.arisa/state/tools/<toolName>`)
 - expose normal CLI behavior through `run --request-file`; callers should not manage daemon internals
 - use the runtime for `daemon.pid`, `daemon.log`, `status.json`, and `commands/*.request|processing|result.json`
 - keep one daemon owner per tool/session and avoid opening a second client over the same resource
 - use `beforeStart` only for tool-specific cleanup such as stale browser locks, without deleting persistent session/model data
 - keep daemon tools headless/server-safe by default when they are meant to run on VPS machines
 
-## Pipe behavior in V1
-V1 does not have a full automatic planner yet. The agent should:
+## Manual pipe behavior
+To run a pipe, the agent should:
 1. understand whether the needed pipe belongs to pre-reasoning normalization or post-reasoning tool chaining
 2. use `list_tools`
 3. use `tool_help` when it needs operational details
@@ -76,7 +99,28 @@ V1 does not have a full automatic planner yet. The agent should:
 Example manual pipe:
 1. `run_tool(openai-transcribe, artifact audio)`
 2. take the returned text `artifactId`
-3. `run_tool(openai-tts, artifact text)` or `send_audio_reply(text)`
+3. `run_tool(openai-tts, artifact text)` or `send_media_reply(text)`
+
+## Async event queue flow
+Beyond time-based scheduling, tools can drive an event queue that wakes the agent only when there is something to evaluate. Everything goes through the `asyncTask` (single) or `asyncTasks` (array) field the pipeline already supports; no new Pi tools are needed. The 1s poller drains tasks by `kind`:
+
+- `agent_task`: a scheduled prompt. The poller delivers it as a prompt for Pi to fulfill (time-based work).
+- `poll_tool`: a recurring checker the poller **runs directly as a tool** (no agent turn spent). The poller materializes its output with the same logic as `run_tool`, so any `agent_event` the checker emits is enqueued for the next tick. Its `recurrence` reschedules the next poll.
+- `agent_event`: an incoming event. The poller delivers it as a prompt so Pi evaluates it and decides the next action (it may stay silent).
+
+Tasks without a `runAt` fire immediately, so `agent_event` and the first `poll_tool` run on the next tick.
+
+The poller dispatches all three kinds, but only `agent_task` is exercised by a bundled tool today (`schedule-agent-task`). The following is the pattern to follow when a checker tool is built:
+
+How a tool wires its own polling:
+1. From any tool `run`, start the poll by returning an `asyncTask` (or several in `asyncTasks`):
+   `{ kind: "poll_tool", payload: { toolName, args }, recurrence: { type: "interval", everySeconds: N } }`.
+2. On each poll the checker tool (`toolName`) runs headless. It keeps its own cursor of seen state in its config/tmp per chat, so it knows what is new.
+3. When the checker finds something new, it emits an event from its `run`:
+   `{ kind: "agent_event", payload: { prompt: "<content to evaluate>" } }`.
+4. The agent reasons over the `agent_event` and decides what to do.
+
+`list_scheduled_tasks`, `cancel_scheduled_task`, and `cancel_all_scheduled_tasks` are kind-agnostic, so they already work to inspect or cancel active polls.
 
 ## Missing config flow
 If `run_tool` returns `missingConfig`, the agent should:
@@ -102,12 +146,28 @@ The default attitude is:
 
 When creating or editing tools:
 - use the shared path helpers and the runtime paths provided in the prompt instead of assuming fixed locations
-- consult the local skill for that workflow when building new tools
+- keep installed tool directories clean: no `state`, `tmp`, `db`, caches, generated vaults, sessions, or user data inside `~/.arisa/tools/<toolName>`
+- store persistent tool infrastructure under `getToolStateDir(toolName)` and persistent chat/user data under `getChatToolStateDir(chatId, toolName)`
+- create temporary directories only for the duration of a request and remove them when empty
+- follow the existing bundled tools under `tools/` as the reference pattern for new tools
 - keep all help text, usage instructions, manifests, and user-facing operational strings in English
 - follow the One Thing Rule: each function or method should do one thing well; if it mixes low-level operations with high-level policy, split it into smaller focused units
 
+### Tool skill hints
+Tools may declare skills in `tool.manifest.json`:
+
+```json
+{
+  "skillHints": [
+    { "name": "stop-slop", "when": "writing public page copy" }
+  ]
+}
+```
+
+The tool registry resolves these from the installed skills directory and injects them into the tool request as `skills`. `list_tools` exposes the hints and `tool_help` shows their resolution status. Skills are guidance for the agent/tool; they are not separate runtime dependencies.
+
 ## Dependency installation
-Arisa installs tool dependencies itself.
+Tool dependencies are installed as part of building or running the tool, not delegated to the user.
 - Prefer `pnpm install`.
 - Fall back to `npm install`.
 - Do not ask the user to do it manually.

@@ -19,8 +19,9 @@ function looksLikeAudioTranscriptionTool(tool) {
   return /transcri|whisper|speech.?to.?text|audio.?to.?text/i.test(`${tool.name} ${tool.description || ""}`);
 }
 
-function shouldNormalizeAudioToText(artifact, desiredMimeType) {
-  return artifact?.mimeType?.startsWith("audio/") && desiredMimeType === "text/plain";
+export function shouldNormalizeArtifactToText(artifact, desiredMimeType = "text/plain") {
+  return desiredMimeType === "text/plain"
+    && (artifact?.mimeType?.startsWith("audio/") || artifact?.mimeType?.startsWith("video/"));
 }
 
 export function selectPipeTool({ toolRegistry, artifact, desiredMimeType }) {
@@ -28,7 +29,7 @@ export function selectPipeTool({ toolRegistry, artifact, desiredMimeType }) {
     .filter((tool) => toolSupportsArtifact(tool, artifact))
     .filter((tool) => toolProduces(tool, desiredMimeType));
 
-  if (shouldNormalizeAudioToText(artifact, desiredMimeType)) {
+  if (shouldNormalizeArtifactToText(artifact, desiredMimeType)) {
     return tools.find(looksLikeAudioTranscriptionTool) || null;
   }
 
@@ -44,7 +45,7 @@ export async function normalizeArtifactForReasoning({
 }) {
   if (!artifact) return { normalizedArtifact: null, toolResult: null, toolName: "" };
 
-  if (!shouldNormalizeAudioToText(artifact, desiredMimeType)) {
+  if (!shouldNormalizeArtifactToText(artifact, desiredMimeType)) {
     return { normalizedArtifact: null, toolResult: null, toolName: "" };
   }
 
