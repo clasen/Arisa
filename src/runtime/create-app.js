@@ -4,6 +4,7 @@ import { ToolRegistry } from "../core/tools/tool-registry.js";
 import { TaskStore } from "../core/tasks/task-store.js";
 import { AgentManager } from "../core/agent/agent-manager.js";
 import { createTelegramBot } from "../transport/telegram/bot.js";
+import { createToolProcessSupervisor } from "./tool-process-supervisor.js";
 
 function normalizeString(value) {
   const text = String(value ?? "").trim();
@@ -51,7 +52,8 @@ export async function createApp({ logger, runtimeOverrides, webhookUrl, setHttpR
   }
 
   const artifactStore = new ArtifactStore();
-  const toolRegistry = new ToolRegistry({ logger });
+  const toolProcessSupervisor = createToolProcessSupervisor({ logger });
+  const toolRegistry = new ToolRegistry({ logger, processOwnerEnv: toolProcessSupervisor.env() });
   const taskStore = new TaskStore();
   await toolRegistry.load();
   logger?.log("app", `loaded ${toolRegistry.list().length} tools`);
@@ -63,8 +65,19 @@ export async function createApp({ logger, runtimeOverrides, webhookUrl, setHttpR
     async start() {
       logger?.log("app", `validating Pi model ${config.pi.provider}/${config.pi.model}`);
       await agentManager.validatePiAgent();
+      await toolProcessSupervisor.start();
       logger?.log("app", "starting Telegram bot");
-      await bot.start();
+      try {
+        await bot.start();
+      } catch (error) {
+        await toolProcessSupervisor.stop();
+        throw error;
+      }
+    },
+
+    async stop() {
+      await bot.stop?.();
+      await toolProcessSupervisor.stop();
     }
   };
 }

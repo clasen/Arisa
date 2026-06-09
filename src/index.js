@@ -4,7 +4,7 @@ import { createServer } from "node:http";
 import { bootstrapIfNeeded } from "./runtime/bootstrap.js";
 import { createApp } from "./runtime/create-app.js";
 import { createLogger } from "./runtime/logger.js";
-import { getServiceStatus, registerServiceProcess, startService, stopService } from "./runtime/service-manager.js";
+import { getServiceStatus, registerServiceProcess, startService, stopService, unregisterServiceProcess } from "./runtime/service-manager.js";
 import { flushArisaHome } from "./runtime/flush.js";
 import { installPiPackage, removePiPackage } from "./runtime/pi-package-manager.js";
 
@@ -17,6 +17,8 @@ const serviceRunner = Boolean(cli.flags["service-runner"]);
 const bootstrapOverrides = toBootstrapOverrides(cli.nestedFlags);
 const runtimeOverrides = toRuntimeOverrides(cli.nestedFlags);
 const logger = createLogger({ verbose });
+let activeApp = null;
+let shuttingDown = false;
 
 const httpPort = Number(process.env.PORT);
 let httpRequestHandler = null;
@@ -97,6 +99,35 @@ const bootstrapHttpOptions = httpPort ? { httpPort, setHttpRequestHandler } : {}
 const webhookUrl = bootstrapOverrides.webhook?.url || "";
 const appHttpOptions = httpPort ? { webhookUrl, setHttpRequestHandler } : {};
 
+async function shutdown(exitCode = 0) {
+  if (shuttingDown) return;
+  shuttingDown = true;
+  try {
+    await activeApp?.stop?.();
+  } catch (error) {
+    logger.error("app", `shutdown failed: ${error instanceof Error ? error.message : String(error)}`);
+    exitCode = exitCode || 1;
+  }
+  if (serviceRunner) {
+    await unregisterServiceProcess();
+  }
+  process.exit(exitCode);
+}
+
+process.once("SIGTERM", () => {
+  shutdown(0);
+});
+
+process.once("SIGINT", () => {
+  shutdown(0);
+});
+
+async function startRuntimeApp() {
+  const app = await createApp({ logger, runtimeOverrides, ...appHttpOptions });
+  activeApp = app;
+  await app.start();
+}
+
 async function runForeground() {
   const hasRuntimePiOverrides = Boolean(
     runtimeOverrides?.pi?.model
@@ -106,11 +137,12 @@ async function runForeground() {
   logger.log("app", `starting${verbose ? " in verbose mode" : ""}`);
   await bootstrapIfNeeded({ force: forceBootstrap, cliConfigOverrides: bootstrapOverrides, ...bootstrapHttpOptions });
   try {
-    const app = await createApp({ logger, runtimeOverrides, ...appHttpOptions });
-    await app.start();
+    await startRuntimeApp();
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     if (message.includes("No auth found")) {
+      await activeApp?.stop?.();
+      activeApp = null;
       console.log(`\n${message}\n`);
       if (hasRuntimePiOverrides) {
         console.log("Skipping automatic bootstrap because Pi runtime overrides were provided.");
@@ -119,8 +151,7 @@ async function runForeground() {
       }
       console.log("Reopening bootstrap so you can provide a Pi API key or switch to a provider you already authenticated with.\n");
       await bootstrapIfNeeded({ force: true, cliConfigOverrides: bootstrapOverrides, ...bootstrapHttpOptions });
-      const app = await createApp({ logger, runtimeOverrides, ...appHttpOptions });
-      await app.start();
+      await startRuntimeApp();
       return;
     }
     throw error;
@@ -202,4 +233,9 @@ async function main() {
   await runForeground();
 }
 
-await main();
+try {
+  await main();
+} catch (error) {
+  logger.error("app", error instanceof Error ? error.message : String(error));
+  await shutdown(1);
+}

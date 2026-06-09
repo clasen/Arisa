@@ -3,7 +3,7 @@ import path from "node:path";
 import defaults from "./config.js";
 import { loadToolConfig } from "../../src/core/tools/tool-config.js";
 import { toolError, toolNeedsConfig, toolOk } from "../../src/core/tools/tool-result.js";
-import { getToolConfigPath, getToolOutDir } from "../../src/runtime/paths.js";
+import { getChatToolTmpDir, getToolConfigPath, getToolTmpDir } from "../../src/runtime/paths.js";
 
 const toolName = "openai-tts";
 const config = await loadToolConfig(toolName, defaults);
@@ -49,7 +49,9 @@ async function run(requestFile) {
     return;
   }
 
-  const outDir = getToolOutDir(toolName);
+  const outDir = request.chatId != null
+    ? getChatToolTmpDir(request.chatId, toolName)
+    : getToolTmpDir(toolName);
   await mkdir(outDir, { recursive: true });
   const filePath = path.join(outDir, `speech-${Date.now()}.ogg`);
   const buffer = Buffer.from(await response.arrayBuffer());

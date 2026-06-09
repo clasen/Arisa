@@ -3,7 +3,10 @@ import path from "node:path";
 import { authorizeChat } from "./auth.js";
 import { captureIncomingArtifact } from "./media.js";
 import { renderTelegramHtml } from "./text-format.js";
+import { withTimeout } from "../../core/agent/prompt-timeout.js";
 import { normalizeArtifactForReasoning, shouldNormalizeArtifactToText } from "../../core/artifacts/normalize-for-reasoning.js";
+
+const promptTimeoutMs = 300_000;
 
 function quotedMessageSummary(message) {
   if (!message) return [];
@@ -154,15 +157,52 @@ async function normalizeIncomingArtifact({ artifact, toolRegistry, chatArtifactS
   return { transcript: normalizedArtifact, toolResult };
 }
 
-async function collectText(session, prompt) {
+function sessionEventLogMessage(event) {
+  if (event.type === "tool_execution_start") {
+    return `tool ${event.toolName} started`;
+  }
+  if (event.type === "tool_execution_end") {
+    return `tool ${event.toolName} ${event.isError ? "failed" : "finished"}`;
+  }
+  if (event.type === "auto_retry_start") {
+    return `auto retry ${event.attempt}/${event.maxAttempts} in ${event.delayMs}ms: ${event.errorMessage}`;
+  }
+  if (event.type === "auto_retry_end") {
+    return event.success
+      ? `auto retry succeeded after ${event.attempt} attempt(s)`
+      : `auto retry failed after ${event.attempt} attempt(s): ${event.finalError || "unknown error"}`;
+  }
+  if (event.type === "compaction_start") {
+    return `compaction started (${event.reason})`;
+  }
+  if (event.type === "compaction_end") {
+    return `compaction ${event.aborted ? "aborted" : "finished"} (${event.reason})`;
+  }
+  if (event.type === "message_end" && event.message?.stopReason === "error") {
+    return `assistant message ended with error: ${event.message.errorMessage || "unknown error"}`;
+  }
+  return "";
+}
+
+async function collectText(session, prompt, { logger, chatId } = {}) {
   let text = "";
   const unsubscribe = session.subscribe((event) => {
     if (event.type === "message_update" && event.assistantMessageEvent.type === "text_delta") {
       text += event.assistantMessageEvent.delta;
     }
+    const logMessage = sessionEventLogMessage(event);
+    if (logMessage) logger?.log("agent", `chat ${chatId} ${logMessage}`);
   });
-  await session.prompt(prompt);
-  unsubscribe();
+
+  try {
+    await withTimeout(session.prompt(prompt), {
+      timeoutMs: promptTimeoutMs,
+      label: `Telegram prompt for chat ${chatId}`
+    });
+  } finally {
+    unsubscribe();
+  }
+
   return text.trim();
 }
 
@@ -182,6 +222,7 @@ async function withTyping(ctx, work) {
 export async function createTelegramBot({ config, artifactStore, toolRegistry, taskStore, agentManager, saveConfig, updateConfig, logger, webhookUrl, setHttpRequestHandler }) {
   const bot = new Bot(config.telegram.token);
   const perChatState = new Map();
+  let taskTimer = null;
 
   function getIncomingChatMeta(ctx) {
     return {
@@ -252,7 +293,13 @@ export async function createTelegramBot({ config, artifactStore, toolRegistry, t
   async function processPromptForChat({ chatId, prompt, ctx = null }) {
     const work = async () => {
       const { session } = await agentManager.getSessionContext(chatId, createTelegramSessionBridge(chatId));
-      const text = await collectText(session, prompt);
+      let text = "";
+      try {
+        text = await collectText(session, prompt, { logger, chatId });
+      } catch (error) {
+        agentManager.resetSession(chatId);
+        throw error;
+      }
       if (text) {
         await sendTextReply({
           sendText: (message, extra) => bot.api.sendMessage(chatId, message, extra),
@@ -283,12 +330,19 @@ export async function createTelegramBot({ config, artifactStore, toolRegistry, t
     let currentPrompt = prompt;
     let currentCtx = ctx;
 
-    while (currentPrompt) {
-      try {
-        logger?.log("telegram", `prompt dispatch for chat ${chatId}`);
-        await processPromptForChat({ chatId, prompt: currentPrompt, ctx: currentCtx });
-      } finally {
-        currentCtx = null;
+    try {
+      while (currentPrompt) {
+        try {
+          logger?.log("telegram", `prompt dispatch for chat ${chatId}`);
+          await processPromptForChat({ chatId, prompt: currentPrompt, ctx: currentCtx });
+        } catch (error) {
+          const message = error instanceof Error ? error.message : String(error);
+          logger?.error("telegram", `${label} failed for chat ${chatId}: ${message}`);
+          throw error;
+        } finally {
+          currentCtx = null;
+        }
+
         if (chatState.nextPrompt) {
           currentPrompt = chatState.nextPrompt;
           chatState.nextPrompt = "";
@@ -296,9 +350,9 @@ export async function createTelegramBot({ config, artifactStore, toolRegistry, t
           currentPrompt = "";
         }
       }
+    } finally {
+      chatState.processing = false;
     }
-
-    chatState.processing = false;
   }
 
   async function enqueueOrProcess(ctx) {
@@ -460,11 +514,14 @@ export async function createTelegramBot({ config, artifactStore, toolRegistry, t
       await bot.api.setMyCommands([
         { command: "new", description: "Start a new chat context" }
       ]);
-      setInterval(() => {
-        dispatchDueTasks().catch((error) => {
-          logger?.error("tasks", `dispatch failed: ${error instanceof Error ? error.message : String(error)}`);
-        });
-      }, 1000).unref();
+      if (!taskTimer) {
+        taskTimer = setInterval(() => {
+          dispatchDueTasks().catch((error) => {
+            logger?.error("tasks", `dispatch failed: ${error instanceof Error ? error.message : String(error)}`);
+          });
+        }, 1000);
+        taskTimer.unref();
+      }
       if (webhookUrl && setHttpRequestHandler) {
         const webhookPath = `/telegram-${config.telegram.token.slice(-8)}`;
         const handleUpdate = webhookCallback(bot, "http", {
@@ -485,6 +542,14 @@ export async function createTelegramBot({ config, artifactStore, toolRegistry, t
         logger?.log("telegram", "bot polling started");
         await bot.start({ drop_pending_updates: true });
       }
+    },
+
+    async stop() {
+      if (taskTimer) clearInterval(taskTimer);
+      taskTimer = null;
+      try {
+        bot.stop();
+      } catch {}
     }
   };
 }

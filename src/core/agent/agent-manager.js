@@ -3,9 +3,11 @@ import { unlink } from "node:fs/promises";
 import { createAgentSession, SessionManager, defineTool } from "@mariozechner/pi-coding-agent";
 import { Type } from "@sinclair/typebox";
 import { createPiRuntime, hasProviderAuth } from "./pi-runtime.js";
-import { loadProjectInstructions } from "./project-instructions.js";
 import { arisaInstallDir, buildAgentRuntimeContext } from "./runtime-context.js";
+import { withTimeout } from "./prompt-timeout.js";
 import { arisaHomeDir, getChatPiSessionsDir } from "../../runtime/paths.js";
+
+const piValidationTimeoutMs = 60_000;
 
 function isLocalBaseUrl(value) {
   if (typeof value !== "string" || !value.trim()) return false;
@@ -19,6 +21,32 @@ function isLocalBaseUrl(value) {
 
 function requiresProviderAuth(model) {
   return !isLocalBaseUrl(model?.baseUrl);
+}
+
+function mimeMatches(pattern, mimeType = "") {
+  if (!pattern || !mimeType) return false;
+  if (pattern === mimeType) return true;
+  if (pattern.endsWith("/*")) return mimeType.startsWith(`${pattern.slice(0, -2)}/`);
+  return false;
+}
+
+function toolSupportsTextInput(tool) {
+  return (tool.input || []).some((input) => mimeMatches(input, "text/plain"));
+}
+
+function toolProducesAudio(tool) {
+  return (tool.output || []).some((output) => mimeMatches(output, "audio/ogg") || mimeMatches(output, "audio/*"));
+}
+
+function looksLikeTextToSpeechTool(tool) {
+  return /tts|text.?to.?speech|speech.?audio|speech/i.test(`${tool.name} ${tool.description || ""}`);
+}
+
+function selectMediaReplyTool(toolRegistry) {
+  const tools = toolRegistry.list()
+    .filter(toolSupportsTextInput)
+    .filter(toolProducesAudio);
+  return tools.find(looksLikeTextToSpeechTool) || tools[0] || null;
 }
 
 export class AgentManager {
@@ -75,7 +103,10 @@ export class AgentManager {
       model,
       sessionManager: SessionManager.inMemory(),
     });
-    await session.prompt("Reply with exactly: OK");
+    await withTimeout(session.prompt("Reply with exactly: OK"), {
+      timeoutMs: piValidationTimeoutMs,
+      label: "Pi validation prompt"
+    });
   }
 
   async getSessionContext(chatId, telegram) {
@@ -117,11 +148,8 @@ export class AgentManager {
     });
 
     if (!hasExistingSession) {
-      const instructions = await loadProjectInstructions();
-      const runtimeContext = buildAgentRuntimeContext();
-      this.logger?.log("agent", `injecting project instructions for chat ${sessionKey}`);
-      this.logger?.log("agent", `runtime context for chat ${sessionKey}:\n${runtimeContext}`);
-      await session.prompt(`${instructions}\n\n${runtimeContext}\n\nAcknowledge with exactly: OK`);
+      this.logger?.log("agent", `created new session for chat ${sessionKey}`);
+      this.logger?.log("agent", `runtime context for chat ${sessionKey}:\n${buildAgentRuntimeContext()}`);
     }
 
     const ctx = { session, modelId: effectiveModelId };
@@ -323,7 +351,20 @@ export class AgentManager {
         }),
         execute: async (_id, params) => {
           await this.toolRegistry.load();
-          const toolName = params.toolName || "openai-tts";
+          const selectedTool = params.toolName
+            ? this.toolRegistry.get(params.toolName)
+            : selectMediaReplyTool(this.toolRegistry);
+          if (!selectedTool) {
+            const result = {
+              ok: false,
+              status: "failed",
+              error: params.toolName
+                ? `Tool not found: ${params.toolName}`
+                : "No registered text-to-speech tool can generate an audio reply."
+            };
+            return { content: [{ type: "text", text: JSON.stringify(result, null, 2) }], details: result };
+          }
+          const toolName = selectedTool.name;
           this.logger?.log("agent", `send_media_reply via ${toolName}`);
           const result = await this.toolRegistry.run({
             name: toolName,

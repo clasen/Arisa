@@ -74,23 +74,13 @@ export async function stopService() {
   return { ok: true, pid: status.pid };
 }
 
+export async function unregisterServiceProcess() {
+  await rm(servicePidFile, { force: true }).catch(() => {});
+}
+
 export async function registerServiceProcess() {
   await ensureArisaHome();
   await writeFile(servicePidFile, `${process.pid}\n`, "utf8");
-
-  const cleanup = async () => {
-    await rm(servicePidFile, { force: true }).catch(() => {});
-  };
-
-  process.on("SIGTERM", async () => {
-    await cleanup();
-    process.exit(0);
-  });
-
-  process.on("SIGINT", async () => {
-    await cleanup();
-    process.exit(0);
-  });
 
   process.on("exit", () => {
     rm(servicePidFile, { force: true }).catch(() => {});

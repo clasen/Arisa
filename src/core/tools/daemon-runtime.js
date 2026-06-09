@@ -1,34 +1,16 @@
 import crypto from "node:crypto";
-import { spawn } from "node:child_process";
-import { openSync } from "node:fs";
-import { mkdir, readFile, readdir, rename, rm, unlink, writeFile } from "node:fs/promises";
+import { mkdir, readdir, rename, unlink } from "node:fs/promises";
 import path from "node:path";
-import { getToolStateDir } from "../../runtime/paths.js";
-
-export function daemonPaths(toolName) {
-  const root = getToolStateDir(toolName);
-  return {
-    root,
-    commandsDir: path.join(root, "commands"),
-    pidFile: path.join(root, "daemon.pid"),
-    statusFile: path.join(root, "status.json"),
-    logFile: path.join(root, "daemon.log")
-  };
-}
-
-export async function readJson(file, fallback = {}) {
-  try { return JSON.parse(await readFile(file, "utf8")); } catch { return fallback; }
-}
-
-export async function writeJson(file, value) {
-  await mkdir(path.dirname(file), { recursive: true });
-  await writeFile(file, `${JSON.stringify(value, null, 2)}\n`, "utf8");
-}
-
-export function isProcessAlive(pid) {
-  if (!pid) return false;
-  try { process.kill(pid, 0); return true; } catch { return false; }
-}
+import {
+  OWNER_HEARTBEAT_INTERVAL_MS,
+  OWNER_HEARTBEAT_TTL_MS,
+  daemonPaths,
+  isProcessAlive,
+  readJson,
+  startManagedDaemon,
+  stopManagedDaemon,
+  writeJson
+} from "./daemon-processes.js";
 
 export function createDaemonRuntime({ toolName, entryPath, beforeStart = null }) {
   const paths = daemonPaths(toolName);
@@ -54,33 +36,54 @@ export function createDaemonRuntime({ toolName, entryPath, beforeStart = null })
     await writeJson(paths.statusFile, { ...current, ...patch, updatedAt: new Date().toISOString() });
   }
 
-  async function clearJobs() {
-    await rm(paths.commandsDir, { recursive: true, force: true });
-    await mkdir(paths.commandsDir, { recursive: true });
-  }
-
   async function start() {
-    await ensure();
-    const pid = await getPid();
-    if (isProcessAlive(pid)) return pid;
-
-    await clearJobs();
-    if (beforeStart) await beforeStart();
-    const out = openSync(paths.logFile, "a");
-    const child = spawn(process.execPath, [entryPath, "daemon"], {
-      detached: true,
-      stdio: ["ignore", out, out],
-      env: process.env
+    return startManagedDaemon({
+      toolName,
+      entryPath,
+      beforeStart,
+      ownerEnv: {
+        ARISA_OWNER_PID: process.env.ARISA_OWNER_PID,
+        ARISA_TOOL_OWNER_FILE: process.env.ARISA_TOOL_OWNER_FILE,
+        ARISA_TOOL_OWNER_TOKEN: process.env.ARISA_TOOL_OWNER_TOKEN
+      }
     });
-    child.unref();
-    await writeJson(paths.pidFile, { pid: child.pid, startedAt: new Date().toISOString() });
-    return child.pid;
   }
 
   async function stop() {
-    const pid = await getPid();
-    if (isProcessAlive(pid)) process.kill(pid, "SIGTERM");
-    await rm(paths.pidFile, { force: true });
+    await stopManagedDaemon(toolName);
+  }
+
+  function installOwnerWatch() {
+    const ownerFile = process.env.ARISA_TOOL_OWNER_FILE;
+    const ownerToken = process.env.ARISA_TOOL_OWNER_TOKEN;
+    if (!ownerFile || !ownerToken) return;
+
+    let exiting = false;
+    async function exitIfOrphaned(message) {
+      if (exiting) return;
+      exiting = true;
+      await writeStatus({ state: "stopped", message });
+      process.exit(0);
+    }
+
+    const timer = setInterval(async () => {
+      const owner = await readJson(ownerFile, null);
+      if (!owner || owner.token !== ownerToken) {
+        await exitIfOrphaned("Arisa owner stopped");
+        return;
+      }
+
+      const heartbeatAt = Date.parse(owner.heartbeatAt || "");
+      if (!Number.isFinite(heartbeatAt) || Date.now() - heartbeatAt > OWNER_HEARTBEAT_TTL_MS) {
+        await exitIfOrphaned("Arisa owner heartbeat expired");
+        return;
+      }
+
+      if (!isProcessAlive(owner.pid)) {
+        await exitIfOrphaned("Arisa owner process exited");
+      }
+    }, OWNER_HEARTBEAT_INTERVAL_MS);
+    timer.unref();
   }
 
   async function waitReady({ timeoutMs = 120000, readyStates = ["ready"] } = {}) {
@@ -140,6 +143,7 @@ export function createDaemonRuntime({ toolName, entryPath, beforeStart = null })
   }
 
   async function workLoop({ processJob, idleTimeoutMs = 0, intervalMs = 250 }) {
+    installOwnerWatch();
     let lastActivity = Date.now();
     setInterval(async () => {
       try {
