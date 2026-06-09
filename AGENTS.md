@@ -8,27 +8,15 @@
 - Tools are isolated and each one has its own manifest, entrypoint, and config defaults.
 
 ## Runtime directory rules
-Keep Arisa runtime paths predictable:
-- `~/.arisa/tools/<toolName>`: installed user tool package only (manifest, entrypoint, config defaults, dependencies).
-- `~/.arisa/state`: global Arisa service state only (`config.json`, `tasks.json`, `arisa.pid`, logs, service-level state).
-- `~/.arisa/state/tools/<toolName>`: global tool infrastructure state only, such as daemon files, shared browser sessions, model caches, and daemon queues. Do not store chat/user content here.
-- `~/.arisa/chats/<chatId>/artifacts`: artifacts for that chat. Artifacts are never global; different chat IDs must not share artifact files or indexes.
-- `~/.arisa/chats/<chatId>/state`: chat state such as artifact indexes and Pi sessions.
-- `~/.arisa/chats/<chatId>/state/tools/<toolName>`: persistent tool data scoped to one chat, such as tool databases, indexes, inboxes, generated sites, vaults, or any user/chat content.
-- `~/.arisa/chats/<chatId>/config/tools/<toolName>`: chat-scoped tool config overrides.
-- `~/.arisa/chats/<chatId>/tmp/tools/<toolName>`: ephemeral per-chat tool request scratch space. Create it only while a request is running and remove it when empty.
+Do not build runtime paths by hand. Use `src/runtime/paths.js`:
+- `getToolDir(toolName)`: installed user tool package only; no runtime data here.
+- `getToolStateDir(toolName)`: global tool infrastructure only: daemons, queues, shared browser sessions, model caches.
+- `getChatToolStateDir(chatId, toolName)`: persistent user/chat data: tool DBs, indexes, inboxes, generated sites, vaults.
+- `getChatArtifactsDir(chatId)` / `getChatArtifactsIndexFile(chatId)`: chat artifacts and artifact index. Artifacts are never global.
+- `getChatToolConfigPath(chatId, toolName)`: chat-scoped config overrides.
+- `getToolTmpDir(toolName)` / `getChatToolTmpDir(chatId, toolName)`: ephemeral scratch. Create only while a request runs; remove when empty.
 
-Do not create ad hoc roots like `~/.arisa/state/<toolName>`, `~/.arisa/state/chats`, or runtime state inside `~/.arisa/tools/<toolName>`.
-
-Use the path helpers from `src/runtime/paths.js` instead of reconstructing these paths by hand:
-- `getToolStateDir(toolName)` for global tool infrastructure state only
-- `getChatToolStateDir(chatId, toolName)` for persistent per-chat tool data
-- `getToolTmpDir(toolName)` for global ephemeral tool scratch
-- `getChatToolTmpDir(chatId, toolName)` for per-chat ephemeral scratch
-- `getChatToolConfigPath(chatId, toolName)` for chat config overrides
-- `getChatArtifactsDir(chatId)` and `getChatArtifactsIndexFile(chatId)` for artifacts
-
-Tool requests receive `chatId` from the registry. Tools that persist or index user content must store it under `getChatToolStateDir(chatId, toolName)`. Shared tool daemons may live under `getToolStateDir(toolName)`, but any user data they store must still be partitioned by chat.
+Tools receive `chatId` from the registry. Any persisted or indexed user content must be scoped by chat. Avoid ad hoc roots like `~/.arisa/state/<toolName>`, `~/.arisa/state/chats`, or runtime data inside `~/.arisa/tools/<toolName>`.
 
 ## Main rule: everything is piped through artifacts
 A pipe transforms one input artifact into one output artifact.
@@ -145,10 +133,7 @@ The default attitude is:
 - propose or start creating the needed tool
 
 When creating or editing tools:
-- use the shared path helpers and the runtime paths provided in the prompt instead of assuming fixed locations
-- keep installed tool directories clean: no `state`, `tmp`, `db`, caches, generated vaults, sessions, or user data inside `~/.arisa/tools/<toolName>`
-- store persistent tool infrastructure under `getToolStateDir(toolName)` and persistent chat/user data under `getChatToolStateDir(chatId, toolName)`
-- create temporary directories only for the duration of a request and remove them when empty
+- use the path helpers in `src/runtime/paths.js`
 - follow the existing bundled tools under `tools/` as the reference pattern for new tools
 - keep all help text, usage instructions, manifests, and user-facing operational strings in English
 - follow the One Thing Rule: each function or method should do one thing well; if it mixes low-level operations with high-level policy, split it into smaller focused units
