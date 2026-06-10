@@ -6,6 +6,28 @@ async function downloadToBuffer(ctx, fileId) {
   return Buffer.from(await response.arrayBuffer());
 }
 
+function mimeTypeFromAudioFileName(fileName = "") {
+  const extension = fileName.toLowerCase().split(".").pop();
+  return {
+    flac: "audio/flac",
+    m4a: "audio/mp4",
+    mp3: "audio/mpeg",
+    mp4: "audio/mp4",
+    mpeg: "audio/mpeg",
+    mpga: "audio/mpga",
+    ogg: "audio/ogg",
+    opus: "audio/ogg",
+    wav: "audio/wav",
+    webm: "audio/webm"
+  }[extension] || "";
+}
+
+function normalizeDocumentMimeType(document) {
+  const mimeType = document.mime_type || "";
+  if (mimeType && mimeType !== "application/octet-stream") return mimeType;
+  return mimeTypeFromAudioFileName(document.file_name) || mimeType || "application/octet-stream";
+}
+
 function incomingCaptionMetadata(ctx) {
   return ctx.message?.caption ? { caption: ctx.message.caption } : {};
 }
@@ -33,6 +55,26 @@ export async function captureIncomingArtifact(ctx, artifactStore) {
     });
   }
 
+  if (ctx.message?.audio) {
+    const audio = ctx.message.audio;
+    const fileName = audio.file_name || `${chatId}-${ctx.msg.message_id}`;
+    const content = await downloadToBuffer(ctx, audio.file_id);
+    return store.createGeneratedFile({
+      fileName,
+      content,
+      kind: "audio",
+      mimeType: audio.mime_type || "audio/mpeg",
+      source: baseSource,
+      metadata: {
+        duration: audio.duration,
+        performer: audio.performer,
+        title: audio.title,
+        fileSize: audio.file_size,
+        ...incomingCaptionMetadata(ctx)
+      }
+    });
+  }
+
   if (ctx.message?.video) {
     const video = ctx.message.video;
     const fileName = video.file_name || `${chatId}-${ctx.msg.message_id}.mp4`;
@@ -54,13 +96,15 @@ export async function captureIncomingArtifact(ctx, artifactStore) {
   }
 
   if (ctx.message?.document) {
-    const fileName = ctx.message.document.file_name || `${chatId}-${ctx.msg.message_id}`;
-    const content = await downloadToBuffer(ctx, ctx.message.document.file_id);
+    const document = ctx.message.document;
+    const fileName = document.file_name || `${chatId}-${ctx.msg.message_id}`;
+    const mimeType = normalizeDocumentMimeType(document);
+    const content = await downloadToBuffer(ctx, document.file_id);
     return store.createGeneratedFile({
       fileName,
       content,
-      kind: "document",
-      mimeType: ctx.message.document.mime_type || "application/octet-stream",
+      kind: mimeType.startsWith("audio/") ? "audio" : "document",
+      mimeType,
       source: baseSource,
       metadata: incomingCaptionMetadata(ctx)
     });

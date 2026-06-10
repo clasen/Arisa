@@ -1,7 +1,9 @@
 function mimeMatches(pattern, mimeType = "") {
-  if (!pattern || !mimeType) return false;
-  if (pattern === mimeType) return true;
-  if (pattern.endsWith("/*")) return mimeType.startsWith(`${pattern.slice(0, -2)}/`);
+  const normalizedMimeType = mimeType.split(";")[0].trim().toLowerCase();
+  const normalizedPattern = pattern?.trim().toLowerCase();
+  if (!normalizedPattern || !normalizedMimeType) return false;
+  if (normalizedPattern === normalizedMimeType) return true;
+  if (normalizedPattern.endsWith("/*")) return normalizedMimeType.startsWith(`${normalizedPattern.slice(0, -2)}/`);
   return false;
 }
 
@@ -20,8 +22,9 @@ function looksLikeAudioTranscriptionTool(tool) {
 }
 
 export function shouldNormalizeArtifactToText(artifact, desiredMimeType = "text/plain") {
+  const mimeType = artifact?.mimeType?.split(";")[0].trim().toLowerCase();
   return desiredMimeType === "text/plain"
-    && (artifact?.mimeType?.startsWith("audio/") || artifact?.mimeType?.startsWith("video/"));
+    && (mimeType?.startsWith("audio/") || mimeType?.startsWith("video/"));
 }
 
 export function selectPipeTool({ toolRegistry, artifact, desiredMimeType }) {

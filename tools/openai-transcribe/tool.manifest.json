@@ -2,7 +2,24 @@
   "name": "openai-transcribe",
   "description": "Transcribe audio files and video audio tracks with OpenAI audio transcription API.",
   "entry": "index.js",
-  "input": ["audio/ogg", "audio/mpeg", "audio/wav", "audio/mp4", "video/mp4"],
+  "input": [
+    "audio/aac",
+    "audio/flac",
+    "audio/m4a",
+    "audio/mp3",
+    "audio/mp4",
+    "audio/mpeg",
+    "audio/mpga",
+    "audio/ogg",
+    "audio/opus",
+    "audio/wav",
+    "audio/wave",
+    "audio/webm",
+    "audio/x-m4a",
+    "audio/x-wav",
+    "video/mp4",
+    "video/webm"
+  ],
   "output": ["text/plain"],
   "configSchema": {
     "OPENAI_API_KEY": {
