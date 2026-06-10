@@ -53,7 +53,7 @@ export async function createApp({ logger, runtimeOverrides, webhookUrl, setHttpR
 
   const artifactStore = new ArtifactStore();
   const toolProcessSupervisor = createToolProcessSupervisor({ logger });
-  const toolRegistry = new ToolRegistry({ logger, processOwnerEnv: toolProcessSupervisor.env() });
+  const toolRegistry = new ToolRegistry({ logger });
   const taskStore = new TaskStore();
   await toolRegistry.load();
   logger?.log("app", `loaded ${toolRegistry.list().length} tools`);

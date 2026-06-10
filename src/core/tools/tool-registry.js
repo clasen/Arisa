@@ -25,9 +25,8 @@ function runProcess(command, args, options = {}) {
 }
 
 export class ToolRegistry {
-  constructor({ logger, processOwnerEnv = {} } = {}) {
+  constructor({ logger } = {}) {
     this.logger = logger;
-    this.processOwnerEnv = processOwnerEnv;
     this.tools = new Map();
     this.skillRegistry = new SkillRegistry();
   }
@@ -154,7 +153,7 @@ export class ToolRegistry {
     await writeFile(requestFile, `${JSON.stringify(enrichedRequest, null, 2)}\n`, "utf8");
     const result = await runProcess("node", [tool.entry, "run", "--request-file", requestFile], {
       cwd: tool.dir,
-      env: { ...process.env, ...this.processOwnerEnv }
+      env: process.env
     });
     await unlink(requestFile).catch(() => {});
     await rmdir(tmpDir).catch(() => {});

@@ -4,9 +4,6 @@ import { mkdir, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { getToolStateDir, toolStateDir } from "../../runtime/paths.js";
 
-export const OWNER_HEARTBEAT_INTERVAL_MS = 2000;
-export const OWNER_HEARTBEAT_TTL_MS = 10000;
-
 export function daemonPaths(toolName) {
   const root = getToolStateDir(toolName);
   return {
@@ -54,9 +51,11 @@ async function waitForExit(pid, timeoutMs) {
 export async function stopManagedDaemon(toolName, { signal = "SIGTERM", forceAfterMs = 3000 } = {}) {
   const paths = daemonPaths(toolName);
   const { pid } = await readJson(paths.pidFile, {});
+  let stopped = false;
   if (isProcessAlive(pid)) {
     try {
       process.kill(pid, signal);
+      stopped = true;
     } catch {}
     if (signal !== "SIGKILL" && forceAfterMs > 0 && !(await waitForExit(pid, forceAfterMs))) {
       try {
@@ -65,19 +64,24 @@ export async function stopManagedDaemon(toolName, { signal = "SIGTERM", forceAft
     }
   }
   await rm(paths.pidFile, { force: true });
+  return { toolName, pid: pid || null, stopped };
 }
 
-export async function startManagedDaemon({ toolName, entryPath, beforeStart = null, ownerEnv = {} }) {
+export async function startManagedDaemon({ toolName, entryPath, beforeStart = null, autoStart = true }) {
   const paths = daemonPaths(toolName);
   await mkdir(paths.commandsDir, { recursive: true });
 
   const current = await readJson(paths.pidFile, {});
   if (isProcessAlive(current.pid)) {
-    const sameOwner = !ownerEnv.ARISA_TOOL_OWNER_TOKEN
-      || current.ownerToken === ownerEnv.ARISA_TOOL_OWNER_TOKEN;
-    if (sameOwner) return current.pid;
-    await stopManagedDaemon(toolName);
+    await writeJson(paths.metaFile, {
+      toolName,
+      entryPath,
+      autoStart,
+      lastStartedAt: current.startedAt || new Date().toISOString()
+    });
+    return current.pid;
   }
+  await rm(paths.pidFile, { force: true });
 
   await rm(paths.commandsDir, { recursive: true, force: true });
   await mkdir(paths.commandsDir, { recursive: true });
@@ -88,26 +92,21 @@ export async function startManagedDaemon({ toolName, entryPath, beforeStart = nu
     const child = spawn(process.execPath, [entryPath, "daemon"], {
       detached: false,
       stdio: ["ignore", out, out],
-      env: { ...process.env, ...ownerEnv }
+      env: process.env
     });
     child.unref();
 
     const startedAt = new Date().toISOString();
     const record = {
       pid: child.pid,
-      startedAt,
-      ownerPid: Number.parseInt(ownerEnv.ARISA_OWNER_PID || "", 10) || null,
-      ownerToken: ownerEnv.ARISA_TOOL_OWNER_TOKEN || ""
+      startedAt
     };
     await writeJson(paths.pidFile, record);
     await writeJson(paths.metaFile, {
       toolName,
       entryPath,
-      autoStart: true,
-      lastStartedAt: startedAt,
-      ownerFile: ownerEnv.ARISA_TOOL_OWNER_FILE || "",
-      ownerPid: record.ownerPid,
-      ownerToken: record.ownerToken
+      autoStart,
+      lastStartedAt: startedAt
     });
     return child.pid;
   } finally {

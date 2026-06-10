@@ -2,8 +2,6 @@ import crypto from "node:crypto";
 import { mkdir, readdir, rename, unlink } from "node:fs/promises";
 import path from "node:path";
 import {
-  OWNER_HEARTBEAT_INTERVAL_MS,
-  OWNER_HEARTBEAT_TTL_MS,
   daemonPaths,
   isProcessAlive,
   readJson,
@@ -40,50 +38,12 @@ export function createDaemonRuntime({ toolName, entryPath, beforeStart = null })
     return startManagedDaemon({
       toolName,
       entryPath,
-      beforeStart,
-      ownerEnv: {
-        ARISA_OWNER_PID: process.env.ARISA_OWNER_PID,
-        ARISA_TOOL_OWNER_FILE: process.env.ARISA_TOOL_OWNER_FILE,
-        ARISA_TOOL_OWNER_TOKEN: process.env.ARISA_TOOL_OWNER_TOKEN
-      }
+      beforeStart
     });
   }
 
   async function stop() {
     await stopManagedDaemon(toolName);
-  }
-
-  function installOwnerWatch() {
-    const ownerFile = process.env.ARISA_TOOL_OWNER_FILE;
-    const ownerToken = process.env.ARISA_TOOL_OWNER_TOKEN;
-    if (!ownerFile || !ownerToken) return;
-
-    let exiting = false;
-    async function exitIfOrphaned(message) {
-      if (exiting) return;
-      exiting = true;
-      await writeStatus({ state: "stopped", message });
-      process.exit(0);
-    }
-
-    const timer = setInterval(async () => {
-      const owner = await readJson(ownerFile, null);
-      if (!owner || owner.token !== ownerToken) {
-        await exitIfOrphaned("Arisa owner stopped");
-        return;
-      }
-
-      const heartbeatAt = Date.parse(owner.heartbeatAt || "");
-      if (!Number.isFinite(heartbeatAt) || Date.now() - heartbeatAt > OWNER_HEARTBEAT_TTL_MS) {
-        await exitIfOrphaned("Arisa owner heartbeat expired");
-        return;
-      }
-
-      if (!isProcessAlive(owner.pid)) {
-        await exitIfOrphaned("Arisa owner process exited");
-      }
-    }, OWNER_HEARTBEAT_INTERVAL_MS);
-    timer.unref();
   }
 
   async function waitReady({ timeoutMs = 120000, readyStates = ["ready"] } = {}) {
@@ -143,7 +103,6 @@ export function createDaemonRuntime({ toolName, entryPath, beforeStart = null })
   }
 
   async function workLoop({ processJob, idleTimeoutMs = 0, intervalMs = 250 }) {
-    installOwnerWatch();
     let lastActivity = Date.now();
     setInterval(async () => {
       try {

@@ -7,7 +7,6 @@ export const stateDir = path.join(arisaHomeDir, "state");
 export const configFile = path.join(stateDir, "config.json");
 export const servicePidFile = path.join(stateDir, "arisa.pid");
 export const serviceLogFile = path.join(stateDir, "arisa.log");
-export const toolDaemonOwnerFile = path.join(stateDir, "tool-daemon-owner.json");
 export const tasksFile = path.join(stateDir, "tasks.json");
 export const toolsDir = path.join(arisaHomeDir, "tools");
 export const chatsDir = path.join(arisaHomeDir, "chats");
