@@ -4,7 +4,7 @@
 
 ## Origin
 
-The initial inspiration was OpenClaw. OpenClaw has interesting ideas but carries a lot of weight (about **185 MB**) compared to Arisa (**76.7 kB**): when it generates tools they end up disorganized, and the overall framework feels overloaded.
+The initial inspiration was OpenClaw, which has interesting ideas but carries a lot of weight (about **185 MB**) compared to Arisa (**76.7 kB**): when it generates tools they end up disorganized, and the overall framework feels overloaded.
 
 The real heart of OpenClaw is Pi Agent: a [minimal terminal coding harness](https://www.youtube.com/watch?v=Dli5slNaJu0) that lets an AI agent reason and act with very little infrastructure. That part is genuinely good.
 
