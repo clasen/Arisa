@@ -186,8 +186,16 @@ function sessionEventLogMessage(event) {
 
 async function collectText(session, prompt, { logger, chatId } = {}) {
   let text = "";
+  let shouldSeparateAssistantMessage = false;
   const unsubscribe = session.subscribe((event) => {
+    if (event.type === "message_start" && event.message.role === "assistant") {
+      shouldSeparateAssistantMessage = text.trim().length > 0;
+    }
     if (event.type === "message_update" && event.assistantMessageEvent.type === "text_delta") {
+      if (shouldSeparateAssistantMessage && event.assistantMessageEvent.delta) {
+        text += "\n\n";
+        shouldSeparateAssistantMessage = false;
+      }
       text += event.assistantMessageEvent.delta;
     }
     const logMessage = sessionEventLogMessage(event);
