@@ -46,7 +46,9 @@ This distinction is important. Some transformations belong to the transport/inpu
 - media is stored as artifacts
 
 ### Tool model
-Bundled tools live under `<arisa-install-dir>/tools/<tool-name>` and user-created tools live under `~/.arisa/tools/<tool-name>`.
+No tools ship with the core. All installed tools live under `~/.arisa/tools/<tool-name>`, whether they come from the [official catalog](https://github.com/clasen/Arisa/tree/main/tools), from another source the user chooses, or are created by the agent itself.
+
+When the agent needs a capability it does not have, it checks the official catalog first and proposes installing the matching tool; the user confirms in the chat before anything is installed.
 
 Each tool folder contains:
 
@@ -59,8 +61,7 @@ Each tool is isolated from the root project and from other tools.
 That isolation is part of the architecture:
 
 - each tool has its own folder
-- bundled tools have a local `config.js` for defaults/template values
-- user-created tools can live entirely inside `~/.arisa/tools/<tool>/`
+- each tool has a local `config.js` for defaults/template values
 - each tool can have its own dependencies
 - one tool can be changed or replaced without tightly coupling the rest of the system
 
@@ -203,15 +204,14 @@ src/
   runtime/      bootstrap + app startup
   transport/    Telegram integration
   core/         agent, tools, artifacts, config
-tools/
-  openai-transcribe/
-  openai-tts/
 ~/.arisa/
   state/
   artifacts/
-  tools/
+  tools/        installed tools (catalog, user-chosen, or agent-created)
   tmp/
 ```
+
+The official tool catalog lives in the repository under [`tools/`](https://github.com/clasen/Arisa/tree/main/tools) and is not part of the npm package.
 
 ## Philosophy
 
@@ -221,9 +221,10 @@ For consistency, the entire Arisa codebase was built using Pi Agent itself, runn
 
 When a capability is missing:
 
-1. check whether an existing tool can solve the task
-2. if not, build the missing tool
-3. keep the solution inside the tool architecture
+1. check whether an installed tool can solve the task
+2. if not, check the official catalog and propose installing the matching tool
+3. if nothing fits, build the missing tool
+4. keep the solution inside the tool architecture
 
 No "I can't do that" when the thing is realistically buildable.
 

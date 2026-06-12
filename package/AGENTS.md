@@ -6,6 +6,7 @@
 - Incoming messages and files (text, voice, photo, document) and generated files become artifacts.
 - A tool registry handles tool discovery, help lookup, config writes, and execution.
 - Tools are isolated and each one has its own manifest, entrypoint, and config defaults.
+- No tools ship with the core. All installed tools live under `~/.arisa/tools/<toolName>`; the install directory of Arisa (your working directory) contains only the core. Never create or install tools inside the install directory.
 
 ## Runtime directory rules
 Do not build runtime paths by hand. Use `src/runtime/paths.js`:
@@ -66,7 +67,7 @@ Every CLI must support (the entrypoint comes from `manifest.entry`, currently al
 - `node index.js run --request-file <json>`
 
 ### Tools that need daemons
-A future tool may need a persistent process, for example to keep a browser session alive or a local model warm. The shared daemon runtime exists for this, but no bundled tool uses it yet.
+A tool may need a persistent process, for example to keep a browser session alive or a local model warm. The shared daemon runtime exists for this (the `whispermix-transcribe` catalog tool uses it).
 When such a tool is built, implement it with the shared daemon runtime instead of custom ad hoc process management:
 - use `src/core/tools/daemon-runtime.js`
 - keep runtime files under the tool state directory (`~/.arisa/state/tools/<toolName>`)
@@ -98,7 +99,7 @@ Beyond time-based scheduling, tools can drive an event queue that wakes the agen
 
 Tasks without a `runAt` fire immediately, so `agent_event` and the first `poll_tool` run on the next tick.
 
-The poller dispatches all three kinds, but only `agent_task` is exercised by a bundled tool today (`schedule-agent-task`). The following is the pattern to follow when a checker tool is built:
+The poller dispatches all three kinds, but only `agent_task` is exercised by a catalog tool today (`schedule-agent-task`). The following is the pattern to follow when a checker tool is built:
 
 How a tool wires its own polling:
 1. From any tool `run`, start the poll by returning an `asyncTask` (or several in `asyncTasks`):
@@ -118,23 +119,44 @@ If `run_tool` returns `missingConfig`, the agent should:
 
 Do not assume a rigid question/answer protocol. Continue the conversation naturally and infer the config value from the user reply when possible.
 
+## Official tool catalog
+The official tool catalog lives at `https://github.com/clasen/Arisa/tree/main/tools`. Each subdirectory is an installable tool following the standard tool contract.
+
+When a capability is missing, check the catalog before building anything:
+1. List the catalog: `curl -s https://api.github.com/repos/clasen/Arisa/contents/tools`.
+2. Read the manifest of any candidate: `https://raw.githubusercontent.com/clasen/Arisa/main/tools/<name>/tool.manifest.json` (the `description`, `input`, and `output` fields tell you whether it solves the need).
+3. If a catalog tool solves the problem, propose it to the user: say which tool it is and what it does, and wait for their confirmation in the chat before installing.
+4. Only when nothing in the catalog fits, fall back to creating a new tool.
+
+### Installing a tool
+After the user confirms (or when the user directly asks to install a tool from any source they choose):
+1. Download the tool directory into `~/.arisa/tools/<name>`. For the official catalog, clone shallowly and copy the subdirectory, for example:
+   `git clone --depth 1 https://github.com/clasen/Arisa /tmp/arisa-catalog && cp -R /tmp/arisa-catalog/tools/<name> ~/.arisa/tools/<name>`.
+2. Fix the Arisa core imports. Catalog tools import core helpers with the placeholder prefix `../../src/`. Rewrite that prefix to the absolute path `<arisaInstallDir>/src/` (the Arisa install directory is your working directory), for example:
+   `import { toolOk } from "../../src/core/tools/tool-result.js"` becomes `import { toolOk } from "/path/to/arisa/src/core/tools/tool-result.js"`.
+3. Install dependencies inside the tool directory (`pnpm install`, fall back to `npm install`).
+4. Run it through `run_tool`; the registry picks up new tools automatically. If it returns `missingConfig`, follow the missing config flow.
+
 ## Tool creation
 Reason in terms of capabilities, not tool names.
 
 When the user asks for something new:
 1. check whether an existing registered tool can already satisfy the task
 2. also check whether the task can be satisfied indirectly through an existing capability
-3. only propose creating a new tool when the needed capability is truly missing
+3. check whether a tool in the official catalog satisfies the task and propose installing it
+4. only propose creating a new tool when the needed capability is truly missing
 
 Do not stop at "I cannot do that" when the task is realistically implementable through the tool architecture.
 The default attitude is:
 - identify that no current tool satisfies the request
 - state that the missing capability can be added
-- propose or start creating the needed tool
+- propose installing from the official catalog, or propose or start creating the needed tool
 
 When creating or editing tools:
+- always create tools under `~/.arisa/tools/<toolName>`, never inside the Arisa install directory
 - use the path helpers in `src/runtime/paths.js`
-- follow the existing bundled tools under `tools/` as the reference pattern for new tools
+- import Arisa core helpers (`tool-result.js`, `tool-config.js`, `paths.js`, `daemon-runtime.js`) with absolute paths into `<arisaInstallDir>/src/`
+- follow the tools in the official catalog as the reference pattern for new tools
 - keep all help text, usage instructions, manifests, and user-facing operational strings in English
 - follow the One Thing Rule: each function or method should do one thing well; if it mixes low-level operations with high-level policy, split it into smaller focused units
 
@@ -158,7 +180,6 @@ Tool dependencies are installed as part of building or running the tool, not del
 - Do not ask the user to do it manually.
 
 ## Safety
-- Do not install or run arbitrary tools outside registered tool manifests in V1.
 - Prefer tool manifests and CLI help over assumptions.
 - Keep tool config and runtime data inside the user runtime area.
 - Be proactive about extending capabilities, but do it through the project's tool architecture, not through ad hoc one-off behavior.

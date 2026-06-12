@@ -1,17 +1,10 @@
 import { mkdir, readdir, readFile, rmdir, unlink, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { spawn } from "node:child_process";
-import { fileURLToPath } from "node:url";
 import { getToolConfigPath, getToolTmpDir, getChatToolTmpDir, toolsDir as userToolsRoot } from "../../runtime/paths.js";
 import { loadToolConfig, parseConfigModule, writeToolConfig } from "./tool-config.js";
 import { normalizeToolResult } from "./tool-result.js";
 import { SkillRegistry } from "../skills/skill-registry.js";
-
-const bundledToolsRoot = fileURLToPath(new URL("../../../tools", import.meta.url));
-const toolRoots = [
-  { root: userToolsRoot, kind: "user" },
-  { root: bundledToolsRoot, kind: "bundled" }
-];
 
 function runProcess(command, args, options = {}) {
   return new Promise((resolve) => {
@@ -34,41 +27,37 @@ export class ToolRegistry {
   async load() {
     this.tools.clear();
 
-    for (const { root, kind } of toolRoots) {
-      let entries = [];
-      try {
-        entries = await readdir(root, { withFileTypes: true });
-      } catch {
-        this.logger?.log("tools", `${kind} tools directory not found: ${root}`);
-        continue;
-      }
+    let entries = [];
+    try {
+      entries = await readdir(userToolsRoot, { withFileTypes: true });
+    } catch {
+      this.logger?.log("tools", `tools directory not found: ${userToolsRoot}`);
+    }
 
-      for (const entry of entries) {
-        if (!entry.isDirectory()) continue;
-        const toolDir = path.join(root, entry.name);
-        const manifestPath = path.join(toolDir, "tool.manifest.json");
-        const configPath = path.join(toolDir, "config.js");
-        try {
-          const manifest = JSON.parse(await readFile(manifestPath, "utf8"));
-          if (this.tools.has(manifest.name)) continue;
-          const configSource = await readFile(configPath, "utf8");
-          const defaults = parseConfigModule(configSource);
-          const config = await loadToolConfig(manifest.name, defaults);
-          const skillHints = this.skillRegistry.normalizeHints(manifest);
-          this.tools.set(manifest.name, {
-            ...manifest,
-            skillHints,
-            dir: toolDir,
-            entry: path.join(toolDir, manifest.entry || "index.js"),
-            localConfigPath: configPath,
-            configPath: getToolConfigPath(manifest.name),
-            defaults,
-            config,
-            sourceKind: kind
-          });
-        } catch {
-          // ignore invalid tool dirs in v1
-        }
+    for (const entry of entries) {
+      if (!entry.isDirectory()) continue;
+      const toolDir = path.join(userToolsRoot, entry.name);
+      const manifestPath = path.join(toolDir, "tool.manifest.json");
+      const configPath = path.join(toolDir, "config.js");
+      try {
+        const manifest = JSON.parse(await readFile(manifestPath, "utf8"));
+        if (this.tools.has(manifest.name)) continue;
+        const configSource = await readFile(configPath, "utf8");
+        const defaults = parseConfigModule(configSource);
+        const config = await loadToolConfig(manifest.name, defaults);
+        const skillHints = this.skillRegistry.normalizeHints(manifest);
+        this.tools.set(manifest.name, {
+          ...manifest,
+          skillHints,
+          dir: toolDir,
+          entry: path.join(toolDir, manifest.entry || "index.js"),
+          localConfigPath: configPath,
+          configPath: getToolConfigPath(manifest.name),
+          defaults,
+          config
+        });
+      } catch {
+        // ignore invalid tool dirs in v1
       }
     }
 

@@ -2,9 +2,9 @@ import path from "node:path";
 import { spawn } from "node:child_process";
 import { readFile } from "node:fs/promises";
 import defaults from "./config.js";
-import { loadToolConfig } from "/Users/martinclasen/Stuff/Node/NPM/Arisa/src/core/tools/tool-config.js";
-import { toolError, toolOk } from "/Users/martinclasen/Stuff/Node/NPM/Arisa/src/core/tools/tool-result.js";
-import { getToolConfigPath } from "/Users/martinclasen/Stuff/Node/NPM/Arisa/src/runtime/paths.js";
+import { loadToolConfig } from "../../src/core/tools/tool-config.js";
+import { toolError, toolOk } from "../../src/core/tools/tool-result.js";
+import { getToolConfigPath } from "../../src/runtime/paths.js";
 
 const toolName = "summarize";
 const config = await loadToolConfig(toolName, defaults);

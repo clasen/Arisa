@@ -7,11 +7,11 @@ import qrcodeTerminal from "qrcode-terminal";
 import QRCode from "qrcode";
 import pkg from "whatsapp-web.js";
 import defaults from "./config.js";
-import { loadToolConfig } from "/Users/martinclasen/Stuff/Node/NPM/Arisa/src/core/tools/tool-config.js";
-import { toolError, toolOk } from "/Users/martinclasen/Stuff/Node/NPM/Arisa/src/core/tools/tool-result.js";
-import { ArtifactStore } from "/Users/martinclasen/Stuff/Node/NPM/Arisa/src/core/artifacts/artifact-store.js";
-import { createDaemonRuntime, isProcessAlive, readJson, writeJson } from "/Users/martinclasen/Stuff/Node/NPM/Arisa/src/core/tools/daemon-runtime.js";
-import { chatsDir, getChatToolStateDir, tasksFile } from "/Users/martinclasen/Stuff/Node/NPM/Arisa/src/runtime/paths.js";
+import { loadToolConfig } from "../../src/core/tools/tool-config.js";
+import { toolError, toolOk } from "../../src/core/tools/tool-result.js";
+import { ArtifactStore } from "../../src/core/artifacts/artifact-store.js";
+import { createDaemonRuntime, isProcessAlive, readJson, writeJson } from "../../src/core/tools/daemon-runtime.js";
+import { chatsDir, getChatToolStateDir, tasksFile } from "../../src/runtime/paths.js";
 
 const { Client, LocalAuth, MessageMedia } = pkg;
 const toolName = "whatsapp-web";
