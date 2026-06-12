@@ -1,0 +1,24 @@
+{
+  "name": "whispermix-transcribe",
+  "description": "Transcribe audio files locally with WhisperMix using a persistent daemon that keeps the model warm.",
+  "entry": "index.js",
+  "input": ["audio/ogg", "audio/mpeg", "audio/wav", "audio/mp4"],
+  "output": ["text/plain"],
+  "configSchema": {
+    "MODEL": {
+      "type": "string",
+      "required": false,
+      "prompt": "Local WhisperMix model id, for example efederici/parakeet-tdt-0.6b-v3-int4."
+    },
+    "LANGUAGE": {
+      "type": "string",
+      "required": false,
+      "prompt": "Language hint for local Whisper models, for example spanish or auto."
+    },
+    "IDLE_TIMEOUT_MS": {
+      "type": "string",
+      "required": false,
+      "prompt": "How long the daemon should stay alive while idle."
+    }
+  }
+}

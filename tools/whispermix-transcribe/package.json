@@ -1,0 +1,9 @@
+{
+  "name": "whispermix-transcribe-cli",
+  "private": true,
+  "type": "module",
+  "version": "1.0.0",
+  "dependencies": {
+    "whispermix": "^1.0.4"
+  }
+}
