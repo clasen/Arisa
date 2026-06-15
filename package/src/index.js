@@ -6,7 +6,6 @@ import { createApp } from "./runtime/create-app.js";
 import { createLogger } from "./runtime/logger.js";
 import { getServiceStatus, registerServiceProcess, startService, stopService, unregisterServiceProcess } from "./runtime/service-manager.js";
 import { flushArisaHome } from "./runtime/flush.js";
-import { installPiPackage, removePiPackage } from "./runtime/pi-package-manager.js";
 
 const args = process.argv.slice(2);
 const cli = parseCliArgs(args);
@@ -205,28 +204,6 @@ async function main() {
     }
     const result = await flushArisaHome();
     console.log(`Arisa state removed: ${result.path}`);
-    return;
-  }
-
-  if (command === "install") {
-    const source = cli.positionals[1];
-    if (!source) {
-      console.log("Usage: arisa install <pi-package-source>");
-      return;
-    }
-    const result = await installPiPackage(source);
-    process.exitCode = result.ok ? 0 : result.code;
-    return;
-  }
-
-  if (command === "remove") {
-    const source = cli.positionals[1];
-    if (!source) {
-      console.log("Usage: arisa remove <pi-package-source>");
-      return;
-    }
-    const result = await removePiPackage(source);
-    process.exitCode = result.ok ? 0 : result.code;
     return;
   }
 

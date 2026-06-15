@@ -4,7 +4,7 @@
 
 ## Origin
 
-The initial inspiration was OpenClaw, which has interesting ideas but carries a lot of weight (about **85 MB**, **55 direct dependencies**) compared to Arisa (**37 kB**, **3 direct dependencies**): when it generates tools they end up disorganized, and the overall framework feels overloaded.
+The initial inspiration was OpenClaw, which has interesting ideas but carries a lot of weight (about **85 MB**, **55 dependencies**) compared to Arisa (**37 kB**, **3 dependencies**): when it generates tools they end up disorganized, and the overall framework feels overloaded.
 
 The real heart of OpenClaw is Pi Agent: a [minimal terminal coding harness](https://www.youtube.com/watch?v=Dli5slNaJu0) that lets an AI agent reason and act with very little infrastructure. That part is genuinely good.
 
@@ -112,8 +112,6 @@ arisa start              # start in background
 arisa stop               # stop background service
 arisa status             # show background service status
 arisa flush              # remove ~/.arisa
-arisa install <source>   # install a Pi package into Arisa's runtime
-arisa remove <source>    # remove a Pi package from Arisa's runtime
 ```
 
 Runtime model override (current process only):
@@ -125,17 +123,6 @@ arisa --pi.model lmstudio/google/gemma-4-26b-a4b
 Notes:
 
 - it only affects the current Arisa process and does not update `~/.arisa/state/config.json`
-
-## Experimental features
-
-### Pi Agent packages
-
-Arisa can install **Pi Agent packages** from the public registry into your user runtime (`~/.arisa/`), using the same package manager as Pi Agent. Browse and discover packages at [pi.dev/packages](https://pi.dev/packages).
-
-- `arisa install <source>` installs a package (by registry name or other source supported by Pi).
-- `arisa remove <source>` removes a previously installed package.
-
-Treat this as **experimental**: the registry, package formats, and install behavior follow Pi Agent and may change. Not every listed package is tailored to Arisa’s Telegram transport and artifact-based tools; prefer packages you understand and verify after install.
 
 ## Bootstrap flow
 
