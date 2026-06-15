@@ -4,15 +4,17 @@ This is the official Arisa tool catalog. Each subdirectory is a self-contained t
 
 ## Overview
 
-| Tool | Function | Input | Output | Requires |
-|------|----------|-------|--------|----------|
-| [`openai-transcribe`](./openai-transcribe/) | Transcribes audio files and video audio tracks via the OpenAI audio transcription API | audio + video | `text/plain` | `OPENAI_API_KEY` |
-| [`openai-tts`](./openai-tts/) | Converts text into OGG speech audio via the OpenAI TTS API | `text/plain` | `audio/ogg` | `OPENAI_API_KEY` |
-| [`schedule-agent-task`](./schedule-agent-task/) | Schedules future agent tasks (one-shot or recurring) through the async task queue | `text/plain` | `application/json` | - |
-| [`summarize`](./summarize/) | Summarizes URLs, YouTube videos, podcasts, and files via `steipete/summarize` | `text/plain` (URL or path) | `text/plain` | Optional: any LLM API key |
-| [`web-browser`](./web-browser/) | Searches the web and fetches pages as readable text | `text/plain` | `text/plain` | - |
-| [`whatsapp-web`](./whatsapp-web/) | Sends and receives WhatsApp messages via WhatsApp Web (login, send, broadcast, inbox, watch) | text + media | `text/plain`, `application/json` | Chrome/Chromium |
-| [`whispermix-transcribe`](./whispermix-transcribe/) | Transcribes audio locally with WhisperMix; keeps the model warm via a persistent daemon | `audio/ogg`, `mp3`, `wav`, `mp4` | `text/plain` | Local WhisperMix install |
+| Tool | Function | Input | Output | Requires | Install footprint |
+|------|----------|-------|--------|----------|-------------------|
+| [`openai-transcribe`](./openai-transcribe/) | Transcribes audio files and video audio tracks via the OpenAI audio transcription API | audio + video | `text/plain` | `OPENAI_API_KEY` | Low — 0 npm deps |
+| [`openai-tts`](./openai-tts/) | Converts text into OGG speech audio via the OpenAI TTS API | `text/plain` | `audio/ogg` | `OPENAI_API_KEY` | Low — 0 npm deps |
+| [`schedule-agent-task`](./schedule-agent-task/) | Schedules future agent tasks (one-shot or recurring) through the async task queue | `text/plain` | `application/json` | - | Low — 0 npm deps |
+| [`summarize`](./summarize/) | Summarizes URLs, YouTube videos, podcasts, and files via `steipete/summarize` | `text/plain` (URL or path) | `text/plain` | Optional: any LLM API key | Medium — 1 npm dep (pulls a large toolchain) |
+| [`web-browser`](./web-browser/) | Searches the web and fetches pages as readable text | `text/plain` | `text/plain` | - | Low — 0 npm deps |
+| [`whatsapp-web`](./whatsapp-web/) | Sends and receives WhatsApp messages via WhatsApp Web (login, send, broadcast, inbox, watch) | text + media | `text/plain`, `application/json` | Chrome/Chromium | High — 3 npm deps + Chrome/Chromium + QR login |
+| [`whispermix-transcribe`](./whispermix-transcribe/) | Transcribes audio locally with WhisperMix; keeps the model warm via a persistent daemon | `audio/ogg`, `mp3`, `wav`, `mp4` | `text/plain` | Local WhisperMix install | High — 1 npm dep + local WhisperMix model + daemon |
+
+**Install footprint guides autonomy.** Low-footprint tools (no extra npm dependencies, no external binaries) can be installed and used within the same request without asking the user first. Medium/High-footprint tools (heavy dependency trees, external binaries, or interactive setup such as a login) should be proposed to the user for confirmation before installing. A missing config secret (for example an API key) is handled by the normal missing-config flow and is not, on its own, a reason to ask before installing.
 
 ## Installing a tool
 

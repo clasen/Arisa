@@ -124,12 +124,15 @@ The official tool catalog lives at `https://github.com/clasen/Arisa/tree/main/to
 
 When a capability is missing, check the catalog before building anything:
 1. List the catalog: `curl -s https://api.github.com/repos/clasen/Arisa/contents/tools`.
-2. Read the manifest of any candidate: `https://raw.githubusercontent.com/clasen/Arisa/main/tools/<name>/tool.manifest.json` (the `description`, `input`, and `output` fields tell you whether it solves the need).
-3. If a catalog tool solves the problem, propose it to the user: say which tool it is and what it does, and wait for their confirmation in the chat before installing.
+2. Read the manifest of any candidate: `https://raw.githubusercontent.com/clasen/Arisa/main/tools/<name>/tool.manifest.json` (the `description`, `input`, and `output` fields tell you whether it solves the need). Also read the catalog `README.md` to check the tool's install footprint.
+3. If a catalog tool solves the problem, decide by install footprint (the `Install footprint` column in the catalog `README.md`):
+   - **Low footprint** (no extra npm dependencies, no external binaries): install it and resolve the user's request in the same turn, without asking first. Favor autonomy here.
+   - **Medium/High footprint** (heavy dependency trees, external binaries, or interactive setup such as a login): propose it to the user, say which tool it is and what it does, and wait for their confirmation in the chat before installing.
+   - A missing config secret (for example an API key) is handled by the missing-config flow and is not, on its own, a reason to ask before installing.
 4. Only when nothing in the catalog fits, fall back to creating a new tool.
 
 ### Installing a tool
-After the user confirms (or when the user directly asks to install a tool from any source they choose):
+After deciding to install (low footprint), after the user confirms, or when the user directly asks to install a tool from any source they choose:
 1. Download the tool directory into `~/.arisa/tools/<name>`. For the official catalog, clone shallowly and copy the subdirectory, for example:
    `git clone --depth 1 https://github.com/clasen/Arisa /tmp/arisa-catalog && cp -R /tmp/arisa-catalog/tools/<name> ~/.arisa/tools/<name>`.
 2. Fix the Arisa core imports. Catalog tools import core helpers with the placeholder prefix `../../src/`. Rewrite that prefix to the absolute path `<arisaInstallDir>/src/` (the Arisa install directory is your working directory), for example:
