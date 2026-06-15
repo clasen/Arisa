@@ -4,7 +4,7 @@
 
 ## Origin
 
-The initial inspiration was OpenClaw, which has interesting ideas but carries a lot of weight (about **185 MB**) compared to Arisa (**76.7 kB**): when it generates tools they end up disorganized, and the overall framework feels overloaded.
+The initial inspiration was OpenClaw, which has interesting ideas but carries a lot of weight (about **85 MB**, **55 direct dependencies**) compared to Arisa (**37 kB**, **3 direct dependencies**): when it generates tools they end up disorganized, and the overall framework feels overloaded.
 
 The real heart of OpenClaw is Pi Agent: a [minimal terminal coding harness](https://www.youtube.com/watch?v=Dli5slNaJu0) that lets an AI agent reason and act with very little infrastructure. That part is genuinely good.
 
@@ -38,17 +38,31 @@ Arisa separates two different kinds of pipes:
 
 This distinction is important. Some transformations belong to the transport/input layer, not to the agent's runtime decision making.
 
+## Zero tools, assembled on demand
+
+A fresh install ships with **zero tools**. The core is only Telegram transport, the Pi Agent reasoning loop, the artifact store, and the tool registry. Out of the box Arisa cannot transcribe audio, browse the web, or speak; it gains each capability only once a tool that provides it is installed.
+
+Arisa assembles its own toolset from real use:
+
+1. A request arrives that the current tools cannot satisfy.
+2. Arisa checks the [official catalog](https://github.com/clasen/Arisa/tree/main/tools) for a tool that fits the need.
+3. If one fits, it installs it: autonomously for low-footprint tools, or after asking you to confirm for heavier ones (extra dependencies, external binaries, or interactive setup such as a login).
+4. If nothing fits, it builds a new tool for the missing capability.
+5. The installed tool stays in `~/.arisa/tools/` and is reused from then on.
+
+The result is a toolset shaped by how you actually use the assistant, not by defaults someone else chose. Two people running the same Arisa build can end up with completely different capabilities.
+
 ## Current behavior
 
 ### Telegram input
 - text messages go directly to Pi Agent
-- audio/voice messages are transcribed first, then passed to Pi Agent as text
+- audio/voice messages are transcribed first when a transcription tool is installed, then passed to Pi Agent as text; otherwise Arisa offers to install one
 - media is stored as artifacts
 
 ### Tool model
 No tools ship with the core. All installed tools live under `~/.arisa/tools/<tool-name>`, whether they come from the [official catalog](https://github.com/clasen/Arisa/tree/main/tools), from another source the user chooses, or are created by the agent itself.
 
-When the agent needs a capability it does not have, it checks the official catalog first and proposes installing the matching tool; the user confirms in the chat before anything is installed.
+When the agent needs a capability it does not have, it checks the official catalog first. Low-footprint tools (no extra dependencies) are installed on the spot so the request is resolved in the same turn; heavier tools (extra dependencies, external binaries, or interactive setup) are proposed for you to confirm before anything is installed.
 
 Each tool folder contains:
 
@@ -236,14 +250,15 @@ No "I can't do that" when the thing is realistically buildable.
 
 ## Status
 
-This is currently a functional V1 focused on:
+This is currently a functional V1. The core provides:
 
 - Telegram transport
 - Pi Agent integration
 - artifact-based message handling
-- isolated CLI tools
-- audio transcription before reasoning
-- text-to-speech replies
+- the isolated CLI tool registry (starts empty)
+- pre-reasoning and post-reasoning pipes
 - queued follow-up message batching
+
+Concrete capabilities such as audio transcription or text-to-speech are not built in; they are added as tools from the catalog (or built on demand) when a request needs them.
 
 Future capabilities should be added as new tools and pipes, not as tightly coupled one-off code paths.
