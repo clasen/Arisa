@@ -532,6 +532,7 @@ export async function createTelegramBot({ config, artifactStore, toolRegistry, t
     await withTyping(ctx, async () => {
       try {
         await agentManager.validatePiAgent();
+        agentManager.clearSessionCache(ctx.chat.id);
         await ctx.reply(buildPiAuthTelegramMessage({ config, verified: true }));
       } catch (error) {
         const issue = getPiAuthIssue(error) || { kind: "validation-failed", message: getErrorMessage(error) };

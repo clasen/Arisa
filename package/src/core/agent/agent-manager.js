@@ -23,6 +23,25 @@ function requiresProviderAuth(model) {
   return !isLocalBaseUrl(model?.baseUrl);
 }
 
+async function promptAndThrowOnAssistantError(session, prompt) {
+  let assistantErrorMessage = "";
+  const unsubscribe = session.subscribe((event) => {
+    if (event.type === "message_end" && event.message?.stopReason === "error") {
+      assistantErrorMessage = event.message.errorMessage || "assistant message ended with error";
+    }
+  });
+
+  try {
+    await session.prompt(prompt);
+  } finally {
+    unsubscribe();
+  }
+
+  if (assistantErrorMessage) {
+    throw new Error(assistantErrorMessage);
+  }
+}
+
 function mimeMatches(pattern, mimeType = "") {
   if (!pattern || !mimeType) return false;
   if (pattern === mimeType) return true;
@@ -72,6 +91,10 @@ export class AgentManager {
     this.pendingNewSessions.add(sessionKey);
   }
 
+  clearSessionCache(chatId) {
+    this.sessions.delete(String(chatId));
+  }
+
   createSessionManager(chatId) {
     const sessionKey = String(chatId);
     const sessionDir = getChatPiSessionsDir(sessionKey);
@@ -103,7 +126,7 @@ export class AgentManager {
       model,
       sessionManager: SessionManager.inMemory(),
     });
-    await withTimeout(session.prompt("Reply with exactly: OK"), {
+    await withTimeout(promptAndThrowOnAssistantError(session, "Reply with exactly: OK"), {
       timeoutMs: piValidationTimeoutMs,
       label: "Pi validation prompt"
     });
