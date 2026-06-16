@@ -64,7 +64,12 @@ export async function createApp({ logger, runtimeOverrides, webhookUrl, setHttpR
   return {
     async start() {
       logger?.log("app", `validating Pi model ${config.pi.provider}/${config.pi.model}`);
-      await agentManager.validatePiAgent();
+      try {
+        await agentManager.validatePiAgent();
+      } catch (error) {
+        await bot.notifyPiAuthIssue?.(error);
+        throw error;
+      }
       await toolProcessSupervisor.start();
       logger?.log("app", "starting Telegram bot");
       try {

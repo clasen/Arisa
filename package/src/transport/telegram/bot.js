@@ -3,6 +3,7 @@ import path from "node:path";
 import { authorizeChat } from "./auth.js";
 import { captureIncomingArtifact } from "./media.js";
 import { renderTelegramHtml } from "./text-format.js";
+import { buildPiAuthTelegramMessage, getErrorMessage, getPiAuthIssue } from "../../core/agent/auth-flow.js";
 import { normalizeArtifactForReasoning, shouldNormalizeArtifactToText } from "../../core/artifacts/normalize-for-reasoning.js";
 
 const slowPromptNoticeMs = 300_000;
@@ -185,6 +186,7 @@ function sessionEventLogMessage(event) {
 
 async function collectText(session, prompt, { logger, chatId, onSlowPrompt } = {}) {
   let text = "";
+  let assistantErrorMessage = "";
   let shouldSeparateAssistantMessage = false;
   let slowPromptTimer = null;
   const unsubscribe = session.subscribe((event) => {
@@ -197,6 +199,9 @@ async function collectText(session, prompt, { logger, chatId, onSlowPrompt } = {
         shouldSeparateAssistantMessage = false;
       }
       text += event.assistantMessageEvent.delta;
+    }
+    if (event.type === "message_end" && event.message?.stopReason === "error") {
+      assistantErrorMessage = event.message.errorMessage || "assistant message ended with error";
     }
     const logMessage = sessionEventLogMessage(event);
     if (logMessage) logger?.log("agent", `chat ${chatId} ${logMessage}`);
@@ -218,6 +223,10 @@ async function collectText(session, prompt, { logger, chatId, onSlowPrompt } = {
     unsubscribe();
   }
 
+  if (assistantErrorMessage) {
+    throw new Error(assistantErrorMessage);
+  }
+
   return text.trim();
 }
 
@@ -237,7 +246,30 @@ async function withTyping(ctx, work) {
 export async function createTelegramBot({ config, artifactStore, toolRegistry, taskStore, agentManager, saveConfig, updateConfig, logger, webhookUrl, setHttpRequestHandler }) {
   const bot = new Bot(config.telegram.token);
   const perChatState = new Map();
+  const notifiedPromptErrors = new WeakSet();
   let taskTimer = null;
+
+  function wasPromptErrorNotified(error) {
+    return error instanceof Error && notifiedPromptErrors.has(error);
+  }
+
+  function markPromptErrorNotified(error) {
+    if (error instanceof Error) notifiedPromptErrors.add(error);
+  }
+
+  async function notifyPiAuthIssueIfNeeded(chatId, error) {
+    const issue = getPiAuthIssue(error);
+    if (!issue) return false;
+
+    try {
+      await bot.api.sendMessage(chatId, buildPiAuthTelegramMessage({ config, issue }));
+      markPromptErrorNotified(error);
+      return true;
+    } catch (notifyError) {
+      logger?.error("telegram", `auth issue notice failed for chat ${chatId}: ${getErrorMessage(notifyError)}`);
+      return false;
+    }
+  }
 
   function getIncomingChatMeta(ctx) {
     return {
@@ -358,8 +390,9 @@ export async function createTelegramBot({ config, artifactStore, toolRegistry, t
           logger?.log("telegram", `prompt dispatch for chat ${chatId}`);
           await processPromptForChat({ chatId, prompt: currentPrompt, ctx: currentCtx });
         } catch (error) {
-          const message = error instanceof Error ? error.message : String(error);
+          const message = getErrorMessage(error);
           logger?.error("telegram", `${label} failed for chat ${chatId}: ${message}`);
+          await notifyPiAuthIssueIfNeeded(chatId, error);
           throw error;
         } finally {
           currentCtx = null;
@@ -493,6 +526,12 @@ export async function createTelegramBot({ config, artifactStore, toolRegistry, t
     await handleNewCommand(ctx);
   });
 
+  bot.command("auth", async (ctx) => {
+    const auth = await authorizeChat({ config, chatId: ctx.chat.id, saveConfig, chatMeta: getIncomingChatMeta(ctx) });
+    if (!auth.ok) return;
+    await ctx.reply(buildPiAuthTelegramMessage({ config }));
+  });
+
   bot.on("message", async (ctx) => {
     const auth = await authorizeChat({ config, chatId: ctx.chat.id, saveConfig, chatMeta: getIncomingChatMeta(ctx) });
     if (!auth.ok) return;
@@ -505,8 +544,11 @@ export async function createTelegramBot({ config, artifactStore, toolRegistry, t
     } catch (error) {
       const chatState = getChatState(ctx.chat.id);
       chatState.processing = false;
-      const message = error instanceof Error ? error.message : String(error);
-      await ctx.reply(message);
+      if (wasPromptErrorNotified(error)) return;
+      const issue = getPiAuthIssue(error);
+      await ctx.reply(issue
+        ? buildPiAuthTelegramMessage({ config, issue })
+        : getErrorMessage(error));
     }
   });
 
@@ -534,7 +576,8 @@ export async function createTelegramBot({ config, artifactStore, toolRegistry, t
         }
       }
       await bot.api.setMyCommands([
-        { command: "new", description: "Start a new chat context" }
+        { command: "new", description: "Start a new chat context" },
+        { command: "auth", description: "Show Pi authentication status" }
       ]);
       if (!taskTimer) {
         taskTimer = setInterval(() => {
@@ -572,6 +615,14 @@ export async function createTelegramBot({ config, artifactStore, toolRegistry, t
       try {
         bot.stop();
       } catch {}
+    },
+
+    async notifyPiAuthIssue(error) {
+      let notified = false;
+      for (const chatId of config.telegram.authorizedChatIds || []) {
+        notified = await notifyPiAuthIssueIfNeeded(chatId, error) || notified;
+      }
+      return notified;
     }
   };
 }
