@@ -2,7 +2,7 @@ import { readFile, writeFile } from "node:fs/promises";
 import readline from "node:readline/promises";
 import { stdin as input, stdout as output } from "node:process";
 import { spawn } from "node:child_process";
-import { AuthStorage } from "@mariozechner/pi-coding-agent";
+import { createPiOAuthLogin } from "../core/agent/pi-auth-login.js";
 import { createPiRuntime, hasProviderAuth, listPiProviders, listProviderModels, supportsProviderOAuth } from "../core/agent/pi-runtime.js";
 import { configFile, ensureArisaHome } from "./paths.js";
 
@@ -194,37 +194,19 @@ function installAuthRelay(httpPort, setHttpRequestHandler) {
 }
 
 async function runInternalPiLogin(provider, { rl = null, authRelay = null } = {}) {
-  const authStorage = AuthStorage.create();
-  const selected = authStorage.getOAuthProviders().find((item) => item.id === provider);
-  if (!selected) {
-    throw new Error(`No internal OAuth login flow is available for ${provider}.`);
-  }
-
-  let manualCodeResolve;
-  let manualCodeReject;
-  const manualCodePromise = new Promise((resolve, reject) => {
-    manualCodeResolve = resolve;
-    manualCodeReject = reject;
-  });
-
-  await authStorage.login(provider, {
-    onAuth: async ({ url, instructions }) => {
+  const login = createPiOAuthLogin({
+    provider,
+    onAuth: async ({ url, instructions, controller }) => {
       console.log(`${instructions || "Open this URL to continue authentication:"}\n${url}\n`);
       await maybeOpenExternal(url);
       if (authRelay) {
         authRelay.setAuthUrl(url);
         console.log("Waiting for authentication via the web relay...");
         const redirectUrl = await authRelay.waitForRedirectUrl();
-        if (redirectUrl && manualCodeResolve) {
-          manualCodeResolve(redirectUrl);
-          manualCodeResolve = undefined;
-        }
-      } else if (selected.usesCallbackServer && rl) {
+        if (redirectUrl) controller.submitManualCode(redirectUrl);
+      } else if (controller.oauthProvider.usesCallbackServer && rl) {
         const pasted = (await rl.question("Paste the redirect URL here if the browser does not return automatically, or press Enter to keep waiting: ")).trim();
-        if (pasted && manualCodeResolve) {
-          manualCodeResolve(pasted);
-          manualCodeResolve = undefined;
-        }
+        if (pasted) controller.submitManualCode(pasted);
       }
     },
     onDeviceCode: async ({ userCode, verificationUri }) => {
@@ -240,15 +222,9 @@ async function runInternalPiLogin(provider, { rl = null, authRelay = null } = {}
     },
     onProgress: (message) => {
       console.log(message);
-    },
-    onManualCodeInput: () => manualCodePromise,
-  }).finally(() => {
-    if (manualCodeResolve) {
-      manualCodeResolve("");
-      manualCodeResolve = undefined;
     }
-    manualCodeReject = undefined;
   });
+  await login.promise;
 }
 
 export async function bootstrapIfNeeded({ force = false, cliConfigOverrides = {}, httpPort = 0, setHttpRequestHandler } = {}) {

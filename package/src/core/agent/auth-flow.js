@@ -82,13 +82,28 @@ export function buildPiAuthTelegramMessage({ config, issue = null, verified = fa
   } else if (status.hasApiKey) {
     lines.push("A Pi API key is configured, but the provider rejected the current request. Update the key and restart Arisa.");
   } else if (status.supportsOAuth) {
-    lines.push("For now, re-run `arisa --bootstrap` on the host and complete Pi login again.");
+    lines.push("Run `/auth` here in Telegram to renew the Pi login.");
   } else {
     lines.push("This provider needs a Pi API key. Re-run `arisa --bootstrap`, provide a key, and restart Arisa.");
   }
 
-  if (issue) {
-    lines.push("Telegram-based renewal is not wired yet, but this /auth path is ready for that flow.");
+  return lines.join("\n");
+}
+
+export function buildPiAuthRecoveryBlockedMessage({ config, issue = null, renewalActive = false }) {
+  const status = getPiAuthStatus(config);
+  const lines = [
+    `Pi authentication is not ready for ${status.provider}/${status.model}.`,
+    "I did not send your message to the agent."
+  ];
+
+  if (issue?.message) {
+    lines.push(`Details: ${issue.message}`);
   }
+
+  lines.push(renewalActive
+    ? "A Pi login is already in progress. Paste the redirect URL or code here when the provider gives it to you."
+    : "Send `/auth` to start Pi login from Telegram.");
+
   return lines.join("\n");
 }

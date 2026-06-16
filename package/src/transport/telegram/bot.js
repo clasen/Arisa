@@ -3,7 +3,8 @@ import path from "node:path";
 import { authorizeChat } from "./auth.js";
 import { captureIncomingArtifact } from "./media.js";
 import { renderTelegramHtml } from "./text-format.js";
-import { buildPiAuthTelegramMessage, getErrorMessage, getPiAuthIssue } from "../../core/agent/auth-flow.js";
+import { buildPiAuthRecoveryBlockedMessage, buildPiAuthTelegramMessage, getErrorMessage, getPiAuthIssue, getPiAuthStatus } from "../../core/agent/auth-flow.js";
+import { createPiOAuthLogin } from "../../core/agent/pi-auth-login.js";
 import { normalizeArtifactForReasoning, shouldNormalizeArtifactToText } from "../../core/artifacts/normalize-for-reasoning.js";
 
 const slowPromptNoticeMs = 300_000;
@@ -247,7 +248,13 @@ export async function createTelegramBot({ config, artifactStore, toolRegistry, t
   const bot = new Bot(config.telegram.token);
   const perChatState = new Map();
   const notifiedPromptErrors = new WeakSet();
+  const authRenewals = new Map();
+  let piAuthIssue = null;
   let taskTimer = null;
+
+  function chatKey(chatId) {
+    return String(chatId);
+  }
 
   function wasPromptErrorNotified(error) {
     return error instanceof Error && notifiedPromptErrors.has(error);
@@ -257,8 +264,14 @@ export async function createTelegramBot({ config, artifactStore, toolRegistry, t
     if (error instanceof Error) notifiedPromptErrors.add(error);
   }
 
-  async function notifyPiAuthIssueIfNeeded(chatId, error) {
+  function rememberPiAuthIssue(error) {
     const issue = getPiAuthIssue(error);
+    if (issue) piAuthIssue = issue;
+    return issue;
+  }
+
+  async function notifyPiAuthIssueIfNeeded(chatId, error) {
+    const issue = rememberPiAuthIssue(error);
     if (!issue) return false;
 
     try {
@@ -269,6 +282,84 @@ export async function createTelegramBot({ config, artifactStore, toolRegistry, t
       logger?.error("telegram", `auth issue notice failed for chat ${chatId}: ${getErrorMessage(notifyError)}`);
       return false;
     }
+  }
+
+  function selectTelegramLoginOption(options = []) {
+    return options.find((option) => /device/i.test(`${option.id} ${option.label}`))
+      || options.find((option) => /browser|oauth|web/i.test(`${option.id} ${option.label}`))
+      || options[0]
+      || null;
+  }
+
+  async function finishAuthRenewal(chatId, renewal) {
+    try {
+      await renewal.promise;
+      await agentManager.validatePiAgent();
+      agentManager.clearSessionCache(chatId);
+      piAuthIssue = null;
+      logger?.log("telegram", `Pi auth renewal completed for chat ${chatId}`);
+      await bot.api.sendMessage(chatId, buildPiAuthTelegramMessage({ config, verified: true }));
+    } catch (error) {
+      const issue = rememberPiAuthIssue(error) || { kind: "validation-failed", message: getErrorMessage(error) };
+      piAuthIssue = issue;
+      logger?.error("telegram", `Pi auth renewal failed for chat ${chatId}: ${getErrorMessage(error)}`);
+      await bot.api.sendMessage(chatId, buildPiAuthTelegramMessage({ config, issue })).catch((notifyError) => {
+        logger?.error("telegram", `auth renewal failure notice failed for chat ${chatId}: ${getErrorMessage(notifyError)}`);
+      });
+    } finally {
+      authRenewals.delete(chatKey(chatId));
+    }
+  }
+
+  async function startAuthRenewal(chatId) {
+    const key = chatKey(chatId);
+    const existing = authRenewals.get(key);
+    if (existing) {
+      return { started: false, renewal: existing };
+    }
+
+    const renewal = createPiOAuthLogin({
+      provider: config.pi.provider,
+      onSelect: async ({ message, options }) => {
+        const selected = selectTelegramLoginOption(options);
+        if (!selected) return undefined;
+        logger?.log("telegram", `Pi auth option for chat ${chatId}: ${selected.id}`);
+        await bot.api.sendMessage(chatId, `${message}\nUsing: ${selected.label || selected.id}`);
+        return selected.id;
+      },
+      onAuth: async ({ url, instructions }) => {
+        await bot.api.sendMessage(chatId, [
+          instructions || "Open this URL to continue Pi authentication:",
+          url,
+          "After login, paste the full redirect URL back here."
+        ].join("\n"));
+      },
+      onDeviceCode: async ({ userCode, verificationUri, expiresInSeconds }) => {
+        const expiry = expiresInSeconds ? `\nExpires in ${Math.round(expiresInSeconds / 60)} minute(s).` : "";
+        await bot.api.sendMessage(chatId, `Open this URL: ${verificationUri}\nThen enter code: ${userCode}${expiry}`);
+      },
+      onPrompt: async ({ message, controller }) => {
+        await bot.api.sendMessage(chatId, `${message}\nReply here with the value.`);
+        return controller.waitForManualCode();
+      },
+      onProgress: (message) => {
+        if (message) logger?.log("telegram", `Pi auth progress for chat ${chatId}: ${message}`);
+      }
+    });
+
+    authRenewals.set(key, renewal);
+    finishAuthRenewal(chatId, renewal);
+    return { started: true, renewal };
+  }
+
+  async function submitAuthRenewalInput(ctx) {
+    const renewal = authRenewals.get(chatKey(ctx.chat.id));
+    const text = getIncomingMessageText(ctx.message).trim();
+    if (!renewal || !renewal.manualInputRequested || !text) return false;
+
+    if (!renewal.submitManualCode(text)) return false;
+    await ctx.reply("Got it. Finishing Pi login now...");
+    return true;
   }
 
   function getIncomingChatMeta(ctx) {
@@ -523,22 +614,48 @@ export async function createTelegramBot({ config, artifactStore, toolRegistry, t
   bot.command("new", async (ctx) => {
     const auth = await authorizeChat({ config, chatId: ctx.chat.id, saveConfig, chatMeta: getIncomingChatMeta(ctx) });
     if (!auth.ok) return;
+    if (piAuthIssue) {
+      await ctx.reply(buildPiAuthRecoveryBlockedMessage({
+        config,
+        issue: piAuthIssue,
+        renewalActive: authRenewals.has(chatKey(ctx.chat.id))
+      }));
+      return;
+    }
     await handleNewCommand(ctx);
   });
 
   bot.command("auth", async (ctx) => {
     const auth = await authorizeChat({ config, chatId: ctx.chat.id, saveConfig, chatMeta: getIncomingChatMeta(ctx) });
     if (!auth.ok) return;
-    await withTyping(ctx, async () => {
-      try {
-        await agentManager.validatePiAgent();
-        agentManager.clearSessionCache(ctx.chat.id);
-        await ctx.reply(buildPiAuthTelegramMessage({ config, verified: true }));
-      } catch (error) {
-        const issue = getPiAuthIssue(error) || { kind: "validation-failed", message: getErrorMessage(error) };
-        await ctx.reply(buildPiAuthTelegramMessage({ config, issue }));
-      }
-    });
+
+    const status = getPiAuthStatus(config);
+    if (status.hasApiKey || !status.supportsOAuth) {
+      await withTyping(ctx, async () => {
+        try {
+          await agentManager.validatePiAgent();
+          agentManager.clearSessionCache(ctx.chat.id);
+          piAuthIssue = null;
+          await ctx.reply(buildPiAuthTelegramMessage({ config, verified: true }));
+        } catch (error) {
+          const issue = rememberPiAuthIssue(error) || { kind: "validation-failed", message: getErrorMessage(error) };
+          piAuthIssue = issue;
+          await ctx.reply(buildPiAuthTelegramMessage({ config, issue }));
+        }
+      });
+      return;
+    }
+
+    try {
+      const { started } = await startAuthRenewal(ctx.chat.id);
+      await ctx.reply(started
+        ? "Starting Pi login from Telegram..."
+        : "Pi login is already in progress. Paste the redirect URL or code here when you have it.");
+    } catch (error) {
+      const issue = rememberPiAuthIssue(error) || { kind: "validation-failed", message: getErrorMessage(error) };
+      piAuthIssue = issue;
+      await ctx.reply(buildPiAuthTelegramMessage({ config, issue }));
+    }
   });
 
   bot.on("message", async (ctx) => {
@@ -547,6 +664,17 @@ export async function createTelegramBot({ config, artifactStore, toolRegistry, t
 
     const command = getTelegramCommand(ctx);
     if (command) return;
+
+    if (await submitAuthRenewalInput(ctx)) return;
+
+    if (piAuthIssue) {
+      await ctx.reply(buildPiAuthRecoveryBlockedMessage({
+        config,
+        issue: piAuthIssue,
+        renewalActive: authRenewals.has(chatKey(ctx.chat.id))
+      }));
+      return;
+    }
 
     try {
       await enqueueOrProcess(ctx);
