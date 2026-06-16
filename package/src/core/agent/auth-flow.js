@@ -46,27 +46,40 @@ export function getPiAuthStatus(config) {
   };
 }
 
-export function buildPiAuthTelegramMessage({ config, issue = null }) {
+export function buildPiAuthTelegramMessage({ config, issue = null, verified = false }) {
   const status = getPiAuthStatus(config);
-  const lines = [
-    issue
-      ? `Pi authentication needs attention for ${status.provider}/${status.model}.`
-      : `Pi authentication status for ${status.provider}/${status.model}.`
-  ];
+  let title = `Pi authentication status for ${status.provider}/${status.model}.`;
+  if (issue) {
+    title = `Pi authentication needs attention for ${status.provider}/${status.model}.`;
+  } else if (verified) {
+    title = `Pi authentication is working for ${status.provider}/${status.model}.`;
+  }
+  const lines = [title];
 
   if (issue?.kind === "invalidated-token") {
     lines.push("The provider says the current authentication token was invalidated.");
   } else if (issue?.kind === "missing-auth") {
     lines.push("Arisa could not find usable authentication for this provider.");
+  } else if (issue?.kind === "validation-failed") {
+    lines.push("Arisa could not validate the current Pi authentication.");
+  } else if (verified) {
+    lines.push(status.hasApiKey
+      ? "The configured Pi API key was accepted by the provider."
+      : "The stored auth was accepted by the provider.");
   } else {
-    lines.push(`Stored auth: ${status.hasStoredAuth ? "detected" : "not detected"}.`);
+    lines.push(`Stored auth record: ${status.hasStoredAuth ? "detected" : "not detected"}.`);
+    lines.push("This only checks whether credentials are stored, not whether the provider will accept them.");
   }
 
   if (issue?.message) {
     lines.push(`Details: ${issue.message}`);
   }
 
-  if (status.hasApiKey) {
+  if (verified) {
+    lines.push("No action needed.");
+  } else if (!issue) {
+    lines.push("Run `/auth` to validate these credentials against the provider.");
+  } else if (status.hasApiKey) {
     lines.push("A Pi API key is configured, but the provider rejected the current request. Update the key and restart Arisa.");
   } else if (status.supportsOAuth) {
     lines.push("For now, re-run `arisa --bootstrap` on the host and complete Pi login again.");
@@ -74,6 +87,8 @@ export function buildPiAuthTelegramMessage({ config, issue = null }) {
     lines.push("This provider needs a Pi API key. Re-run `arisa --bootstrap`, provide a key, and restart Arisa.");
   }
 
-  lines.push("Telegram-based renewal is not wired yet, but this /auth path is ready for that flow.");
+  if (issue) {
+    lines.push("Telegram-based renewal is not wired yet, but this /auth path is ready for that flow.");
+  }
   return lines.join("\n");
 }

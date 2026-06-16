@@ -529,7 +529,15 @@ export async function createTelegramBot({ config, artifactStore, toolRegistry, t
   bot.command("auth", async (ctx) => {
     const auth = await authorizeChat({ config, chatId: ctx.chat.id, saveConfig, chatMeta: getIncomingChatMeta(ctx) });
     if (!auth.ok) return;
-    await ctx.reply(buildPiAuthTelegramMessage({ config }));
+    await withTyping(ctx, async () => {
+      try {
+        await agentManager.validatePiAgent();
+        await ctx.reply(buildPiAuthTelegramMessage({ config, verified: true }));
+      } catch (error) {
+        const issue = getPiAuthIssue(error) || { kind: "validation-failed", message: getErrorMessage(error) };
+        await ctx.reply(buildPiAuthTelegramMessage({ config, issue }));
+      }
+    });
   });
 
   bot.on("message", async (ctx) => {
