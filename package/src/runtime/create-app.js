@@ -3,6 +3,7 @@ import { ArtifactStore } from "../core/artifacts/artifact-store.js";
 import { ToolRegistry } from "../core/tools/tool-registry.js";
 import { TaskStore } from "../core/tasks/task-store.js";
 import { AgentManager } from "../core/agent/agent-manager.js";
+import { getErrorMessage, getPiAuthIssue } from "../core/agent/auth-flow.js";
 import { createTelegramBot } from "../transport/telegram/bot.js";
 import { createToolProcessSupervisor } from "./tool-process-supervisor.js";
 
@@ -64,16 +65,22 @@ export async function createApp({ logger, runtimeOverrides, webhookUrl, setHttpR
   return {
     async start() {
       logger?.log("app", `validating Pi model ${config.pi.provider}/${config.pi.model}`);
+      let skipAgentStartupPrompts = false;
       try {
         await agentManager.validatePiAgent();
       } catch (error) {
+        const issue = getPiAuthIssue(error);
+        if (!issue) {
+          throw error;
+        }
+        skipAgentStartupPrompts = true;
+        logger?.error("app", `Pi auth validation failed; starting Telegram in auth recovery mode: ${getErrorMessage(error)}`);
         await bot.notifyPiAuthIssue?.(error);
-        throw error;
       }
       await toolProcessSupervisor.start();
       logger?.log("app", "starting Telegram bot");
       try {
-        await bot.start();
+        await bot.start({ skipAgentStartupPrompts });
       } catch (error) {
         await toolProcessSupervisor.stop();
         throw error;

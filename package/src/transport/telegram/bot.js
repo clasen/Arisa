@@ -562,26 +562,30 @@ export async function createTelegramBot({ config, artifactStore, toolRegistry, t
   });
 
   return {
-    async start() {
+    async start({ skipAgentStartupPrompts = false } = {}) {
       config.telegram.chatMeta ||= {};
-      for (const chatId of config.telegram.authorizedChatIds || []) {
-        try {
-          logger?.log("telegram", `generating startup message for chat ${chatId}`);
-          const chatMeta = config.telegram.chatMeta[chatId] || {};
-          const welcomePrompt = [
-            "System event: Arisa has just started.",
-            `chatId: ${chatId}`,
-            `preferredTelegramLanguageCode: ${chatMeta.languageCode || "unknown"}`,
-            chatMeta.username ? `username: ${chatMeta.username}` : null,
-            chatMeta.firstName ? `firstName: ${chatMeta.firstName}` : null,
-            "Send a short welcome-back message for Telegram.",
-            "Keep it brief, warm, and natural.",
-            "Use the user's Telegram language when possible.",
-            "Do not mention internal implementation details."
-          ].filter(Boolean).join("\n");
-          await enqueuePrompt({ chatId, prompt: welcomePrompt, label: "startup message" });
-        } catch (error) {
-          logger?.log("telegram", `startup message failed for chat ${chatId}: ${error instanceof Error ? error.message : String(error)}`);
+      if (skipAgentStartupPrompts) {
+        logger?.log("telegram", "skipping agent startup messages because Pi auth needs attention");
+      } else {
+        for (const chatId of config.telegram.authorizedChatIds || []) {
+          try {
+            logger?.log("telegram", `generating startup message for chat ${chatId}`);
+            const chatMeta = config.telegram.chatMeta[chatId] || {};
+            const welcomePrompt = [
+              "System event: Arisa has just started.",
+              `chatId: ${chatId}`,
+              `preferredTelegramLanguageCode: ${chatMeta.languageCode || "unknown"}`,
+              chatMeta.username ? `username: ${chatMeta.username}` : null,
+              chatMeta.firstName ? `firstName: ${chatMeta.firstName}` : null,
+              "Send a short welcome-back message for Telegram.",
+              "Keep it brief, warm, and natural.",
+              "Use the user's Telegram language when possible.",
+              "Do not mention internal implementation details."
+            ].filter(Boolean).join("\n");
+            await enqueuePrompt({ chatId, prompt: welcomePrompt, label: "startup message" });
+          } catch (error) {
+            logger?.log("telegram", `startup message failed for chat ${chatId}: ${error instanceof Error ? error.message : String(error)}`);
+          }
         }
       }
       await bot.api.setMyCommands([
