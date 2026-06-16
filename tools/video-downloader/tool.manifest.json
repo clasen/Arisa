@@ -1,0 +1,24 @@
+{
+  "name": "video-downloader",
+  "description": "Download videos from YouTube, TikTok, Instagram, Facebook, X/Twitter, and similar yt-dlp supported URLs.",
+  "entry": "index.js",
+  "input": ["text/plain"],
+  "output": ["video/mp4"],
+  "configSchema": {
+    "YTDLP_COMMAND": {
+      "type": "string",
+      "required": false,
+      "prompt": "Optional yt-dlp command or absolute path. Defaults to yt-dlp."
+    },
+    "FFPROBE_COMMAND": {
+      "type": "string",
+      "required": false,
+      "prompt": "Optional ffprobe command or absolute path. Defaults to ffprobe."
+    },
+    "TWITTER_COOKIES_PATH": {
+      "type": "string",
+      "required": false,
+      "prompt": "Optional Netscape cookies file for X/Twitter downloads that require login."
+    }
+  }
+}

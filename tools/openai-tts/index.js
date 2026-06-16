@@ -1,9 +1,12 @@
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
+import { pathToFileURL } from "node:url";
 import defaults from "./config.js";
-import { loadToolConfig } from "../../src/core/tools/tool-config.js";
-import { toolError, toolNeedsConfig, toolOk } from "../../src/core/tools/tool-result.js";
-import { getChatToolTmpDir, getToolConfigPath, getToolTmpDir } from "../../src/runtime/paths.js";
+
+const importCore = (relativePath) => import(pathToFileURL(path.join(process.env.ARISA_PACKAGE_DIR, "src", relativePath)).href);
+const { loadToolConfig } = await importCore("core/tools/tool-config.js");
+const { toolError, toolNeedsConfig, toolOk } = await importCore("core/tools/tool-result.js");
+const { getChatToolTmpDir, getToolConfigPath, getToolTmpDir } = await importCore("runtime/paths.js");
 
 const toolName = "openai-tts";
 const config = await loadToolConfig(toolName, defaults);

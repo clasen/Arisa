@@ -1,7 +1,9 @@
 import { mkdir } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 
+export const arisaPackageDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", "..");
 export const arisaHomeDir = path.join(os.homedir(), ".arisa");
 export const stateDir = path.join(arisaHomeDir, "state");
 export const configFile = path.join(stateDir, "config.json");

@@ -1,10 +1,14 @@
 import { mkdir, readdir, readFile, rmdir, unlink, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { spawn } from "node:child_process";
-import { getToolConfigPath, getToolTmpDir, getChatToolTmpDir, toolsDir as userToolsRoot } from "../../runtime/paths.js";
+import { arisaPackageDir, getToolConfigPath, getToolTmpDir, getChatToolTmpDir, toolsDir as userToolsRoot } from "../../runtime/paths.js";
 import { loadToolConfig, parseConfigModule, writeToolConfig } from "./tool-config.js";
 import { normalizeToolResult } from "./tool-result.js";
 import { SkillRegistry } from "../skills/skill-registry.js";
+
+function toolEnv() {
+  return { ...process.env, ARISA_PACKAGE_DIR: arisaPackageDir };
+}
 
 function runProcess(command, args, options = {}) {
   return new Promise((resolve) => {
@@ -82,7 +86,7 @@ export class ToolRegistry {
   async help(name) {
     const tool = this.get(name);
     if (!tool) throw new Error(`Tool not found: ${name}`);
-    const result = await runProcess("node", [tool.entry, "--help"], { cwd: tool.dir, env: process.env });
+    const result = await runProcess("node", [tool.entry, "--help"], { cwd: tool.dir, env: toolEnv() });
     const help = result.stdout || result.stderr;
     const skills = await this.resolveSkills(name);
     if (!skills.length) return help;
@@ -142,7 +146,7 @@ export class ToolRegistry {
     await writeFile(requestFile, `${JSON.stringify(enrichedRequest, null, 2)}\n`, "utf8");
     const result = await runProcess("node", [tool.entry, "run", "--request-file", requestFile], {
       cwd: tool.dir,
-      env: process.env
+      env: toolEnv()
     });
     await unlink(requestFile).catch(() => {});
     await rmdir(tmpDir).catch(() => {});

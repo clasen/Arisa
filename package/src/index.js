@@ -6,6 +6,9 @@ import { createApp } from "./runtime/create-app.js";
 import { createLogger } from "./runtime/logger.js";
 import { getServiceStatus, registerServiceProcess, startService, stopService, unregisterServiceProcess } from "./runtime/service-manager.js";
 import { flushArisaHome } from "./runtime/flush.js";
+import { arisaPackageDir } from "./runtime/paths.js";
+
+process.env.ARISA_PACKAGE_DIR = arisaPackageDir;
 
 const args = process.argv.slice(2);
 const cli = parseCliArgs(args);

@@ -1,17 +1,20 @@
 import crypto from "node:crypto";
 import path from "node:path";
 import process from "node:process";
+import { pathToFileURL } from "node:url";
 import { existsSync } from "node:fs";
 import { mkdir, readFile, readdir, rm, rmdir, unlink, writeFile } from "node:fs/promises";
 import qrcodeTerminal from "qrcode-terminal";
 import QRCode from "qrcode";
 import pkg from "whatsapp-web.js";
 import defaults from "./config.js";
-import { loadToolConfig } from "../../src/core/tools/tool-config.js";
-import { toolError, toolOk } from "../../src/core/tools/tool-result.js";
-import { ArtifactStore } from "../../src/core/artifacts/artifact-store.js";
-import { createDaemonRuntime, isProcessAlive, readJson, writeJson } from "../../src/core/tools/daemon-runtime.js";
-import { chatsDir, getChatToolStateDir, tasksFile } from "../../src/runtime/paths.js";
+
+const importCore = (relativePath) => import(pathToFileURL(path.join(process.env.ARISA_PACKAGE_DIR, "src", relativePath)).href);
+const { loadToolConfig } = await importCore("core/tools/tool-config.js");
+const { toolError, toolOk } = await importCore("core/tools/tool-result.js");
+const { ArtifactStore } = await importCore("core/artifacts/artifact-store.js");
+const { createDaemonRuntime, isProcessAlive, readJson, writeJson } = await importCore("core/tools/daemon-runtime.js");
+const { chatsDir, getChatToolStateDir, tasksFile } = await importCore("runtime/paths.js");
 
 const { Client, LocalAuth, MessageMedia } = pkg;
 const toolName = "whatsapp-web";

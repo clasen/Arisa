@@ -1,5 +1,9 @@
 import { readFile } from "node:fs/promises";
-import { toolError, toolOk } from "../../src/core/tools/tool-result.js";
+import path from "node:path";
+import { pathToFileURL } from "node:url";
+
+const importCore = (relativePath) => import(pathToFileURL(path.join(process.env.ARISA_PACKAGE_DIR, "src", relativePath)).href);
+const { toolError, toolOk } = await importCore("core/tools/tool-result.js");
 
 function printHelp() {
   console.log(`schedule-agent-task\n\nUsage:\n  node index.js --help\n  node index.js run --request-file <json>\n\nExpected input:\n  {\n    "text": "tell me the temperature in Toronto",\n    "artifact": { "text": "tell me the temperature in Toronto" },\n    "args": {\n      "prompt": "tell me the temperature in Toronto",\n      "runAt": "2026-04-07T14:00:00.000Z",\n      "delaySeconds": "30",\n      "intervalSeconds": "3600"\n    }\n  }\n\nBehavior:\n  - schedules a future agent task for the current chat\n  - provide either args.runAt or args.delaySeconds\n  - optional args.intervalSeconds makes the task recurring\n`);

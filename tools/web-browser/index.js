@@ -1,5 +1,9 @@
 import { readFile } from "node:fs/promises";
-import { toolError, toolOk } from "../../src/core/tools/tool-result.js";
+import path from "node:path";
+import { pathToFileURL } from "node:url";
+
+const importCore = (relativePath) => import(pathToFileURL(path.join(process.env.ARISA_PACKAGE_DIR, "src", relativePath)).href);
+const { toolError, toolOk } = await importCore("core/tools/tool-result.js");
 
 function printHelp() {
   console.log(`web-browser\n\nUsage:\n  node index.js --help\n  node index.js run --request-file <json>\n\nExpected input:\n  {\n    "text": "weather toronto" | "https://example.com",\n    "artifact": { "text": "weather toronto" },\n    "args": {\n      "mode": "search" | "open",\n      "url": "https://example.com",\n      "maxResults": "5"\n    }\n  }\n\nBehavior:\n  - If the input looks like a URL, open the page.\n  - Otherwise, perform a web search.\n  - When possible, opening pages uses r.jina.ai with a direct fetch fallback.\n`);

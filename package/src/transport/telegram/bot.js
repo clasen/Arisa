@@ -3,10 +3,9 @@ import path from "node:path";
 import { authorizeChat } from "./auth.js";
 import { captureIncomingArtifact } from "./media.js";
 import { renderTelegramHtml } from "./text-format.js";
-import { withTimeout } from "../../core/agent/prompt-timeout.js";
 import { normalizeArtifactForReasoning, shouldNormalizeArtifactToText } from "../../core/artifacts/normalize-for-reasoning.js";
 
-const promptTimeoutMs = 300_000;
+const slowPromptNoticeMs = 300_000;
 
 function quotedMessageSummary(message) {
   if (!message) return [];
@@ -184,9 +183,10 @@ function sessionEventLogMessage(event) {
   return "";
 }
 
-async function collectText(session, prompt, { logger, chatId } = {}) {
+async function collectText(session, prompt, { logger, chatId, onSlowPrompt } = {}) {
   let text = "";
   let shouldSeparateAssistantMessage = false;
+  let slowPromptTimer = null;
   const unsubscribe = session.subscribe((event) => {
     if (event.type === "message_start" && event.message.role === "assistant") {
       shouldSeparateAssistantMessage = text.trim().length > 0;
@@ -202,12 +202,19 @@ async function collectText(session, prompt, { logger, chatId } = {}) {
     if (logMessage) logger?.log("agent", `chat ${chatId} ${logMessage}`);
   });
 
+  if (onSlowPrompt) {
+    slowPromptTimer = setTimeout(() => {
+      logger?.log("telegram", `prompt for chat ${chatId} is still running after ${slowPromptNoticeMs}ms`);
+      onSlowPrompt().catch((error) => {
+        logger?.error("telegram", `slow prompt notice failed for chat ${chatId}: ${error instanceof Error ? error.message : String(error)}`);
+      });
+    }, slowPromptNoticeMs);
+  }
+
   try {
-    await withTimeout(session.prompt(prompt), {
-      timeoutMs: promptTimeoutMs,
-      label: `Telegram prompt for chat ${chatId}`
-    });
+    await session.prompt(prompt);
   } finally {
+    if (slowPromptTimer) clearTimeout(slowPromptTimer);
     unsubscribe();
   }
 
@@ -303,7 +310,14 @@ export async function createTelegramBot({ config, artifactStore, toolRegistry, t
       const { session } = await agentManager.getSessionContext(chatId, createTelegramSessionBridge(chatId));
       let text = "";
       try {
-        text = await collectText(session, prompt, { logger, chatId });
+        text = await collectText(session, prompt, {
+          logger,
+          chatId,
+          onSlowPrompt: () => bot.api.sendMessage(
+            chatId,
+            "This is taking longer than 5 minutes, so I will keep the current session running instead of starting over. Send /new if you want to abandon it and start fresh."
+          )
+        });
       } catch (error) {
         agentManager.resetSession(chatId);
         throw error;

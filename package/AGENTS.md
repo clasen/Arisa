@@ -57,6 +57,11 @@ Not every pipe should be decided by Pi Agent at runtime. Some pipes are part of 
 If inbound media was normalized before reasoning, Pi Agent should use the normalized result as the actual message content.
 For example, if a voice note was transcribed, Pi Agent should answer the meaning of the transcript, not simply return the raw transcript unless the user explicitly asked for transcription.
 
+## Telegram outbound replies
+- Short textual replies are sent inline as a normal Telegram message.
+- When a textual reply is too large to read comfortably inline, it is delivered as a generated Markdown artifact instead of a long inline message. The transport handles this automatically in `sendTextReply`: replies over the inline length limit become a `reply-<timestamp>.md` artifact sent as a document.
+- This is a transport-layer concern. Pi Agent should write the full answer it wants to deliver and not pre-split or truncate it to fit the chat; the transport decides between inline text and a Markdown attachment.
+
 ## How to inspect CLI tools
 Before using a tool, inspect its help:
 - via the custom tool: `tool_help`
@@ -135,10 +140,8 @@ When a capability is missing, check the catalog before building anything:
 After deciding to install (low footprint), after the user confirms, or when the user directly asks to install a tool from any source they choose:
 1. Download the tool directory into `~/.arisa/tools/<name>`. For the official catalog, clone shallowly and copy the subdirectory, for example:
    `git clone --depth 1 https://github.com/clasen/Arisa /tmp/arisa-catalog && cp -R /tmp/arisa-catalog/tools/<name> ~/.arisa/tools/<name>`.
-2. Fix the Arisa core imports. Catalog tools import core helpers with the placeholder prefix `../../src/`. Rewrite that prefix to the absolute path `<arisaInstallDir>/src/` (the Arisa install directory is your working directory), for example:
-   `import { toolOk } from "../../src/core/tools/tool-result.js"` becomes `import { toolOk } from "/path/to/arisa/src/core/tools/tool-result.js"`.
-3. Install dependencies inside the tool directory (`pnpm install`, fall back to `npm install`).
-4. Run it through `run_tool`; the registry picks up new tools automatically. If it returns `missingConfig`, follow the missing config flow.
+2. Install dependencies inside the tool directory (`pnpm install`, fall back to `npm install`).
+3. Run it through `run_tool`; the registry picks up new tools automatically and exposes the Arisa package root through `ARISA_PACKAGE_DIR`. If it returns `missingConfig`, follow the missing config flow.
 
 ## Tool creation
 Reason in terms of capabilities, not tool names.
@@ -158,7 +161,7 @@ The default attitude is:
 When creating or editing tools:
 - always create tools under `~/.arisa/tools/<toolName>`, never inside the Arisa install directory
 - use the path helpers in `src/runtime/paths.js`
-- import Arisa core helpers (`tool-result.js`, `tool-config.js`, `paths.js`, `daemon-runtime.js`) with absolute paths into `<arisaInstallDir>/src/`
+- import Arisa core helpers dynamically through `ARISA_PACKAGE_DIR` (for example `await importCore("core/tools/tool-result.js")`); never use `../../src/...` or rewritten absolute paths
 - follow the tools in the official catalog as the reference pattern for new tools
 - keep all help text, usage instructions, manifests, and user-facing operational strings in English
 - follow the One Thing Rule: each function or method should do one thing well; if it mixes low-level operations with high-level policy, split it into smaller focused units

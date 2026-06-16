@@ -1,0 +1,7 @@
+{
+  "name": "arisa-tool-video-downloader",
+  "version": "1.0.0",
+  "type": "module",
+  "private": true,
+  "description": "Arisa tool to download social videos with yt-dlp."
+}

@@ -1,13 +1,16 @@
 import crypto from "node:crypto";
 import os from "node:os";
 import path from "node:path";
+import { pathToFileURL } from "node:url";
 import { spawn } from "node:child_process";
 import { readFile, stat, unlink } from "node:fs/promises";
 import defaults from "./config.js";
-import { loadToolConfig } from "../../src/core/tools/tool-config.js";
-import { createDaemonRuntime } from "../../src/core/tools/daemon-runtime.js";
-import { toolError, toolOk } from "../../src/core/tools/tool-result.js";
-import { getToolConfigPath } from "../../src/runtime/paths.js";
+
+const importCore = (relativePath) => import(pathToFileURL(path.join(process.env.ARISA_PACKAGE_DIR, "src", relativePath)).href);
+const { loadToolConfig } = await importCore("core/tools/tool-config.js");
+const { createDaemonRuntime } = await importCore("core/tools/daemon-runtime.js");
+const { toolError, toolOk } = await importCore("core/tools/tool-result.js");
+const { getToolConfigPath } = await importCore("runtime/paths.js");
 
 const toolName = "whispermix-transcribe";
 const config = await loadToolConfig(toolName, defaults);
