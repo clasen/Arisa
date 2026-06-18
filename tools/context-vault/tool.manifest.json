@@ -1,0 +1,15 @@
+{
+  "name": "context-vault",
+  "description": "Store, search, update, and forget chat-scoped user context and preferences.",
+  "entry": "index.js",
+  "input": ["text/plain", "application/json"],
+  "output": ["text/plain", "application/json"],
+  "configSchema": {
+    "MAX_RESULTS": {
+      "type": "number",
+      "required": false,
+      "prompt": "Maximum number of context results to return."
+    }
+  },
+  "skillHints": []
+}

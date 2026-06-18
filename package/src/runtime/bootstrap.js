@@ -6,6 +6,15 @@ import { createPiOAuthLogin } from "../core/agent/pi-auth-login.js";
 import { createPiRuntime, hasProviderAuth, listPiProviders, listProviderModels, supportsProviderOAuth } from "../core/agent/pi-runtime.js";
 import { configFile, ensureArisaHome } from "./paths.js";
 
+const ARISA_BANNER = [
+  " █████╗ ██████╗ ██╗███████╗ █████╗ ",
+  "██╔══██╗██╔══██╗██║██╔════╝██╔══██╗",
+  "███████║██████╔╝██║███████╗███████║",
+  "██╔══██║██╔══██╗██║╚════██║██╔══██║",
+  "██║  ██║██║  ██║██║███████║██║  ██║",
+  "╚═╝  ╚═╝╚═╝  ╚═╝╚═╝╚══════╝╚═╝  ╚═╝"
+].join("\n");
+
 async function exists(file) {
   try {
     await readFile(file, "utf8");
@@ -282,9 +291,10 @@ export async function bootstrapIfNeeded({ force = false, cliConfigOverrides = {}
     return value || fallback;
   };
 
-  console.log("\n== Arisa bootstrap ==\n");
-  console.log("Telegram bot token tip: get it from https://t.me/BotFather");
-  const telegramApiKey = await ask("Telegram API key / bot token");
+  console.log(`\n${ARISA_BANNER}`);
+  console.log("-------- https://arisa.sh --------\n");
+  console.log("Get Telegram bot token from https://t.me/BotFather");
+  const telegramApiKey = await ask("Telegram bot token");
   const telegramMaxChatIds = Number(await ask("Maximum authorized chat IDs", "1"));
 
   const runtime = createPiRuntime();

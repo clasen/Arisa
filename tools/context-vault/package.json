@@ -1,0 +1,9 @@
+{
+  "name": "context-vault-tool",
+  "version": "1.0.0",
+  "type": "module",
+  "private": true,
+  "dependencies": {
+    "deepbase": "^3.6.9"
+  }
+}
