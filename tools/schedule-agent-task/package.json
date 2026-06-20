@@ -1,5 +1,5 @@
 {
-  "name": "schedule-agent-task-cli",
+  "name": "schedule-agent-task",
   "private": true,
   "type": "module",
   "version": "1.0.0"

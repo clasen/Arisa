@@ -1,9 +1,10 @@
 {
-  "name": "context-vault",
+  "name": "roster-sites",
   "version": "1.0.0",
   "type": "module",
   "private": true,
   "dependencies": {
-    "deepbase": "^3.6.9"
+    "deepbase": "^3.6.9",
+    "roster-server": "^2.4.4"
   }
 }

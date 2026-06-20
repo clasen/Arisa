@@ -1,5 +1,5 @@
 {
-  "name": "audio-extractor-cli",
+  "name": "audio-extractor",
   "private": true,
   "type": "module",
   "version": "1.0.0"

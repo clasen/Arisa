@@ -1,0 +1,14 @@
+{
+  "name": "roster-sites",
+  "description": "Manage and publish small HTTPS sites through RosterServer.",
+  "entry": "index.js",
+  "input": ["text/html", "text/plain", "application/json"],
+  "output": ["application/json"],
+  "configSchema": {
+    "defaultDomain": { "type": "string", "required": false, "prompt": "Optional default domain to manage when args.domain is omitted." },
+    "wwwPath": { "type": "string", "required": false, "prompt": "RosterServer www root." },
+    "greenlockStorePath": { "type": "string", "required": false, "prompt": "Greenlock certificate store path." },
+    "email": { "type": "string", "required": false, "prompt": "Let's Encrypt contact email." }
+  },
+  "skillHints": []
+}

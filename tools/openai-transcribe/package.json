@@ -1,5 +1,5 @@
 {
-  "name": "openai-transcribe-cli",
+  "name": "openai-transcribe",
   "private": true,
   "type": "module",
   "version": "1.0.0"

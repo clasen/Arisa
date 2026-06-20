@@ -1,5 +1,5 @@
 {
-  "name": "openai-tts-cli",
+  "name": "openai-tts",
   "private": true,
   "type": "module",
   "version": "1.0.0"
