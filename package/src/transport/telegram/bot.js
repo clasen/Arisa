@@ -251,7 +251,7 @@ async function withTyping(ctx, work) {
   }
 }
 
-export async function createTelegramBot({ config, artifactStore, toolRegistry, taskStore, agentManager, saveConfig, updateConfig, logger, webhookUrl, setHttpRequestHandler }) {
+export async function createTelegramBot({ config, artifactStore, toolRegistry, taskStore, agentManager, saveConfig, updateConfig, logger, webhookUrl, webRouter }) {
   const bot = new Bot(config.telegram.token);
   const perChatState = new Map();
   const notifiedPromptErrors = new WeakSet();
@@ -736,19 +736,16 @@ export async function createTelegramBot({ config, artifactStore, toolRegistry, t
         }, 1000);
         taskTimer.unref();
       }
-      if (webhookUrl && setHttpRequestHandler) {
+      if (webhookUrl && webRouter) {
         const webhookPath = `/telegram-${config.telegram.token.slice(-8)}`;
         const handleUpdate = webhookCallback(bot, "http", {
           timeoutMilliseconds: 60_000,
           onTimeout: "return",
         });
-        setHttpRequestHandler((req, res) => {
-          const parsed = new URL(req.url, "http://localhost");
-          if (req.method === "POST" && parsed.pathname === webhookPath) {
-            return handleUpdate(req, res);
-          }
-          res.writeHead(200, { "Content-Type": "text/plain" });
-          res.end("ok");
+        webRouter.registerCoreRoute({
+          method: "POST",
+          path: webhookPath,
+          handler: handleUpdate
         });
         await bot.api.setWebhook(`${webhookUrl}${webhookPath}`);
         logger?.log("telegram", `webhook mode: ${webhookUrl}${webhookPath}`);

@@ -29,7 +29,7 @@ function setHttpRequestHandler(handler) {
   httpRequestHandler = handler;
 }
 
-if (httpPort && bootstrapOverrides.telegram) {
+if (httpPort) {
   createServer((req, res) => {
     if (httpRequestHandler) return httpRequestHandler(req, res);
     res.writeHead(200, { "Content-Type": "text/plain" });

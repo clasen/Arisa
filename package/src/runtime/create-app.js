@@ -1,3 +1,4 @@
+import crypto from "node:crypto";
 import { loadConfig, saveConfig, updateConfig } from "../core/config/config-store.js";
 import { ArtifactStore } from "../core/artifacts/artifact-store.js";
 import { ToolRegistry } from "../core/tools/tool-registry.js";
@@ -6,6 +7,14 @@ import { AgentManager } from "../core/agent/agent-manager.js";
 import { getErrorMessage, getPiAuthIssue } from "../core/agent/auth-flow.js";
 import { createTelegramBot } from "../transport/telegram/bot.js";
 import { createToolProcessSupervisor } from "./tool-process-supervisor.js";
+import { createWebRouter } from "./web/web-router.js";
+import {
+  getChatArtifactsDir,
+  getChatToolStateDir,
+  getChatToolTmpDir,
+  getToolStateDir,
+  getToolTmpDir
+} from "./paths.js";
 
 function normalizeString(value) {
   const text = String(value ?? "").trim();
@@ -44,6 +53,29 @@ function applyRuntimeOverrides(config, runtimeOverrides) {
   };
 }
 
+async function ensureWebToken(config, logger) {
+  if (config.web?.token) return config.web.token;
+
+  const generatedToken = crypto.randomBytes(24).toString("hex");
+  const persisted = await updateConfig((storedConfig) => {
+    storedConfig.web ||= {};
+    storedConfig.web.token ||= generatedToken;
+  });
+  config.web = { ...(config.web || {}), token: persisted.web.token };
+  logger?.log("web", "generated shared web route token");
+  return config.web.token;
+}
+
+function createToolWebPaths() {
+  return {
+    getChatArtifactsDir,
+    getChatToolStateDir,
+    getChatToolTmpDir,
+    getToolStateDir,
+    getToolTmpDir
+  };
+}
+
 export async function createApp({ logger, runtimeOverrides, webhookUrl, setHttpRequestHandler } = {}) {
   logger?.log("app", "loading config");
   const persistedConfig = await loadConfig();
@@ -60,7 +92,33 @@ export async function createApp({ logger, runtimeOverrides, webhookUrl, setHttpR
   logger?.log("app", `loaded ${toolRegistry.list().length} tools`);
 
   const agentManager = new AgentManager({ config, artifactStore, toolRegistry, taskStore, logger });
-  const bot = await createTelegramBot({ config, artifactStore, toolRegistry, taskStore, agentManager, saveConfig, updateConfig, logger, webhookUrl, setHttpRequestHandler });
+  await ensureWebToken(config, logger);
+  const webRouter = createWebRouter({
+    getRoutes: () => toolRegistry.listWebRoutes(),
+    getToken: () => config.web?.token || "",
+    logger,
+    buildContext: ({ toolName, chatId }) => ({
+      toolName,
+      chatId,
+      logger,
+      toolRegistry,
+      artifactStore,
+      taskStore,
+      agentManager,
+      paths: createToolWebPaths()
+    })
+  });
+  webRouter.registerCoreRoute({
+    method: "GET",
+    path: "/health",
+    handler: (_req, res) => {
+      res.writeHead(200, { "Content-Type": "text/plain; charset=utf-8" });
+      res.end("ok\n");
+    }
+  });
+  setHttpRequestHandler?.(webRouter.dispatch);
+
+  const bot = await createTelegramBot({ config, artifactStore, toolRegistry, taskStore, agentManager, saveConfig, updateConfig, logger, webhookUrl, webRouter: setHttpRequestHandler ? webRouter : null });
 
   return {
     async start() {

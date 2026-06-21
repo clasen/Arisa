@@ -31,6 +31,7 @@ Each tool declares in `tool.manifest.json`:
 - `output`: produced output types
 - `configSchema`: required config fields
 - `skillHints`: optional skills to apply when using or editing the tool
+- `web.routes`: optional HTTP routes exposed through Arisa's main server
 
 ## Conceptual pipe model
 There are two different moments where pipes can happen:
@@ -70,6 +71,27 @@ Before using a tool, inspect its help:
 Every CLI must support (the entrypoint comes from `manifest.entry`, currently always `index.js`):
 - `node index.js --help`
 - `node index.js run --request-file <json>`
+
+## Tool-provided web routes
+Tools may expose small web pages or HTTP endpoints through Arisa's main HTTP server by declaring `web.routes` in `tool.manifest.json`. See `tools/README.md` and `tools/web-hello` for the full contract and minimal example.
+
+```json
+{
+  "name": "example-tool",
+  "web": {
+    "routes": [
+      {
+        "path": "/example",
+        "handler": "web/index.js",
+        "methods": ["GET"],
+        "public": false
+      }
+    ]
+  }
+}
+```
+
+Handlers run in-process and export `handleWebRequest(req, res, context)`. Routes are protected by default with `config.web.token`; use `public: true` only for intentional public GET endpoints. Keep handlers inside the installed tool directory, avoid reserved paths (`/`, `/health`, `/api*`, `/auth*`, `/telegram-*`), and persist data only through `context.paths` runtime helpers such as `getChatToolStateDir(chatId, toolName)`.
 
 ### Tools that need daemons
 A tool may need a persistent process, for example to keep a browser session alive or a local model warm. The shared daemon runtime exists for this (the `whispermix-transcribe` catalog tool uses it).
