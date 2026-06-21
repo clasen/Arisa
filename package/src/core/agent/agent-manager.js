@@ -1,6 +1,6 @@
 import path from "node:path";
 import { unlink } from "node:fs/promises";
-import { createAgentSession, SessionManager, defineTool } from "@mariozechner/pi-coding-agent";
+import { createAgentSession, SessionManager, defineTool } from "@earendil-works/pi-coding-agent";
 import { Type } from "@sinclair/typebox";
 import { createPiRuntime, hasProviderAuth } from "./pi-runtime.js";
 import { arisaInstallDir, buildAgentRuntimeContext } from "./runtime-context.js";

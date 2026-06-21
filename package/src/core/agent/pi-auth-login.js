@@ -1,4 +1,4 @@
-import { AuthStorage } from "@mariozechner/pi-coding-agent";
+import { AuthStorage } from "@earendil-works/pi-coding-agent";
 
 export function createPiOAuthLogin({ provider, onAuth, onDeviceCode, onPrompt, onProgress, onSelect } = {}) {
   const authStorage = AuthStorage.create();

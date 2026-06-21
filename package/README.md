@@ -71,6 +71,8 @@ Each tool folder contains:
 - `tool.manifest.json`
 - `index.js`
 
+`tool.manifest.json` may also include optional `skillHints`; Arisa resolves installed skills and passes them into `run_tool` requests as `skills` guidance, not runtime dependencies.
+
 Each tool is isolated from the root project and from other tools.
 That isolation is part of the architecture:
 

@@ -185,6 +185,13 @@ function sessionEventLogMessage(event) {
   return "";
 }
 
+function buildStartupMessage(chatMeta = {}) {
+  const languageCode = String(chatMeta.languageCode || "").toLowerCase();
+  if (languageCode.startsWith("es")) return "Arisa esta en linea de nuevo.";
+  if (languageCode.startsWith("pt")) return "Arisa esta online de novo.";
+  return "Arisa is back online.";
+}
+
 async function collectText(session, prompt, { logger, chatId, onSlowPrompt } = {}) {
   let text = "";
   let assistantErrorMessage = "";
@@ -522,6 +529,31 @@ export async function createTelegramBot({ config, artifactStore, toolRegistry, t
     });
   }
 
+  async function sendStartupMessages() {
+    for (const chatId of config.telegram.authorizedChatIds || []) {
+      try {
+        logger?.log("telegram", `sending startup message for chat ${chatId}`);
+        const chatMeta = config.telegram.chatMeta[chatId] || {};
+        await bot.api.sendMessage(chatId, buildStartupMessage(chatMeta));
+      } catch (error) {
+        logger?.log("telegram", `startup message failed for chat ${chatId}: ${error instanceof Error ? error.message : String(error)}`);
+      }
+    }
+  }
+
+  function scheduleStartupMessages({ skipAgentStartupPrompts = false } = {}) {
+    if (skipAgentStartupPrompts) {
+      logger?.log("telegram", "skipping startup messages because Pi auth needs attention");
+      return;
+    }
+    const timer = setTimeout(() => {
+      sendStartupMessages().catch((error) => {
+        logger?.log("telegram", `startup messages failed: ${error instanceof Error ? error.message : String(error)}`);
+      });
+    }, 0);
+    timer.unref?.();
+  }
+
   async function dispatchTask(task) {
     const chatId = task.payload?.chatId;
     if (!chatId) {
@@ -692,30 +724,6 @@ export async function createTelegramBot({ config, artifactStore, toolRegistry, t
   return {
     async start({ skipAgentStartupPrompts = false } = {}) {
       config.telegram.chatMeta ||= {};
-      if (skipAgentStartupPrompts) {
-        logger?.log("telegram", "skipping agent startup messages because Pi auth needs attention");
-      } else {
-        for (const chatId of config.telegram.authorizedChatIds || []) {
-          try {
-            logger?.log("telegram", `generating startup message for chat ${chatId}`);
-            const chatMeta = config.telegram.chatMeta[chatId] || {};
-            const welcomePrompt = [
-              "System event: Arisa has just started.",
-              `chatId: ${chatId}`,
-              `preferredTelegramLanguageCode: ${chatMeta.languageCode || "unknown"}`,
-              chatMeta.username ? `username: ${chatMeta.username}` : null,
-              chatMeta.firstName ? `firstName: ${chatMeta.firstName}` : null,
-              "Send a short welcome-back message for Telegram.",
-              "Keep it brief, warm, and natural.",
-              "Use the user's Telegram language when possible.",
-              "Do not mention internal implementation details."
-            ].filter(Boolean).join("\n");
-            await enqueuePrompt({ chatId, prompt: welcomePrompt, label: "startup message" });
-          } catch (error) {
-            logger?.log("telegram", `startup message failed for chat ${chatId}: ${error instanceof Error ? error.message : String(error)}`);
-          }
-        }
-      }
       await bot.api.setMyCommands([
         { command: "new", description: "Start a new chat context" },
         { command: "auth", description: "Show Pi authentication status" }
@@ -744,8 +752,10 @@ export async function createTelegramBot({ config, artifactStore, toolRegistry, t
         });
         await bot.api.setWebhook(`${webhookUrl}${webhookPath}`);
         logger?.log("telegram", `webhook mode: ${webhookUrl}${webhookPath}`);
+        scheduleStartupMessages({ skipAgentStartupPrompts });
       } else {
         logger?.log("telegram", "bot polling started");
+        scheduleStartupMessages({ skipAgentStartupPrompts });
         await bot.start({ drop_pending_updates: true });
       }
     },

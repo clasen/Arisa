@@ -1,4 +1,4 @@
-import { AuthStorage, ModelRegistry } from "@mariozechner/pi-coding-agent";
+import { AuthStorage, ModelRegistry } from "@earendil-works/pi-coding-agent";
 
 function compareText(a, b) {
   return a.localeCompare(b, undefined, { sensitivity: "base", numeric: true });
