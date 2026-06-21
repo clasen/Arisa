@@ -23,7 +23,7 @@ const logger = createLogger({ verbose });
 let activeApp = null;
 let shuttingDown = false;
 
-const defaultHttpPort = 91107;
+const defaultHttpPort = 11970;
 const httpPort = Number(process.env.ARISA_HTTP_PORT || defaultHttpPort);
 const shouldStartHttpServer = Boolean(httpPort && !["stop", "status", "flush"].includes(command));
 let httpRequestHandler = null;
