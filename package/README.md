@@ -162,7 +162,7 @@ Notes:
 
 - interactive bootstrap remains unchanged when no CLI overrides are provided
 - `--bootstrap` can be combined with overrides to regenerate config non-interactively
-- when `--pi.apiKey` is omitted and the provider supports OAuth, Arisa starts a temporary web page on `PORT` (default `10000`) where you can complete authentication from any browser
+- Arisa's HTTP server listens on `ARISA_HTTP_PORT` (default `91107`); bootstrap OAuth pages and tool-provided web routes use this server
 - unknown `--pi.provider` or `--pi.model` values are ignored and replaced by safe defaults
 
 Telegram bot tokens can be created with:

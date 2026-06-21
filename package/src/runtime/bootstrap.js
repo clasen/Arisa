@@ -254,7 +254,7 @@ export async function bootstrapIfNeeded({ force = false, cliConfigOverrides = {}
       }
       if (!httpPort || !setHttpRequestHandler) {
         throw new Error(
-          `No auth found for ${resolvedPi.provider}. Auth relay requires an HTTP server on PORT. Provide --pi.apiKey or set the PORT environment variable.`
+          `No auth found for ${resolvedPi.provider}. Arisa's HTTP server is unavailable; set ARISA_HTTP_PORT or free the configured port.`
         );
       }
       const authRelay = installAuthRelay(httpPort, setHttpRequestHandler);
