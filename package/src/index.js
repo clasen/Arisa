@@ -8,6 +8,7 @@ import { createLogger } from "./runtime/logger.js";
 import { getServiceStatus, registerServiceProcess, startService, stopService, unregisterServiceProcess } from "./runtime/service-manager.js";
 import { flushArisaHome } from "./runtime/flush.js";
 import { arisaPackageDir } from "./runtime/paths.js";
+import { parseProcessIds } from "./runtime/process-ids.js";
 
 process.env.ARISA_PACKAGE_DIR = arisaPackageDir;
 
@@ -49,11 +50,11 @@ async function runCommand(commandName, args = []) {
 async function getListeningPids(port) {
   const lsofOutput = await runCommand("lsof", ["-tiTCP", `-sTCP:LISTEN`, `-iTCP:${port}`]);
   if (lsofOutput) {
-    return lsofOutput.split(/\s+/).map(Number).filter(Number.isFinite);
+    return parseProcessIds(lsofOutput);
   }
 
   const fuserOutput = await runCommand("fuser", ["-n", "tcp", String(port)]);
-  return fuserOutput.split(/\s+/).map(Number).filter(Number.isFinite);
+  return parseProcessIds(fuserOutput);
 }
 
 async function getProcessCommand(pid) {
