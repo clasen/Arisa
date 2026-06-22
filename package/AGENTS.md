@@ -31,7 +31,24 @@ Each tool declares in `tool.manifest.json`:
 - `output`: produced output types
 - `configSchema`: required config fields
 - `skillHints`: optional skills to apply when using or editing the tool
-- `web.routes`: optional HTTP routes exposed through Arisa's main server
+
+## Tool-to-Arisa IPC
+Arisa does not mount tool-provided web routes in core. If a tool needs to expose a web UI or HTTP endpoint, the tool owns that server, usually through the shared daemon runtime. The tool's server handles its own requests and uses Arisa IPC when it needs artifacts, tasks, agent events, or runtime paths.
+
+Installed tools can import the IPC client through `ARISA_PACKAGE_DIR`:
+
+```js
+import path from "node:path";
+import { pathToFileURL } from "node:url";
+
+const importCore = (relativePath) => import(pathToFileURL(path.join(process.env.ARISA_PACKAGE_DIR, "src", relativePath)).href);
+const { createArisaClient } = await importCore("core/tools/ipc-client.js");
+
+const arisa = createArisaClient({ toolName: "example-tool", chatId });
+await arisa.artifacts.createText({ text: "hello" });
+```
+
+The IPC channel is a local socket under `~/.arisa/state`. Every request must include `toolName`; chat-scoped capabilities also require `chatId`. Exposed capabilities are explicit: artifacts (`createText`, `listRecent`, `get`), tasks (`add`, `list`, `cancel`), agent events (`enqueueEvent`), and runtime paths (`getChatToolStateDir`, `getToolStateDir`, `getChatToolTmpDir`, `getToolTmpDir`, `getChatArtifactsDir`). Do not add raw access to `agentManager`, `taskStore`, `artifactStore`, or `toolRegistry`.
 
 ## Conceptual pipe model
 There are two different moments where pipes can happen:
@@ -72,27 +89,6 @@ Every CLI must support (the entrypoint comes from `manifest.entry`, currently al
 - `node index.js --help`
 - `node index.js run --request-file <json>`
 
-## Tool-provided web routes
-Tools may expose small web pages or HTTP endpoints through Arisa's main HTTP server by declaring `web.routes` in `tool.manifest.json`. See `tools/README.md` and `tools/web-hello` for the full contract and minimal example.
-
-```json
-{
-  "name": "example-tool",
-  "web": {
-    "routes": [
-      {
-        "path": "/example",
-        "handler": "web/index.js",
-        "methods": ["GET"],
-        "public": false
-      }
-    ]
-  }
-}
-```
-
-Handlers run in-process and export `handleWebRequest(req, res, context)`. Routes are protected by default with `config.web.token`; use `public: true` only for intentional public GET endpoints. Keep handlers inside the installed tool directory, avoid reserved paths (`/`, `/health`, `/api*`, `/auth*`, `/telegram-*`), and persist data only through `context.paths` runtime helpers such as `getChatToolStateDir(chatId, toolName)`.
-
 ### Tools that need daemons
 A tool may need a persistent process, for example to keep a browser session alive or a local model warm. The shared daemon runtime exists for this (the `whispermix-transcribe` catalog tool uses it).
 When such a tool is built, implement it with the shared daemon runtime instead of custom ad hoc process management:
@@ -103,6 +99,7 @@ When such a tool is built, implement it with the shared daemon runtime instead o
 - keep one daemon owner per tool/session and avoid opening a second client over the same resource
 - use `beforeStart` only for tool-specific cleanup such as stale browser locks, without deleting persistent session/model data
 - keep daemon tools headless/server-safe by default when they are meant to run on VPS machines
+- if the daemon exposes an HTTP server, keep that server inside the tool; Arisa core does not discover or mount tool routes
 
 ## Manual pipe behavior
 To run a pipe, the agent should:

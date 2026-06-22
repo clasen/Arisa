@@ -14,7 +14,6 @@ This is the official Arisa tool catalog. Each subdirectory is a self-contained t
 | [`schedule-agent-task`](./schedule-agent-task/) | Schedules future agent tasks (one-shot or recurring) through the async task queue | `text/plain` | `application/json` | - | Low — 0 npm deps |
 | [`video-downloader`](./video-downloader/) | Downloads videos from YouTube, TikTok, Instagram, Facebook, X/Twitter, and similar yt-dlp supported URLs | `text/plain` | `video/mp4` | yt-dlp + ffprobe | Medium — 0 npm deps + external binaries |
 | [`web-browser`](./web-browser/) | Searches the web and fetches pages as readable text | `text/plain` | `text/plain` | - | Low — 0 npm deps |
-| [`web-hello`](./web-hello/) | Minimal example of a tool-provided web page at `/hello` | `text/plain` | `text/plain` | - | Low — 0 npm deps |
 | [`whatsapp-web`](./whatsapp-web/) | Sends and receives WhatsApp messages via WhatsApp Web (login, send, broadcast, inbox, watch) | text + media | `text/plain`, `application/json` | Chrome/Chromium | High — 3 npm deps + Chrome/Chromium + QR login |
 | [`whispermix-transcribe`](./whispermix-transcribe/) | Transcribes audio locally with WhisperMix; keeps the model warm via a persistent daemon | `audio/ogg`, `mp3`, `wav`, `mp4` | `text/plain` | Local WhisperMix install | High — 1 npm dep + local WhisperMix model + daemon |
 
@@ -24,6 +23,27 @@ This is the official Arisa tool catalog. Each subdirectory is a self-contained t
 
 Tools are installed by copying the tool directory into `~/.arisa/tools/<tool-name>` and running `pnpm install` (or `npm install`) inside it. Catalog tools resolve Arisa core helpers at runtime through the `ARISA_PACKAGE_DIR` environment variable that Arisa provides when invoking tools.
 
+## Tool-to-Arisa IPC
+
+Tools use local IPC when they need to call back into Arisa. Arisa does not discover or mount tool-provided web routes in core.
+
+If a tool needs a web UI or HTTP endpoint, the tool should run its own server, usually from a daemon built with Arisa's shared daemon runtime. That server handles requests internally and uses IPC to access Arisa capabilities.
+
+Example IPC client usage from a tool:
+
+```js
+import path from "node:path";
+import { pathToFileURL } from "node:url";
+
+const importCore = (relativePath) => import(pathToFileURL(path.join(process.env.ARISA_PACKAGE_DIR, "src", relativePath)).href);
+const { createArisaClient } = await importCore("core/tools/ipc-client.js");
+
+const arisa = createArisaClient({ toolName: "example-tool", chatId });
+await arisa.artifacts.createText({ text: "hello" });
+```
+
+The IPC client supports explicit capabilities only: artifacts, tasks, agent events, and runtime paths. Chat-scoped calls require `chatId`.
+
 ## Tool contract
 
 Every tool must have:
@@ -32,43 +52,6 @@ Every tool must have:
 - **`index.js`** — the executable entry point. Must handle `--help` and `run --request-file <json>`.
 - **`config.js`** — default config values merged with user-supplied secrets at runtime.
 - **`package.json`** — isolated dependencies (tools run in their own `node_modules`).
-
-Tools may also declare optional **`web.routes`** in `tool.manifest.json` to expose small web pages or HTTP endpoints through Arisa's main HTTP server:
-
-```json
-{
-  "name": "example-tool",
-  "web": {
-    "routes": [
-      {
-        "path": "/example",
-        "handler": "web/index.js",
-        "methods": ["GET"],
-        "public": false
-      }
-    ]
-  }
-}
-```
-
-The handler file must live inside the installed tool directory and export:
-
-```js
-export async function handleWebRequest(req, res, context) {
-  // write the response with res.writeHead/res.end
-}
-```
-
-Web route rules:
-
-- `path` must start with `/`, must not contain `..`, cannot collide with another tool, and cannot be `/`, `/health`, `/api*`, `/auth*`, or `/telegram-*`.
-- `methods` defaults to `["GET"]`; mutating endpoints must declare their methods explicitly.
-- routes are protected by default with Arisa's shared web token (`config.web.token`), sent as `Authorization: Bearer <token>` or `?token=<token>`. Set `public: true` only for intentionally public routes; public routes are GET-only unless additional methods are declared.
-- Arisa applies a request body size limit, a request timeout, generic client errors, and server-side logs scoped by tool and route.
-- Web handlers must not persist runtime data inside `~/.arisa/tools/<toolName>`. Use runtime path helpers from `context.paths`, especially `getChatToolStateDir(chatId, toolName)` for chat-scoped state.
-- Static files are not served automatically. If a tool needs assets, serve them through a helper that validates paths against a fixed root.
-
-See [`web-hello`](./web-hello/) for a minimal public page.
 
 ## Adding a tool
 

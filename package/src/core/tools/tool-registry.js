@@ -1,14 +1,13 @@
 import { mkdir, readdir, readFile, rmdir, unlink, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { spawn } from "node:child_process";
-import { arisaPackageDir, getToolConfigPath, getToolTmpDir, getChatToolTmpDir, toolsDir as userToolsRoot } from "../../runtime/paths.js";
-import { validateToolWebRoutes } from "../../runtime/web/route-validation.js";
+import { arisaIpcSocketFile, arisaPackageDir, getToolConfigPath, getToolTmpDir, getChatToolTmpDir, toolsDir as userToolsRoot } from "../../runtime/paths.js";
 import { loadToolConfig, parseConfigModule, writeToolConfig } from "./tool-config.js";
 import { normalizeToolResult } from "./tool-result.js";
 import { SkillRegistry } from "../skills/skill-registry.js";
 
 function toolEnv() {
-  return { ...process.env, ARISA_PACKAGE_DIR: arisaPackageDir };
+  return { ...process.env, ARISA_PACKAGE_DIR: arisaPackageDir, ARISA_IPC_SOCKET: arisaIpcSocketFile };
 }
 
 function runProcess(command, args, options = {}) {
@@ -26,14 +25,11 @@ export class ToolRegistry {
   constructor({ logger } = {}) {
     this.logger = logger;
     this.tools = new Map();
-    this.webRoutes = [];
     this.skillRegistry = new SkillRegistry();
   }
 
   async load() {
     this.tools.clear();
-    this.webRoutes = [];
-    const claimedWebPaths = new Map();
 
     let entries = [];
     try {
@@ -54,7 +50,7 @@ export class ToolRegistry {
         const defaults = parseConfigModule(configSource);
         const config = await loadToolConfig(manifest.name, defaults);
         const skillHints = this.skillRegistry.normalizeHints(manifest);
-        const tool = {
+        this.tools.set(manifest.name, {
           ...manifest,
           skillHints,
           dir: toolDir,
@@ -63,13 +59,7 @@ export class ToolRegistry {
           configPath: getToolConfigPath(manifest.name),
           defaults,
           config
-        };
-        this.tools.set(manifest.name, tool);
-        const { routes, errors } = validateToolWebRoutes(manifest, toolDir, claimedWebPaths);
-        this.webRoutes.push(...routes);
-        for (const error of errors) {
-          this.logger?.log("web", `skipping route for ${manifest.name}: ${error.error}`);
-        }
+        });
       } catch {
         // ignore invalid tool dirs in v1
       }
@@ -86,13 +76,6 @@ export class ToolRegistry {
       output: tool.output,
       configSchema: tool.configSchema || {},
       skillHints: tool.skillHints || []
-    }));
-  }
-
-  listWebRoutes() {
-    return this.webRoutes.map((route) => ({
-      ...route,
-      methods: [...route.methods]
     }));
   }
 
