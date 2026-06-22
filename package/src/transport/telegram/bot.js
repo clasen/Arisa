@@ -1,4 +1,4 @@
-import { Bot, InputFile, webhookCallback } from "grammy";
+import { Bot, InputFile } from "grammy";
 import path from "node:path";
 import { authorizeChat } from "./auth.js";
 import { captureIncomingArtifact } from "./media.js";
@@ -251,7 +251,7 @@ async function withTyping(ctx, work) {
   }
 }
 
-export async function createTelegramBot({ config, artifactStore, toolRegistry, taskStore, agentManager, saveConfig, updateConfig, logger, webhookUrl, webRouter }) {
+export async function createTelegramBot({ config, artifactStore, toolRegistry, taskStore, agentManager, saveConfig, updateConfig, logger }) {
   const bot = new Bot(config.telegram.token);
   const perChatState = new Map();
   const notifiedPromptErrors = new WeakSet();
@@ -736,25 +736,10 @@ export async function createTelegramBot({ config, artifactStore, toolRegistry, t
         }, 1000);
         taskTimer.unref();
       }
-      if (webhookUrl && webRouter) {
-        const webhookPath = `/telegram-${config.telegram.token.slice(-8)}`;
-        const handleUpdate = webhookCallback(bot, "http", {
-          timeoutMilliseconds: 60_000,
-          onTimeout: "return",
-        });
-        webRouter.registerCoreRoute({
-          method: "POST",
-          path: webhookPath,
-          handler: handleUpdate
-        });
-        await bot.api.setWebhook(`${webhookUrl}${webhookPath}`);
-        logger?.log("telegram", `webhook mode: ${webhookUrl}${webhookPath}`);
-        scheduleStartupMessages({ skipAgentStartupPrompts });
-      } else {
-        logger?.log("telegram", "bot polling started");
-        scheduleStartupMessages({ skipAgentStartupPrompts });
-        await bot.start({ drop_pending_updates: true });
-      }
+      await bot.api.deleteWebhook({ drop_pending_updates: true });
+      logger?.log("telegram", "bot polling started");
+      scheduleStartupMessages({ skipAgentStartupPrompts });
+      await bot.start();
     },
 
     async stop() {

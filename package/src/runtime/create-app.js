@@ -46,7 +46,7 @@ function applyRuntimeOverrides(config, runtimeOverrides) {
   };
 }
 
-export async function createApp({ logger, runtimeOverrides, webhookUrl, setHttpRequestHandler } = {}) {
+export async function createApp({ logger, runtimeOverrides } = {}) {
   logger?.log("app", "loading config");
   const persistedConfig = await loadConfig();
   const config = applyRuntimeOverrides(persistedConfig, runtimeOverrides);
@@ -64,7 +64,7 @@ export async function createApp({ logger, runtimeOverrides, webhookUrl, setHttpR
   const agentManager = new AgentManager({ config, artifactStore, toolRegistry, taskStore, logger });
   const arisaCapabilities = createArisaCapabilities({ artifactStore, taskStore });
   const ipcServer = createIpcServer({ capabilities: arisaCapabilities, logger });
-  const bot = await createTelegramBot({ config, artifactStore, toolRegistry, taskStore, agentManager, saveConfig, updateConfig, logger, webhookUrl, setHttpRequestHandler });
+  const bot = await createTelegramBot({ config, artifactStore, toolRegistry, taskStore, agentManager, saveConfig, updateConfig, logger });
 
   return {
     async start() {

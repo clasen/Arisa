@@ -114,6 +114,7 @@ arisa start              # start in background
 arisa stop               # stop background service
 arisa status             # show background service status
 arisa flush              # remove ~/.arisa
+arisa --silent           # run without verbose logs
 ```
 
 Runtime model override (current process only):
@@ -138,32 +139,7 @@ On first run, Arisa will:
 6. validate that Pi Agent works
 7. only then start listening to Telegram
 
-### Non-interactive bootstrap (CLI overrides)
-
-You can skip the interactive questions by providing `--telegram.token` and optional overrides:
-
-```bash
-node src/index.js --telegram.token <token>
-```
-
-With this mode, Arisa creates `~/.arisa/state/config.json` without prompts and applies these defaults when not provided:
-
-- `pi.provider`: `openai-codex` when available, otherwise first provider from the current Pi provider list
-- `pi.model`: first model after bootstrap sorting (currently prioritizes `openai-codex/gpt-5.5`)
-- `telegram.maxChatIds`: `1`
-
-Supported overrides:
-
-```bash
-node src/index.js --telegram.token <token> --telegram.maxChatIds 3 --pi.provider openai-codex --pi.model gpt-5.5 --pi.apiKey <optional-provider-key>
-```
-
-Notes:
-
-- interactive bootstrap remains unchanged when no CLI overrides are provided
-- `--bootstrap` can be combined with overrides to regenerate config non-interactively
-- when `--pi.apiKey` is omitted and the provider supports OAuth, bootstrap can use a temporary auth relay if `PORT` is set; this relay is only for Pi login and is not a tool web route server
-- unknown `--pi.provider` or `--pi.model` values are ignored and replaced by safe defaults
+Arisa does not run a persistent HTTP health server or Telegram webhook; Telegram uses long polling.
 
 Telegram bot tokens can be created with:
 

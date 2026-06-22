@@ -1,14 +1,11 @@
 #!/usr/bin/env node
 
-import { createServer } from "node:http";
-import { execFile } from "node:child_process";
 import { bootstrapIfNeeded } from "./runtime/bootstrap.js";
 import { createApp } from "./runtime/create-app.js";
 import { createLogger } from "./runtime/logger.js";
 import { getServiceStatus, registerServiceProcess, startService, stopService, unregisterServiceProcess } from "./runtime/service-manager.js";
 import { flushArisaHome } from "./runtime/flush.js";
 import { arisaPackageDir } from "./runtime/paths.js";
-import { parseProcessIds } from "./runtime/process-ids.js";
 
 process.env.ARISA_PACKAGE_DIR = arisaPackageDir;
 
@@ -16,135 +13,12 @@ const args = process.argv.slice(2);
 const cli = parseCliArgs(args);
 const command = cli.positionals[0] || "run";
 const forceBootstrap = Boolean(cli.flags.bootstrap);
-const verbose = Boolean(cli.flags.verbose);
+const verbose = !cli.flags.silent;
 const serviceRunner = Boolean(cli.flags["service-runner"]);
-const bootstrapOverrides = toBootstrapOverrides(cli.nestedFlags);
-const runtimeOverrides = toRuntimeOverrides(cli.nestedFlags);
+const runtimeOverrides = toNestedOverrides(cli.nestedFlags);
 const logger = createLogger({ verbose });
 let activeApp = null;
 let shuttingDown = false;
-
-const defaultHttpPort = 11970;
-const httpPort = Number(process.env.ARISA_HTTP_PORT || defaultHttpPort);
-const shouldStartHttpServer = Boolean(httpPort && !["stop", "status", "flush"].includes(command));
-let httpRequestHandler = null;
-let httpServerListening = false;
-let httpServer = null;
-
-function setHttpRequestHandler(handler) {
-  httpRequestHandler = handler;
-}
-
-const httpServerReady = shouldStartHttpServer
-  ? startHttpServer()
-  : Promise.resolve(false);
-
-async function runCommand(commandName, args = []) {
-  return new Promise((resolve) => {
-    execFile(commandName, args, (error, stdout = "") => {
-      resolve(error ? "" : stdout.trim());
-    });
-  });
-}
-
-async function getListeningPids(port) {
-  const lsofOutput = await runCommand("lsof", ["-tiTCP", `-sTCP:LISTEN`, `-iTCP:${port}`]);
-  if (lsofOutput) {
-    return parseProcessIds(lsofOutput);
-  }
-
-  const fuserOutput = await runCommand("fuser", ["-n", "tcp", String(port)]);
-  return parseProcessIds(fuserOutput);
-}
-
-async function getProcessCommand(pid) {
-  return runCommand("ps", ["-p", String(pid), "-o", "command="]);
-}
-
-function looksLikeArisaProcess(commandText) {
-  return /\barisa\b/.test(commandText) || /\/arisa\/src\/index\.js\b/i.test(commandText);
-}
-
-function isProcessRunning(pid) {
-  try {
-    process.kill(pid, 0);
-    return true;
-  } catch {
-    return false;
-  }
-}
-
-async function waitForProcessExit(pid, timeoutMs = 3000) {
-  const deadline = Date.now() + timeoutMs;
-  while (Date.now() < deadline) {
-    if (!isProcessRunning(pid)) return true;
-    await new Promise((resolve) => setTimeout(resolve, 100));
-  }
-  return !isProcessRunning(pid);
-}
-
-async function stopStaleArisaListeners(port) {
-  const pids = await getListeningPids(port);
-  for (const pid of pids) {
-    if (pid === process.pid) continue;
-    const commandText = await getProcessCommand(pid);
-    if (!looksLikeArisaProcess(commandText)) {
-      logger.error("http", `port ${port} is already used by pid ${pid}; not killing non-Arisa process`);
-      continue;
-    }
-
-    logger.log("http", `stopping stale Arisa listener on port ${port} (pid ${pid})`);
-    try {
-      process.kill(pid, "SIGTERM");
-      if (!await waitForProcessExit(pid)) {
-        process.kill(pid, "SIGKILL");
-        await waitForProcessExit(pid, 1000);
-      }
-    } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
-      logger.error("http", `failed to stop stale Arisa listener pid ${pid}: ${message}`);
-    }
-  }
-}
-
-async function startHttpServer() {
-  await stopStaleArisaListeners(httpPort);
-  return new Promise((resolve) => {
-    const server = createServer((req, res) => {
-      if (httpRequestHandler) return httpRequestHandler(req, res);
-      res.writeHead(200, { "Content-Type": "text/plain" });
-      res.end("ok");
-      return undefined;
-    });
-    httpServer = server;
-    server.on("error", (error) => {
-      const message = error instanceof Error ? error.message : String(error);
-      logger.error("http", `server failed on port ${httpPort}: ${message}`);
-      resolve(false);
-    });
-    server.listen(httpPort)
-      .on("listening", () => {
-        httpServerListening = true;
-        logger.log("http", `health server on port ${httpPort}`);
-        resolve(true);
-      });
-  });
-}
-
-async function getHttpOptions() {
-  await httpServerReady;
-  return httpServerListening ? { httpPort, setHttpRequestHandler } : {};
-}
-
-async function stopHttpServer() {
-  if (!httpServerListening || !httpServer) return;
-  await new Promise((resolve) => {
-    httpServer.close(() => resolve());
-  });
-  httpServer = null;
-  httpServerListening = false;
-  httpRequestHandler = null;
-}
 
 function parseCliArgs(rawArgs) {
   const flags = {};
@@ -176,7 +50,7 @@ function parseCliArgs(rawArgs) {
   return { flags, nestedFlags, positionals };
 }
 
-function toBootstrapOverrides(nestedFlags) {
+function toNestedOverrides(nestedFlags) {
   const overrides = {};
   for (const [flatKey, value] of Object.entries(nestedFlags)) {
     const parts = flatKey.split(".");
@@ -193,10 +67,6 @@ function toBootstrapOverrides(nestedFlags) {
   return overrides;
 }
 
-function toRuntimeOverrides(nestedFlags) {
-  return toBootstrapOverrides(nestedFlags);
-}
-
 function toServiceRunnerArgs(nestedFlags) {
   const args = [];
   if (nestedFlags["pi.model"]) {
@@ -205,14 +75,11 @@ function toServiceRunnerArgs(nestedFlags) {
   return args;
 }
 
-const webhookUrl = bootstrapOverrides.webhook?.url || "";
-
 async function shutdown(exitCode = 0) {
   if (shuttingDown) return;
   shuttingDown = true;
   try {
     await activeApp?.stop?.();
-    await stopHttpServer();
   } catch (error) {
     logger.error("app", `shutdown failed: ${error instanceof Error ? error.message : String(error)}`);
     exitCode = exitCode || 1;
@@ -231,8 +98,8 @@ process.once("SIGINT", () => {
   shutdown(0);
 });
 
-async function startRuntimeApp(httpOptions = {}) {
-  const app = await createApp({ logger, runtimeOverrides, webhookUrl, ...httpOptions });
+async function startRuntimeApp() {
+  const app = await createApp({ logger, runtimeOverrides });
   activeApp = app;
   await app.start();
 }
@@ -244,10 +111,9 @@ async function runForeground() {
     || runtimeOverrides?.pi?.apiKey
   );
   logger.log("app", `starting${verbose ? " in verbose mode" : ""}`);
-  const httpOptions = await getHttpOptions();
-  await bootstrapIfNeeded({ force: forceBootstrap, cliConfigOverrides: bootstrapOverrides, ...httpOptions });
+  await bootstrapIfNeeded({ force: forceBootstrap });
   try {
-    await startRuntimeApp(httpOptions);
+    await startRuntimeApp();
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     if (message.includes("No auth found")) {
@@ -260,8 +126,8 @@ async function runForeground() {
         throw error;
       }
       console.log("Reopening bootstrap so you can provide a Pi API key or switch to a provider you already authenticated with.\n");
-      await bootstrapIfNeeded({ force: true, cliConfigOverrides: bootstrapOverrides, ...httpOptions });
-      await startRuntimeApp(httpOptions);
+      await bootstrapIfNeeded({ force: true });
+      await startRuntimeApp();
       return;
     }
     throw error;
@@ -276,9 +142,7 @@ async function main() {
   }
 
   if (command === "start") {
-    const httpOptions = await getHttpOptions();
-    await bootstrapIfNeeded({ force: forceBootstrap, cliConfigOverrides: bootstrapOverrides, ...httpOptions });
-    await stopHttpServer();
+    await bootstrapIfNeeded({ force: forceBootstrap });
     const result = await startService({ verbose, cliArgs: toServiceRunnerArgs(cli.nestedFlags) });
     if (!result.ok) {
       console.log(`Arisa is already running in background (pid ${result.pid}).`);

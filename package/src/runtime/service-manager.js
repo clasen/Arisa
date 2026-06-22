@@ -36,7 +36,7 @@ export async function getServiceStatus() {
   return { running: true, pid };
 }
 
-export async function startService({ verbose = false, cliArgs = [] } = {}) {
+export async function startService({ verbose = true, cliArgs = [] } = {}) {
   await ensureArisaHome();
   const status = await getServiceStatus();
   if (status.running) {
@@ -45,7 +45,7 @@ export async function startService({ verbose = false, cliArgs = [] } = {}) {
 
   const logHandle = await open(serviceLogFile, "a");
   const args = [entryFile, "--service-runner", ...cliArgs];
-  if (verbose) args.push("--verbose");
+  if (!verbose) args.push("--silent");
 
   const child = spawn(process.execPath, args, {
     detached: true,
