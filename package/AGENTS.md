@@ -1,18 +1,16 @@
 # Arisa AGENTS
 
-## Architecture
+## Core boundaries
+Arisa core owns transport, sessions, artifacts, and tool orchestration:
 - Telegram transport handles inbound and outbound messaging.
 - Pi Agent keeps one session per authorized chat.
 - Incoming messages and files (text, voice, photo, document) and generated files become artifacts.
-- A tool registry handles tool discovery, help lookup, config writes, and execution.
-- Tools are isolated and each one has its own manifest, entrypoint, and config defaults.
-- No tools ship with the core. All installed tools live under `~/.arisa/tools/<toolName>`; the install directory of Arisa (your working directory) contains only the core. Never create or install tools inside the install directory.
+- The tool registry handles tool discovery, help lookup, config writes, and execution.
+- Tools are isolated packages with their own manifest, entrypoint, and config defaults.
+- No tools ship with the core; installed tools live under `~/.arisa/tools/<toolName>`.
+- The Arisa install directory (your working directory) contains only the core. Never create or install tools inside it.
 
-## Core modification policy
-Modifying the Arisa core is the last resort, never the default. All work must be done in tools.
-- Always solve the request by creating or editing a tool under `~/.arisa/tools/<toolName>`.
-- Treat changing core code as the final option, only after confirming the capability genuinely cannot be delivered through the tool architecture.
-- Never modify the core on your own initiative. Always consult the user first, explaining why a core change is unavoidable, and wait for explicit approval before touching core code.
+New capabilities belong in tools by default. Solve requests by creating or editing a tool under `~/.arisa/tools/<toolName>`. Modifying core is the last resort: do it only after confirming the capability cannot be delivered through the tool architecture, explaining why the core change is unavoidable, and receiving explicit user approval.
 
 ## Runtime directory rules
 Do not build runtime paths by hand. Use `src/runtime/paths.js`:
@@ -39,9 +37,9 @@ Each tool declares in `tool.manifest.json`:
 - `skillHints`: optional skills to apply when using or editing the tool
 
 ## Tool-to-Arisa IPC
-Arisa does not mount tool-provided web routes in core. If a tool needs to expose a web UI or HTTP endpoint, the tool owns that server, usually through the shared daemon runtime. The tool's server handles its own requests and uses Arisa IPC when it needs to run a registered tool, create/read artifacts, manage tasks, enqueue agent events, or resolve runtime paths.
+Tools that expose a web UI or HTTP endpoint own that server, usually through the shared daemon runtime; Arisa core does not mount tool routes or proxies. Use Arisa IPC when a tool needs registered tools, artifacts, tasks, agent events, or runtime paths.
 
-Installed tools can import the IPC client through `ARISA_PACKAGE_DIR`:
+Import the IPC client through `ARISA_PACKAGE_DIR`:
 
 ```js
 import path from "node:path";
@@ -52,11 +50,6 @@ const { createArisaClient } = await importCore("core/tools/ipc-client.js");
 
 const arisa = createArisaClient({ toolName: "example-tool", chatId });
 await arisa.artifacts.createText({ text: "hello" });
-```
-
-For tool-owned web UI request/response flows, call another registered tool through IPC instead of adding core HTTP routes or proxies:
-
-```js
 const result = await arisa.tools.run({
   name: "strudel-agent",
   text: prompt,
@@ -64,7 +57,7 @@ const result = await arisa.tools.run({
 }, { timeoutMs: 120_000 });
 ```
 
-The IPC channel is a local socket under `~/.arisa/state`. Every request must include `toolName`; chat-scoped capabilities also require `chatId`. Exposed capabilities are explicit: tools (`run`), artifacts (`createText`, `listRecent`, `get`), tasks (`add`, `list`, `cancel`), agent events (`enqueueEvent`), and runtime paths (`getChatToolStateDir`, `getToolStateDir`, `getChatToolTmpDir`, `getToolTmpDir`, `getChatArtifactsDir`). Do not add raw access to `agentManager`, `taskStore`, `artifactStore`, or `toolRegistry`.
+The IPC channel is a local socket under `~/.arisa/state`. Every request must include `toolName`; chat-scoped capabilities also require `chatId`. Exposed capabilities are explicit: tools (`run`), artifacts (`createText`, `listRecent`, `get`), tasks (`add`, `list`, `cancel`), agent events (`enqueueEvent`), and runtime paths (`getChatToolStateDir`, `getToolStateDir`, `getChatToolTmpDir`, `getToolTmpDir`, `getChatArtifactsDir`). Do not expose raw `agentManager`, `taskStore`, `artifactStore`, or `toolRegistry` access.
 
 ## Conceptual pipe model
 There are two different moments where pipes can happen:
@@ -159,43 +152,31 @@ If `run_tool` returns `missingConfig`, the agent should:
 
 Do not assume a rigid question/answer protocol. Continue the conversation naturally and infer the config value from the user reply when possible.
 
-## Official tool catalog
-The official tool catalog lives at `https://github.com/clasen/Arisa/tree/main/tools`. Each subdirectory is an installable tool following the standard tool contract.
-
-When a capability is missing, check the catalog before building anything:
-1. List the catalog: `curl -s https://api.github.com/repos/clasen/Arisa/contents/tools`.
-2. Read the manifest of any candidate: `https://raw.githubusercontent.com/clasen/Arisa/main/tools/<name>/tool.manifest.json` (the `description`, `input`, and `output` fields tell you whether it solves the need). Also read the catalog `README.md` to check the tool's install footprint.
-3. If a catalog tool solves the problem, decide by install footprint (the `Install footprint` column in the catalog `README.md`):
-   - **Low footprint** (no extra npm dependencies, no external binaries): install it and resolve the user's request in the same turn, without asking first. Favor autonomy here.
-   - **Medium/High footprint** (heavy dependency trees, external binaries, or interactive setup such as a login): propose it to the user, say which tool it is and what it does, and wait for their confirmation in the chat before installing.
-   - A missing config secret (for example an API key) is handled by the missing-config flow and is not, on its own, a reason to ask before installing.
-4. Only when nothing in the catalog fits, fall back to creating a new tool.
-
-### Installing a tool
-After deciding to install (low footprint), after the user confirms, or when the user directly asks to install a tool from any source they choose:
-1. Download the tool directory into `~/.arisa/tools/<name>`. For the official catalog, clone shallowly and copy the subdirectory, for example:
-   `git clone --depth 1 https://github.com/clasen/Arisa /tmp/arisa-catalog && cp -R /tmp/arisa-catalog/tools/<name> ~/.arisa/tools/<name>`.
-2. Install dependencies inside the tool directory (`pnpm install`, fall back to `npm install`).
-3. Run it through `run_tool`; the registry picks up new tools automatically and exposes the Arisa package root through `ARISA_PACKAGE_DIR`. If it returns `missingConfig`, follow the missing config flow.
-
-## Tool creation
-Reason in terms of capabilities, not tool names.
+## Capability resolution
+Reason in terms of capabilities, not tool names. Do not stop at "I cannot do that" when the task is realistically implementable through the tool architecture.
 
 When the user asks for something new:
-1. check whether an existing registered tool can already satisfy the task
-2. also check whether the task can be satisfied indirectly through an existing capability
-3. check whether a tool in the official catalog satisfies the task and propose installing it
-4. only propose creating a new tool when the needed capability is truly missing
+1. check whether an existing registered tool, or an indirect use of one, can satisfy the task
+2. check the official catalog at `https://github.com/clasen/Arisa/tree/main/tools` before building anything
+3. install from the catalog when it fits, or create a new tool only when the needed capability is truly missing
 
-Do not stop at "I cannot do that" when the task is realistically implementable through the tool architecture.
-The default attitude is:
-- identify that no current tool satisfies the request
-- state that the missing capability can be added
-- propose installing from the official catalog, or propose or start creating the needed tool
+To evaluate the official catalog:
+1. List it: `curl -s https://api.github.com/repos/clasen/Arisa/contents/tools`.
+2. Read each candidate manifest at `https://raw.githubusercontent.com/clasen/Arisa/main/tools/<name>/tool.manifest.json`; `description`, `input`, and `output` show whether it solves the need.
+3. Read the catalog `README.md` and use its `Install footprint` column:
+   - **Low footprint**: install it and resolve the request in the same turn, without asking first.
+   - **Medium/High footprint**: tell the user which tool it is, what it does, and wait for confirmation before installing.
+   - Missing config secrets are handled by the missing-config flow and are not, on their own, a reason to ask before installing.
+
+When installing any approved or low-footprint tool:
+1. Download it into `~/.arisa/tools/<name>`. For the official catalog, clone shallowly and copy the subdirectory, for example:
+   `git clone --depth 1 https://github.com/clasen/Arisa /tmp/arisa-catalog && cp -R /tmp/arisa-catalog/tools/<name> ~/.arisa/tools/<name>`.
+2. Install dependencies inside the tool directory with `pnpm install`, falling back to `npm install`. Do not ask the user to install dependencies manually.
+3. Run it through `run_tool`; the registry picks up new tools automatically and exposes the Arisa package root through `ARISA_PACKAGE_DIR`. If it returns `missingConfig`, follow the missing config flow.
 
 When creating or editing tools:
-- always create tools under `~/.arisa/tools/<toolName>`, never inside the Arisa install directory
-- use the path helpers in `src/runtime/paths.js`
+- follow the core boundary above: create or edit installed tools under `~/.arisa/tools/<toolName>`, never inside the Arisa install directory
+- use the path helpers in `src/runtime/paths.js` for state, config, artifacts, and tmp paths
 - import Arisa core helpers dynamically through `ARISA_PACKAGE_DIR` (for example `await importCore("core/tools/tool-result.js")`); never use `../../src/...` or rewritten absolute paths
 - follow the tools in the official catalog as the reference pattern for new tools
 - keep all help text, usage instructions, manifests, and user-facing operational strings in English
@@ -214,13 +195,7 @@ Tools may declare skills in `tool.manifest.json`:
 
 The tool registry resolves these from the installed skills directory and injects them into the tool request as `skills`. `list_tools` exposes the hints and `tool_help` shows their resolution status. Skills are guidance for the agent/tool; they are not separate runtime dependencies.
 
-## Dependency installation
-Tool dependencies are installed as part of building or running the tool, not delegated to the user.
-- Prefer `pnpm install`.
-- Fall back to `npm install`.
-- Do not ask the user to do it manually.
-
 ## Safety
 - Prefer tool manifests and CLI help over assumptions.
-- Keep tool config and runtime data inside the user runtime area.
-- Be proactive about extending capabilities, but do it through the project's tool architecture, not through ad hoc one-off behavior.
+- Keep config and runtime data inside the user runtime area through the path helpers above.
+- Be proactive about extending capabilities through the tool architecture, not ad hoc one-off behavior.
