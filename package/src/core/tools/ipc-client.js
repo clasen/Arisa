@@ -58,8 +58,9 @@ export function createArisaClient({ toolName, chatId = null, socketPath = proces
     throw new Error("toolName is required");
   }
 
-  const call = (method, params = {}) => requestIpc({
+  const call = (method, params = {}, options = {}) => requestIpc({
     socketPath,
+    timeoutMs: options.timeoutMs,
     request: {
       id: crypto.randomUUID(),
       method,
@@ -82,6 +83,9 @@ export function createArisaClient({ toolName, chatId = null, socketPath = proces
     },
     agent: {
       enqueueEvent: (params) => call("agent.enqueueEvent", params)
+    },
+    tools: {
+      run: (params, options) => call("tools.run", params, options)
     },
     paths: {
       getChatToolStateDir: () => call("paths.getChatToolStateDir"),

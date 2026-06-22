@@ -27,7 +27,7 @@ Tools are installed by copying the tool directory into `~/.arisa/tools/<tool-nam
 
 Tools use local IPC when they need to call back into Arisa. Arisa does not discover or mount tool-provided web routes in core.
 
-If a tool needs a web UI or HTTP endpoint, the tool should run its own server, usually from a daemon built with Arisa's shared daemon runtime. That server handles requests internally and uses IPC to access Arisa capabilities.
+If a tool needs a web UI or HTTP endpoint, the tool should run its own server, usually from a daemon built with Arisa's shared daemon runtime. That server handles requests internally and uses IPC to access Arisa capabilities or run another registered tool.
 
 Example IPC client usage from a tool:
 
@@ -42,7 +42,21 @@ const arisa = createArisaClient({ toolName: "example-tool", chatId });
 await arisa.artifacts.createText({ text: "hello" });
 ```
 
-The IPC client supports explicit capabilities only: artifacts, tasks, agent events, and runtime paths. Chat-scoped calls require `chatId`.
+Tool-owned web servers can use `tools.run` for request/response interactions without adding core HTTP routes or proxies:
+
+```js
+const result = await arisa.tools.run({
+  name: "strudel-agent",
+  text: prompt,
+  args: {
+    bpm,
+    tags,
+    currentCode
+  }
+}, { timeoutMs: 120_000 });
+```
+
+The IPC client supports explicit capabilities only: tools (`run`), artifacts, tasks, agent events, and runtime paths. Chat-scoped calls require `chatId`.
 
 ## Tool contract
 

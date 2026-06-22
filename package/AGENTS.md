@@ -8,6 +8,12 @@
 - Tools are isolated and each one has its own manifest, entrypoint, and config defaults.
 - No tools ship with the core. All installed tools live under `~/.arisa/tools/<toolName>`; the install directory of Arisa (your working directory) contains only the core. Never create or install tools inside the install directory.
 
+## Core modification policy
+Modifying the Arisa core is the last resort, never the default. All work must be done in tools.
+- Always solve the request by creating or editing a tool under `~/.arisa/tools/<toolName>`.
+- Treat changing core code as the final option, only after confirming the capability genuinely cannot be delivered through the tool architecture.
+- Never modify the core on your own initiative. Always consult the user first, explaining why a core change is unavoidable, and wait for explicit approval before touching core code.
+
 ## Runtime directory rules
 Do not build runtime paths by hand. Use `src/runtime/paths.js`:
 - `getToolDir(toolName)`: installed user tool package only; no runtime data here.
@@ -33,7 +39,7 @@ Each tool declares in `tool.manifest.json`:
 - `skillHints`: optional skills to apply when using or editing the tool
 
 ## Tool-to-Arisa IPC
-Arisa does not mount tool-provided web routes in core. If a tool needs to expose a web UI or HTTP endpoint, the tool owns that server, usually through the shared daemon runtime. The tool's server handles its own requests and uses Arisa IPC when it needs artifacts, tasks, agent events, or runtime paths.
+Arisa does not mount tool-provided web routes in core. If a tool needs to expose a web UI or HTTP endpoint, the tool owns that server, usually through the shared daemon runtime. The tool's server handles its own requests and uses Arisa IPC when it needs to run a registered tool, create/read artifacts, manage tasks, enqueue agent events, or resolve runtime paths.
 
 Installed tools can import the IPC client through `ARISA_PACKAGE_DIR`:
 
@@ -48,7 +54,17 @@ const arisa = createArisaClient({ toolName: "example-tool", chatId });
 await arisa.artifacts.createText({ text: "hello" });
 ```
 
-The IPC channel is a local socket under `~/.arisa/state`. Every request must include `toolName`; chat-scoped capabilities also require `chatId`. Exposed capabilities are explicit: artifacts (`createText`, `listRecent`, `get`), tasks (`add`, `list`, `cancel`), agent events (`enqueueEvent`), and runtime paths (`getChatToolStateDir`, `getToolStateDir`, `getChatToolTmpDir`, `getToolTmpDir`, `getChatArtifactsDir`). Do not add raw access to `agentManager`, `taskStore`, `artifactStore`, or `toolRegistry`.
+For tool-owned web UI request/response flows, call another registered tool through IPC instead of adding core HTTP routes or proxies:
+
+```js
+const result = await arisa.tools.run({
+  name: "strudel-agent",
+  text: prompt,
+  args: { bpm, tags, currentCode }
+}, { timeoutMs: 120_000 });
+```
+
+The IPC channel is a local socket under `~/.arisa/state`. Every request must include `toolName`; chat-scoped capabilities also require `chatId`. Exposed capabilities are explicit: tools (`run`), artifacts (`createText`, `listRecent`, `get`), tasks (`add`, `list`, `cancel`), agent events (`enqueueEvent`), and runtime paths (`getChatToolStateDir`, `getToolStateDir`, `getChatToolTmpDir`, `getToolTmpDir`, `getChatArtifactsDir`). Do not add raw access to `agentManager`, `taskStore`, `artifactStore`, or `toolRegistry`.
 
 ## Conceptual pipe model
 There are two different moments where pipes can happen:

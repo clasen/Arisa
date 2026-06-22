@@ -62,7 +62,7 @@ export async function createApp({ logger, runtimeOverrides } = {}) {
   logger?.log("app", `loaded ${toolRegistry.list().length} tools`);
 
   const agentManager = new AgentManager({ config, artifactStore, toolRegistry, taskStore, logger });
-  const arisaCapabilities = createArisaCapabilities({ artifactStore, taskStore });
+  const arisaCapabilities = createArisaCapabilities({ artifactStore, taskStore, agentManager });
   const ipcServer = createIpcServer({ capabilities: arisaCapabilities, logger });
   const bot = await createTelegramBot({ config, artifactStore, toolRegistry, taskStore, agentManager, saveConfig, updateConfig, logger });
 

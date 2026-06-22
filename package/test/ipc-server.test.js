@@ -59,11 +59,16 @@ function createFakeTaskStore() {
   };
 }
 
-function createCapabilities() {
+function createCapabilities(overrides = {}) {
   return createArisaCapabilities({
-    artifactStore: createFakeArtifactStore(),
-    taskStore: createFakeTaskStore()
+    artifactStore: overrides.artifactStore || createFakeArtifactStore(),
+    taskStore: overrides.taskStore || createFakeTaskStore(),
+    agentManager: overrides.agentManager
   });
+}
+
+function wait(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 async function createTempSocketPath() {
@@ -135,6 +140,114 @@ test("requires chatId for chat-scoped capabilities", async () => {
     await assert.rejects(
       () => client.artifacts.listRecent(),
       /artifacts\.listRecent requires chatId/
+    );
+  } finally {
+    await ipcServer.stop();
+  }
+});
+
+test("runs a registered tool over local IPC", async () => {
+  const socketPath = await createTempSocketPath();
+  const calls = [];
+  const agentManager = {
+    runTool: async (request) => {
+      calls.push(request);
+      return { ok: true, status: "ok", output: { text: "generated code" } };
+    }
+  };
+  const ipcServer = createIpcServer({ capabilities: createCapabilities({ agentManager }), socketPath });
+  await ipcServer.start();
+
+  try {
+    const client = createArisaClient({ toolName: "strudel-ui", chatId: "chat-1", socketPath });
+    const result = await client.tools.run({
+      name: "strudel-agent",
+      text: "make acid house",
+      args: {
+        bpm: 128,
+        tags: ["acid", "live"],
+        currentCode: "stack(s(\"bd\"))"
+      }
+    });
+
+    assert.deepEqual(result, { ok: true, status: "ok", output: { text: "generated code" } });
+    assert.equal(calls.length, 1);
+    assert.equal(calls[0].name, "strudel-agent");
+    assert.equal(calls[0].chatId, "chat-1");
+    assert.equal(calls[0].request.text, "make acid house");
+    assert.deepEqual(calls[0].request.args, {
+      bpm: 128,
+      tags: ["acid", "live"],
+      currentCode: "stack(s(\"bd\"))"
+    });
+    assert.equal(calls[0].request.artifact, null);
+  } finally {
+    await ipcServer.stop();
+  }
+});
+
+test("hydrates artifact input before running a tool over IPC", async () => {
+  const socketPath = await createTempSocketPath();
+  const calls = [];
+  const agentManager = {
+    runTool: async (request) => {
+      calls.push(request);
+      return { ok: true, status: "ok", output: { json: { received: true } } };
+    }
+  };
+  const ipcServer = createIpcServer({ capabilities: createCapabilities({ agentManager }), socketPath });
+  await ipcServer.start();
+
+  try {
+    const client = createArisaClient({ toolName: "strudel-ui", chatId: 123, socketPath });
+    const artifact = await client.artifacts.createText({ text: "current pattern" });
+    await client.tools.run({ name: "strudel-agent", artifactId: artifact.id });
+
+    assert.equal(calls.length, 1);
+    assert.deepEqual(calls[0].request.artifact, artifact);
+  } finally {
+    await ipcServer.stop();
+  }
+});
+
+test("requires chatId when running a tool over IPC", async () => {
+  const socketPath = await createTempSocketPath();
+  const agentManager = {
+    runTool: async () => ({ ok: true, status: "ok" })
+  };
+  const ipcServer = createIpcServer({ capabilities: createCapabilities({ agentManager }), socketPath });
+  await ipcServer.start();
+
+  try {
+    const client = createArisaClient({ toolName: "strudel-ui", socketPath });
+    await assert.rejects(
+      () => client.tools.run({ name: "strudel-agent" }),
+      /tools\.run requires chatId/
+    );
+  } finally {
+    await ipcServer.stop();
+  }
+});
+
+test("supports per-call IPC timeout overrides", async () => {
+  const socketPath = await createTempSocketPath();
+  const agentManager = {
+    runTool: async () => {
+      await wait(25);
+      return { ok: true, status: "ok" };
+    }
+  };
+  const ipcServer = createIpcServer({ capabilities: createCapabilities({ agentManager }), socketPath });
+  await ipcServer.start();
+
+  try {
+    const client = createArisaClient({ toolName: "strudel-ui", chatId: 123, socketPath });
+    const result = await client.tools.run({ name: "strudel-agent" }, { timeoutMs: 250 });
+    assert.deepEqual(result, { ok: true, status: "ok" });
+
+    await assert.rejects(
+      () => client.tools.run({ name: "strudel-agent" }, { timeoutMs: 1 }),
+      /Arisa IPC request timed out/
     );
   } finally {
     await ipcServer.stop();

@@ -27,15 +27,48 @@ function requireString(value, fieldName) {
   return value;
 }
 
+function normalizeArgs(args) {
+  if (args == null) return {};
+  if (typeof args !== "object" || Array.isArray(args)) {
+    throw new Error("args must be an object");
+  }
+  return args;
+}
+
 function normalizeLimit(limit) {
   const value = Number(limit);
   if (!Number.isInteger(value) || value <= 0) return 20;
   return Math.min(value, 100);
 }
 
-export function createArisaCapabilities({ artifactStore, taskStore } = {}) {
+export function createArisaCapabilities({ artifactStore, taskStore, agentManager } = {}) {
   async function dispatch({ method, toolName, chatId = null, params = {} } = {}) {
     const scopedToolName = requireToolName(toolName);
+
+    if (method === "tools.run") {
+      if (!agentManager?.runTool) {
+        throw new Error("tools.run requires agentManager");
+      }
+      const scopedChatId = requireChatId(chatId, method);
+      const targetToolName = requireString(params.name, "name");
+      const chatArtifactStore = artifactStore.forChat(scopedChatId);
+      const artifact = params.artifactId
+        ? await chatArtifactStore.get(requireString(params.artifactId, "artifactId"))
+        : null;
+      if (params.artifactId && !artifact) {
+        throw new Error(`Artifact not found: ${params.artifactId}`);
+      }
+
+      return agentManager.runTool({
+        name: targetToolName,
+        request: {
+          artifact,
+          text: params.text,
+          args: normalizeArgs(params.args)
+        },
+        chatId: scopedChatId
+      });
+    }
 
     if (method === "artifacts.createText") {
       const scopedChatId = requireChatId(chatId, method);
