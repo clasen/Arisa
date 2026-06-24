@@ -69,8 +69,20 @@ function toNestedOverrides(nestedFlags) {
 
 function toServiceRunnerArgs(nestedFlags) {
   const args = [];
-  if (nestedFlags["pi.model"]) {
-    args.push("--pi.model", nestedFlags["pi.model"]);
+  const serviceSafePiFlags = [
+    "pi.provider",
+    "pi.model",
+    "pi.workspaceDir",
+    "pi.tools",
+    "pi.excludeTools",
+    "pi.shellPath",
+    "pi.shellTimeoutMs"
+  ];
+
+  for (const flag of serviceSafePiFlags) {
+    if (nestedFlags[flag]) {
+      args.push(`--${flag}`, nestedFlags[flag]);
+    }
   }
   return args;
 }
@@ -109,6 +121,11 @@ async function runForeground() {
     runtimeOverrides?.pi?.model
     || runtimeOverrides?.pi?.provider
     || runtimeOverrides?.pi?.apiKey
+    || runtimeOverrides?.pi?.workspaceDir
+    || runtimeOverrides?.pi?.tools
+    || runtimeOverrides?.pi?.excludeTools
+    || runtimeOverrides?.pi?.shellPath
+    || runtimeOverrides?.pi?.shellTimeoutMs
   );
   logger.log("app", `starting${verbose ? " in verbose mode" : ""}`);
   await bootstrapIfNeeded({ force: forceBootstrap });

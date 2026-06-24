@@ -74,7 +74,8 @@ function buildPrompt({ ctx, artifact, transcript, toolResult }) {
     parts.push(`Important: pre-reasoning media normalization could not be completed, so you do not have a transcript for this audio/video message.`);
   }
 
-  parts.push(`If you need a CLI tool, use list_tools/tool_help/run_tool.`);
+  parts.push(`Use read/write/edit for file work in the active workspace, bash for bash-compatible commands, and system_shell for native system commands such as PowerShell on Windows.`);
+  parts.push(`If you need an Arisa modular CLI tool, use list_tools/tool_help/run_tool.`);
   parts.push(`If a tool config is missing, ask the user naturally and then use set_tool_config.`);
   parts.push(`If the user wants a generated media reply, use send_media_reply.`);
   return parts.join("\n");
@@ -130,7 +131,7 @@ async function buildAsyncTaskPrompt({ task, artifactStore, toolRegistry, logger 
   }
 
   parts.push("Treat this as a new request for the chat and fulfill it now.");
-  parts.push("If needed, use tools.");
+  parts.push("If needed, use read/write/edit, bash, system_shell, or Arisa modular tools via run_tool.");
   return parts.filter(Boolean).join("\n");
 }
 
@@ -142,7 +143,7 @@ function buildAsyncEventPrompt(task) {
     task.payload.prompt ? `event: ${task.payload.prompt}` : null,
     "A polling checker detected this external event. Evaluate it and decide the next action.",
     "If it warrants no action, you may stay silent.",
-    "If needed, use tools."
+    "If needed, use read/write/edit, bash, system_shell, or Arisa modular tools via run_tool."
   ].filter(Boolean).join("\n");
 }
 

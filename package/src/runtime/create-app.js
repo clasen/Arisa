@@ -14,6 +14,31 @@ function normalizeString(value) {
   return text ? text : "";
 }
 
+function normalizeStringList(value) {
+  if (Array.isArray(value)) {
+    const items = value
+      .map((item) => normalizeString(item))
+      .filter(Boolean);
+    return items.length ? [...new Set(items)] : undefined;
+  }
+
+  if (typeof value === "string") {
+    const items = value
+      .split(",")
+      .map((item) => item.trim())
+      .filter(Boolean);
+    return items.length ? [...new Set(items)] : undefined;
+  }
+
+  return undefined;
+}
+
+function normalizePositiveInteger(value) {
+  const number = Number(value);
+  if (!Number.isFinite(number) || number <= 0) return undefined;
+  return Math.floor(number);
+}
+
 function splitModelOverride(modelOverride) {
   const separatorIndex = modelOverride.indexOf("/");
   if (separatorIndex <= 0 || separatorIndex === modelOverride.length - 1) {
@@ -25,23 +50,41 @@ function splitModelOverride(modelOverride) {
   };
 }
 
-function applyRuntimeOverrides(config, runtimeOverrides) {
+export function applyRuntimeOverrides(config, runtimeOverrides) {
+  const piRuntimeOverrides = runtimeOverrides?.pi || {};
+  const pi = {};
   const providerOverride = normalizeString(runtimeOverrides?.pi?.provider);
   const modelOverride = normalizeString(runtimeOverrides?.pi?.model);
-  if (!providerOverride && !modelOverride) return config;
 
-  const splitOverride = modelOverride ? splitModelOverride(modelOverride) : null;
-  const provider = providerOverride || splitOverride?.provider || config.pi.provider;
-  const model = splitOverride && (!providerOverride || providerOverride === splitOverride.provider)
-    ? splitOverride.model
-    : (modelOverride || config.pi.model);
+  if (providerOverride || modelOverride) {
+    const splitOverride = modelOverride ? splitModelOverride(modelOverride) : null;
+    pi.provider = providerOverride || splitOverride?.provider || config.pi.provider;
+    pi.model = splitOverride && (!providerOverride || providerOverride === splitOverride.provider)
+      ? splitOverride.model
+      : (modelOverride || config.pi.model);
+  }
+
+  for (const key of ["apiKey", "workspaceDir", "shellPath"]) {
+    const value = normalizeString(piRuntimeOverrides[key]);
+    if (value) pi[key] = value;
+  }
+
+  const tools = normalizeStringList(piRuntimeOverrides.tools);
+  if (tools) pi.tools = tools;
+
+  const excludeTools = normalizeStringList(piRuntimeOverrides.excludeTools);
+  if (excludeTools) pi.excludeTools = excludeTools;
+
+  const shellTimeoutMs = normalizePositiveInteger(piRuntimeOverrides.shellTimeoutMs);
+  if (shellTimeoutMs) pi.shellTimeoutMs = shellTimeoutMs;
+
+  if (!Object.keys(pi).length) return config;
 
   return {
     ...config,
     pi: {
       ...config.pi,
-      provider,
-      model
+      ...pi
     }
   };
 }

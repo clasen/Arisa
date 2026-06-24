@@ -1,13 +1,26 @@
 import path from "node:path";
-import { unlink } from "node:fs/promises";
+import { stat, unlink } from "node:fs/promises";
 import { createAgentSession, SessionManager, defineTool } from "@earendil-works/pi-coding-agent";
 import { Type } from "@sinclair/typebox";
 import { createPiRuntime, hasProviderAuth } from "./pi-runtime.js";
 import { arisaInstallDir, buildAgentRuntimeContext } from "./runtime-context.js";
 import { withTimeout } from "./prompt-timeout.js";
+import { buildPiToolPolicy, getCoreCodingTools } from "./core-tools.js";
+import { createSystemShellTool } from "./system-shell-tool.js";
 import { arisaHomeDir, getChatPiSessionsDir } from "../../runtime/paths.js";
 
 const piValidationTimeoutMs = 60_000;
+const arisaToolNames = [
+  "list_tools",
+  "tool_help",
+  "tool_skills",
+  "set_tool_config",
+  "run_tool",
+  "list_scheduled_tasks",
+  "cancel_scheduled_task",
+  "cancel_all_scheduled_tasks",
+  "send_media_reply"
+];
 
 function isLocalBaseUrl(value) {
   if (typeof value !== "string" || !value.trim()) return false;
@@ -68,6 +81,13 @@ function selectMediaReplyTool(toolRegistry) {
   return tools.find(looksLikeTextToSpeechTool) || tools[0] || null;
 }
 
+async function assertDirectory(dir, label) {
+  const stats = await stat(dir);
+  if (!stats.isDirectory()) {
+    throw new Error(`${label} is not a directory: ${dir}`);
+  }
+}
+
 export class AgentManager {
   constructor({ config, artifactStore, toolRegistry, taskStore, logger }) {
     this.config = config;
@@ -95,15 +115,15 @@ export class AgentManager {
     this.sessions.delete(String(chatId));
   }
 
-  createSessionManager(chatId) {
+  createSessionManager(chatId, workspaceDir = arisaInstallDir) {
     const sessionKey = String(chatId);
     const sessionDir = getChatPiSessionsDir(sessionKey);
     if (this.pendingNewSessions.has(sessionKey)) {
       this.logger?.log("agent", `starting new persisted session for chat ${sessionKey}`);
-      return { sessionManager: SessionManager.create(arisaInstallDir, sessionDir), isNewSession: true };
+      return { sessionManager: SessionManager.create(workspaceDir, sessionDir), isNewSession: true };
     }
     this.logger?.log("agent", `recovering persisted session for chat ${sessionKey}`);
-    return { sessionManager: SessionManager.continueRecent(arisaInstallDir, sessionDir), isNewSession: false };
+    return { sessionManager: SessionManager.continueRecent(workspaceDir, sessionDir), isNewSession: false };
   }
 
   async validatePiAgent() {
@@ -156,23 +176,36 @@ export class AgentManager {
       throw new Error(`No auth found for ${this.config.pi.provider}. Re-run bootstrap and complete login for this provider before Telegram starts.`);
     }
 
-    const { sessionManager, isNewSession } = this.createSessionManager(sessionKey);
+    const policy = buildPiToolPolicy({
+      config: this.config,
+      customToolNames: [...arisaToolNames, "system_shell"]
+    });
+    await assertDirectory(policy.workspaceDir, "pi.workspaceDir");
+    const { sessionManager, isNewSession } = this.createSessionManager(sessionKey, policy.workspaceDir);
     const hasExistingSession = sessionManager.buildSessionContext().messages.length > 0;
     this.logger?.log("agent", `${hasExistingSession ? "resuming" : "creating"} session for chat ${sessionKey} with model ${effectiveModelId}`);
-    const customTools = this.createTools(telegram, chatId);
+    const customTools = [
+      ...this.createTools(telegram, chatId, policy),
+      createSystemShellTool({ workspaceDir: policy.workspaceDir, shell: policy.shell })
+    ];
     const { session } = await createAgentSession({
-      cwd: arisaInstallDir,
+      cwd: policy.workspaceDir,
       agentDir: arisaHomeDir,
       authStorage,
       modelRegistry,
       model,
+      tools: policy.tools,
+      excludeTools: policy.excludeTools,
       customTools,
       sessionManager
     });
 
     if (!hasExistingSession) {
       this.logger?.log("agent", `created new session for chat ${sessionKey}`);
-      this.logger?.log("agent", `runtime context for chat ${sessionKey}:\n${buildAgentRuntimeContext()}`);
+      this.logger?.log("agent", `runtime context for chat ${sessionKey}:\n${buildAgentRuntimeContext({
+        workspaceDir: policy.workspaceDir,
+        coreTools: policy.coreTools
+      })}`);
     }
 
     const ctx = { session, modelId: effectiveModelId };
@@ -226,20 +259,44 @@ export class AgentManager {
     return result;
   }
 
-  createTools(telegram, chatId) {
+  createTools(telegram, chatId, policy = buildPiToolPolicy({ config: this.config, customToolNames: arisaToolNames })) {
     const chatArtifactStore = this.artifactStore.forChat(chatId);
 
     return [
       defineTool({
         name: "list_tools",
         label: "List tools",
-        description: "List registered CLI tools and their capabilities.",
+        description: "List Arisa core, native shell, and modular CLI tools with their capabilities.",
         parameters: Type.Object({}),
         execute: async () => {
           await this.toolRegistry.load();
+          const coreTools = getCoreCodingTools({
+            tools: policy.tools,
+            excludeTools: policy.excludeTools
+          });
+          const nativeTools = [{
+            name: "system_shell",
+            source: "arisa-native",
+            description: "Run native system shell commands in the active Arisa workspace.",
+            workspaceDir: policy.workspaceDir,
+            shell: policy.shell.shellPath || (process.platform === "win32" ? "powershell" : "sh"),
+            enabled: !(policy.excludeTools || []).includes("system_shell")
+          }];
+          const cliTools = this.toolRegistry.list().map((tool) => ({
+            ...tool,
+            source: "arisa-modular",
+            invocation: "run_tool"
+          }));
+          const result = {
+            workspaceDir: policy.workspaceDir,
+            coreTools,
+            nativeTools,
+            cliTools,
+            tools: [...coreTools.filter((tool) => tool.enabled), ...nativeTools.filter((tool) => tool.enabled), ...cliTools]
+          };
           return {
-            content: [{ type: "text", text: JSON.stringify(this.toolRegistry.list(), null, 2) }],
-            details: { tools: this.toolRegistry.list() }
+            content: [{ type: "text", text: JSON.stringify(result, null, 2) }],
+            details: result
           };
         }
       }),
