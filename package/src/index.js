@@ -116,6 +116,17 @@ async function startRuntimeApp() {
   await app.start();
 }
 
+async function startBackgroundService() {
+  const result = await startService({ verbose, cliArgs: toServiceRunnerArgs(cli.nestedFlags) });
+  if (!result.ok) {
+    console.log(`Arisa is already running in background (pid ${result.pid}).`);
+    return result;
+  }
+  console.log(`Arisa started in background (pid ${result.pid}).`);
+  console.log(`Log file: ${result.logFile}`);
+  return result;
+}
+
 async function runForeground() {
   const hasRuntimePiOverrides = Boolean(
     runtimeOverrides?.pi?.model
@@ -128,7 +139,11 @@ async function runForeground() {
     || runtimeOverrides?.pi?.shellTimeoutMs
   );
   logger.log("app", `starting${verbose ? " in verbose mode" : ""}`);
-  await bootstrapIfNeeded({ force: forceBootstrap });
+  const bootstrapResult = await bootstrapIfNeeded({ force: forceBootstrap });
+  if (bootstrapResult.startInBackground) {
+    await startBackgroundService();
+    return;
+  }
   try {
     await startRuntimeApp();
   } catch (error) {
@@ -143,7 +158,11 @@ async function runForeground() {
         throw error;
       }
       console.log("Reopening bootstrap so you can provide a Pi API key or switch to a provider you already authenticated with.\n");
-      await bootstrapIfNeeded({ force: true });
+      const retryBootstrapResult = await bootstrapIfNeeded({ force: true });
+      if (retryBootstrapResult.startInBackground) {
+        await startBackgroundService();
+        return;
+      }
       await startRuntimeApp();
       return;
     }
@@ -159,14 +178,12 @@ async function main() {
   }
 
   if (command === "start") {
-    await bootstrapIfNeeded({ force: forceBootstrap });
-    const result = await startService({ verbose, cliArgs: toServiceRunnerArgs(cli.nestedFlags) });
-    if (!result.ok) {
-      console.log(`Arisa is already running in background (pid ${result.pid}).`);
+    const bootstrapResult = await bootstrapIfNeeded({ force: forceBootstrap });
+    if (bootstrapResult.configCreated && bootstrapResult.viaTelegram && !bootstrapResult.startInBackground) {
+      console.log("Config saved. Arisa was not started in background.");
       return;
     }
-    console.log(`Arisa started in background (pid ${result.pid}).`);
-    console.log(`Log file: ${result.logFile}`);
+    await startBackgroundService();
     return;
   }
 

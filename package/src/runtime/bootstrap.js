@@ -1,7 +1,9 @@
+import crypto from "node:crypto";
 import { readFile, writeFile } from "node:fs/promises";
 import readline from "node:readline/promises";
 import { stdin as input, stdout as output } from "node:process";
 import { spawn } from "node:child_process";
+import { Bot } from "grammy";
 import { createPiOAuthLogin } from "../core/agent/pi-auth-login.js";
 import { createPiRuntime, hasProviderAuth, listPiProviders, listProviderModels, supportsProviderOAuth } from "../core/agent/pi-runtime.js";
 import { configFile, ensureArisaHome } from "./paths.js";
@@ -24,13 +26,13 @@ async function exists(file) {
   }
 }
 
-function buildConfig({ telegramApiKey, telegramMaxChatIds, provider, model, piApiKey }) {
+function buildConfig({ telegramApiKey, telegramMaxChatIds, authorizedChatIds = [], chatMeta = {}, provider, model, piApiKey }) {
   return {
     telegram: {
       token: telegramApiKey,
       maxChatIds: telegramMaxChatIds,
-      authorizedChatIds: [],
-      chatMeta: {}
+      authorizedChatIds,
+      chatMeta
     },
     pi: {
       provider,
@@ -73,6 +75,64 @@ function sortBootstrapModels(provider, models) {
   });
 }
 
+function createSetupToken() {
+  return crypto.randomBytes(18).toString("base64url");
+}
+
+function parsePositiveInteger(value, fallback = null) {
+  const number = Number(value);
+  if (!Number.isFinite(number) || number <= 0) return fallback;
+  return Math.floor(number);
+}
+
+function selectByIndex(items, value, fallbackIndex = 0) {
+  const index = parsePositiveInteger(value, fallbackIndex + 1) - 1;
+  return items[Math.max(0, Math.min(items.length - 1, index))];
+}
+
+function parseYesNo(value, fallback = true) {
+  const text = String(value ?? "").trim().toLowerCase();
+  if (!text) return fallback;
+  if (["y", "yes", "s", "si", "sí"].includes(text)) return true;
+  if (["n", "no"].includes(text)) return false;
+  return null;
+}
+
+function buildInlineKeyboard(action, items) {
+  return {
+    inline_keyboard: items.map((item, index) => ([{
+      text: item.text,
+      callback_data: `${action}:${index}`
+    }]))
+  };
+}
+
+function getIncomingChatMeta(ctx) {
+  return {
+    languageCode: ctx.from?.language_code || "",
+    username: ctx.from?.username || "",
+    firstName: ctx.from?.first_name || "",
+    lastName: ctx.from?.last_name || ""
+  };
+}
+
+function formatProviderOption(item) {
+  const authLabel = item.authConfigured ? "auth configured" : item.supportsOAuth ? "login or API key" : "API key";
+  return `${item.provider} (${item.modelCount} models, ${authLabel})`;
+}
+
+function formatModelOption(model) {
+  const capabilities = [model.reasoning ? "reasoning" : null, model.input?.includes("image") ? "image" : null].filter(Boolean).join(", ");
+  return capabilities ? `${model.id} [${capabilities}]` : model.id;
+}
+
+function selectPiLoginOption(options = []) {
+  return options.find((option) => /device/i.test(`${option.id} ${option.label}`))
+    || options.find((option) => /browser|oauth|web/i.test(`${option.id} ${option.label}`))
+    || options[0]
+    || null;
+}
+
 async function maybeOpenExternal(url) {
   if (!url) return;
   await new Promise((resolve) => {
@@ -92,6 +152,12 @@ async function maybeOpenExternal(url) {
 async function runInternalPiLogin(provider, { rl = null } = {}) {
   const login = createPiOAuthLogin({
     provider,
+    onSelect: async ({ message, options }) => {
+      const selected = selectPiLoginOption(options);
+      if (!selected) return undefined;
+      console.log(`${message}\nUsing: ${selected.label || selected.id}\n`);
+      return selected.id;
+    },
     onAuth: async ({ url, instructions, controller }) => {
       console.log(`${instructions || "Open this URL to continue authentication:"}\n${url}\n`);
       await maybeOpenExternal(url);
@@ -118,43 +184,24 @@ async function runInternalPiLogin(provider, { rl = null } = {}) {
   await login.promise;
 }
 
-export async function bootstrapIfNeeded({ force = false } = {}) {
-  await ensureArisaHome();
-  if (!force && await exists(configFile)) return;
-
-  const rl = readline.createInterface({ input, output });
-  const ask = async (label, fallback = "") => {
-    const suffix = fallback ? ` (${fallback})` : "";
-    const value = (await rl.question(`${label}${suffix}: `)).trim();
-    return value || fallback;
-  };
-
-  console.log(`\n${ARISA_BANNER}`);
-  console.log("-------- https://arisa.sh --------\n");
-  console.log("Get Telegram bot token from https://t.me/BotFather");
-  const telegramApiKey = await ask("Telegram bot token");
+async function collectCliBootstrapChoices({ telegramApiKey, rl, ask }) {
   const telegramMaxChatIds = Number(await ask("Maximum authorized chat IDs", "1"));
 
   const runtime = createPiRuntime();
   const providers = sortBootstrapProviders(listPiProviders(runtime));
   console.log("\nAvailable Pi providers:");
   providers.forEach((item, index) => {
-    const authLabel = item.authConfigured ? "auth: configured" : item.supportsOAuth ? "auth: login or API key" : "auth: API key";
-    console.log(`${index + 1}. ${item.provider} (${item.modelCount} models, ${authLabel})`);
+    console.log(`${index + 1}. ${formatProviderOption(item)}`);
   });
 
-  const selectedProviderIndex = Number(await ask("Select Pi provider by number", "1"));
-  const selectedProvider = providers[Math.max(0, Math.min(providers.length - 1, selectedProviderIndex - 1))];
+  const selectedProvider = selectByIndex(providers, await ask("Select Pi provider by number", "1"));
   const models = sortBootstrapModels(selectedProvider.provider, listProviderModels(selectedProvider.provider, runtime));
   console.log(`\nAvailable models for ${selectedProvider.provider}:`);
   models.forEach((model, index) => {
-    const capabilities = [model.reasoning ? "reasoning" : null, model.input?.includes("image") ? "image" : null].filter(Boolean).join(", ");
-    const suffix = capabilities ? ` [${capabilities}]` : "";
-    console.log(`${index + 1}. ${model.id}${suffix}`);
+    console.log(`${index + 1}. ${formatModelOption(model)}`);
   });
 
-  const selectedModelIndex = Number(await ask("Select Pi model by number", "1"));
-  const selectedModel = models[Math.max(0, Math.min(models.length - 1, selectedModelIndex - 1))];
+  const selectedModel = selectByIndex(models, await ask("Select Pi model by number", "1"));
   const selectedAuthReady = hasProviderAuth(selectedProvider.provider, runtime);
   const providerSupportsOAuth = supportsProviderOAuth(selectedProvider.provider, runtime);
   console.log(`Selected model: ${selectedModel.provider}/${selectedModel.id}`);
@@ -189,17 +236,346 @@ export async function bootstrapIfNeeded({ force = false } = {}) {
     console.log(`Pi auth for ${selectedProvider.provider} is still missing after login.`);
   }
 
-  const config = buildConfig({
-    telegramApiKey,
-    telegramMaxChatIds,
-    provider: selectedProvider.provider,
-    model: selectedModel.id,
-    piApiKey
+  return {
+    config: buildConfig({
+      telegramApiKey,
+      telegramMaxChatIds,
+      provider: selectedProvider.provider,
+      model: selectedModel.id,
+      piApiKey
+    }),
+    startInBackground: false,
+    viaTelegram: false
+  };
+}
+
+async function runTelegramBootstrap({ telegramApiKey, setupToken, botInfo }) {
+  const bot = new Bot(telegramApiKey);
+  const runtime = createPiRuntime();
+  const providers = sortBootstrapProviders(listPiProviders(runtime));
+  let setupChatId = null;
+  let chatMeta = {};
+  let state = "await-start";
+  let telegramMaxChatIds = 1;
+  let selectedProvider = null;
+  let selectedModel = null;
+  let piApiKey = "";
+  let activeLogin = null;
+  let completed = false;
+  let resolveResult;
+  let rejectResult;
+
+  const resultPromise = new Promise((resolve, reject) => {
+    resolveResult = resolve;
+    rejectResult = reject;
   });
 
-  await writeFile(configFile, `${JSON.stringify(config, null, 2)}\n`, "utf8");
-  rl.close();
-  console.log(`\nConfig saved to ${configFile}\n`);
+  const sendSetupMessage = async (text, extra = {}) => {
+    if (!setupChatId) return;
+    await bot.api.sendMessage(setupChatId, text, extra);
+  };
+
+  const isSetupChat = (ctx) => setupChatId && ctx.chat?.id === setupChatId;
+
+  const complete = (startInBackground) => {
+    if (completed) return;
+    completed = true;
+    resolveResult({
+      config: buildConfig({
+        telegramApiKey,
+        telegramMaxChatIds,
+        authorizedChatIds: [setupChatId],
+        chatMeta: { [setupChatId]: chatMeta },
+        provider: selectedProvider.provider,
+        model: selectedModel.id,
+        piApiKey
+      }),
+      startInBackground,
+      viaTelegram: true
+    });
+  };
+
+  const askProvider = async () => {
+    state = "provider";
+    await sendSetupMessage("Select the Pi provider Arisa should use:", {
+      reply_markup: buildInlineKeyboard("provider", providers.map((provider) => ({ text: formatProviderOption(provider) })))
+    });
+  };
+
+  const askModel = async () => {
+    state = "model";
+    const models = sortBootstrapModels(selectedProvider.provider, listProviderModels(selectedProvider.provider, createPiRuntime()));
+    await sendSetupMessage(`Select the model for ${selectedProvider.provider}:`, {
+      reply_markup: buildInlineKeyboard("model", models.map((model) => ({ text: formatModelOption(model) })))
+    });
+  };
+
+  const askBackground = async () => {
+    state = "background";
+    await sendSetupMessage("Bootstrap complete. Keep Arisa running in background now?", {
+      reply_markup: {
+        inline_keyboard: [
+          [{ text: "Yes, start in background", callback_data: "background:yes" }],
+          [{ text: "No, continue in foreground", callback_data: "background:no" }]
+        ]
+      }
+    });
+  };
+
+  const askApiKey = async () => {
+    state = "pi-api-key";
+    await sendSetupMessage(`Send the Pi API key for ${selectedProvider.provider}.`);
+  };
+
+  const askAuthMethod = async () => {
+    const providerRuntime = createPiRuntime();
+    const selectedAuthReady = hasProviderAuth(selectedProvider.provider, providerRuntime);
+    const providerSupportsOAuth = supportsProviderOAuth(selectedProvider.provider, providerRuntime);
+    const buttons = [];
+
+    if (selectedAuthReady) {
+      buttons.push([{ text: "Use existing Pi auth", callback_data: "auth:existing" }]);
+    }
+    if (providerSupportsOAuth) {
+      buttons.push([{ text: selectedAuthReady ? "Run Pi login again" : "Start Pi login", callback_data: "auth:login" }]);
+    }
+    buttons.push([{ text: "Enter API key", callback_data: "auth:key" }]);
+
+    state = "auth-method";
+    await sendSetupMessage([
+      `Selected model: ${selectedProvider.provider}/${selectedModel.id}`,
+      `Existing Pi auth for ${selectedProvider.provider}: ${selectedAuthReady ? "yes" : "no"}`,
+      "Choose how Arisa should authenticate Pi."
+    ].join("\n"), {
+      reply_markup: { inline_keyboard: buttons }
+    });
+  };
+
+  const finishPiLogin = async (login) => {
+    try {
+      await login.promise;
+      activeLogin = null;
+      if (hasProviderAuth(selectedProvider.provider, createPiRuntime())) {
+        await sendSetupMessage(`Detected Pi auth for ${selectedProvider.provider}.`);
+        await askBackground();
+        return;
+      }
+      await sendSetupMessage(`Pi auth for ${selectedProvider.provider} is still missing after login.`);
+      await askAuthMethod();
+    } catch (error) {
+      activeLogin = null;
+      await sendSetupMessage(`Pi login failed: ${error instanceof Error ? error.message : String(error)}`);
+      await askAuthMethod();
+    }
+  };
+
+  const startPiLogin = async () => {
+    if (hasProviderAuth(selectedProvider.provider, createPiRuntime())) {
+      await sendSetupMessage(`Existing Pi auth for ${selectedProvider.provider} detected.`);
+      await askBackground();
+      return;
+    }
+
+    state = "pi-login";
+    const login = createPiOAuthLogin({
+      provider: selectedProvider.provider,
+      onSelect: async ({ message, options }) => {
+        const selected = selectPiLoginOption(options);
+        if (!selected) return undefined;
+        await sendSetupMessage(`${message}\nUsing: ${selected.label || selected.id}`);
+        return selected.id;
+      },
+      onAuth: async ({ url, instructions }) => {
+        await sendSetupMessage([
+          instructions || "Open this URL to continue Pi authentication:",
+          url,
+          "After login, paste the full redirect URL back here."
+        ].join("\n"));
+      },
+      onDeviceCode: async ({ userCode, verificationUri, expiresInSeconds }) => {
+        const expiry = expiresInSeconds ? `\nExpires in ${Math.round(expiresInSeconds / 60)} minute(s).` : "";
+        await sendSetupMessage(`Open this URL: ${verificationUri}\nThen enter code: ${userCode}${expiry}`);
+      },
+      onPrompt: async ({ message, controller }) => {
+        await sendSetupMessage(`${message}\nReply here with the value.`);
+        return controller.waitForManualCode();
+      },
+      onProgress: (message) => {
+        if (message) console.log(`[bootstrap] Pi auth progress: ${message}`);
+      }
+    });
+
+    activeLogin = login;
+    finishPiLogin(login);
+  };
+
+  bot.catch((error) => {
+    console.error("Telegram setup bot error:", error);
+  });
+
+  bot.command("start", async (ctx) => {
+    if (String(ctx.match || "").trim() !== setupToken) {
+      await ctx.reply("Invalid setup link. Use the link shown in the Arisa bootstrap terminal.");
+      return;
+    }
+
+    if (setupChatId && ctx.chat.id !== setupChatId) {
+      await ctx.reply("This setup session is already connected to another chat.");
+      return;
+    }
+
+    setupChatId = ctx.chat.id;
+    chatMeta = getIncomingChatMeta(ctx);
+    await ctx.reply([
+      `Connected to @${botInfo.username}.`,
+      "This chat will be the only Telegram chat authorized during setup."
+    ].join("\n"));
+    await askProvider();
+  });
+
+  bot.on("callback_query:data", async (ctx) => {
+    await ctx.answerCallbackQuery().catch(() => {});
+    if (!isSetupChat(ctx)) return;
+
+    const data = String(ctx.callbackQuery.data || "");
+    const [action, rawValue] = data.split(":");
+
+    if (action === "provider" && state === "provider") {
+      selectedProvider = providers[Number(rawValue)];
+      if (!selectedProvider) return;
+      await askModel();
+      return;
+    }
+
+    if (action === "model" && state === "model") {
+      const models = sortBootstrapModels(selectedProvider.provider, listProviderModels(selectedProvider.provider, createPiRuntime()));
+      selectedModel = models[Number(rawValue)];
+      if (!selectedModel) return;
+      await askAuthMethod();
+      return;
+    }
+
+    if (action === "auth" && state === "auth-method") {
+      if (rawValue === "existing") {
+        if (hasProviderAuth(selectedProvider.provider, createPiRuntime())) {
+          await askBackground();
+        } else {
+          await sendSetupMessage(`No existing Pi auth found for ${selectedProvider.provider}.`);
+          await askAuthMethod();
+        }
+        return;
+      }
+      if (rawValue === "login") {
+        await startPiLogin();
+        return;
+      }
+      if (rawValue === "key") {
+        await askApiKey();
+        return;
+      }
+    }
+
+    if (action === "background" && state === "background") {
+      await sendSetupMessage(rawValue === "yes"
+        ? "Saving config. Arisa will start in background now."
+        : "Saving config. Arisa will continue in foreground.");
+      complete(rawValue === "yes");
+    }
+  });
+
+  bot.on("message:text", async (ctx) => {
+    if (!isSetupChat(ctx)) return;
+    const text = String(ctx.message.text || "").trim();
+    if (!text || text.startsWith("/")) return;
+
+    if (state === "pi-api-key") {
+      piApiKey = text;
+      await askBackground();
+      return;
+    }
+
+    if (state === "pi-login" && activeLogin?.manualInputRequested) {
+      if (activeLogin.submitManualCode(text)) {
+        await ctx.reply("Got it. Finishing Pi login now...");
+      }
+      return;
+    }
+
+    if (state === "background") {
+      const answer = parseYesNo(text, true);
+      if (answer === null) {
+        await ctx.reply("Please answer yes or no.");
+        return;
+      }
+      await ctx.reply(answer
+        ? "Saving config. Arisa will start in background now."
+        : "Saving config. Arisa will continue in foreground.");
+      complete(answer);
+    }
+  });
+
+  await bot.api.deleteWebhook({ drop_pending_updates: true });
+  console.log("Waiting for Telegram setup to complete...");
+  const polling = bot.start().then(() => {
+    if (!completed) throw new Error("Telegram setup bot stopped before bootstrap completed.");
+  });
+
+  try {
+    return await Promise.race([resultPromise, polling]);
+  } catch (error) {
+    rejectResult(error);
+    throw error;
+  } finally {
+    bot.stop();
+    await polling.catch(() => {});
+  }
+}
+
+export async function bootstrapIfNeeded({ force = false } = {}) {
+  await ensureArisaHome();
+  if (!force && await exists(configFile)) {
+    return { configCreated: false, viaTelegram: false, startInBackground: false };
+  }
+
+  const rl = readline.createInterface({ input, output });
+  const ask = async (label, fallback = "") => {
+    const suffix = fallback ? ` (${fallback})` : "";
+    const value = (await rl.question(`${label}${suffix}: `)).trim();
+    return value || fallback;
+  };
+
+  console.log(`\n${ARISA_BANNER}`);
+  console.log("-------- https://arisa.sh --------\n");
+  console.log("Get Telegram bot token from https://t.me/BotFather");
+  const telegramApiKey = await ask("Telegram bot token");
+
+  try {
+    const setupProbeBot = new Bot(telegramApiKey);
+    const botInfo = await setupProbeBot.api.getMe();
+    const answer = parseYesNo(await ask("Continue bootstrap from Telegram?", "Y"), true);
+    const continueFromTelegram = answer === null ? true : answer;
+
+    let result;
+    if (continueFromTelegram) {
+      const setupToken = createSetupToken();
+      const setupLink = `https://t.me/${botInfo.username}?start=${setupToken}`;
+      console.log(`\nOpen this link to continue setup in Telegram:\n${setupLink}\n`);
+      await maybeOpenExternal(setupLink);
+      result = await runTelegramBootstrap({ telegramApiKey, setupToken, botInfo });
+    } else {
+      result = await collectCliBootstrapChoices({ telegramApiKey, rl, ask });
+    }
+
+    await writeFile(configFile, `${JSON.stringify(result.config, null, 2)}\n`, "utf8");
+    console.log(`\nConfig saved to ${configFile}\n`);
+    return {
+      configCreated: true,
+      viaTelegram: result.viaTelegram,
+      startInBackground: result.startInBackground
+    };
+  } finally {
+    rl.close();
+  }
 }
 
 export { configFile };

@@ -132,12 +132,14 @@ Notes:
 On first run, Arisa will:
 
 1. ask for a Telegram bot token
-2. ask for the maximum number of authorized chat ids
-3. show Pi providers discovered from Pi Agent's model registry
-4. show the models available for the selected provider
-5. resolve authentication for the selected Pi provider
+2. validate the token and ask whether to continue bootstrap from Telegram (default: yes)
+3. when Telegram setup is selected, show a `https://t.me/<bot>?start=<setup-token>` link
+4. authorize that Telegram chat and continue setup there: Pi provider, model, and Pi auth
+5. ask from Telegram whether Arisa should keep running in background
 6. validate that Pi Agent works
 7. only then start listening to Telegram
+
+Choosing `n` at the Telegram setup prompt keeps the previous CLI-only bootstrap flow.
 
 Arisa does not run a persistent HTTP health server or Telegram webhook; Telegram uses long polling.
 
