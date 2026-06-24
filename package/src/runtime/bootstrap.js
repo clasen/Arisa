@@ -98,13 +98,28 @@ function parseYesNo(value, fallback = true) {
   return null;
 }
 
-function buildInlineKeyboard(action, items) {
-  return {
-    inline_keyboard: items.map((item, index) => ([{
-      text: item.text,
-      callback_data: `${action}:${index}`
-    }]))
-  };
+function buildPagedInlineKeyboard(action, items, { page = 0, pageSize = 8 } = {}) {
+  const pageCount = Math.max(1, Math.ceil(items.length / pageSize));
+  const currentPage = Math.max(0, Math.min(pageCount - 1, page));
+  const startIndex = currentPage * pageSize;
+  const rows = items.slice(startIndex, startIndex + pageSize).map((item, index) => ([{
+    text: item.text,
+    callback_data: `${action}:${startIndex + index}`
+  }]));
+
+  if (pageCount > 1) {
+    const navigation = [];
+    if (currentPage > 0) {
+      navigation.push({ text: "Previous", callback_data: `${action}-page:${currentPage - 1}` });
+    }
+    navigation.push({ text: `${currentPage + 1}/${pageCount}`, callback_data: "noop:page" });
+    if (currentPage < pageCount - 1) {
+      navigation.push({ text: "Next", callback_data: `${action}-page:${currentPage + 1}` });
+    }
+    rows.push(navigation);
+  }
+
+  return { inline_keyboard: rows };
 }
 
 function getIncomingChatMeta(ctx) {
@@ -275,6 +290,17 @@ async function runTelegramBootstrap({ telegramApiKey, setupToken, botInfo }) {
     await bot.api.sendMessage(setupChatId, text, extra);
   };
 
+  const showSetupPrompt = async (ctx, text, extra = {}) => {
+    const messageId = ctx?.callbackQuery?.message?.message_id;
+    if (messageId && ctx.chat?.id) {
+      try {
+        await ctx.api.editMessageText(ctx.chat.id, messageId, text, extra);
+        return;
+      } catch {}
+    }
+    await sendSetupMessage(text, extra);
+  };
+
   const isSetupChat = (ctx) => setupChatId && ctx.chat?.id === setupChatId;
 
   const complete = (startInBackground) => {
@@ -295,24 +321,24 @@ async function runTelegramBootstrap({ telegramApiKey, setupToken, botInfo }) {
     });
   };
 
-  const askProvider = async () => {
+  const askProvider = async (ctx = null, page = 0) => {
     state = "provider";
-    await sendSetupMessage("Select the Pi provider Arisa should use:", {
-      reply_markup: buildInlineKeyboard("provider", providers.map((provider) => ({ text: formatProviderOption(provider) })))
+    await showSetupPrompt(ctx, "Select the Pi provider Arisa should use:", {
+      reply_markup: buildPagedInlineKeyboard("provider", providers.map((provider) => ({ text: formatProviderOption(provider) })), { page })
     });
   };
 
-  const askModel = async () => {
+  const askModel = async (ctx = null, page = 0) => {
     state = "model";
     const models = sortBootstrapModels(selectedProvider.provider, listProviderModels(selectedProvider.provider, createPiRuntime()));
-    await sendSetupMessage(`Select the model for ${selectedProvider.provider}:`, {
-      reply_markup: buildInlineKeyboard("model", models.map((model) => ({ text: formatModelOption(model) })))
+    await showSetupPrompt(ctx, `Select the model for ${selectedProvider.provider}:`, {
+      reply_markup: buildPagedInlineKeyboard("model", models.map((model) => ({ text: formatModelOption(model) })), { page })
     });
   };
 
-  const askBackground = async () => {
+  const askBackground = async (ctx = null) => {
     state = "background";
-    await sendSetupMessage("Bootstrap complete. Keep Arisa running in background now?", {
+    await showSetupPrompt(ctx, "Bootstrap complete. Keep Arisa running in background now?", {
       reply_markup: {
         inline_keyboard: [
           [{ text: "Yes, start in background", callback_data: "background:yes" }],
@@ -322,12 +348,14 @@ async function runTelegramBootstrap({ telegramApiKey, setupToken, botInfo }) {
     });
   };
 
-  const askApiKey = async () => {
+  const askApiKey = async (ctx = null) => {
     state = "pi-api-key";
-    await sendSetupMessage(`Send the Pi API key for ${selectedProvider.provider}.`);
+    await showSetupPrompt(ctx, `Send the Pi API key for ${selectedProvider.provider}.`, {
+      reply_markup: { inline_keyboard: [] }
+    });
   };
 
-  const askAuthMethod = async () => {
+  const askAuthMethod = async (ctx = null) => {
     const providerRuntime = createPiRuntime();
     const selectedAuthReady = hasProviderAuth(selectedProvider.provider, providerRuntime);
     const providerSupportsOAuth = supportsProviderOAuth(selectedProvider.provider, providerRuntime);
@@ -342,7 +370,7 @@ async function runTelegramBootstrap({ telegramApiKey, setupToken, botInfo }) {
     buttons.push([{ text: "Enter API key", callback_data: "auth:key" }]);
 
     state = "auth-method";
-    await sendSetupMessage([
+    await showSetupPrompt(ctx, [
       `Selected model: ${selectedProvider.provider}/${selectedModel.id}`,
       `Existing Pi auth for ${selectedProvider.provider}: ${selectedAuthReady ? "yes" : "no"}`,
       "Choose how Arisa should authenticate Pi."
@@ -440,10 +468,22 @@ async function runTelegramBootstrap({ telegramApiKey, setupToken, botInfo }) {
     const data = String(ctx.callbackQuery.data || "");
     const [action, rawValue] = data.split(":");
 
+    if (action === "noop") return;
+
+    if (action === "provider-page" && state === "provider") {
+      await askProvider(ctx, Number(rawValue));
+      return;
+    }
+
+    if (action === "model-page" && state === "model") {
+      await askModel(ctx, Number(rawValue));
+      return;
+    }
+
     if (action === "provider" && state === "provider") {
       selectedProvider = providers[Number(rawValue)];
       if (!selectedProvider) return;
-      await askModel();
+      await askModel(ctx);
       return;
     }
 
@@ -451,17 +491,17 @@ async function runTelegramBootstrap({ telegramApiKey, setupToken, botInfo }) {
       const models = sortBootstrapModels(selectedProvider.provider, listProviderModels(selectedProvider.provider, createPiRuntime()));
       selectedModel = models[Number(rawValue)];
       if (!selectedModel) return;
-      await askAuthMethod();
+      await askAuthMethod(ctx);
       return;
     }
 
     if (action === "auth" && state === "auth-method") {
       if (rawValue === "existing") {
         if (hasProviderAuth(selectedProvider.provider, createPiRuntime())) {
-          await askBackground();
+          await askBackground(ctx);
         } else {
           await sendSetupMessage(`No existing Pi auth found for ${selectedProvider.provider}.`);
-          await askAuthMethod();
+          await askAuthMethod(ctx);
         }
         return;
       }
@@ -470,7 +510,7 @@ async function runTelegramBootstrap({ telegramApiKey, setupToken, botInfo }) {
         return;
       }
       if (rawValue === "key") {
-        await askApiKey();
+        await askApiKey(ctx);
         return;
       }
     }

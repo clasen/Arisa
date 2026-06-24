@@ -11,6 +11,10 @@ function isStaleSocketError(error) {
   return ["ENOENT", "ECONNREFUSED"].includes(error?.code);
 }
 
+function isNamedPipe(socketPath) {
+  return typeof socketPath === "string" && /^\\\\[.?]\\pipe\\/i.test(socketPath);
+}
+
 async function hasLiveSocket(socketPath) {
   return new Promise((resolve, reject) => {
     const client = net.createConnection(socketPath);
@@ -52,14 +56,19 @@ export function createIpcServer({ capabilities, socketPath = arisaIpcSocketFile,
 
   async function start() {
     if (server) return { socketPath };
-    await mkdir(path.dirname(socketPath), { recursive: true });
+    const namedPipe = isNamedPipe(socketPath);
+    if (!namedPipe) {
+      await mkdir(path.dirname(socketPath), { recursive: true });
+    }
 
     if (await hasLiveSocket(socketPath)) {
       throw new Error(`Arisa IPC socket already in use: ${socketPath}`);
     }
-    await unlink(socketPath).catch((error) => {
-      if (error?.code !== "ENOENT") throw error;
-    });
+    if (!namedPipe) {
+      await unlink(socketPath).catch((error) => {
+        if (error?.code !== "ENOENT") throw error;
+      });
+    }
 
     server = net.createServer((socket) => {
       socket.setEncoding("utf8");
@@ -83,7 +92,9 @@ export function createIpcServer({ capabilities, socketPath = arisaIpcSocketFile,
       server.once("error", reject);
       server.listen(socketPath, resolve);
     });
-    await chmod(socketPath, 0o600).catch(() => {});
+    if (!namedPipe) {
+      await chmod(socketPath, 0o600).catch(() => {});
+    }
     logger?.log?.("ipc", `listening on ${socketPath}`);
     return { socketPath };
   }
@@ -93,9 +104,11 @@ export function createIpcServer({ capabilities, socketPath = arisaIpcSocketFile,
     const closingServer = server;
     server = null;
     await new Promise((resolve) => closingServer.close(resolve));
-    await unlink(socketPath).catch((error) => {
-      if (error?.code !== "ENOENT") throw error;
-    });
+    if (!isNamedPipe(socketPath)) {
+      await unlink(socketPath).catch((error) => {
+        if (error?.code !== "ENOENT") throw error;
+      });
+    }
   }
 
   return {

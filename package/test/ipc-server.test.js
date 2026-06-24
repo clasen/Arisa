@@ -7,6 +7,7 @@ import test from "node:test";
 import { createArisaClient } from "../src/core/tools/ipc-client.js";
 import { createArisaCapabilities } from "../src/runtime/arisa-capabilities.js";
 import { createIpcServer } from "../src/runtime/ipc/ipc-server.js";
+import { createIpcSocketPath } from "../src/runtime/paths.js";
 
 function createFakeArtifactStore() {
   const stores = new Map();
@@ -66,6 +67,15 @@ function createCapabilities(overrides = {}) {
     agentManager: overrides.agentManager
   });
 }
+
+test("uses a Windows named pipe for IPC on Windows", () => {
+  const socketPath = createIpcSocketPath({
+    homeDir: "C:\\Users\\Arisa\\.arisa",
+    platform: "win32"
+  });
+
+  assert.match(socketPath, /^\\\\\.\\pipe\\arisa-[a-f0-9]{16}$/);
+});
 
 function wait(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
