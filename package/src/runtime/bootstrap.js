@@ -331,8 +331,10 @@ async function runTelegramBootstrap({ telegramApiKey, setupToken, botInfo }) {
   const askModel = async (ctx = null, page = 0) => {
     state = "model";
     const models = sortBootstrapModels(selectedProvider.provider, listProviderModels(selectedProvider.provider, createPiRuntime()));
+    const keyboard = buildPagedInlineKeyboard("model", models.map((model) => ({ text: formatModelOption(model) })), { page });
+    keyboard.inline_keyboard.push([{ text: "Back to providers", callback_data: "back:provider" }]);
     await showSetupPrompt(ctx, `Select the model for ${selectedProvider.provider}:`, {
-      reply_markup: buildPagedInlineKeyboard("model", models.map((model) => ({ text: formatModelOption(model) })), { page })
+      reply_markup: keyboard
     });
   };
 
@@ -368,6 +370,7 @@ async function runTelegramBootstrap({ telegramApiKey, setupToken, botInfo }) {
       buttons.push([{ text: selectedAuthReady ? "Run Pi login again" : "Start Pi login", callback_data: "auth:login" }]);
     }
     buttons.push([{ text: "Enter API key", callback_data: "auth:key" }]);
+    buttons.push([{ text: "Back to models", callback_data: "back:model" }]);
 
     state = "auth-method";
     await showSetupPrompt(ctx, [
@@ -469,6 +472,19 @@ async function runTelegramBootstrap({ telegramApiKey, setupToken, botInfo }) {
     const [action, rawValue] = data.split(":");
 
     if (action === "noop") return;
+
+    if (action === "back" && rawValue === "provider" && state === "model") {
+      selectedProvider = null;
+      selectedModel = null;
+      await askProvider(ctx);
+      return;
+    }
+
+    if (action === "back" && rawValue === "model" && state === "auth-method") {
+      selectedModel = null;
+      await askModel(ctx);
+      return;
+    }
 
     if (action === "provider-page" && state === "provider") {
       await askProvider(ctx, Number(rawValue));
