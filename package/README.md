@@ -1,6 +1,6 @@
 # Arisa
 
-[Arisa](https://arisa.sh) is a personal Telegram assistant powered by [Pi Agent](https://pi.dev).
+[Arisa](https://arisa.sh) is a personal assistant you talk to through Telegram, powered by [Pi Agent](https://pi.dev).
 
 ## Origin
 
@@ -56,7 +56,7 @@ The result is a toolset shaped by how you actually use the assistant, not by def
 
 ### Telegram input
 - text messages go directly to Pi Agent
-- audio/voice messages are transcribed first when a transcription tool is installed, then passed to Pi Agent as text; otherwise Arisa offers to install one
+- audio/voice messages are transcribed first when a transcription tool is installed, then passed to Pi Agent as text; otherwise the agent is told transcription failed and can offer to install one
 - media is stored as artifacts
 
 ### Tool model
@@ -82,17 +82,24 @@ That isolation is part of the architecture:
 - one tool can be changed or replaced without tightly coupling the rest of the system
 
 ### Configuration model
-- all runtime state lives under `~/.arisa/`
-- Telegram runtime config is stored in `~/.arisa/state/config.json`
-- artifact index is stored in `~/.arisa/state/artifacts.json`
-- incoming Telegram attachments are stored directly in `~/.arisa/artifacts/`
-- tool-specific secrets/config live in `~/.arisa/tools/<tool>/config.js`
-- user-created tools also live under `~/.arisa/tools/<tool>/`
-- tool runtime temp files and generated outputs live under `~/.arisa/tools/<tool>/` (for example `tmp/` and `out/`)
-- durable files should end up in `~/.arisa/artifacts/`
-- Pi authentication can use either:
-  - an API key entered during bootstrap
-  - or Pi's existing OAuth login when supported, such as `openai-codex`
+All runtime state lives under `~/.arisa/`, split between global state and per-chat state.
+
+Global:
+- runtime config is stored in `~/.arisa/state/config.json`
+- the scheduled-task queue is stored in `~/.arisa/state/tasks.json`
+- installed tools live under `~/.arisa/tools/<tool>/`, each with a default `config.js` template
+- global tool runtime state (daemons, caches, temp) lives under `~/.arisa/state/tools/<tool>/`
+
+Per chat (`~/.arisa/chats/<chatId>/`):
+- artifact files are stored under `artifacts/`
+- the artifact index is stored in `state/artifacts.json`
+- the Pi session lives under `state/pi-sessions/`
+- chat-scoped tool config overrides live in `config/tools/<tool>/config.js`
+- ephemeral scratch lives under `tmp/`
+
+Pi authentication can use either:
+- an API key entered during bootstrap
+- or Pi's existing OAuth login when supported, such as `openai-codex`
 
 ## Install globally
 
@@ -129,54 +136,15 @@ Notes:
 
 ## Bootstrap flow
 
-On first run, Arisa will:
+On first run, Arisa walks you through three steps:
 
-1. ask for a Telegram bot token
-2. validate the token and ask whether to continue bootstrap from Telegram (default: yes)
-3. when Telegram setup is selected, show a `https://t.me/<bot>?start=<setup-token>` link
-4. authorize that Telegram chat and continue setup there: Pi provider, model, and Pi auth
-5. ask from Telegram whether Arisa should keep running in background
-6. validate that Pi Agent works
-7. only then start listening to Telegram
+1. Give it a Telegram bot token (create one with [@BotFather](https://t.me/BotFather)) and Arisa validates it.
+2. Continue setup in Telegram (the default): open the link to authorize your chat, then pick the Pi provider, model, and auth, and whether to keep running in the background.
+3. Once Pi is working, Arisa starts listening.
 
-Choosing `n` at the Telegram setup prompt keeps the previous CLI-only bootstrap flow.
+## ChatGPT subscription is enough to run Arisa
 
-Arisa does not run a persistent HTTP health server or Telegram webhook; Telegram uses long polling.
-
-Telegram bot tokens can be created with:
-
-- https://t.me/BotFather
-
-## Using Pi authentication
-
-For providers with internal Pi login support, such as Codex, leaving the API key empty during bootstrap will start the internal login flow automatically if no existing auth is found.
-
-For example, selecting:
-
-- `openai-codex/gpt-5.5`
-
-allows Arisa to authenticate through Pi's Codex OAuth flow instead of requiring a normal OpenAI API key.
-
-## Running model
-
-Arisa keeps one Pi session per authorized Telegram chat.
-
-If a message arrives while Pi Agent is still processing another one:
-
-- the current message keeps running
-- the new message is appended to a queued buffer
-- additional incoming messages are concatenated to that same buffer
-- once the current processing finishes, the buffered messages are sent together as the next prompt
-
-Conceptually:
-
-```txt
-message 1 is processing
-message 2 arrives -> queued
-message 3 arrives -> appended to queued
-message 1 finishes
-queued batch is processed next
-```
+Allows Arisa to authenticate through Pi's Codex OAuth flow instead of requiring a normal OpenAI API key. This means a regular ChatGPT subscription is enough to run Arisa on GPT-5.5, which is powerful and a genuine pleasure to use.
 
 ## Project structure
 
@@ -186,10 +154,16 @@ src/
   transport/    Telegram integration
   core/         agent, tools, artifacts, config
 ~/.arisa/
-  state/
-  artifacts/
-  tools/        installed tools (catalog, user-chosen, or agent-created)
-  tmp/
+  state/              global config, task queue, IPC socket
+    config.json
+    tasks.json
+    tools/<tool>/     global tool state (daemons, caches, tmp)
+  tools/<tool>/       installed tools (catalog, user-chosen, or agent-created)
+  chats/<chatId>/
+    artifacts/        per-chat artifact files
+    state/            artifact index + Pi session
+    config/tools/     chat-scoped tool config overrides
+    tmp/              ephemeral scratch
 ```
 
 The official tool catalog lives in the repository under [`tools/`](https://github.com/clasen/Arisa/tree/main/tools) and is not part of the npm package.
