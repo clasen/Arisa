@@ -1,0 +1,11 @@
+{
+  "name": "stop-slop-writer",
+  "description": "Prepare and audit prose requests using the stop-slop writing skill.",
+  "entry": "index.js",
+  "input": ["text/plain", "application/json", "text/markdown"],
+  "output": ["text/markdown", "application/json"],
+  "configSchema": {},
+  "skillHints": [
+    { "name": "stop-slop", "when": "drafting, editing, reviewing, analyzing, documenting, or writing creative/advertising prose" }
+  ]
+}

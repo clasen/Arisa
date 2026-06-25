@@ -6,7 +6,7 @@ const importCore = (relativePath) => import(pathToFileURL(path.join(process.env.
 const { toolError, toolOk } = await importCore("core/tools/tool-result.js");
 
 function printHelp() {
-  console.log(`schedule-agent-task\n\nUsage:\n  node index.js --help\n  node index.js run --request-file <json>\n\nExpected input:\n  {\n    "text": "tell me the temperature in Toronto",\n    "artifact": { "text": "tell me the temperature in Toronto" },\n    "args": {\n      "prompt": "tell me the temperature in Toronto",\n      "runAt": "2026-04-07T14:00:00.000Z",\n      "delaySeconds": "30",\n      "intervalSeconds": "3600"\n    }\n  }\n\nBehavior:\n  - schedules a future agent task for the current chat\n  - provide either args.runAt or args.delaySeconds\n  - optional args.intervalSeconds makes the task recurring\n`);
+  console.log(`schedule-agent-task\n\nUsage:\n  node index.js --help\n  node index.js run --request-file <json>\n\nExpected input:\n  {\n    "text": "tell me the temperature in Toronto",\n    "artifact": { "text": "tell me the temperature in Toronto" },\n    "args": {\n      "prompt": "tell me the temperature in Toronto",\n      "runAt": "2026-04-07T14:00:00.000Z",\n      "delaySeconds": "30",\n      "intervalSeconds": "3600"\n    }\n  }\n\nBehavior:\n  - schedules a future agent task for the current chat\n  - provide either args.runAt or args.delaySeconds\n  - optional args.intervalSeconds makes the task recurring\n\nTool filter mode:\n  args.kind = \"poll_tool\" or args.toolName schedules a lightweight tool callback instead of an agent.\n  The tool can return asyncTask/asyncTasks only when it wants to wake the agent.\n  args.toolName: tool to run\n  args.toolArgs: JSON object passed as request.args to that tool\n`);
 }
 
 function firstNonEmpty(...values) {
@@ -35,9 +35,16 @@ async function run(requestFile) {
   const prompt = firstNonEmpty(args.prompt, args.message, args.task, request.text, request.artifact?.text);
   const runAt = buildRunAt(args);
   const intervalSeconds = Number(firstNonEmpty(args.intervalSeconds, args.interval, args.everySeconds));
+  const toolName = firstNonEmpty(args.toolName, args.callbackTool, args.filterTool, args.pollTool);
+  const kind = toolName ? "poll_tool" : String(args.kind || "agent_task");
 
-  if (!prompt.trim()) {
+  if (kind !== "poll_tool" && !prompt.trim()) {
     console.log(JSON.stringify(toolError("prompt/message/task, text, or artifact.text is required")));
+    return;
+  }
+
+  if (kind === "poll_tool" && !toolName.trim()) {
+    console.log(JSON.stringify(toolError("args.toolName/callbackTool/filterTool/pollTool is required for poll_tool")));
     return;
   }
 
@@ -47,9 +54,11 @@ async function run(requestFile) {
   }
 
   const asyncTask = {
-    kind: "agent_task",
+    kind,
     runAt,
-    payload: { prompt },
+    payload: kind === "poll_tool"
+      ? { toolName, args: typeof args.toolArgs === "string" ? JSON.parse(args.toolArgs || "{}") : (args.toolArgs || {}) }
+      : { prompt },
     recurrence: Number.isFinite(intervalSeconds) && intervalSeconds > 0
       ? { type: "interval", everySeconds: intervalSeconds }
       : null

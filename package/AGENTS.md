@@ -195,6 +195,8 @@ Tools may declare skills in `tool.manifest.json`:
 
 The tool registry resolves these from the installed skills directory and injects them into the tool request as `skills`. `list_tools` exposes the hints and `tool_help` shows their resolution status. Skills are guidance for the agent/tool; they are not separate runtime dependencies.
 
+If a tool executes deterministic logic over skill content, bundle the required skill assets inside the tool package and treat injected `skills` only as an optional override. A catalog tool must still work when the hinted skill is not installed on the target Arisa instance.
+
 ## Safety
 - Prefer tool manifests and CLI help over assumptions.
 - Keep config and runtime data inside the user runtime area through the path helpers above.

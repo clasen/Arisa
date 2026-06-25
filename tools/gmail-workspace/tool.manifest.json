@@ -1,0 +1,53 @@
+{
+  "name": "gmail-workspace",
+  "description": "Read, search, send, and manage Gmail via Google Workspace CLI using OAuth/API credentials. Does not accept browser cookies.",
+  "entry": "index.js",
+  "input": ["text/plain", "application/json"],
+  "output": ["text/plain", "application/json"],
+  "configSchema": {
+    "GOOGLE_WORKSPACE_CLI_TOKEN": {
+      "type": "string",
+      "required": false,
+      "secret": true,
+      "prompt": "Optional OAuth2 access token for Google Workspace CLI. Prefer OAuth credentials/config over pasting cookies."
+    },
+    "GOOGLE_WORKSPACE_CLI_CREDENTIALS_FILE": {
+      "type": "string",
+      "required": false,
+      "prompt": "Optional path to Google OAuth client credentials JSON for Google Workspace CLI."
+    },
+    "GOOGLE_WORKSPACE_CLI_CLIENT_ID": {
+      "type": "string",
+      "required": false,
+      "secret": true,
+      "prompt": "Optional OAuth client ID for gws auth login."
+    },
+    "GOOGLE_WORKSPACE_CLI_CLIENT_SECRET": {
+      "type": "string",
+      "required": false,
+      "secret": true,
+      "prompt": "Optional OAuth client secret for gws auth login."
+    },
+    "GOOGLE_WORKSPACE_CLI_CONFIG_DIR": {
+      "type": "string",
+      "required": false,
+      "prompt": "Optional Google Workspace CLI config directory."
+    },
+    "GOOGLE_WORKSPACE_PROJECT_ID": {
+      "type": "string",
+      "required": false,
+      "prompt": "Optional Google Cloud project ID for quota/billing."
+    },
+    "GMAIL_DEFAULT_USER_ID": {
+      "type": "string",
+      "required": false,
+      "prompt": "Default Gmail userId; usually me."
+    },
+    "GMAIL_PUBSUB_TOPIC": {
+      "type": "string",
+      "required": false,
+      "prompt": "Optional Pub/Sub topic for Gmail push notifications, e.g. projects/my-project/topics/gmail-updates."
+    }
+  },
+  "skillHints": []
+}

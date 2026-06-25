@@ -1,0 +1,10 @@
+{
+  "name": "gmail-workspace",
+  "version": "0.1.0",
+  "type": "module",
+  "private": true,
+  "description": "Arisa tool wrapping Google Workspace CLI for Gmail access.",
+  "dependencies": {
+    "@googleworkspace/cli": "0.22.5"
+  }
+}

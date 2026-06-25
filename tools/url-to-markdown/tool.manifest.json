@@ -1,0 +1,9 @@
+{
+  "name": "url-to-markdown",
+  "description": "Fetch a URL as readable Markdown and return it as a document file.",
+  "entry": "index.js",
+  "input": ["text/plain", "application/json"],
+  "output": ["text/markdown"],
+  "configSchema": {},
+  "skillHints": []
+}

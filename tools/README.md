@@ -8,16 +8,21 @@ This is the official Arisa tool catalog. Each subdirectory is a self-contained t
 |------|----------|-------|--------|----------|-------------------|
 | [`audio-extractor`](./audio-extractor/) | Extracts and normalizes audio from video or audio media via ffmpeg | audio + video | `audio/wav`, `audio/mpeg` | ffmpeg + ffprobe | Medium — 0 npm deps + external binaries |
 | [`context-vault`](./context-vault/) | Stores, searches, updates, and forgets chat-scoped user context and preferences | `text/plain`, `application/json` | `text/plain`, `application/json` | - | Low — 1 npm dep |
+| [`gmail-workspace`](./gmail-workspace/) | Reads, searches, sends, and manages Gmail through Google Workspace CLI using OAuth/API credentials | `text/plain`, `application/json` | `text/plain`, `application/json` | Google Workspace OAuth/API credentials | Medium — 1 npm dep + OAuth setup |
 | [`openai-transcribe`](./openai-transcribe/) | Transcribes audio files and video audio tracks via the OpenAI audio transcription API | audio + video | `text/plain` | `OPENAI_API_KEY` | Low — 0 npm deps |
 | [`openai-tts`](./openai-tts/) | Converts text into OGG speech audio via the OpenAI TTS API | `text/plain` | `audio/ogg` | `OPENAI_API_KEY` | Low — 0 npm deps |
 | [`roster-sites`](./roster-sites/) | Manages and publishes HTTPS sites through RosterServer (start/stop daemon, init, publish, list, DNS) | text + HTML | `application/json` | Public VPS + DNS + ports 80/443 (Let's Encrypt) | Medium — 2 npm deps + RosterServer daemon |
 | [`schedule-agent-task`](./schedule-agent-task/) | Schedules future agent tasks (one-shot or recurring) through the async task queue | `text/plain` | `application/json` | - | Low — 0 npm deps |
+| [`stop-slop-writer`](./stop-slop-writer/) | Prepares and audits prose requests using bundled stop-slop writing guidance | `text/plain`, `text/markdown`, `application/json` | `text/markdown`, `application/json` | - | Low — 0 npm deps |
+| [`url-to-markdown`](./url-to-markdown/) | Fetches a URL as readable Markdown and returns it as a document file | `text/plain`, `application/json` | `text/markdown` | - | Low — 0 npm deps |
 | [`video-downloader`](./video-downloader/) | Downloads videos from YouTube, TikTok, Instagram, Facebook, X/Twitter, and similar yt-dlp supported URLs | `text/plain` | `video/mp4` | yt-dlp + ffprobe | Medium — 0 npm deps + external binaries |
 | [`web-browser`](./web-browser/) | Searches the web and fetches pages as readable text | `text/plain` | `text/plain` | - | Low — 0 npm deps |
 | [`whatsapp-web`](./whatsapp-web/) | Sends and receives WhatsApp messages via WhatsApp Web (login, send, broadcast, inbox, watch) | text + media | `text/plain`, `application/json` | Chrome/Chromium | High — 3 npm deps + Chrome/Chromium + QR login |
 | [`whispermix-transcribe`](./whispermix-transcribe/) | Transcribes audio locally with WhisperMix; keeps the model warm via a persistent daemon | `audio/ogg`, `mp3`, `wav`, `mp4` | `text/plain` | Local WhisperMix install | High — 1 npm dep + local WhisperMix model + daemon |
 
 **Install footprint guides autonomy.** Low-footprint tools (no extra npm dependencies, no external binaries) can be installed and used within the same request without asking the user first. Medium/High-footprint tools (heavy dependency trees, external binaries, or interactive setup such as a login) should be proposed to the user for confirmation before installing. A missing config secret (for example an API key) is handled by the normal missing-config flow and is not, on its own, a reason to ask before installing.
+
+Tools that execute deterministic logic over skill content must vendor the required skill assets inside the tool package. `skillHints` remains advisory metadata for the agent and registry; it must not be the only runtime source for tool behavior.
 
 ## Installing a tool
 
