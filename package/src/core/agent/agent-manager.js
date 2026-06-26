@@ -65,18 +65,15 @@ function containsAbsolutePath(value) {
   return /(^|\s)(\/[^\s]|[A-Za-z]:[\\/])/.test(value);
 }
 
-function resolveMediaCaption({ caption, output, method }) {
+export function resolveMediaCaption(caption) {
   if (caption && !containsAbsolutePath(caption)) return caption;
-  if (method === "document" && output?.fileName) return output.fileName;
-  if (output?.text && !containsAbsolutePath(output.text)) return output.text;
-  if (output?.fileName) return output.fileName;
   return undefined;
 }
 
 async function deliverArtifactToChat({ artifact, telegram, caption, method, logger }) {
   const resolvedMethod = method || artifact.metadata?.delivery?.method || inferDeliveryMethod(artifact);
   const fileName = path.basename(artifact.path);
-  const resolvedCaption = resolveMediaCaption({ caption, output: { fileName }, method: resolvedMethod });
+  const resolvedCaption = resolveMediaCaption(caption);
   logger?.log("agent", `deliver artifact ${artifact.id} as ${resolvedMethod}`);
   await telegram.sendMedia(artifact.path, { method: resolvedMethod, caption: resolvedCaption, filename: fileName });
   return { method: resolvedMethod, fileName, artifactId: artifact.id };
@@ -428,7 +425,7 @@ export class AgentManager {
       defineTool({
         name: "send_artifact",
         label: "Send artifact",
-        description: "Deliver an existing chat artifact to the current Telegram chat. Pass the `artifactId` returned by run_tool or from an inbound file. The delivery method, caption, and filename are derived from the artifact (its delivery hint, kind, and stored name); internal local paths are never exposed. Set `caption` for a visible label, or `method` to override the delivery method. The artifact is not deleted.",
+        description: "Deliver an existing chat artifact to the current Telegram chat. Pass the `artifactId` returned by run_tool or from an inbound file. The delivery method and filename are derived from the artifact (its delivery hint, kind, and stored name); internal local paths are never exposed. No caption is shown by default, since the filename already appears on the attachment; set `caption` only to add a separate visible label, or `method` to override the delivery method. The artifact is not deleted.",
         parameters: Type.Object({
           artifactId: Type.String(),
           caption: Type.Optional(Type.String()),
