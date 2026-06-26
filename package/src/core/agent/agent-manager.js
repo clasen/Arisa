@@ -19,7 +19,7 @@ const arisaToolNames = [
   "list_scheduled_tasks",
   "cancel_scheduled_task",
   "cancel_all_scheduled_tasks",
-  "send_media_reply"
+  "send_artifact"
 ];
 
 function isLocalBaseUrl(value) {
@@ -55,30 +55,22 @@ async function promptAndThrowOnAssistantError(session, prompt) {
   }
 }
 
-function mimeMatches(pattern, mimeType = "") {
-  if (!pattern || !mimeType) return false;
-  if (pattern === mimeType) return true;
-  if (pattern.endsWith("/*")) return mimeType.startsWith(`${pattern.slice(0, -2)}/`);
-  return false;
+function inferDeliveryMethod(artifact) {
+  if (artifact.kind === "audio" || (artifact.mimeType || "").startsWith("audio/")) return "audio";
+  return "document";
 }
 
-function toolSupportsTextInput(tool) {
-  return (tool.input || []).some((input) => mimeMatches(input, "text/plain"));
+function containsAbsolutePath(value) {
+  if (typeof value !== "string") return false;
+  return /(^|\s)(\/[^\s]|[A-Za-z]:[\\/])/.test(value);
 }
 
-function toolProducesAudio(tool) {
-  return (tool.output || []).some((output) => mimeMatches(output, "audio/ogg") || mimeMatches(output, "audio/*"));
-}
-
-function looksLikeTextToSpeechTool(tool) {
-  return /tts|text.?to.?speech|speech.?audio|speech/i.test(`${tool.name} ${tool.description || ""}`);
-}
-
-function selectMediaReplyTool(toolRegistry) {
-  const tools = toolRegistry.list()
-    .filter(toolSupportsTextInput)
-    .filter(toolProducesAudio);
-  return tools.find(looksLikeTextToSpeechTool) || tools[0] || null;
+function resolveMediaCaption({ caption, output, method }) {
+  if (caption && !containsAbsolutePath(caption)) return caption;
+  if (method === "document" && output?.fileName) return output.fileName;
+  if (output?.text && !containsAbsolutePath(output.text)) return output.text;
+  if (output?.fileName) return output.fileName;
+  return undefined;
 }
 
 async function assertDirectory(dir, label) {
@@ -238,7 +230,7 @@ export class AgentManager {
         kind: result.output.kind || "file",
         mimeType: result.output.mimeType || "application/octet-stream",
         source: { type: "tool", toolName: name },
-        metadata: { tool: name }
+        metadata: { tool: name, delivery: result.output.delivery }
       });
       result.output.artifactId = generated.id;
       await unlink(result.output.filePath).catch(() => {});
@@ -417,12 +409,12 @@ export class AgentManager {
         }
       }),
       defineTool({
-        name: "send_media_reply",
-        label: "Send media reply",
-        description: "Run a CLI tool that generates a file and send it to the current Telegram chat using the tool's delivery hint or an explicit method.",
+        name: "send_artifact",
+        label: "Send artifact",
+        description: "Deliver an existing chat artifact to the current Telegram chat. Pass the `artifactId` returned by run_tool or from an inbound file. The delivery method, caption, and filename are derived from the artifact (its delivery hint, kind, and stored name); internal local paths are never exposed. Set `caption` for a visible label, or `method` to override the delivery method. The artifact is not deleted.",
         parameters: Type.Object({
-          text: Type.String(),
-          toolName: Type.Optional(Type.String()),
+          artifactId: Type.String(),
+          caption: Type.Optional(Type.String()),
           method: Type.Optional(Type.Union([
             Type.Literal("voice"),
             Type.Literal("audio"),
@@ -430,36 +422,23 @@ export class AgentManager {
           ]))
         }),
         execute: async (_id, params) => {
-          await this.toolRegistry.load();
-          const selectedTool = params.toolName
-            ? this.toolRegistry.get(params.toolName)
-            : selectMediaReplyTool(this.toolRegistry);
-          if (!selectedTool) {
-            const result = {
-              ok: false,
-              status: "failed",
-              error: params.toolName
-                ? `Tool not found: ${params.toolName}`
-                : "No registered text-to-speech tool can generate an audio reply."
-            };
+          const artifact = await chatArtifactStore.get(params.artifactId);
+          if (!artifact) {
+            const result = { ok: false, status: "failed", error: `Artifact not found: ${params.artifactId}` };
             return { content: [{ type: "text", text: JSON.stringify(result, null, 2) }], details: result };
           }
-          const toolName = selectedTool.name;
-          this.logger?.log("agent", `send_media_reply via ${toolName}`);
-          const result = await this.toolRegistry.run({
-            name: toolName,
-            request: { text: params.text, args: {} },
-            chatId
-          });
-          if (!result.ok || !result.output?.filePath) {
+          if (!artifact.path) {
+            const result = { ok: false, status: "failed", error: `Artifact ${params.artifactId} has no file to deliver.` };
             return { content: [{ type: "text", text: JSON.stringify(result, null, 2) }], details: result };
           }
-          const method = params.method || result.output?.delivery?.method || "audio";
-          await telegram.sendMedia(result.output.filePath, { method, caption: params.text });
-          await unlink(result.output.filePath).catch(() => {});
+          const method = params.method || artifact.metadata?.delivery?.method || inferDeliveryMethod(artifact);
+          const fileName = path.basename(artifact.path);
+          const caption = resolveMediaCaption({ caption: params.caption, output: { fileName }, method });
+          this.logger?.log("agent", `send_artifact ${artifact.id} as ${method}`);
+          await telegram.sendMedia(artifact.path, { method, caption, filename: fileName });
           return {
             content: [{ type: "text", text: `Media sent to Telegram as ${method}.` }],
-            details: { ...result, sent: { method } }
+            details: { ok: true, sent: { method, fileName, artifactId: artifact.id } }
           };
         }
       })

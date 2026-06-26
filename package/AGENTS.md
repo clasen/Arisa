@@ -121,7 +121,9 @@ To run a pipe, the agent should:
 Example manual pipe:
 1. `run_tool(openai-transcribe, artifact audio)`
 2. take the returned text `artifactId`
-3. `run_tool(openai-tts, artifact text)` or `send_media_reply(text)`
+3. `run_tool(openai-tts, artifact text)` to generate audio, then `send_artifact(artifactId)` to deliver it
+
+Delivery is generic: any `run_tool` output that produces a file becomes an artifact, and `send_artifact(artifactId)` delivers it to the chat. The delivery method and caption are derived from the artifact (its `delivery` hint, `kind`, and stored name); internal local paths are never exposed. Tools declare their delivery intent by returning `delivery: { method }` in their output; they do not deliver to the transport themselves.
 
 ## Async event queue flow
 Beyond time-based scheduling, tools can drive an event queue that wakes the agent only when there is something to evaluate. Everything goes through the `asyncTask` (single) or `asyncTasks` (array) field the pipeline already supports; no new Pi tools are needed. The 1s poller drains tasks by `kind`:
