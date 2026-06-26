@@ -73,6 +73,15 @@ function resolveMediaCaption({ caption, output, method }) {
   return undefined;
 }
 
+async function deliverArtifactToChat({ artifact, telegram, caption, method, logger }) {
+  const resolvedMethod = method || artifact.metadata?.delivery?.method || inferDeliveryMethod(artifact);
+  const fileName = path.basename(artifact.path);
+  const resolvedCaption = resolveMediaCaption({ caption, output: { fileName }, method: resolvedMethod });
+  logger?.log("agent", `deliver artifact ${artifact.id} as ${resolvedMethod}`);
+  await telegram.sendMedia(artifact.path, { method: resolvedMethod, caption: resolvedCaption, filename: fileName });
+  return { method: resolvedMethod, fileName, artifactId: artifact.id };
+}
+
 async function assertDirectory(dir, label) {
   const stats = await stat(dir);
   if (!stats.isDirectory()) {
@@ -329,12 +338,13 @@ export class AgentManager {
       defineTool({
         name: "run_tool",
         label: "Run tool",
-        description: "Run a CLI tool using text input or an artifactId. Inspect the returned status/resolution fields. If a tool reports missing config, ask the user naturally, use set_tool_config, and retry.",
+        description: "Run a CLI tool using text input or an artifactId. Inspect the returned status/resolution fields. If a tool reports missing config, ask the user naturally, use set_tool_config, and retry. Set `deliver: true` to also send the generated file to the chat in one step (only when you want the user to receive it now, not for intermediate pipe steps).",
         parameters: Type.Object({
           name: Type.String(),
           artifactId: Type.Optional(Type.String()),
           text: Type.Optional(Type.String()),
-          args: Type.Optional(Type.Record(Type.String(), Type.String()))
+          args: Type.Optional(Type.Record(Type.String(), Type.String())),
+          deliver: Type.Optional(Type.Boolean())
         }),
         execute: async (_id, params) => {
           let artifact = null;
@@ -353,6 +363,13 @@ export class AgentManager {
             },
             chatId
           });
+
+          if (params.deliver && result.output?.artifactId) {
+            const generated = await chatArtifactStore.get(result.output.artifactId);
+            if (generated?.path) {
+              result.sent = await deliverArtifactToChat({ artifact: generated, telegram, logger: this.logger });
+            }
+          }
 
           return {
             content: [{ type: "text", text: JSON.stringify(result, null, 2) }],
@@ -431,14 +448,16 @@ export class AgentManager {
             const result = { ok: false, status: "failed", error: `Artifact ${params.artifactId} has no file to deliver.` };
             return { content: [{ type: "text", text: JSON.stringify(result, null, 2) }], details: result };
           }
-          const method = params.method || artifact.metadata?.delivery?.method || inferDeliveryMethod(artifact);
-          const fileName = path.basename(artifact.path);
-          const caption = resolveMediaCaption({ caption: params.caption, output: { fileName }, method });
-          this.logger?.log("agent", `send_artifact ${artifact.id} as ${method}`);
-          await telegram.sendMedia(artifact.path, { method, caption, filename: fileName });
+          const sent = await deliverArtifactToChat({
+            artifact,
+            telegram,
+            caption: params.caption,
+            method: params.method,
+            logger: this.logger
+          });
           return {
-            content: [{ type: "text", text: `Media sent to Telegram as ${method}.` }],
-            details: { ok: true, sent: { method, fileName, artifactId: artifact.id } }
+            content: [{ type: "text", text: `Media sent to Telegram as ${sent.method}.` }],
+            details: { ok: true, sent }
           };
         }
       })
