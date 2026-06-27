@@ -48,7 +48,23 @@ function getIncomingMessageText(message) {
   return message?.text || message?.caption || "";
 }
 
-function buildPrompt({ ctx, artifact, transcript, toolResult }) {
+function baseMimeType(mimeType = "") {
+  return mimeType.split(";")[0].trim().toLowerCase();
+}
+
+function isInlineTextArtifact(artifact, messageText) {
+  return artifact?.kind === "text"
+    && baseMimeType(artifact.mimeType) === "text/plain"
+    && typeof artifact.text === "string"
+    && artifact.text === messageText;
+}
+
+export function shouldIncludeArtifactReference({ artifact, messageText = "" } = {}) {
+  if (!artifact) return false;
+  return !isInlineTextArtifact(artifact, messageText);
+}
+
+export function buildPrompt({ ctx, artifact, transcript, toolResult }) {
   const parts = [
     `Incoming Telegram message.`,
     `chatId: ${ctx.chat.id}`,
@@ -60,10 +76,12 @@ function buildPrompt({ ctx, artifact, transcript, toolResult }) {
   const messageText = getIncomingMessageText(ctx.message);
   if (messageText) parts.push(`text: ${messageText}`);
   parts.push(...quotedMessageSummary(ctx.message?.reply_to_message));
-  if (artifact?.path) parts.push(`artifactPath: ${artifact.path}`);
-  if (artifact?.id) parts.push(`artifactId: ${artifact.id}`);
-  if (artifact?.mimeType) parts.push(`mimeType: ${artifact.mimeType}`);
-  if (artifact?.kind) parts.push(`kind: ${artifact.kind}`);
+  if (shouldIncludeArtifactReference({ artifact, messageText })) {
+    if (artifact?.path) parts.push(`artifactPath: ${artifact.path}`);
+    if (artifact?.id) parts.push(`artifactId: ${artifact.id}`);
+    if (artifact?.mimeType) parts.push(`mimeType: ${artifact.mimeType}`);
+    if (artifact?.kind) parts.push(`kind: ${artifact.kind}`);
+  }
   if (transcript) {
     parts.push(`transcriptArtifactId: ${transcript.id}`);
     parts.push(`transcriptText: ${transcript.text}`);
@@ -91,21 +109,24 @@ function buildNewSessionPrompt(ctx) {
 }
 
 async function buildAsyncTaskPrompt({ task, artifactStore, toolRegistry, logger }) {
+  const taskText = task.payload.prompt || "";
   const parts = [
     "Scheduled task fired.",
     `taskId: ${task.id}`,
     `chatId: ${task.payload.chatId}`,
-    task.payload.prompt ? `text: ${task.payload.prompt}` : null
+    taskText ? `text: ${taskText}` : null
   ];
 
   if (task.payload.artifactId) {
     const chatArtifactStore = artifactStore.forChat(task.payload.chatId);
     const artifact = await chatArtifactStore.get(task.payload.artifactId);
     if (artifact) {
-      parts.push(`artifactPath: ${artifact.path || ""}`);
-      parts.push(`artifactId: ${artifact.id}`);
-      parts.push(`mimeType: ${artifact.mimeType}`);
-      parts.push(`kind: ${artifact.kind}`);
+      if (shouldIncludeArtifactReference({ artifact, messageText: taskText })) {
+        parts.push(`artifactPath: ${artifact.path || ""}`);
+        parts.push(`artifactId: ${artifact.id}`);
+        parts.push(`mimeType: ${artifact.mimeType}`);
+        parts.push(`kind: ${artifact.kind}`);
+      }
 
       const { normalizedArtifact, toolResult } = await normalizeArtifactForReasoning({
         artifact,
@@ -431,6 +452,8 @@ export async function createTelegramBot({ config, artifactStore, toolRegistry, t
         const input = new InputFile(filePath, filename || undefined);
         if (method === "voice") return bot.api.sendVoice(chatId, input, { caption });
         if (method === "document") return bot.api.sendDocument(chatId, input, { caption });
+        if (method === "photo" || method === "image") return bot.api.sendPhoto(chatId, input, { caption });
+        if (method === "video") return bot.api.sendVideo(chatId, input, { caption });
         return bot.api.sendAudio(chatId, input, { caption });
       }
     };

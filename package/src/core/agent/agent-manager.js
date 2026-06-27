@@ -57,6 +57,8 @@ async function promptAndThrowOnAssistantError(session, prompt) {
 
 function inferDeliveryMethod(artifact) {
   if (artifact.kind === "audio" || (artifact.mimeType || "").startsWith("audio/")) return "audio";
+  if (artifact.kind === "image" || (artifact.mimeType || "").startsWith("image/")) return "photo";
+  if (artifact.kind === "video" || (artifact.mimeType || "").startsWith("video/")) return "video";
   return "document";
 }
 

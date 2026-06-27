@@ -1,6 +1,6 @@
 {
   "name": "whatsapp-web",
-  "description": "Use WhatsApp Web to log in, send messages, and receive/process WhatsApp replies via whatsapp-web.js.",
+  "description": "Use isolated per-chat WhatsApp Web sessions to log in, send messages, and receive/process WhatsApp replies via whatsapp-web.js. Recommendation: use a dedicated auxiliary number because WhatsApp Web automation can risk Meta restrictions or bans.",
   "entry": "index.js",
   "input": ["text/plain", "image/*", "video/*", "audio/*", "application/pdf"],
   "output": ["text/plain", "application/json"],
@@ -24,6 +24,11 @@
       "type": "string",
       "required": false,
       "prompt": "Optional path to Chrome/Chromium executable for WhatsApp Web."
+    },
+    "IDLE_SHUTDOWN_MS": {
+      "type": "string",
+      "required": false,
+      "prompt": "Milliseconds to keep an unwatched per-chat WhatsApp session live before closing the browser and reconnecting on demand."
     }
   }
 }

@@ -128,7 +128,7 @@ export async function captureIncomingArtifact(ctx, artifactStore) {
     return store.createText({
       text: ctx.message.text,
       source: baseSource,
-      metadata: {}
+      metadata: { visibility: "internal", representation: "inline-message" }
     });
   }
 

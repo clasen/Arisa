@@ -3,7 +3,7 @@ import path from "node:path";
 import process from "node:process";
 import { pathToFileURL } from "node:url";
 import { existsSync } from "node:fs";
-import { mkdir, readFile, readdir, rm, rmdir, unlink, writeFile } from "node:fs/promises";
+import { mkdir, readFile, readdir, rename, rm, rmdir, stat, unlink, writeFile } from "node:fs/promises";
 import qrcodeTerminal from "qrcode-terminal";
 import QRCode from "qrcode";
 import pkg from "whatsapp-web.js";
@@ -19,16 +19,41 @@ const { chatsDir, getChatToolStateDir, tasksFile } = await importCore("runtime/p
 const { Client, LocalAuth, MessageMedia } = pkg;
 const toolName = "whatsapp-web";
 const config = await loadToolConfig(toolName, defaults);
-const daemon = createDaemonRuntime({ toolName, entryPath: new URL(import.meta.url).pathname, beforeStart: cleanupBrowserLocks });
+const daemon = createDaemonRuntime({ toolName, entryPath: new URL(import.meta.url).pathname, beforeStart: cleanupAllBrowserLocks });
 const stateRoot = daemon.paths.root;
-const sessionDir = path.join(stateRoot, "session");
-const qrImageFile = path.join(stateRoot, "whatsapp-login-qr.png");
-const mediaTmpDir = path.join(stateRoot, "media-tmp");
-const webCacheDir = path.join(stateRoot, "web-cache");
+const chatSessionsRoot = path.join(stateRoot, "chats");
+const legacySessionDir = path.join(stateRoot, "session");
 const artifactStore = new ArtifactStore();
 
 function printHelp() {
-  console.log(`whatsapp-web\n\nUsage:\n  node index.js --help\n  node index.js run --request-file <json>\n\nModes:\n  login      Start the daemon and return a QR code when needed.\n  status     Show daemon/session status.\n  send       Send one WhatsApp message.\n  broadcast  Send one message to multiple recipients.\n  inbox      Read/process received WhatsApp replies from the local inbox.\n  wait-reply Wait for a reply from an optional recipient.\n  watch      Enable event-driven processing when new WhatsApp messages arrive.\n  unwatch    Disable event-driven processing.\n  qr         Generate a PNG image from the latest login QR.\n  logout     Stop daemon and remove the local WhatsApp session.\n\nExamples:\n  { "args": { "mode": "login" } }\n  { "args": { "mode": "send", "to": "+5491112345678", "message": "Hello" } }\n  { "args": { "mode": "watch", "chatId": "879964957" } }\n\nSession: ${sessionDir}\n`);
+  console.log(`whatsapp-web
+
+Usage:
+  node index.js --help
+  node index.js run --request-file <json>
+
+Modes:
+  login      Start this chat's WhatsApp session and return a QR code when needed.
+  status     Show this chat's WhatsApp session status.
+  send       Send one WhatsApp message from this chat's WhatsApp session.
+  broadcast  Send one message to multiple recipients from this chat's session.
+  inbox      Read/process received WhatsApp replies from this chat's local inbox.
+  wait-reply Wait for a reply from an optional recipient.
+  watch      Keep this chat's WhatsApp session live and process incoming messages.
+  unwatch    Disable event-driven processing for this chat.
+  qr         Generate a PNG image from this chat's latest login QR.
+  logout     Stop and remove only this chat's local WhatsApp session.
+
+Examples:
+  { "chatId": "879964957", "args": { "mode": "login" } }
+  { "chatId": "879964957", "args": { "mode": "send", "to": "+5491112345678", "message": "Hello" } }
+  { "chatId": "879964957", "args": { "mode": "watch" } }
+
+Per-chat sessions: ${chatSessionsRoot}/<chatId>/session
+Legacy global session ignored: ${legacySessionDir}
+
+Warning: use a dedicated auxiliary number for the bot; WhatsApp Web automation can put accounts at risk of Meta restrictions or bans.
+`);
 }
 
 function bool(value, fallback = true) {
@@ -44,13 +69,177 @@ function number(value, fallback) {
   return Number.isFinite(parsed) ? parsed : fallback;
 }
 
-async function ensureState() {
-  await daemon.ensure();
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-async function cleanupBrowserLocks() {
+function normalizeChatId(value) {
+  const text = String(value ?? "").trim();
+  if (!text) throw new Error("chatId is required for whatsapp-web");
+  if (!/^-?\d+$/.test(text)) throw new Error(`Invalid chatId: ${text}`);
+  return text;
+}
+
+function requestChatId(request) {
+  return normalizeChatId(request.chatId || request.args?.chatId || request.args?.telegramChatId || request.artifact?.chatId);
+}
+
+function chatPaths(chatId) {
+  const root = path.join(chatSessionsRoot, normalizeChatId(chatId));
+  const commandsDir = path.join(root, "commands");
+  return {
+    root,
+    commandsDir,
+    sessionDir: path.join(root, "session"),
+    statusFile: path.join(root, "status.json"),
+    qrImageFile: path.join(root, "whatsapp-login-qr.png"),
+    mediaTmpDir: path.join(root, "media-tmp"),
+    webCacheDir: path.join(root, "web-cache"),
+    lockFile: path.join(root, "lock")
+  };
+}
+
+async function ensureToolState() {
+  await daemon.ensure();
+  await mkdir(chatSessionsRoot, { recursive: true });
+}
+
+async function ensureChatState(paths) {
+  await mkdir(paths.commandsDir, { recursive: true });
+}
+
+function jobPaths(paths, id) {
+  return {
+    request: path.join(paths.commandsDir, `${id}.request.json`),
+    processing: path.join(paths.commandsDir, `${id}.processing.json`),
+    result: path.join(paths.commandsDir, `${id}.result.json`)
+  };
+}
+
+async function readChatStatus(chatId, fallback = {}) {
+  return readJson(chatPaths(chatId).statusFile, fallback);
+}
+
+async function writeChatStatus(chatId, patch) {
+  const paths = chatPaths(chatId);
+  const current = await readJson(paths.statusFile, {});
+  const next = { ...current, ...patch, chatId: normalizeChatId(chatId), updatedAt: new Date().toISOString() };
+  if (patch.state && patch.state !== "needs_login") {
+    delete next.qr;
+    delete next.qrText;
+  }
+  await writeJson(paths.statusFile, next);
+  return next;
+}
+
+function statusText(chatId, status, pid) {
+  return [
+    `WhatsApp status for chat ${chatId}: ${status.state || "unknown"}`,
+    status.message || "",
+    typeof status.live === "boolean" ? `Live client: ${status.live ? "yes" : "no"}` : "",
+    pid ? `Daemon pid: ${pid}` : ""
+  ].filter(Boolean).join("\n");
+}
+
+async function waitForChatState(chatId, states, timeoutMs) {
+  const start = Date.now();
+  while (Date.now() - start < timeoutMs) {
+    const status = await readChatStatus(chatId, {});
+    if (states.includes(status.state)) return status;
+    await sleep(500);
+  }
+  return readChatStatus(chatId, { state: "connecting" });
+}
+
+async function waitForLoginSignal(chatId, timeoutMs) {
+  return waitForChatState(chatId, ["ready", "needs_login", "expired", "failed"], timeoutMs);
+}
+
+async function submitChatJob(chatId, payload, { timeoutMs = 180000 } = {}) {
+  const normalizedChatId = normalizeChatId(chatId);
+  const paths = chatPaths(normalizedChatId);
+  await daemon.start();
+  await ensureChatState(paths);
+
+  const id = crypto.randomUUID();
+  const files = jobPaths(paths, id);
+  await writeJson(files.request, { id, chatId: normalizedChatId, ...payload });
+
+  const start = Date.now();
+  while (Date.now() - start < timeoutMs) {
+    const result = await readJson(files.result, null);
+    if (result) {
+      await unlink(files.result).catch(() => {});
+      if (!result.ok) throw new Error(result.error || `${toolName} job failed`);
+      return result.output || {};
+    }
+    await sleep(250);
+  }
+  throw new Error(`${toolName} job timed out after ${timeoutMs}ms`);
+}
+
+async function listSessionChatIds() {
+  const entries = await readdir(chatSessionsRoot, { withFileTypes: true }).catch(() => []);
+  return entries.filter((entry) => entry.isDirectory()).map((entry) => entry.name).filter((entry) => /^-?\d+$/.test(entry)).sort();
+}
+
+async function claimNextChatJob() {
+  for (const chatId of await listSessionChatIds()) {
+    const paths = chatPaths(chatId);
+    const files = await readdir(paths.commandsDir).catch(() => []);
+    for (const file of files.filter((item) => item.endsWith(".request.json")).sort()) {
+      const id = file.replace(/\.request\.json$/, "");
+      const item = jobPaths(paths, id);
+      try {
+        await rename(item.request, item.processing);
+        return { id, chatId, paths, ...item, payload: await readJson(item.processing, null) };
+      } catch {}
+    }
+  }
+  return null;
+}
+
+async function completeJob(job, output) {
+  await writeJson(job.result, { ok: true, output });
+  await unlink(job.processing).catch(() => {});
+}
+
+async function failJob(job, error) {
+  await writeJson(job.result, { ok: false, error: error?.message || String(error) });
+  await unlink(job.processing).catch(() => {});
+}
+
+async function withChatLock(paths, work, { timeoutMs = 30000, staleMs = 120000 } = {}) {
+  const start = Date.now();
+  while (Date.now() - start < timeoutMs) {
+    try {
+      await writeFile(paths.lockFile, `${JSON.stringify({ pid: process.pid, createdAt: new Date().toISOString() })}\n`, { flag: "wx" });
+      try {
+        return await work();
+      } finally {
+        await unlink(paths.lockFile).catch(() => {});
+      }
+    } catch (error) {
+      if (error?.code !== "EEXIST") throw error;
+      const stats = await stat(paths.lockFile).catch(() => null);
+      if (stats && Date.now() - stats.mtimeMs > staleMs) {
+        await rm(paths.lockFile, { force: true }).catch(() => {});
+      }
+      await sleep(200);
+    }
+  }
+  throw new Error(`Timed out waiting for WhatsApp session lock at ${paths.lockFile}`);
+}
+
+async function cleanupBrowserLocks(paths) {
   for (const name of ["SingletonLock", "SingletonSocket", "SingletonCookie"]) {
-    await rm(path.join(sessionDir, "session", name), { force: true }).catch(() => {});
+    await rm(path.join(paths.sessionDir, "session", name), { force: true }).catch(() => {});
+  }
+}
+
+async function cleanupAllBrowserLocks() {
+  for (const chatId of await listSessionChatIds()) {
+    await cleanupBrowserLocks(chatPaths(chatId));
   }
 }
 
@@ -131,7 +320,7 @@ async function waitForInboxMessage({ chatId, from, unreadOnly = true, after = ne
   while (Date.now() - start < timeoutMs) {
     const matches = await selectInboxMessages({ chatId, from, limit: 1, unreadOnly, after });
     if (matches.length) return matches[0];
-    await new Promise((resolve) => setTimeout(resolve, 1000));
+    await sleep(1000);
   }
   throw new Error(`No WhatsApp reply received within ${timeoutMs}ms`);
 }
@@ -140,13 +329,22 @@ function watchFileForChat(chatId) {
   return path.join(getChatToolStateDir(chatId, toolName), "watch.json");
 }
 
+async function readWatchConfig(chatId) {
+  return readJson(watchFileForChat(chatId), { enabled: false, chatId: Number(chatId) });
+}
+
+async function isWatchEnabled(chatId) {
+  return Boolean((await readWatchConfig(chatId)).enabled);
+}
+
 async function readWatchConfigs() {
   const entries = await readdir(chatsDir, { withFileTypes: true }).catch(() => []);
   const watches = [];
   for (const entry of entries) {
     if (!entry.isDirectory()) continue;
+    if (!/^-?\d+$/.test(entry.name)) continue;
     const chatId = entry.name;
-    const watch = await readJson(watchFileForChat(chatId), { enabled: false });
+    const watch = await readWatchConfig(chatId);
     if (watch.enabled) watches.push({ ...watch, chatId: Number(watch.chatId || chatId) });
   }
   return watches;
@@ -177,9 +375,10 @@ function buildIncomingMessagePrompt(message, artifact) {
   ].filter(Boolean).join("\n");
 }
 
-async function enqueueArisaTaskForIncomingMessage(watch, message, artifact = null) {
+async function enqueueArisaTaskForIncomingMessage(chatId, message, artifact = null) {
+  const numericChatId = Number(chatId);
   const tasks = await readTasks();
-  if (tasks.some((task) => task.source?.toolName === toolName && task.source?.chatId === Number(watch.chatId) && task.source?.messageId === message.id)) return;
+  if (tasks.some((task) => task.source?.toolName === toolName && task.source?.chatId === numericChatId && task.source?.messageId === message.id)) return;
   tasks.push({
     id: crypto.randomUUID(),
     status: "pending",
@@ -187,9 +386,9 @@ async function enqueueArisaTaskForIncomingMessage(watch, message, artifact = nul
     updatedAt: new Date().toISOString(),
     kind: "agent_task",
     runAt: new Date().toISOString(),
-    payload: { chatId: Number(watch.chatId), prompt: buildIncomingMessagePrompt(message, artifact), artifactId: artifact?.id || "" },
+    payload: { chatId: numericChatId, prompt: buildIncomingMessagePrompt(message, artifact), artifactId: artifact?.id || "" },
     recurrence: null,
-    source: { type: "tool", toolName, chatId: Number(watch.chatId), messageId: message.id }
+    source: { type: "tool", toolName, chatId: numericChatId, messageId: message.id }
   });
   await writeTasks(tasks);
 }
@@ -200,16 +399,17 @@ function renderQr(qr) {
   return rendered;
 }
 
-function makeClient() {
+function makeClient(chatId) {
+  const paths = chatPaths(chatId);
   const puppeteer = {
     headless: bool(config.HEADLESS, true) ? "new" : false,
     args: ["--no-sandbox", "--disable-setuid-sandbox", "--disable-dev-shm-usage"]
   };
   if (config.CHROME_EXECUTABLE_PATH && existsSync(config.CHROME_EXECUTABLE_PATH)) puppeteer.executablePath = config.CHROME_EXECUTABLE_PATH;
   return new Client({
-    authStrategy: new LocalAuth({ dataPath: sessionDir }),
+    authStrategy: new LocalAuth({ dataPath: paths.sessionDir }),
     puppeteer,
-    webVersionCache: { type: "local", path: webCacheDir }
+    webVersionCache: { type: "local", path: paths.webCacheDir }
   });
 }
 
@@ -226,20 +426,21 @@ function mediaExtension(mimeType = "") {
   return map[base] || "bin";
 }
 
-async function storeIncomingMediaArtifact(message, watch) {
-  if (!watch.enabled || !watch.chatId || !message.hasMedia) return null;
+async function storeIncomingMediaArtifact(message, chatId) {
+  if (!message.hasMedia) return null;
   let media = null;
   try { media = await message.downloadMedia(); } catch { return null; }
   if (!media?.data || !media?.mimetype) return null;
 
+  const paths = chatPaths(chatId);
   const mimeType = media.mimetype.split(";")[0].trim();
   const kind = mediaKind(mimeType, message.type);
   const fileName = media.filename || `whatsapp-${message.id?._serialized || Date.now()}.${mediaExtension(mimeType)}`;
-  await mkdir(mediaTmpDir, { recursive: true });
-  const tmpPath = path.join(mediaTmpDir, `${crypto.randomUUID()}-${fileName.replace(/[^a-zA-Z0-9._-]/g, "_")}`);
+  await mkdir(paths.mediaTmpDir, { recursive: true });
+  const tmpPath = path.join(paths.mediaTmpDir, `${crypto.randomUUID()}-${fileName.replace(/[^a-zA-Z0-9._-]/g, "_")}`);
   await writeFile(tmpPath, Buffer.from(media.data, "base64"));
   try {
-    return await artifactStore.forChat(watch.chatId).createFromFile({
+    return await artifactStore.forChat(chatId).createFromFile({
       originalPath: tmpPath,
       fileName,
       kind,
@@ -249,13 +450,13 @@ async function storeIncomingMediaArtifact(message, watch) {
     });
   } finally {
     await unlink(tmpPath).catch(() => {});
-    await rmdir(mediaTmpDir).catch(() => {});
+    await rmdir(paths.mediaTmpDir).catch(() => {});
   }
 }
 
-async function captureIncomingMessage(message) {
+async function captureIncomingMessage(ownerChatId, message) {
   if (message.fromMe) {
-    await daemon.writeStatus({ state: "ready", message: "WhatsApp is ready." });
+    await writeChatStatus(ownerChatId, { state: "ready", live: true, pid: process.pid, message: "WhatsApp is ready." });
     return;
   }
   let contact = null;
@@ -271,109 +472,308 @@ async function captureIncomingMessage(message) {
     receivedAt: new Date((message.timestamp || Math.floor(Date.now() / 1000)) * 1000).toISOString(),
     read: false
   };
-  const watches = await readWatchConfigs();
-  for (const watch of watches) {
-    if (!(await appendInboxMessage(watch.chatId, inboxMessage))) continue;
-    const artifact = await storeIncomingMediaArtifact(message, watch);
-    await enqueueArisaTaskForIncomingMessage(watch, inboxMessage, artifact);
+
+  if (!(await appendInboxMessage(ownerChatId, inboxMessage))) return;
+  if (!(await isWatchEnabled(ownerChatId))) return;
+
+  const artifact = await storeIncomingMediaArtifact(message, ownerChatId);
+  await enqueueArisaTaskForIncomingMessage(ownerChatId, inboxMessage, artifact);
+}
+
+class SessionManager {
+  constructor() {
+    this.sessions = new Map();
+    this.idleShutdownMs = number(config.IDLE_SHUTDOWN_MS, 300000);
+  }
+
+  get(chatId) {
+    return this.sessions.get(normalizeChatId(chatId));
+  }
+
+  touch(chatId) {
+    const record = this.get(chatId);
+    if (record) record.lastActivity = Date.now();
+  }
+
+  async ensureClient(chatId) {
+    const normalizedChatId = normalizeChatId(chatId);
+    const existing = this.sessions.get(normalizedChatId);
+    if (existing?.client) {
+      existing.lastActivity = Date.now();
+      return existing;
+    }
+
+    const paths = chatPaths(normalizedChatId);
+    await ensureChatState(paths);
+    await cleanupBrowserLocks(paths);
+    await writeChatStatus(normalizedChatId, {
+      state: "connecting",
+      live: true,
+      pid: process.pid,
+      message: "Starting WhatsApp Web client for this chat."
+    });
+
+    const client = makeClient(normalizedChatId);
+    const record = {
+      chatId: normalizedChatId,
+      client,
+      initializing: null,
+      lastActivity: Date.now(),
+      closingReason: ""
+    };
+    this.sessions.set(normalizedChatId, record);
+
+    client.on("qr", async (qr) => {
+      await QRCode.toFile(paths.qrImageFile, qr, { margin: 2, width: 900 }).catch(() => {});
+      await writeChatStatus(normalizedChatId, {
+        state: "needs_login",
+        live: true,
+        pid: process.pid,
+        qr,
+        qrText: renderQr(qr),
+        message: "Scan this QR code with WhatsApp > Linked devices."
+      });
+    });
+    client.on("authenticated", async () => {
+      await writeChatStatus(normalizedChatId, {
+        state: "connecting",
+        live: true,
+        pid: process.pid,
+        message: "Authenticated, waiting for WhatsApp to be ready."
+      });
+    });
+    client.on("ready", async () => {
+      record.lastActivity = Date.now();
+      await writeChatStatus(normalizedChatId, { state: "ready", live: true, pid: process.pid, message: "WhatsApp is ready." });
+    });
+    client.on("message", async (message) => {
+      record.lastActivity = Date.now();
+      try {
+        await captureIncomingMessage(normalizedChatId, message);
+      } catch (error) {
+        await writeChatStatus(normalizedChatId, { state: "ready", live: true, pid: process.pid, message: `WhatsApp is ready. Inbox warning: ${error.message || error}` });
+      }
+    });
+    client.on("message_create", async (message) => {
+      record.lastActivity = Date.now();
+      if (message.fromMe) await writeChatStatus(normalizedChatId, { state: "ready", live: true, pid: process.pid, message: "WhatsApp is ready." });
+    });
+    client.on("auth_failure", async (message) => {
+      this.sessions.delete(normalizedChatId);
+      await writeChatStatus(normalizedChatId, { state: "expired", live: false, pid: process.pid, message: `Authentication failed: ${message}` });
+    });
+    client.on("disconnected", async (reason) => {
+      if (record.closingReason === "idle" || record.closingReason === "logout") return;
+      this.sessions.delete(normalizedChatId);
+      await writeChatStatus(normalizedChatId, { state: "expired", live: false, pid: process.pid, message: `Disconnected: ${reason}` });
+    });
+
+    record.initializing = client.initialize().catch(async (error) => {
+      this.sessions.delete(normalizedChatId);
+      await writeChatStatus(normalizedChatId, { state: "failed", live: false, pid: process.pid, message: error.message || String(error) });
+      try { await client.destroy(); } catch {}
+    });
+    return record;
+  }
+
+  async waitReady(chatId, timeoutMs = 120000) {
+    const start = Date.now();
+    while (Date.now() - start < timeoutMs) {
+      const status = await readChatStatus(chatId, {});
+      if (status.state === "ready" && status.live) return status;
+      if (status.state === "needs_login") {
+        throw new Error("WhatsApp session for this chat needs login. Run whatsapp-web login and scan the QR code.");
+      }
+      if (status.state === "expired") {
+        throw new Error(status.message || "WhatsApp session for this chat expired. Run whatsapp-web login again.");
+      }
+      if (status.state === "failed") {
+        throw new Error(status.message || "WhatsApp session for this chat failed.");
+      }
+      await sleep(500);
+    }
+    throw new Error(`${toolName} session for chat ${chatId} was not ready after ${timeoutMs}ms`);
+  }
+
+  async send(chatId, job) {
+    const record = await this.ensureClient(chatId);
+    await this.waitReady(chatId, number(job.readyTimeoutMs, number(config.READY_TIMEOUT_MS, 120000)));
+    record.lastActivity = Date.now();
+    const whatsappChatId = normalizeRecipient(job.to);
+    if (job.mediaPath) {
+      const media = MessageMedia.fromFilePath(job.mediaPath);
+      await record.client.sendMessage(whatsappChatId, media, { caption: job.message || "" });
+    } else {
+      await record.client.sendMessage(whatsappChatId, job.message);
+    }
+    record.lastActivity = Date.now();
+    return { chatId: whatsappChatId, sessionChatId: normalizeChatId(chatId) };
+  }
+
+  async logout(chatId) {
+    const normalizedChatId = normalizeChatId(chatId);
+    const record = this.sessions.get(normalizedChatId);
+    if (record?.client) {
+      record.closingReason = "logout";
+      try { await record.client.destroy(); } catch {}
+    }
+    this.sessions.delete(normalizedChatId);
+    const paths = chatPaths(normalizedChatId);
+    await rm(paths.sessionDir, { recursive: true, force: true });
+    await writeChatStatus(normalizedChatId, { state: "logged_out", live: false, pid: process.pid, message: "Local WhatsApp session removed for this chat." });
+    return readChatStatus(normalizedChatId, {});
+  }
+
+  async shutdownIdleClients() {
+    if (this.idleShutdownMs <= 0) return;
+    for (const [chatId, record] of this.sessions) {
+      if (await isWatchEnabled(chatId)) continue;
+      if (Date.now() - record.lastActivity < this.idleShutdownMs) continue;
+      record.closingReason = "idle";
+      try { await record.client.destroy(); } catch {}
+      this.sessions.delete(chatId);
+      const status = await readChatStatus(chatId, {});
+      if (status.state === "ready") {
+        await writeChatStatus(chatId, { state: "ready", live: false, pid: process.pid, message: "WhatsApp session is ready and will reconnect on demand." });
+      } else {
+        await writeChatStatus(chatId, { live: false, pid: process.pid });
+      }
+    }
+  }
+
+  async ensureWatchedClients() {
+    for (const watch of await readWatchConfigs()) {
+      await this.ensureClient(String(watch.chatId));
+    }
   }
 }
 
-async function processJob(client, job) {
-  if (job.type !== "send") throw new Error(`Unknown command type: ${job.type}`);
-  const chatId = normalizeRecipient(job.to);
-  if (job.mediaPath) {
-    const media = MessageMedia.fromFilePath(job.mediaPath);
-    await client.sendMessage(chatId, media, { caption: job.message || "" });
-  } else {
-    await client.sendMessage(chatId, job.message);
+async function processJob(manager, job) {
+  if (!job?.payload?.type) throw new Error("Invalid WhatsApp command");
+  const chatId = normalizeChatId(job.payload.chatId || job.chatId);
+  if (job.payload.type === "ensure") {
+    await withChatLock(job.paths, () => manager.ensureClient(chatId));
+    return readChatStatus(chatId, {});
   }
-  return { chatId };
+  if (job.payload.type === "send") {
+    return manager.send(chatId, job.payload);
+  }
+  if (job.payload.type === "logout") {
+    return withChatLock(job.paths, () => manager.logout(chatId));
+  }
+  throw new Error(`Unknown command type: ${job.payload.type}`);
 }
 
 async function runDaemon() {
-  await ensureState();
-  await daemon.writeStatus({ state: "starting", pid: process.pid, message: "Starting WhatsApp Web client" });
-  const client = makeClient();
+  await ensureToolState();
+  await daemon.writeStatus({ state: "ready", pid: process.pid, message: "WhatsApp multiplex daemon is ready." });
+  const manager = new SessionManager();
+  let processing = false;
 
-  client.on("qr", async (qr) => daemon.writeStatus({ state: "qr", qr, qrText: renderQr(qr), message: "Scan this QR code with WhatsApp > Linked devices." }));
-  client.on("authenticated", async () => daemon.writeStatus({ state: "authenticated", message: "Authenticated, waiting for WhatsApp to be ready." }));
-  client.on("ready", async () => {
-    await daemon.writeStatus({ state: "ready", message: "WhatsApp is ready." });
-    await daemon.workLoop({ processJob: (job) => processJob(client, job) });
+  manager.ensureWatchedClients().catch((error) => {
+    daemon.writeStatus({ state: "error", pid: process.pid, message: error?.message || String(error) }).catch(() => {});
   });
-  client.on("message", async (message) => {
-    try { await captureIncomingMessage(message); }
-    catch (error) { await daemon.writeStatus({ state: "ready", message: `WhatsApp is ready. Inbox warning: ${error.message || error}` }); }
-  });
-  client.on("message_create", async (message) => {
-    if (message.fromMe) await daemon.writeStatus({ state: "ready", message: "WhatsApp is ready." });
-  });
-  client.on("auth_failure", async (message) => daemon.writeStatus({ state: "error", message: `Authentication failed: ${message}` }));
-  client.on("disconnected", async (reason) => daemon.writeStatus({ state: "disconnected", message: `Disconnected: ${reason}` }));
 
-  try { await client.initialize(); }
-  catch (error) { await daemon.writeStatus({ state: "error", message: error.message || String(error) }); }
-}
+  setInterval(async () => {
+    if (processing) return;
+    processing = true;
+    try {
+      const job = await claimNextChatJob();
+      if (job) {
+        try {
+          await completeJob(job, await processJob(manager, job));
+        } catch (error) {
+          await failJob(job, error);
+        }
+      }
+    } catch (error) {
+      await daemon.writeStatus({ state: "error", pid: process.pid, message: error?.message || String(error) });
+    } finally {
+      processing = false;
+    }
+  }, 250);
 
-async function waitForLoginSignal(timeoutMs) {
-  const start = Date.now();
-  while (Date.now() - start < timeoutMs) {
-    const status = await readJson(daemon.paths.statusFile, {});
-    if (["ready", "qr", "authenticated", "error"].includes(status.state)) return status;
-    await new Promise((resolve) => setTimeout(resolve, 500));
-  }
-  return readJson(daemon.paths.statusFile, { state: "starting" });
+  setInterval(() => {
+    manager.ensureWatchedClients().catch((error) => {
+      daemon.writeStatus({ state: "error", pid: process.pid, message: error?.message || String(error) }).catch(() => {});
+    });
+  }, 10000);
+
+  setInterval(() => {
+    manager.shutdownIdleClients().catch((error) => {
+      daemon.writeStatus({ state: "error", pid: process.pid, message: error?.message || String(error) }).catch(() => {});
+    });
+  }, 30000);
 }
 
 function getMessage(request) {
   return String(request.args?.message || request.text || request.artifact?.text || "").trim();
 }
 
-async function sendOne(to, message, artifact = null) {
-  return daemon.submit({ type: "send", to, message, mediaPath: artifact?.path || "" }, {
-    timeoutMs: number(config.JOB_TIMEOUT_MS, 120000),
+async function sendOne(chatId, to, message, artifact = null) {
+  return submitChatJob(chatId, {
+    type: "send",
+    to,
+    message,
+    mediaPath: artifact?.path || "",
     readyTimeoutMs: number(config.READY_TIMEOUT_MS, 120000)
+  }, {
+    timeoutMs: number(config.JOB_TIMEOUT_MS, 120000)
+  });
+}
+
+async function qrOutput(chatId, status, pid) {
+  const paths = chatPaths(chatId);
+  if (!status.qr) throw new Error("No active QR code found. Run login first.");
+  await QRCode.toFile(paths.qrImageFile, status.qr, { margin: 2, width: 900 });
+  return toolOk({
+    text: "WhatsApp login QR image generated. Recommendation: use a dedicated auxiliary number; WhatsApp Web automation can risk Meta restrictions or bans.",
+    filePath: paths.qrImageFile,
+    fileName: "whatsapp-login-qr.png",
+    kind: "image",
+    mimeType: "image/png",
+    delivery: { method: "photo" },
+    json: { pid, ...status }
   });
 }
 
 async function run(requestFile) {
   const request = JSON.parse(await readFile(requestFile, "utf8"));
   const mode = String(request.args?.mode || (/qr|login/i.test(String(request.text || "")) ? "qr" : "status")).toLowerCase();
-  const requestChatId = request.chatId || request.args?.chatId || request.args?.telegramChatId || request.artifact?.chatId;
 
   try {
+    const chatId = requestChatId(request);
+
     if (mode === "login") {
       const pid = await daemon.start();
-      const status = await waitForLoginSignal(number(request.args?.timeoutMs, 45000));
-      if (status.state === "qr" && status.qr) {
-        await QRCode.toFile(qrImageFile, status.qr, { margin: 2, width: 900 });
-        console.log(JSON.stringify(toolOk({ text: "WhatsApp login QR image generated.", filePath: qrImageFile, fileName: "whatsapp-login-qr.png", kind: "image", mimeType: "image/png", delivery: { method: "document" }, json: { pid, ...status } })));
+      await submitChatJob(chatId, { type: "ensure" }, { timeoutMs: number(request.args?.timeoutMs, 45000) });
+      const status = await waitForLoginSignal(chatId, number(request.args?.timeoutMs, 45000));
+      if (status.state === "needs_login" && status.qr) {
+        console.log(JSON.stringify(await qrOutput(chatId, status, pid)));
         return;
       }
-      console.log(JSON.stringify(toolOk({ text: `WhatsApp status: ${status.state || "unknown"}\n${status.message || ""}`, json: { pid, ...status } })));
+      console.log(JSON.stringify(toolOk({ text: statusText(chatId, status, pid), json: { pid, ...status } })));
       return;
     }
 
     if (mode === "status") {
-      const status = await readJson(daemon.paths.statusFile, { state: "unknown", message: "No WhatsApp daemon has been started." });
+      const status = await readChatStatus(chatId, { state: "needs_login", live: false, message: "No WhatsApp session has been started for this chat." });
       const pid = await daemon.getPid();
-      console.log(JSON.stringify(toolOk({ text: `WhatsApp status: ${status.state}\n${status.message || ""}${pid ? `\nDaemon pid: ${pid}` : ""}`, json: { pid, alive: isProcessAlive(pid), ...status } })));
+      console.log(JSON.stringify(toolOk({ text: statusText(chatId, status, pid), json: { pid, alive: isProcessAlive(pid), ...status } })));
       return;
     }
 
     if (mode === "qr") {
-      const status = await readJson(daemon.paths.statusFile, {});
-      if (!status.qr) throw new Error("No active QR code found. Run login first.");
-      await QRCode.toFile(qrImageFile, status.qr, { margin: 2, width: 900 });
-      console.log(JSON.stringify(toolOk({ text: "WhatsApp login QR image generated.", filePath: qrImageFile, fileName: "whatsapp-login-qr.png", kind: "image", mimeType: "image/png", delivery: { method: "document" } })));
+      const status = await readChatStatus(chatId, {});
+      const pid = await daemon.getPid();
+      console.log(JSON.stringify(await qrOutput(chatId, status, pid)));
       return;
     }
 
     if (mode === "send") {
       const message = getMessage(request);
       if (!message && !request.artifact?.path) throw new Error("Message text or media artifact is required");
-      const result = await sendOne(request.args?.to || request.args?.recipient, message, request.artifact);
+      const result = await sendOne(chatId, request.args?.to || request.args?.recipient, message, request.artifact);
       console.log(JSON.stringify(toolOk({ text: `Message sent to ${result.chatId}.`, json: result })));
       return;
     }
@@ -385,51 +785,44 @@ async function run(requestFile) {
       if (!message) throw new Error("Message text is required");
       const sent = [];
       for (const recipient of recipients) {
-        sent.push(await sendOne(recipient, message, request.artifact));
-        await new Promise((resolve) => setTimeout(resolve, number(config.SEND_DELAY_MS, 1200)));
+        sent.push(await sendOne(chatId, recipient, message, request.artifact));
+        await sleep(number(config.SEND_DELAY_MS, 1200));
       }
       console.log(JSON.stringify(toolOk({ text: `Sent ${sent.length} WhatsApp messages.`, json: { sent } })));
       return;
     }
 
     if (mode === "inbox") {
-      if (!requestChatId) throw new Error("chatId is required for inbox mode");
-      const messages = await selectInboxMessages({ chatId: requestChatId, from: request.args?.from, limit: number(request.args?.limit, 20), unreadOnly: bool(request.args?.unread ?? request.args?.unreadOnly, false), after: request.args?.after || "" });
-      if (bool(request.args?.markRead, true)) await markMessagesRead(requestChatId, messages.map((item) => item.id));
+      const messages = await selectInboxMessages({ chatId, from: request.args?.from, limit: number(request.args?.limit, 20), unreadOnly: bool(request.args?.unread ?? request.args?.unreadOnly, false), after: request.args?.after || "" });
+      if (bool(request.args?.markRead, true)) await markMessagesRead(chatId, messages.map((item) => item.id));
       console.log(JSON.stringify(toolOk({ text: formatInboxMessages(messages), json: { messages } })));
       return;
     }
 
     if (mode === "wait-reply") {
-      await daemon.start();
-      if (!requestChatId) throw new Error("chatId is required for wait-reply mode");
-      const message = await waitForInboxMessage({ chatId: requestChatId, from: request.args?.from, unreadOnly: bool(request.args?.unread ?? request.args?.unreadOnly, true), after: request.args?.after || new Date().toISOString(), timeoutMs: number(request.args?.timeoutMs, 60000) });
-      if (bool(request.args?.markRead, true)) await markMessagesRead(requestChatId, [message.id]);
+      await submitChatJob(chatId, { type: "ensure" }, { timeoutMs: number(config.READY_TIMEOUT_MS, 120000) });
+      const message = await waitForInboxMessage({ chatId, from: request.args?.from, unreadOnly: bool(request.args?.unread ?? request.args?.unreadOnly, true), after: request.args?.after || new Date().toISOString(), timeoutMs: number(request.args?.timeoutMs, 60000) });
+      if (bool(request.args?.markRead, true)) await markMessagesRead(chatId, [message.id]);
       console.log(JSON.stringify(toolOk({ text: formatInboxMessages([message]), json: { message } })));
       return;
     }
 
     if (mode === "watch") {
-      const chatId = request.args?.chatId || request.args?.telegramChatId;
-      if (!chatId) throw new Error("chatId is required for event-driven watch mode");
       await writeJson(watchFileForChat(chatId), { enabled: true, chatId: Number(chatId), updatedAt: new Date().toISOString() });
-      await daemon.start();
-      console.log(JSON.stringify(toolOk({ text: "WhatsApp event-driven processing enabled. Arisa will only run when a new WhatsApp message arrives.", json: { enabled: true, chatId: Number(chatId) } })));
+      await submitChatJob(chatId, { type: "ensure" }, { timeoutMs: number(config.READY_TIMEOUT_MS, 120000) });
+      console.log(JSON.stringify(toolOk({ text: "WhatsApp event-driven processing enabled for this chat. Arisa will only run when a new WhatsApp message arrives.", json: { enabled: true, chatId: Number(chatId) } })));
       return;
     }
 
     if (mode === "unwatch") {
-      if (!requestChatId) throw new Error("chatId is required for unwatch mode");
-      await writeJson(watchFileForChat(requestChatId), { enabled: false, chatId: Number(requestChatId), updatedAt: new Date().toISOString() });
-      console.log(JSON.stringify(toolOk({ text: "WhatsApp event-driven processing disabled.", json: { enabled: false } })));
+      await writeJson(watchFileForChat(chatId), { enabled: false, chatId: Number(chatId), updatedAt: new Date().toISOString() });
+      console.log(JSON.stringify(toolOk({ text: "WhatsApp event-driven processing disabled for this chat.", json: { enabled: false, chatId: Number(chatId) } })));
       return;
     }
 
     if (mode === "logout") {
-      await daemon.stop();
-      await rm(sessionDir, { recursive: true, force: true });
-      await daemon.writeStatus({ state: "logged_out", message: "Local WhatsApp session removed." });
-      console.log(JSON.stringify(toolOk({ text: "WhatsApp session removed." })));
+      const result = await submitChatJob(chatId, { type: "logout" }, { timeoutMs: number(config.JOB_TIMEOUT_MS, 120000) });
+      console.log(JSON.stringify(toolOk({ text: "WhatsApp session removed for this chat.", json: result })));
       return;
     }
 
