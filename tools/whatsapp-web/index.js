@@ -33,7 +33,7 @@ Usage:
   node index.js run --request-file <json>
 
 Modes:
-  login      Start this chat's WhatsApp session and return a QR code when needed.
+  login      Start this chat's WhatsApp session, enable watch, and return a QR code when needed.
   status     Show this chat's WhatsApp session status.
   send       Send one WhatsApp message from this chat's WhatsApp session.
   broadcast  Send one message to multiple recipients from this chat's session.
@@ -337,6 +337,10 @@ async function isWatchEnabled(chatId) {
   return Boolean((await readWatchConfig(chatId)).enabled);
 }
 
+async function enableWatch(chatId) {
+  await writeJson(watchFileForChat(chatId), { enabled: true, chatId: Number(chatId), updatedAt: new Date().toISOString() });
+}
+
 async function readWatchConfigs() {
   const entries = await readdir(chatsDir, { withFileTypes: true }).catch(() => []);
   const watches = [];
@@ -356,6 +360,14 @@ async function readTasks() {
 
 async function writeTasks(tasks) {
   await writeJson(tasksFile, tasks);
+}
+
+function isTechnicalWhatsAppNotification(message) {
+  const type = String(message.type || "").toLowerCase();
+  const technicalTypes = new Set(["e2e_notification", "notification_template"]);
+  return !compact(message.body)
+    && !message.hasMedia
+    && (technicalTypes.has(type) || type.includes("notification") || message.from === "status@broadcast");
 }
 
 function buildIncomingMessagePrompt(message, artifact) {
@@ -389,6 +401,28 @@ async function enqueueArisaTaskForIncomingMessage(chatId, message, artifact = nu
     payload: { chatId: numericChatId, prompt: buildIncomingMessagePrompt(message, artifact), artifactId: artifact?.id || "" },
     recurrence: null,
     source: { type: "tool", toolName, chatId: numericChatId, messageId: message.id }
+  });
+  await writeTasks(tasks);
+}
+
+async function enqueueWhatsAppReadyTask(chatId) {
+  const numericChatId = Number(chatId);
+  const tasks = await readTasks();
+  const createdAt = new Date().toISOString();
+  tasks.push({
+    id: crypto.randomUUID(),
+    status: "pending",
+    createdAt,
+    updatedAt: createdAt,
+    kind: "agent_task",
+    runAt: createdAt,
+    payload: {
+      chatId: numericChatId,
+      prompt: "System event: WhatsApp Web login completed for this chat. Reply briefly in the user's language to confirm that WhatsApp is connected and ready.",
+      artifactId: ""
+    },
+    recurrence: null,
+    source: { type: "tool", toolName, chatId: numericChatId, event: "login_ready", occurredAt: createdAt }
   });
   await writeTasks(tasks);
 }
@@ -459,6 +493,10 @@ async function captureIncomingMessage(ownerChatId, message) {
     await writeChatStatus(ownerChatId, { state: "ready", live: true, pid: process.pid, message: "WhatsApp is ready." });
     return;
   }
+  if (isTechnicalWhatsAppNotification(message)) {
+    await writeChatStatus(ownerChatId, { state: "ready", live: true, pid: process.pid, message: `WhatsApp is ready. Ignored system notification: ${message.type || "unknown"}.` });
+    return;
+  }
   let contact = null;
   try { contact = await message.getContact(); } catch {}
   const inboxMessage = {
@@ -519,11 +557,13 @@ class SessionManager {
       client,
       initializing: null,
       lastActivity: Date.now(),
-      closingReason: ""
+      closingReason: "",
+      loginNotificationPending: false
     };
     this.sessions.set(normalizedChatId, record);
 
     client.on("qr", async (qr) => {
+      record.loginNotificationPending = true;
       await QRCode.toFile(paths.qrImageFile, qr, { margin: 2, width: 900 }).catch(() => {});
       await writeChatStatus(normalizedChatId, {
         state: "needs_login",
@@ -545,6 +585,10 @@ class SessionManager {
     client.on("ready", async () => {
       record.lastActivity = Date.now();
       await writeChatStatus(normalizedChatId, { state: "ready", live: true, pid: process.pid, message: "WhatsApp is ready." });
+      if (record.loginNotificationPending) {
+        record.loginNotificationPending = false;
+        await enqueueWhatsAppReadyTask(normalizedChatId);
+      }
     });
     client.on("message", async (message) => {
       record.lastActivity = Date.now();
@@ -727,7 +771,7 @@ async function qrOutput(chatId, status, pid) {
   if (!status.qr) throw new Error("No active QR code found. Run login first.");
   await QRCode.toFile(paths.qrImageFile, status.qr, { margin: 2, width: 900 });
   return toolOk({
-    text: "WhatsApp login QR image generated. Recommendation: use a dedicated auxiliary number; WhatsApp Web automation can risk Meta restrictions or bans.",
+    text: "WhatsApp login QR image generated. Event watch is enabled for this chat. Recommendation: use a dedicated auxiliary number; WhatsApp Web automation can risk Meta restrictions or bans.",
     filePath: paths.qrImageFile,
     fileName: "whatsapp-login-qr.png",
     kind: "image",
@@ -745,6 +789,7 @@ async function run(requestFile) {
     const chatId = requestChatId(request);
 
     if (mode === "login") {
+      await enableWatch(chatId);
       const pid = await daemon.start();
       await submitChatJob(chatId, { type: "ensure" }, { timeoutMs: number(request.args?.timeoutMs, 45000) });
       const status = await waitForLoginSignal(chatId, number(request.args?.timeoutMs, 45000));
@@ -808,7 +853,7 @@ async function run(requestFile) {
     }
 
     if (mode === "watch") {
-      await writeJson(watchFileForChat(chatId), { enabled: true, chatId: Number(chatId), updatedAt: new Date().toISOString() });
+      await enableWatch(chatId);
       await submitChatJob(chatId, { type: "ensure" }, { timeoutMs: number(config.READY_TIMEOUT_MS, 120000) });
       console.log(JSON.stringify(toolOk({ text: "WhatsApp event-driven processing enabled for this chat. Arisa will only run when a new WhatsApp message arrives.", json: { enabled: true, chatId: Number(chatId) } })));
       return;
