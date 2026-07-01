@@ -1,21 +1,24 @@
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
-import { pathToFileURL } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import defaults from "./config.js";
 
-const importCore = (relativePath) => import(pathToFileURL(path.join(process.env.ARISA_PACKAGE_DIR, "src", relativePath)).href);
+const toolDir = path.dirname(fileURLToPath(import.meta.url));
+const arisaPackageDir = process.env.ARISA_PACKAGE_DIR || path.resolve(toolDir, "../../package");
+const importCore = (relativePath) => import(pathToFileURL(path.join(arisaPackageDir, "src", relativePath)).href);
 const { loadToolConfig } = await importCore("core/tools/tool-config.js");
 const { toolError, toolNeedsConfig, toolOk } = await importCore("core/tools/tool-result.js");
 const { getChatToolTmpDir, getToolConfigPath, getToolTmpDir } = await importCore("runtime/paths.js");
 
 const toolName = "openai-tts";
-const config = await loadToolConfig(toolName, defaults);
 
 function printHelp() {
   console.log(`openai-tts\n\nUsage:\n  node index.js --help\n  node index.js run --request-file <json>\n\nExpected input:\n  {\n    \"text\": \"hello\",\n    \"artifact\": { \"text\": \"hello\" },\n    \"args\": { \"voice\": \"alloy\" }\n  }\n\nOutput:\n  - generates OGG/Opus audio\n  - suggests Telegram voice-note delivery via output.delivery.method = \"voice\"\n\nConfig at ${getToolConfigPath(toolName)}:\n  OPENAI_API_KEY\n  MODEL\n  VOICE\n`);
 }
 
 async function run(requestFile) {
+  const request = JSON.parse(await readFile(requestFile, "utf8"));
+  const config = await loadToolConfig(toolName, defaults, request.chatId);
   if (!config.OPENAI_API_KEY) {
     console.log(JSON.stringify(toolNeedsConfig({
       tool: toolName,
@@ -25,7 +28,6 @@ async function run(requestFile) {
     return;
   }
 
-  const request = JSON.parse(await readFile(requestFile, "utf8"));
   const inputText = request.text || request.artifact?.text;
   if (!inputText) {
     console.log(JSON.stringify(toolError("text or artifact.text is required")));

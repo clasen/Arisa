@@ -336,7 +336,7 @@ async function handle(request, config) {
 async function run(requestFile) {
   try {
     const request = JSON.parse(await readFile(requestFile, "utf8"));
-    const config = await loadSavedToken(request, await loadToolConfig(toolName, defaults));
+    const config = await loadSavedToken(request, await loadToolConfig(toolName, defaults, request.chatId));
     const result = await handle(request, config);
     const extra = {};
     if (result.asyncTask) extra.asyncTask = result.asyncTask;

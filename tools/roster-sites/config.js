@@ -1,6 +1,6 @@
 export default {
   defaultDomain: "",
-  wwwPath: "/srv/www",
-  greenlockStorePath: "/srv/greenlock.d",
+  wwwPath: "",
+  greenlockStorePath: "",
   email: ""
 };

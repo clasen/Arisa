@@ -23,6 +23,15 @@ Do not build runtime paths by hand. Use `src/runtime/paths.js`:
 
 Tools receive `chatId` from the registry. Any persisted or indexed user content must be scoped by chat. Avoid ad hoc roots like `~/.arisa/state/<toolName>`, `~/.arisa/state/chats`, or runtime data inside `~/.arisa/tools/<toolName>`.
 
+## Tool config rules
+Every tool has a local `config.js` that exports generic, non-user-specific defaults. Keep user credentials, deployment-specific URLs, account ids, phone numbers, and other per-user values empty or neutral there; document required values in `tool.manifest.json` `configSchema`.
+
+Tools must consume config through `src/core/tools/tool-config.js`:
+- `loadToolConfig(toolName, defaults)` for global tools and daemons that run as one shared process.
+- `loadToolConfig(toolName, defaults, request.chatId)` inside `run()` for request-scoped tools that should honor per-chat overrides.
+
+Config precedence is a shallow merge: tool defaults -> global tool config (`~/.arisa/tools/<toolName>/config.js`) -> chat tool config (`~/.arisa/chats/<chatId>/config/tools/<toolName>/config.js`). Per-request `args` may override loaded config for that invocation only; do not persist request args as config unless the user explicitly asked to set a default.
+
 ## Main rule: everything is piped through artifacts
 A pipe transforms one input artifact into one output artifact.
 Examples:

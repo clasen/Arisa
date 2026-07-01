@@ -4,6 +4,7 @@ import os from "node:os";
 import path from "node:path";
 import test from "node:test";
 import { buildPiToolPolicy } from "../src/core/agent/core-tools.js";
+import { appendArisaAgentsFile, arisaAgentsFile } from "../src/core/agent/runtime-context.js";
 import { createSystemShellTool } from "../src/core/agent/system-shell-tool.js";
 import { applyRuntimeOverrides } from "../src/runtime/create-app.js";
 import { arisaHomeDir } from "../src/runtime/paths.js";
@@ -88,4 +89,23 @@ test("system_shell runs commands from the configured workspace", async () => {
   assert.equal(result.details.cwd, workspaceDir);
   assert.equal(result.details.exitCode, 0);
   assert.equal(result.details.stdout, realWorkspaceDir);
+});
+
+test("adds Arisa AGENTS.md to Pi context files without duplicating it", () => {
+  const current = {
+    agentsFiles: [
+      { path: "/workspace/AGENTS.md", content: "# Workspace" },
+      { path: arisaAgentsFile, content: "old" }
+    ],
+    diagnostics: []
+  };
+
+  const next = appendArisaAgentsFile(current, "# Arisa AGENTS");
+
+  assert.deepEqual(next.diagnostics, []);
+  assert.deepEqual(
+    next.agentsFiles.map((file) => file.path),
+    ["/workspace/AGENTS.md", arisaAgentsFile]
+  );
+  assert.equal(next.agentsFiles.at(-1).content, "# Arisa AGENTS");
 });

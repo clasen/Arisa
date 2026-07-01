@@ -1,15 +1,16 @@
 import path from "node:path";
-import { pathToFileURL } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import { readFile, stat } from "node:fs/promises";
 import defaults from "./config.js";
 
-const importCore = (relativePath) => import(pathToFileURL(path.join(process.env.ARISA_PACKAGE_DIR, "src", relativePath)).href);
+const toolDir = path.dirname(fileURLToPath(import.meta.url));
+const arisaPackageDir = process.env.ARISA_PACKAGE_DIR || path.resolve(toolDir, "../../package");
+const importCore = (relativePath) => import(pathToFileURL(path.join(arisaPackageDir, "src", relativePath)).href);
 const { loadToolConfig } = await importCore("core/tools/tool-config.js");
 const { toolError, toolNeedsConfig, toolOk } = await importCore("core/tools/tool-result.js");
 const { getToolConfigPath } = await importCore("runtime/paths.js");
 
 const toolName = "openai-transcribe";
-const config = await loadToolConfig(toolName, defaults);
 
 const supportedUploadExtensions = new Set([
   ".flac",
@@ -63,6 +64,8 @@ function printHelp() {
 }
 
 async function run(requestFile) {
+  const request = JSON.parse(await readFile(requestFile, "utf8"));
+  const config = await loadToolConfig(toolName, defaults, request.chatId);
   if (!config.OPENAI_API_KEY) {
     console.log(JSON.stringify(toolNeedsConfig({
       tool: toolName,
@@ -72,7 +75,6 @@ async function run(requestFile) {
     return;
   }
 
-  const request = JSON.parse(await readFile(requestFile, "utf8"));
   const artifact = request.artifact;
   if (!artifact?.path) {
     console.log(JSON.stringify(toolError("artifact.path is required")));

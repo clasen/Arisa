@@ -1,0 +1,12 @@
+{
+  "name": "arisa-turn-server",
+  "version": "0.1.0",
+  "type": "module",
+  "private": true,
+  "description": "Daemon tool that runs coturn for WebRTC TURN fallback.",
+  "main": "index.js",
+  "scripts": {
+    "start": "node index.js start",
+    "check": "node --check index.js"
+  }
+}

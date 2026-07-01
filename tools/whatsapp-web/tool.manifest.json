@@ -13,7 +13,7 @@
     "DEFAULT_COUNTRY_CODE": {
       "type": "string",
       "required": false,
-      "prompt": "Default country code used when normalizing local phone numbers."
+      "prompt": "Optional default country code used when normalizing local phone numbers."
     },
     "HEADLESS": {
       "type": "string",

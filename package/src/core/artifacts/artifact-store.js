@@ -7,6 +7,11 @@ function id() {
   return crypto.randomUUID();
 }
 
+function writeArtifactFile(filePath, content) {
+  if (typeof content === "string") return writeFile(filePath, content, "utf8");
+  return writeFile(filePath, content);
+}
+
 class ChatArtifactStore {
   constructor(chatId) {
     this.chatId = String(chatId);
@@ -81,7 +86,7 @@ class ChatArtifactStore {
     const dir = path.join(this.rootDir, artifactId);
     await mkdir(dir, { recursive: true });
     const destPath = path.join(dir, fileName);
-    await writeFile(destPath, content);
+    await writeArtifactFile(destPath, content);
     const artifact = {
       id: artifactId,
       chatId: this.chatId,

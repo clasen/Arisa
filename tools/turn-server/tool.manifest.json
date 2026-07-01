@@ -1,0 +1,18 @@
+{
+  "name": "turn-server",
+  "description": "Daemon tool: coturn TURN server for WebRTC fallback relay.",
+  "entry": "index.js",
+  "daemon": {
+    "command": "node index.js start",
+    "publicPorts": "3478/udp,3478/tcp",
+    "iceEndpoint": "/signaling/ice-servers"
+  },
+  "input": ["text/plain", "application/json"],
+  "output": ["application/json"],
+  "configSchema": {
+    "realm": { "type": "string", "description": "TURN realm, default localhost." },
+    "publicHost": { "type": "string", "description": "Public hostname or IP clients use to reach this TURN server." },
+    "secret": { "type": "string", "secret": true, "description": "Shared TURN REST API secret" }
+  },
+  "skillHints": []
+}

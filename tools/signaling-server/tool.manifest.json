@@ -1,0 +1,24 @@
+{
+  "name": "signaling-server",
+  "description": "Daemon tool: standalone minimal WebRTC signaling service for public in-memory rooms.",
+  "entry": "index.js",
+  "daemon": {
+    "command": "node index.js serve",
+    "healthPath": "/signaling/health",
+    "publicPath": "/signaling",
+    "websocketPath": "/signaling/ws"
+  },
+  "input": ["text/plain", "application/json"],
+  "output": ["application/json"],
+  "configSchema": {
+    "port": {
+      "type": "string",
+      "description": "Default port for the standalone server."
+    },
+    "publicBaseUrl": {
+      "type": "string",
+      "description": "Public base URL where clients reach the signaling service."
+    }
+  },
+  "skillHints": []
+}

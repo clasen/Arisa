@@ -4,13 +4,9 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 
 const toolDir = path.dirname(fileURLToPath(import.meta.url));
 const bundledSkillDir = path.join(toolDir, "skill");
+const arisaPackageDir = process.env.ARISA_PACKAGE_DIR || path.resolve(toolDir, "../../package");
 
-const importCore = (relativePath) => {
-  if (!process.env.ARISA_PACKAGE_DIR) {
-    throw new Error("ARISA_PACKAGE_DIR is required to load Arisa tool helpers");
-  }
-  return import(pathToFileURL(path.join(process.env.ARISA_PACKAGE_DIR, "src", relativePath)).href);
-};
+const importCore = (relativePath) => import(pathToFileURL(path.join(arisaPackageDir, "src", relativePath)).href);
 
 function printHelp() {
   console.log(`stop-slop-writer

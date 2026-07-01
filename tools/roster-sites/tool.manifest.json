@@ -6,9 +6,9 @@
   "output": ["application/json"],
   "configSchema": {
     "defaultDomain": { "type": "string", "required": false, "prompt": "Optional default domain to manage when args.domain is omitted." },
-    "wwwPath": { "type": "string", "required": false, "prompt": "RosterServer www root." },
-    "greenlockStorePath": { "type": "string", "required": false, "prompt": "Greenlock certificate store path." },
-    "email": { "type": "string", "required": false, "prompt": "Let's Encrypt contact email." }
+    "wwwPath": { "type": "string", "required": true, "prompt": "RosterServer www root for this deployment, for example /srv/www." },
+    "greenlockStorePath": { "type": "string", "required": true, "prompt": "Greenlock certificate store path for this deployment, for example /srv/greenlock.d." },
+    "email": { "type": "string", "required": true, "prompt": "Let's Encrypt contact email." }
   },
   "skillHints": []
 }

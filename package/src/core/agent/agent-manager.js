@@ -1,9 +1,9 @@
 import path from "node:path";
-import { stat, unlink } from "node:fs/promises";
-import { createAgentSession, SessionManager, defineTool } from "@earendil-works/pi-coding-agent";
+import { readFile, stat, unlink } from "node:fs/promises";
+import { createAgentSession, DefaultResourceLoader, SessionManager, defineTool } from "@earendil-works/pi-coding-agent";
 import { Type } from "@sinclair/typebox";
 import { createPiRuntime, hasProviderAuth } from "./pi-runtime.js";
-import { arisaInstallDir, buildAgentRuntimeContext } from "./runtime-context.js";
+import { appendArisaAgentsFile, arisaAgentsFile, arisaInstallDir, buildAgentRuntimeContext } from "./runtime-context.js";
 import { withTimeout } from "./prompt-timeout.js";
 import { buildPiToolPolicy, getCoreCodingTools } from "./core-tools.js";
 import { createSystemShellTool } from "./system-shell-tool.js";
@@ -86,6 +86,17 @@ async function assertDirectory(dir, label) {
   if (!stats.isDirectory()) {
     throw new Error(`${label} is not a directory: ${dir}`);
   }
+}
+
+async function createArisaResourceLoader({ cwd, agentDir }) {
+  const arisaAgentsContent = await readFile(arisaAgentsFile, "utf8");
+  const resourceLoader = new DefaultResourceLoader({
+    cwd,
+    agentDir,
+    agentsFilesOverride: (current) => appendArisaAgentsFile(current, arisaAgentsContent)
+  });
+  await resourceLoader.reload();
+  return resourceLoader;
 }
 
 export class AgentManager {
@@ -188,9 +199,14 @@ export class AgentManager {
       ...this.createTools(telegram, chatId, policy),
       createSystemShellTool({ workspaceDir: policy.workspaceDir, shell: policy.shell })
     ];
+    const resourceLoader = await createArisaResourceLoader({
+      cwd: policy.workspaceDir,
+      agentDir: arisaHomeDir
+    });
     const { session } = await createAgentSession({
       cwd: policy.workspaceDir,
       agentDir: arisaHomeDir,
+      resourceLoader,
       authStorage,
       modelRegistry,
       model,

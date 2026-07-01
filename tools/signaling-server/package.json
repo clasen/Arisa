@@ -1,0 +1,16 @@
+{
+  "name": "arisa-signaling-server",
+  "version": "0.1.0",
+  "type": "module",
+  "private": true,
+  "description": "Minimal public WebRTC signaling service with in-memory rooms.",
+  "main": "index.js",
+  "scripts": {
+    "start": "node index.js serve",
+    "dev": "node index.js serve --port 8787",
+    "check": "node --check index.js"
+  },
+  "dependencies": {
+    "ws": "^8.18.0"
+  }
+}

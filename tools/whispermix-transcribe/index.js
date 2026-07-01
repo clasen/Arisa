@@ -1,12 +1,14 @@
 import crypto from "node:crypto";
 import os from "node:os";
 import path from "node:path";
-import { pathToFileURL } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import { spawn } from "node:child_process";
 import { readFile, stat, unlink } from "node:fs/promises";
 import defaults from "./config.js";
 
-const importCore = (relativePath) => import(pathToFileURL(path.join(process.env.ARISA_PACKAGE_DIR, "src", relativePath)).href);
+const toolDir = path.dirname(fileURLToPath(import.meta.url));
+const arisaPackageDir = process.env.ARISA_PACKAGE_DIR || path.resolve(toolDir, "../../package");
+const importCore = (relativePath) => import(pathToFileURL(path.join(arisaPackageDir, "src", relativePath)).href);
 const { loadToolConfig } = await importCore("core/tools/tool-config.js");
 const { createDaemonRuntime } = await importCore("core/tools/daemon-runtime.js");
 const { toolError, toolOk } = await importCore("core/tools/tool-result.js");
@@ -17,7 +19,7 @@ const config = await loadToolConfig(toolName, defaults);
 const daemon = createDaemonRuntime({ toolName, entryPath: new URL(import.meta.url).pathname });
 
 function printHelp() {
-  console.log(`whispermix-transcribe\n\nUsage:\n  node index.js --help\n  node index.js run --request-file <json>\n\nExpected input:\n  {\n    "artifact": { "path": "/abs/audio.ogg", "mimeType": "audio/ogg" },\n    "args": { "model": "efederici/parakeet-tdt-0.6b-v3-int4", "language": "spanish" }\n  }\n\nConfig at ${getToolConfigPath(toolName)}:\n  MODEL\n  FALLBACK_MODEL\n  LANGUAGE\n  IDLE_TIMEOUT_MS\n  READY_TIMEOUT_MS\n  JOB_TIMEOUT_MS\n`);
+  console.log(`whispermix-transcribe\n\nUsage:\n  node index.js --help\n  node index.js run --request-file <json>\n\nExpected input:\n  {\n    "artifact": { "path": "/abs/audio.ogg", "mimeType": "audio/ogg" },\n    "args": { "model": "efederici/parakeet-tdt-0.6b-v3-int4", "language": "auto" }\n  }\n\nConfig at ${getToolConfigPath(toolName)}:\n  MODEL\n  FALLBACK_MODEL\n  LANGUAGE\n  IDLE_TIMEOUT_MS\n  READY_TIMEOUT_MS\n  JOB_TIMEOUT_MS\n`);
 }
 
 function asNumber(value, fallback) {

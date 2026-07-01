@@ -1,0 +1,17 @@
+{
+  "name": "markdown-pdf",
+  "version": "0.1.0",
+  "type": "module",
+  "private": true,
+  "description": "Convert Markdown documents to PDF using pdfmake.",
+  "main": "index.js",
+  "scripts": {
+    "check": "node --check index.js"
+  },
+  "dependencies": {
+    "markdown-it": "^14.1.0",
+    "markdown-it-footnote": "^4.0.0",
+    "markdown-it-task-lists": "^2.1.1",
+    "pdfmake": "^0.2.18"
+  }
+}

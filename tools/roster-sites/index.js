@@ -12,14 +12,13 @@ const toolName = "roster-sites";
 const entryPath = fileURLToPath(import.meta.url);
 const toolDir = path.dirname(entryPath);
 const require = createRequire(import.meta.url);
-const arisaPackageDir = process.env.ARISA_PACKAGE_DIR || process.env.ARISA_INSTALL_DIR || "/root/.nvm/versions/node/v24.14.0/lib/node_modules/arisa";
+const arisaPackageDir = process.env.ARISA_PACKAGE_DIR || process.env.ARISA_INSTALL_DIR || path.resolve(toolDir, "../../package");
 const pathsModule = await import(pathToFileURL(path.join(arisaPackageDir, "src/runtime/paths.js")));
 const {
-  getChatToolConfigPath,
   getChatToolStateDir,
-  getToolConfigPath,
   getToolStateDir
 } = pathsModule;
+const { loadToolConfig } = await import(pathToFileURL(path.join(arisaPackageDir, "src/core/tools/tool-config.js")).href);
 
 function printHelp() {
   console.log(`roster-sites
@@ -43,21 +42,8 @@ Runtime daemon files stay under ~/.arisa/state/tools/roster-sites.
 `);
 }
 
-function parseConfigModule(source) {
-  const normalized = source.replace(/^export\s+default/, "return");
-  return new Function(normalized)();
-}
-
-async function readConfigModule(filePath, fallback = {}) {
-  try { return parseConfigModule(await readFile(filePath, "utf8")); } catch { return fallback; }
-}
-
 async function loadConfig(chatId = null) {
-  const globalStored = await readConfigModule(getToolConfigPath(toolName), {});
-  const merged = { ...defaults, ...globalStored };
-  if (chatId == null) return merged;
-  const chatStored = await readConfigModule(getChatToolConfigPath(chatId, toolName), {});
-  return { ...merged, ...chatStored };
+  return loadToolConfig(toolName, defaults, chatId);
 }
 
 function resultOk(output) { return { ok: true, output: { text: JSON.stringify(output, null, 2), mimeType: "application/json" } }; }
@@ -224,6 +210,7 @@ function fallbackStyles() { return `:root{color-scheme:dark;--bg:#1d2021;--fg:#e
 function appScript() { return `window.__applyTweaks=window.__applyTweaks||(()=>{});`; }
 
 async function deploySite(config, domain, pages) {
+  requireConfig(config, ["email", "wwwPath", "greenlockStorePath"]);
   const siteDir = path.join(config.wwwPath, domain);
   await mkdir(path.join(siteDir, "assets"), { recursive: true });
   await mkdir(path.join(siteDir, "data"), { recursive: true });
@@ -244,6 +231,7 @@ async function hasMx(email) {
 }
 
 async function startRosterServer(config) {
+  requireConfig(config, ["email", "wwwPath", "greenlockStorePath"]);
   if (!(await hasMx(config.email))) throw new Error(`RosterServer contact email needs a domain with MX records: ${config.email}`);
   const Roster = require("roster-server");
   const server = new Roster({ email: config.email, wwwPath: config.wwwPath, greenlockStorePath: config.greenlockStorePath });
@@ -287,6 +275,11 @@ function resolveDomain(args = {}, config = {}, { required = false } = {}) {
   const domain = String(args.domain || config.defaultDomain || config.domain || "").trim();
   if (required && !domain) throw new Error("args.domain is required for this action unless defaultDomain is configured");
   return domain;
+}
+
+function requireConfig(config, fields) {
+  const missing = fields.filter((field) => !String(config[field] || "").trim());
+  if (missing.length) throw new Error(`Missing required roster-sites config: ${missing.join(", ")}`);
 }
 
 async function handleRun(request) {

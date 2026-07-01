@@ -1,7 +1,7 @@
 import crypto from "node:crypto";
 import path from "node:path";
 import process from "node:process";
-import { pathToFileURL } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import { existsSync } from "node:fs";
 import { mkdir, readFile, readdir, rename, rm, rmdir, stat, unlink, writeFile } from "node:fs/promises";
 import qrcodeTerminal from "qrcode-terminal";
@@ -9,11 +9,14 @@ import QRCode from "qrcode";
 import pkg from "whatsapp-web.js";
 import defaults from "./config.js";
 
-const importCore = (relativePath) => import(pathToFileURL(path.join(process.env.ARISA_PACKAGE_DIR, "src", relativePath)).href);
+const toolDir = path.dirname(fileURLToPath(import.meta.url));
+const arisaPackageDir = process.env.ARISA_PACKAGE_DIR || path.resolve(toolDir, "../../package");
+const importCore = (relativePath) => import(pathToFileURL(path.join(arisaPackageDir, "src", relativePath)).href);
 const { loadToolConfig } = await importCore("core/tools/tool-config.js");
 const { toolError, toolOk } = await importCore("core/tools/tool-result.js");
 const { ArtifactStore } = await importCore("core/artifacts/artifact-store.js");
-const { createDaemonRuntime, isProcessAlive, readJson, writeJson } = await importCore("core/tools/daemon-runtime.js");
+const { createDaemonRuntime } = await importCore("core/tools/daemon-runtime.js");
+const { isProcessAlive, readJson, writeJson } = await importCore("core/tools/daemon-processes.js");
 const { chatsDir, getChatToolStateDir, tasksFile } = await importCore("runtime/paths.js");
 
 const { Client, LocalAuth, MessageMedia } = pkg;
@@ -35,10 +38,10 @@ Usage:
 Modes:
   login      Start this chat's WhatsApp session, enable watch, and return a QR code when needed.
   status     Show this chat's WhatsApp session status.
-  send       Send one WhatsApp message from this chat's WhatsApp session.
-  broadcast  Send one message to multiple recipients from this chat's session.
+  send       Send one WhatsApp message from this chat's WhatsApp session. Enables watch by default.
+  broadcast  Send one message to multiple recipients from this chat's session. Enables watch by default.
   inbox      Read/process received WhatsApp replies from this chat's local inbox.
-  wait-reply Wait for a reply from an optional recipient.
+  wait-reply Wait for a reply from an optional recipient after sending.
   watch      Keep this chat's WhatsApp session live and process incoming messages.
   unwatch    Disable event-driven processing for this chat.
   qr         Generate a PNG image from this chat's latest login QR.
@@ -47,7 +50,12 @@ Modes:
 Examples:
   { "chatId": "879964957", "args": { "mode": "login" } }
   { "chatId": "879964957", "args": { "mode": "send", "to": "+5491112345678", "message": "Hello" } }
+  { "chatId": "879964957", "args": { "mode": "wait-reply", "from": "+5491112345678" } }
   { "chatId": "879964957", "args": { "mode": "watch" } }
+
+Recommended workflow:
+  login once -> keep watch enabled -> send -> wait-reply when the agent needs the immediate answer.
+  If WhatsApp is active, watch should stay enabled so replies are processed automatically.
 
 Per-chat sessions: ${chatSessionsRoot}/<chatId>/session
 Legacy global session ignored: ${legacySessionDir}
@@ -511,15 +519,10 @@ async function captureIncomingMessage(ownerChatId, message) {
     read: false
   };
 
-  const artifact = await storeIncomingMediaArtifact(message, ownerChatId);
-  if (!compact(inboxMessage.body) && !artifact) {
-    await writeChatStatus(ownerChatId, { state: "ready", live: true, pid: process.pid, message: `WhatsApp is ready. Ignored non-readable event: ${message.type || "unknown"}.` });
-    return;
-  }
-
   if (!(await appendInboxMessage(ownerChatId, inboxMessage))) return;
   if (!(await isWatchEnabled(ownerChatId))) return;
 
+  const artifact = await storeIncomingMediaArtifact(message, ownerChatId);
   await enqueueArisaTaskForIncomingMessage(ownerChatId, inboxMessage, artifact);
 }
 
@@ -823,8 +826,11 @@ async function run(requestFile) {
     if (mode === "send") {
       const message = getMessage(request);
       if (!message && !request.artifact?.path) throw new Error("Message text or media artifact is required");
+      const autoWatch = bool(request.args?.watch ?? request.args?.autoWatch, true);
+      if (autoWatch) await enableWatch(chatId);
       const result = await sendOne(chatId, request.args?.to || request.args?.recipient, message, request.artifact);
-      console.log(JSON.stringify(toolOk({ text: `Message sent to ${result.chatId}.`, json: result })));
+      const watchNote = autoWatch ? " Watch is enabled for this chat; use wait-reply when you need the immediate answer." : " Watch is disabled by request; run watch or wait-reply to process replies.";
+      console.log(JSON.stringify(toolOk({ text: `Message sent to ${result.chatId}.${watchNote}`, json: { ...result, watchEnabled: autoWatch } })));
       return;
     }
 
@@ -833,12 +839,15 @@ async function run(requestFile) {
       const message = getMessage(request);
       if (!recipients.length) throw new Error("At least one recipient is required");
       if (!message) throw new Error("Message text is required");
+      const autoWatch = bool(request.args?.watch ?? request.args?.autoWatch, true);
+      if (autoWatch) await enableWatch(chatId);
       const sent = [];
       for (const recipient of recipients) {
         sent.push(await sendOne(chatId, recipient, message, request.artifact));
         await sleep(number(config.SEND_DELAY_MS, 1200));
       }
-      console.log(JSON.stringify(toolOk({ text: `Sent ${sent.length} WhatsApp messages.`, json: { sent } })));
+      const watchNote = autoWatch ? " Watch is enabled for this chat; use wait-reply when you need an immediate answer from a recipient." : " Watch is disabled by request; run watch or wait-reply to process replies.";
+      console.log(JSON.stringify(toolOk({ text: `Sent ${sent.length} WhatsApp messages.${watchNote}`, json: { sent, watchEnabled: autoWatch } })));
       return;
     }
 

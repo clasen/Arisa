@@ -83,6 +83,20 @@ test("creates generated file artifacts", async () => {
   assert.equal(artifact.mimeType, "text/markdown");
 });
 
+test("writes generated text file artifacts as UTF-8", async () => {
+  await resetHome();
+  const content = "# Español\nÑandú\n";
+  const artifact = await new ArtifactStore().forChat("chat-1").createGeneratedFile({
+    fileName: "reply.txt",
+    content,
+    kind: "document",
+    mimeType: "text/plain",
+    source: { type: "assistant" }
+  });
+
+  assert.deepEqual(await readFile(artifact.path), Buffer.from(content, "utf8"));
+});
+
 test("keeps artifact indexes isolated by chat", async () => {
   await resetHome();
   const store = new ArtifactStore();
