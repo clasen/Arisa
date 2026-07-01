@@ -511,10 +511,15 @@ async function captureIncomingMessage(ownerChatId, message) {
     read: false
   };
 
+  const artifact = await storeIncomingMediaArtifact(message, ownerChatId);
+  if (!compact(inboxMessage.body) && !artifact) {
+    await writeChatStatus(ownerChatId, { state: "ready", live: true, pid: process.pid, message: `WhatsApp is ready. Ignored non-readable event: ${message.type || "unknown"}.` });
+    return;
+  }
+
   if (!(await appendInboxMessage(ownerChatId, inboxMessage))) return;
   if (!(await isWatchEnabled(ownerChatId))) return;
 
-  const artifact = await storeIncomingMediaArtifact(message, ownerChatId);
   await enqueueArisaTaskForIncomingMessage(ownerChatId, inboxMessage, artifact);
 }
 
