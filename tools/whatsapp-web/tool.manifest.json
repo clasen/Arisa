@@ -2,8 +2,17 @@
   "name": "whatsapp-web",
   "description": "Use isolated per-chat WhatsApp Web sessions to log in, send messages, and receive/process WhatsApp replies via whatsapp-web.js. Recommendation: use a dedicated auxiliary number because WhatsApp Web automation can risk Meta restrictions or bans.",
   "entry": "index.js",
-  "input": ["text/plain", "image/*", "video/*", "audio/*", "application/pdf"],
-  "output": ["text/plain", "application/json"],
+  "input": [
+    "text/plain",
+    "image/*",
+    "video/*",
+    "audio/*",
+    "application/pdf"
+  ],
+  "output": [
+    "text/plain",
+    "application/json"
+  ],
   "configSchema": {
     "PHONE_NUMBER": {
       "type": "string",
@@ -30,5 +39,16 @@
       "required": false,
       "prompt": "Milliseconds to keep an unwatched per-chat WhatsApp session live before closing the browser and reconnecting on demand."
     }
-  }
+  },
+  "category": "communication",
+  "keywords": [
+    "contacts",
+    "daemon",
+    "essential",
+    "inbox",
+    "messaging",
+    "send",
+    "watch",
+    "whatsapp"
+  ]
 }

@@ -2,8 +2,12 @@
   "name": "openai-tts",
   "description": "Convert text into OGG/Opus speech audio using the OpenAI speech API.",
   "entry": "index.js",
-  "input": ["text/plain"],
-  "output": ["audio/ogg"],
+  "input": [
+    "text/plain"
+  ],
+  "output": [
+    "audio/ogg"
+  ],
   "configSchema": {
     "OPENAI_API_KEY": {
       "type": "string",
@@ -16,5 +20,14 @@
       "required": false,
       "prompt": "Voice to use, for example alloy."
     }
-  }
+  },
+  "category": "speech",
+  "keywords": [
+    "audio",
+    "openai",
+    "speech",
+    "text-to-speech",
+    "tts",
+    "voice"
+  ]
 }

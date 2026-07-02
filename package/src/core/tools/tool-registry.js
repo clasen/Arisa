@@ -21,6 +21,28 @@ function runProcess(command, args, options = {}) {
   });
 }
 
+function normalizeCategory(category) {
+  if (typeof category !== "string") return null;
+  const trimmed = category.trim();
+  return trimmed || null;
+}
+
+function normalizeKeywords(keywords) {
+  if (!Array.isArray(keywords)) return [];
+  return [...new Set(keywords
+    .filter((keyword) => typeof keyword === "string")
+    .map((keyword) => keyword.trim())
+    .filter(Boolean))];
+}
+
+function formatSemanticMetadata(tool) {
+  return [
+    "Semantic metadata:",
+    `- category: ${tool.category || "none"}`,
+    `- keywords: ${tool.keywords?.length ? tool.keywords.join(", ") : "none"}`
+  ].join("\n");
+}
+
 export class ToolRegistry {
   constructor({ logger } = {}) {
     this.logger = logger;
@@ -52,6 +74,8 @@ export class ToolRegistry {
         const skillHints = this.skillRegistry.normalizeHints(manifest);
         this.tools.set(manifest.name, {
           ...manifest,
+          category: normalizeCategory(manifest.category),
+          keywords: normalizeKeywords(manifest.keywords),
           skillHints,
           dir: toolDir,
           entry: path.join(toolDir, manifest.entry || "index.js"),
@@ -75,6 +99,8 @@ export class ToolRegistry {
       input: tool.input,
       output: tool.output,
       configSchema: tool.configSchema || {},
+      category: tool.category,
+      keywords: tool.keywords || [],
       skillHints: tool.skillHints || []
     }));
   }
@@ -89,13 +115,19 @@ export class ToolRegistry {
     const result = await runProcess("node", [tool.entry, "--help"], { cwd: tool.dir, env: toolEnv() });
     const help = result.stdout || result.stderr;
     const skills = await this.resolveSkills(name);
-    if (!skills.length) return help;
-    const skillHelp = skills.map((item) => [
-      `- ${item.name}${item.when ? ` (${item.when})` : ""}`,
-      item.description ? `  ${item.description}` : null,
-      item.found ? `  path: ${item.path}` : "  warning: skill not found"
-    ].filter(Boolean).join("\n")).join("\n");
-    return `${help}\n\nAssigned skills:\n${skillHelp}\n`;
+    const sections = [
+      help.trimEnd(),
+      formatSemanticMetadata(tool)
+    ];
+    if (skills.length) {
+      const skillHelp = skills.map((item) => [
+        `- ${item.name}${item.when ? ` (${item.when})` : ""}`,
+        item.description ? `  ${item.description}` : null,
+        item.found ? `  path: ${item.path}` : "  warning: skill not found"
+      ].filter(Boolean).join("\n")).join("\n");
+      sections.push(`Assigned skills:\n${skillHelp}`);
+    }
+    return `${sections.filter(Boolean).join("\n\n")}\n`;
   }
 
   async resolveSkills(name) {

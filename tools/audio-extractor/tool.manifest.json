@@ -18,7 +18,10 @@
     "audio/x-m4a",
     "audio/x-wav"
   ],
-  "output": ["audio/wav", "audio/mpeg"],
+  "output": [
+    "audio/wav",
+    "audio/mpeg"
+  ],
   "configSchema": {
     "FFMPEG_COMMAND": {
       "type": "string",
@@ -30,5 +33,15 @@
       "required": false,
       "prompt": "Optional ffprobe command or absolute path. Defaults to ffprobe."
     }
-  }
+  },
+  "category": "media",
+  "keywords": [
+    "audio",
+    "essential",
+    "extract",
+    "ffmpeg",
+    "normalize",
+    "preprocessing",
+    "video"
+  ]
 }

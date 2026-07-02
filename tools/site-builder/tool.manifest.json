@@ -1,0 +1,32 @@
+{
+  "name": "site-builder",
+  "description": "Generate or audit a landing/portfolio/static site brief using the bundled Impeccable frontend design skill.",
+  "entry": "index.js",
+  "input": [
+    "text/plain",
+    "text/markdown",
+    "application/json"
+  ],
+  "output": [
+    "text/html",
+    "text/markdown",
+    "application/json"
+  ],
+  "configSchema": {},
+  "skillHints": [
+    {
+      "name": "impeccable",
+      "when": "building, shaping, auditing, polishing, or improving landing pages, portfolios, marketing pages, static sites, and frontend UI"
+    }
+  ],
+  "category": "site",
+  "keywords": [
+    "audit",
+    "brief",
+    "design",
+    "frontend",
+    "html",
+    "landing-page",
+    "site-generator"
+  ]
+}

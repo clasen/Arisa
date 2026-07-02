@@ -2,8 +2,15 @@
   "name": "whispermix-transcribe",
   "description": "Transcribe audio files locally with WhisperMix using a persistent daemon that keeps the model warm.",
   "entry": "index.js",
-  "input": ["audio/ogg", "audio/mpeg", "audio/wav", "audio/mp4"],
-  "output": ["text/plain"],
+  "input": [
+    "audio/ogg",
+    "audio/mpeg",
+    "audio/wav",
+    "audio/mp4"
+  ],
+  "output": [
+    "text/plain"
+  ],
   "configSchema": {
     "MODEL": {
       "type": "string",
@@ -20,5 +27,15 @@
       "required": false,
       "prompt": "How long the daemon should stay alive while idle."
     }
-  }
+  },
+  "category": "transcription",
+  "keywords": [
+    "audio",
+    "daemon",
+    "local",
+    "normalization",
+    "speech-to-text",
+    "transcribe",
+    "whisper"
+  ]
 }

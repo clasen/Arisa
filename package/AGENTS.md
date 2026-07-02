@@ -43,6 +43,8 @@ Each tool declares in `tool.manifest.json`:
 - `input`: supported input types
 - `output`: produced output types
 - `configSchema`: required config fields
+- `category`: optional broad capability bucket for discovery
+- `keywords`: optional intent tags for capability discovery
 - `skillHints`: optional skills to apply when using or editing the tool
 
 ## Tool-to-Arisa IPC
@@ -165,6 +167,8 @@ Do not assume a rigid question/answer protocol. Continue the conversation natura
 
 ## Capability resolution
 Reason in terms of capabilities, not tool names. Do not stop at "I cannot do that" when the task is realistically implementable through the tool architecture.
+
+Before asking the user for recurrent context, inspect available tools by `category` and `keywords`, especially `memory`, `context`, `contacts`, and `essential`.
 
 When the user asks for something new:
 1. check whether an existing registered tool, or an indirect use of one, can satisfy the task

@@ -20,10 +20,10 @@ async function resetHome() {
   await rm(arisaHomeDir, { recursive: true, force: true });
 }
 
-async function createFakeTool(name = "fake-tool") {
+async function createFakeTool(name = "fake-tool", manifestOverrides = {}) {
   const dir = path.join(toolsDir, name);
   await mkdir(dir, { recursive: true });
-  await writeFile(path.join(dir, "tool.manifest.json"), `${JSON.stringify({
+  const manifest = {
     name,
     description: "Fake test tool",
     entry: "index.js",
@@ -33,6 +33,10 @@ async function createFakeTool(name = "fake-tool") {
       apiKey: { type: "string", required: false }
     },
     skillHints: [{ name: "missing-skill", when: "testing" }]
+  };
+  await writeFile(path.join(dir, "tool.manifest.json"), `${JSON.stringify({
+    ...manifest,
+    ...manifestOverrides
   }, null, 2)}\n`, "utf8");
   await writeFile(path.join(dir, "config.js"), "export default {\n  apiKey: \"default-key\"\n};\n", "utf8");
   await writeFile(path.join(dir, "index.js"), `import { readFile } from "node:fs/promises";
@@ -67,7 +71,10 @@ process.stdout.write(JSON.stringify({
 
 test("loads and lists installed tools from the user tools directory", async () => {
   await resetHome();
-  await createFakeTool("fake-tool");
+  await createFakeTool("fake-tool", {
+    category: "memory",
+    keywords: ["memory", "essential"]
+  });
 
   const registry = new ToolRegistry();
   await registry.load();
@@ -80,8 +87,38 @@ test("loads and lists installed tools from the user tools directory", async () =
     configSchema: {
       apiKey: { type: "string", required: false }
     },
+    category: "memory",
+    keywords: ["memory", "essential"],
     skillHints: [{ name: "missing-skill", when: "testing" }]
   }]);
+});
+
+test("lists optional semantic metadata with stable defaults", async () => {
+  await resetHome();
+  await createFakeTool("fake-tool");
+
+  const registry = new ToolRegistry();
+  await registry.load();
+
+  assert.equal(registry.list()[0].category, null);
+  assert.deepEqual(registry.list()[0].keywords, []);
+});
+
+test("shows semantic metadata in tool help", async () => {
+  await resetHome();
+  await createFakeTool("fake-tool", {
+    category: "memory",
+    keywords: ["memory", "essential"]
+  });
+
+  const registry = new ToolRegistry();
+  await registry.load();
+
+  const help = await registry.help("fake-tool");
+
+  assert.match(help, /Fake test tool help/);
+  assert.match(help, /Semantic metadata:\n- category: memory\n- keywords: memory, essential/);
+  assert.match(help, /Assigned skills:/);
 });
 
 test("runs a registered tool process with an enriched request and cleans up request files", async () => {

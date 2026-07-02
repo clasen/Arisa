@@ -2,8 +2,23 @@
   "name": "markdown-pdf",
   "description": "Convert Markdown to PDF with pdfmake. Supports headings, emphasis, links, code, blockquotes, lists, task lists, tables, images, rules, and footnotes.",
   "entry": "index.js",
-  "input": ["text/markdown", "text/plain", "application/json"],
-  "output": ["application/pdf"],
+  "input": [
+    "text/markdown",
+    "text/plain",
+    "application/json"
+  ],
+  "output": [
+    "application/pdf"
+  ],
   "configSchema": {},
-  "skillHints": []
+  "skillHints": [],
+  "category": "document",
+  "keywords": [
+    "artifact",
+    "document",
+    "export",
+    "markdown",
+    "pdf",
+    "render"
+  ]
 }

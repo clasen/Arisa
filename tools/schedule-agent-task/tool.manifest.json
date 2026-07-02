@@ -2,7 +2,21 @@
   "name": "schedule-agent-task",
   "description": "Schedule a future Pi Agent task for the current chat.",
   "entry": "index.js",
-  "input": ["text/plain"],
-  "output": ["application/json"],
-  "configSchema": {}
+  "input": [
+    "text/plain"
+  ],
+  "output": [
+    "application/json"
+  ],
+  "configSchema": {},
+  "category": "scheduler",
+  "keywords": [
+    "agent-task",
+    "async",
+    "essential",
+    "polling",
+    "reminder",
+    "schedule",
+    "task"
+  ]
 }

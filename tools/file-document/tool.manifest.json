@@ -1,0 +1,23 @@
+{
+  "name": "file-document",
+  "description": "Return an existing local file as a document artifact.",
+  "entry": "index.js",
+  "input": [
+    "text/plain"
+  ],
+  "output": [
+    "text/markdown",
+    "text/plain",
+    "application/octet-stream"
+  ],
+  "configSchema": {},
+  "category": "artifact",
+  "keywords": [
+    "artifact",
+    "delivery",
+    "document",
+    "essential",
+    "file",
+    "local-file"
+  ]
+}

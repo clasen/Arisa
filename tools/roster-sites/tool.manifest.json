@@ -2,13 +2,46 @@
   "name": "roster-sites",
   "description": "Manage and publish small HTTPS sites through RosterServer.",
   "entry": "index.js",
-  "input": ["text/html", "text/plain", "application/json"],
-  "output": ["application/json"],
+  "input": [
+    "text/html",
+    "text/plain",
+    "application/json"
+  ],
+  "output": [
+    "application/json"
+  ],
   "configSchema": {
-    "defaultDomain": { "type": "string", "required": false, "prompt": "Optional default domain to manage when args.domain is omitted." },
-    "wwwPath": { "type": "string", "required": true, "prompt": "RosterServer www root for this deployment, for example /srv/www." },
-    "greenlockStorePath": { "type": "string", "required": true, "prompt": "Greenlock certificate store path for this deployment, for example /srv/greenlock.d." },
-    "email": { "type": "string", "required": true, "prompt": "Let's Encrypt contact email." }
+    "defaultDomain": {
+      "type": "string",
+      "required": false,
+      "prompt": "Optional default domain to manage when args.domain is omitted."
+    },
+    "wwwPath": {
+      "type": "string",
+      "required": true,
+      "prompt": "RosterServer www root for this deployment, for example /srv/www."
+    },
+    "greenlockStorePath": {
+      "type": "string",
+      "required": true,
+      "prompt": "Greenlock certificate store path for this deployment, for example /srv/greenlock.d."
+    },
+    "email": {
+      "type": "string",
+      "required": true,
+      "prompt": "Let's Encrypt contact email."
+    }
   },
-  "skillHints": []
+  "skillHints": [],
+  "category": "deployment",
+  "keywords": [
+    "deployment",
+    "domain",
+    "essential",
+    "hosting",
+    "https",
+    "publish",
+    "roster",
+    "site"
+  ]
 }

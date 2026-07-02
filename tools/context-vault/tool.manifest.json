@@ -1,9 +1,15 @@
 {
   "name": "context-vault",
-  "description": "Store, search, update, and forget chat-scoped user context and preferences.",
+  "description": "Store, search, update, and forget chat-scoped user context and preferences, with lightweight fallback search over prior Pi sessions.",
   "entry": "index.js",
-  "input": ["text/plain", "application/json"],
-  "output": ["text/plain", "application/json"],
+  "input": [
+    "text/plain",
+    "application/json"
+  ],
+  "output": [
+    "text/plain",
+    "application/json"
+  ],
   "configSchema": {
     "MAX_RESULTS": {
       "type": "number",
@@ -11,5 +17,17 @@
       "prompt": "Maximum number of context results to return."
     }
   },
-  "skillHints": []
+  "skillHints": [],
+  "category": "memory",
+  "keywords": [
+    "chat-scoped",
+    "contacts",
+    "context",
+    "essential",
+    "memory",
+    "preferences",
+    "recall",
+    "remember",
+    "session-search"
+  ]
 }

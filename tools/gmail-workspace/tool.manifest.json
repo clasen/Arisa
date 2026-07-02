@@ -2,8 +2,14 @@
   "name": "gmail-workspace",
   "description": "Read, search, send, and manage Gmail via Google Workspace CLI using OAuth/API credentials. Does not accept browser cookies.",
   "entry": "index.js",
-  "input": ["text/plain", "application/json"],
-  "output": ["text/plain", "application/json"],
+  "input": [
+    "text/plain",
+    "application/json"
+  ],
+  "output": [
+    "text/plain",
+    "application/json"
+  ],
   "configSchema": {
     "GOOGLE_WORKSPACE_CLI_TOKEN": {
       "type": "string",
@@ -49,5 +55,16 @@
       "prompt": "Optional Pub/Sub topic for Gmail push notifications, e.g. projects/my-project/topics/gmail-updates."
     }
   },
-  "skillHints": []
+  "skillHints": [],
+  "category": "communication",
+  "keywords": [
+    "email",
+    "essential",
+    "gmail",
+    "inbox",
+    "polling",
+    "secretary",
+    "send",
+    "workspace"
+  ]
 }

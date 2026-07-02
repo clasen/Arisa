@@ -2,7 +2,21 @@
   "name": "web-browser",
   "description": "Search the web and open web pages as readable text.",
   "entry": "index.js",
-  "input": ["text/plain"],
-  "output": ["text/plain"],
-  "configSchema": {}
+  "input": [
+    "text/plain"
+  ],
+  "output": [
+    "text/plain"
+  ],
+  "configSchema": {},
+  "category": "web",
+  "keywords": [
+    "browse",
+    "essential",
+    "page",
+    "readability",
+    "research",
+    "search",
+    "web"
+  ]
 }

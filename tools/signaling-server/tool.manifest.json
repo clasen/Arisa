@@ -8,8 +8,13 @@
     "publicPath": "/signaling",
     "websocketPath": "/signaling/ws"
   },
-  "input": ["text/plain", "application/json"],
-  "output": ["application/json"],
+  "input": [
+    "text/plain",
+    "application/json"
+  ],
+  "output": [
+    "application/json"
+  ],
   "configSchema": {
     "port": {
       "type": "string",
@@ -20,5 +25,14 @@
       "description": "Public base URL where clients reach the signaling service."
     }
   },
-  "skillHints": []
+  "skillHints": [],
+  "category": "realtime",
+  "keywords": [
+    "daemon",
+    "rooms",
+    "server",
+    "signaling",
+    "webrtc",
+    "websocket"
+  ]
 }

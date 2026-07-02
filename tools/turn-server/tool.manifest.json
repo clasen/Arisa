@@ -7,12 +7,37 @@
     "publicPorts": "3478/udp,3478/tcp",
     "iceEndpoint": "/signaling/ice-servers"
   },
-  "input": ["text/plain", "application/json"],
-  "output": ["application/json"],
+  "input": [
+    "text/plain",
+    "application/json"
+  ],
+  "output": [
+    "application/json"
+  ],
   "configSchema": {
-    "realm": { "type": "string", "description": "TURN realm, default localhost." },
-    "publicHost": { "type": "string", "description": "Public hostname or IP clients use to reach this TURN server." },
-    "secret": { "type": "string", "secret": true, "description": "Shared TURN REST API secret" }
+    "realm": {
+      "type": "string",
+      "description": "TURN realm, default localhost."
+    },
+    "publicHost": {
+      "type": "string",
+      "description": "Public hostname or IP clients use to reach this TURN server."
+    },
+    "secret": {
+      "type": "string",
+      "secret": true,
+      "description": "Shared TURN REST API secret"
+    }
   },
-  "skillHints": []
+  "skillHints": [],
+  "category": "realtime",
+  "keywords": [
+    "coturn",
+    "daemon",
+    "networking",
+    "relay",
+    "server",
+    "turn",
+    "webrtc"
+  ]
 }

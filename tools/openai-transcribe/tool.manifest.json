@@ -20,7 +20,9 @@
     "video/mp4",
     "video/webm"
   ],
-  "output": ["text/plain"],
+  "output": [
+    "text/plain"
+  ],
   "configSchema": {
     "OPENAI_API_KEY": {
       "type": "string",
@@ -28,5 +30,15 @@
       "secret": true,
       "prompt": "I need your OPENAI_API_KEY to transcribe audio."
     }
-  }
+  },
+  "category": "transcription",
+  "keywords": [
+    "audio",
+    "essential",
+    "normalization",
+    "openai",
+    "speech-to-text",
+    "transcribe",
+    "video"
+  ]
 }

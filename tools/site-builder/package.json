@@ -1,0 +1,7 @@
+{
+  "name": "site-builder",
+  "version": "0.1.0",
+  "type": "module",
+  "private": true,
+  "description": "Anti-slop landing site builder combining frontend taste and prose cleanup rules."
+}
