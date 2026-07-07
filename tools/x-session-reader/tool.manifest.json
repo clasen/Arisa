@@ -1,0 +1,49 @@
+{
+  "name": "x-session-reader",
+  "description": "Read posts and bookmarks visible to a user-provided X/Twitter web session cookie, without bypassing login or anti-bot checks.",
+  "entry": "index.js",
+  "input": [
+    "text/plain",
+    "application/json"
+  ],
+  "output": [
+    "text/plain",
+    "application/json",
+    "text/markdown",
+    "text/csv"
+  ],
+  "configSchema": {
+    "X_COOKIES": {
+      "type": "string",
+      "required": true,
+      "secret": true,
+      "prompt": "Paste your X/Twitter cookies as a JSON array exported from your browser, or as a raw Cookie header."
+    },
+    "CHROME_EXECUTABLE_PATH": {
+      "type": "string",
+      "required": false,
+      "prompt": "Optional Chrome/Chromium executable path. Defaults to Playwright's cached Chromium."
+    },
+    "HEADLESS": {
+      "type": "string",
+      "required": false,
+      "prompt": "Run browser headless: true or false."
+    }
+  },
+  "skillHints": [],
+  "category": "social",
+  "keywords": [
+    "browser",
+    "cookies",
+    "playwright",
+    "bookmarks",
+    "download",
+    "export",
+    "posts",
+    "reader",
+    "session",
+    "social",
+    "twitter",
+    "x"
+  ]
+}

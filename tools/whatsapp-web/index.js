@@ -284,6 +284,33 @@ function compact(value = "") {
   return String(value).replace(/\s+/g, " ").trim();
 }
 
+function numberOrNull(value) {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+function locationFromMessage(message) {
+  if (String(message.type || "").toLowerCase() !== "location") return null;
+  const source = message.location || message._data || {};
+  const latitude = numberOrNull(source.latitude ?? source.lat ?? source.degreesLatitude);
+  const longitude = numberOrNull(source.longitude ?? source.lng ?? source.degreesLongitude);
+  const description = compact(source.description || source.loc || source.name || source.address || "");
+  if (latitude == null || longitude == null) return description ? { description } : null;
+  return {
+    latitude,
+    longitude,
+    description,
+    mapsUrl: `https://maps.google.com/?q=${encodeURIComponent(`${latitude},${longitude}`)}`
+  };
+}
+
+function messageBodyForInbox(message) {
+  const location = locationFromMessage(message);
+  if (location?.mapsUrl) return location.description ? `${location.description}\n${location.mapsUrl}` : location.mapsUrl;
+  if (location?.description) return location.description;
+  return message.body || "";
+}
+
 function normalizeRecipient(value) {
   const raw = String(value || "").trim();
   if (!raw) throw new Error("Recipient is required");
@@ -296,13 +323,22 @@ function normalizeRecipient(value) {
   return `${digits}@c.us`;
 }
 
+function displayTextForInboxItem(item) {
+  if (item.location?.mapsUrl) return "";
+  if (String(item.type || "").toLowerCase() === "location") return item.body && item.body.length < 300 ? item.body : "[location message; coordinates were not captured by this older inbox entry]";
+  return item.body || "[non-text message]";
+}
+
 function formatInboxMessages(messages) {
   if (!messages.length) return "No WhatsApp replies found.";
   return messages.map((item, index) => [
     `${index + 1}. From: ${item.fromName || item.from}`,
     item.fromPhone ? `Phone: ${item.fromPhone}` : null,
     `At: ${item.receivedAt}`,
-    `Text: ${item.body || "[non-text message]"}`
+    item.type ? `Type: ${item.type}` : null,
+    item.location?.mapsUrl ? `Location: ${item.location.mapsUrl}` : null,
+    item.location?.description ? `Description: ${item.location.description}` : null,
+    displayTextForInboxItem(item) ? `Text: ${displayTextForInboxItem(item)}` : null
   ].filter(Boolean).join("\n")).join("\n\n");
 }
 
@@ -386,6 +422,8 @@ function buildIncomingMessagePrompt(message, artifact) {
     `whatsappId: ${message.from}`,
     `receivedAt: ${message.receivedAt}`,
     `type: ${message.type}`,
+    message.location?.mapsUrl ? `location: ${message.location.mapsUrl}` : null,
+    message.location?.description ? `locationDescription: ${message.location.description}` : null,
     `text: ${message.body || "[non-text message]"}`,
     artifact ? `artifactId: ${artifact.id}` : null,
     artifact ? `mimeType: ${artifact.mimeType}` : null,
@@ -395,22 +433,37 @@ function buildIncomingMessagePrompt(message, artifact) {
   ].filter(Boolean).join("\n");
 }
 
-async function enqueueArisaTaskForIncomingMessage(chatId, message, artifact = null) {
-  const numericChatId = Number(chatId);
-  const tasks = await readTasks();
-  if (tasks.some((task) => task.source?.toolName === toolName && task.source?.chatId === numericChatId && task.source?.messageId === message.id)) return;
-  tasks.push({
+function hasIncomingMessageTask(tasks, numericChatId, messageId) {
+  return tasks.some((task) => task.source?.toolName === toolName && task.source?.chatId === numericChatId && task.source?.messageId === messageId);
+}
+
+function incomingMessageTask(chatId, message, artifact = null) {
+  const now = new Date().toISOString();
+  return {
     id: crypto.randomUUID(),
     status: "pending",
-    createdAt: new Date().toISOString(),
-    updatedAt: new Date().toISOString(),
+    createdAt: now,
+    updatedAt: now,
     kind: "agent_task",
-    runAt: new Date().toISOString(),
-    payload: { chatId: numericChatId, prompt: buildIncomingMessagePrompt(message, artifact), artifactId: artifact?.id || "" },
+    runAt: now,
+    payload: { chatId, prompt: buildIncomingMessagePrompt(message, artifact), artifactId: artifact?.id || "" },
     recurrence: null,
-    source: { type: "tool", toolName, chatId: numericChatId, messageId: message.id }
-  });
-  await writeTasks(tasks);
+    source: { type: "tool", toolName, chatId, messageId: message.id }
+  };
+}
+
+async function enqueueArisaTaskForIncomingMessage(chatId, message, artifact = null) {
+  const numericChatId = Number(chatId);
+  const task = incomingMessageTask(numericChatId, message, artifact);
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    const tasks = await readTasks();
+    if (hasIncomingMessageTask(tasks, numericChatId, message.id)) return;
+    tasks.push(task);
+    await writeTasks(tasks);
+    await sleep(100 + attempt * 150);
+    if (hasIncomingMessageTask(await readTasks(), numericChatId, message.id)) return;
+  }
+  await writeChatStatus(chatId, { state: "ready", live: true, pid: process.pid, message: `WhatsApp is ready. Warning: failed to persist agent task for message ${message.id}.` });
 }
 
 async function enqueueWhatsAppReadyTask(chatId) {
@@ -496,6 +549,15 @@ async function storeIncomingMediaArtifact(message, chatId) {
   }
 }
 
+function restartableWhatsAppError(error) {
+  const message = String(error?.message || error || "");
+  return /Execution context was destroyed|ProtocolError|Target closed|Session closed|frame was detached|browser has disconnected|Navigation failed|Cannot find context|Most likely the page has been closed/i.test(message);
+}
+
+function shortError(error) {
+  return String(error?.message || error || "unknown error").split("\n")[0].slice(0, 300);
+}
+
 async function captureIncomingMessage(ownerChatId, message) {
   if (message.fromMe) {
     await writeChatStatus(ownerChatId, { state: "ready", live: true, pid: process.pid, message: "WhatsApp is ready." });
@@ -507,13 +569,15 @@ async function captureIncomingMessage(ownerChatId, message) {
   }
   let contact = null;
   try { contact = await message.getContact(); } catch {}
+  const location = locationFromMessage(message);
   const inboxMessage = {
     id: message.id?._serialized || `${message.from}-${message.timestamp}-${Date.now()}`,
     from: message.from,
     fromPhone: String(message.from || "").replace(/@c\.us$/, ""),
     fromName: compact(contact?.pushname || contact?.name || contact?.number || ""),
-    body: message.body || "",
+    body: messageBodyForInbox(message),
     type: message.type || "unknown",
+    location,
     timestamp: message.timestamp || Math.floor(Date.now() / 1000),
     receivedAt: new Date((message.timestamp || Math.floor(Date.now() / 1000)) * 1000).toISOString(),
     read: false
@@ -566,9 +630,17 @@ class SessionManager {
       initializing: null,
       lastActivity: Date.now(),
       closingReason: "",
-      loginNotificationPending: false
+      loginNotificationPending: false,
+      restarting: false,
+      restartTimer: null,
+      startupTimer: null
     };
     this.sessions.set(normalizedChatId, record);
+    record.startupTimer = setTimeout(async () => {
+      const status = await readChatStatus(normalizedChatId, {}).catch(() => ({}));
+      if (status.state === "ready" || status.state === "needs_login" || record.restarting) return;
+      if (await isWatchEnabled(normalizedChatId)) this.scheduleRestart(normalizedChatId, `startup timeout while ${status.state || "connecting"}`);
+    }, number(config.STARTUP_TIMEOUT_MS, 90000));
 
     client.on("qr", async (qr) => {
       record.loginNotificationPending = true;
@@ -591,6 +663,8 @@ class SessionManager {
       });
     });
     client.on("ready", async () => {
+      if (record.startupTimer) clearTimeout(record.startupTimer);
+      record.startupTimer = null;
       record.lastActivity = Date.now();
       await writeChatStatus(normalizedChatId, { state: "ready", live: true, pid: process.pid, message: "WhatsApp is ready." });
       if (record.loginNotificationPending) {
@@ -611,19 +685,42 @@ class SessionManager {
       if (message.fromMe) await writeChatStatus(normalizedChatId, { state: "ready", live: true, pid: process.pid, message: "WhatsApp is ready." });
     });
     client.on("auth_failure", async (message) => {
+      if (record.startupTimer) clearTimeout(record.startupTimer);
+      record.startupTimer = null;
       this.sessions.delete(normalizedChatId);
       await writeChatStatus(normalizedChatId, { state: "expired", live: false, pid: process.pid, message: `Authentication failed: ${message}` });
     });
+    client.on("error", async (error) => {
+      if (restartableWhatsAppError(error) && await isWatchEnabled(normalizedChatId)) {
+        this.scheduleRestart(normalizedChatId, `client error: ${shortError(error)}`);
+      }
+    });
     client.on("disconnected", async (reason) => {
-      if (record.closingReason === "idle" || record.closingReason === "logout") return;
+      if (record.startupTimer) {
+        clearTimeout(record.startupTimer);
+        record.startupTimer = null;
+      }
+      if (["idle", "logout", "restart"].includes(record.closingReason)) return;
       this.sessions.delete(normalizedChatId);
+      if (await isWatchEnabled(normalizedChatId)) {
+        this.scheduleRestart(normalizedChatId, `disconnected: ${reason}`);
+        return;
+      }
       await writeChatStatus(normalizedChatId, { state: "expired", live: false, pid: process.pid, message: `Disconnected: ${reason}` });
     });
 
     record.initializing = client.initialize().catch(async (error) => {
+      if (record.startupTimer) {
+        clearTimeout(record.startupTimer);
+        record.startupTimer = null;
+      }
       this.sessions.delete(normalizedChatId);
-      await writeChatStatus(normalizedChatId, { state: "failed", live: false, pid: process.pid, message: error.message || String(error) });
       try { await client.destroy(); } catch {}
+      if (restartableWhatsAppError(error) && await isWatchEnabled(normalizedChatId)) {
+        this.scheduleRestart(normalizedChatId, `initialize error: ${shortError(error)}`);
+        return;
+      }
+      await writeChatStatus(normalizedChatId, { state: "failed", live: false, pid: process.pid, message: error.message || String(error) });
     });
     return record;
   }
@@ -662,9 +759,54 @@ class SessionManager {
     return { chatId: whatsappChatId, sessionChatId: normalizeChatId(chatId) };
   }
 
+  scheduleRestart(chatId, reason) {
+    const normalizedChatId = normalizeChatId(chatId);
+    const record = this.sessions.get(normalizedChatId) || { chatId: normalizedChatId };
+    if (record.startupTimer) {
+      clearTimeout(record.startupTimer);
+      record.startupTimer = null;
+    }
+    if (record.restartTimer || record.restarting) return;
+    record.restartTimer = setTimeout(() => {
+      record.restartTimer = null;
+      this.restart(normalizedChatId, reason).catch((error) => {
+        writeChatStatus(normalizedChatId, { state: "failed", live: false, pid: process.pid, message: `Auto-restart failed: ${shortError(error)}` }).catch(() => {});
+      });
+    }, 2000);
+    if (!this.sessions.has(normalizedChatId)) this.sessions.set(normalizedChatId, record);
+    writeChatStatus(normalizedChatId, { state: "reconnecting", live: false, pid: process.pid, message: `WhatsApp client error; auto-restarting. ${reason}` }).catch(() => {});
+  }
+
+  async restart(chatId, reason) {
+    const normalizedChatId = normalizeChatId(chatId);
+    const record = this.sessions.get(normalizedChatId);
+    if (record?.restarting) return;
+    if (record) record.restarting = true;
+    await writeChatStatus(normalizedChatId, { state: "reconnecting", live: false, pid: process.pid, message: `Restarting WhatsApp client: ${reason}` });
+    if (record?.startupTimer) {
+      clearTimeout(record.startupTimer);
+      record.startupTimer = null;
+    }
+    if (record?.client) {
+      record.closingReason = "restart";
+      try { await record.client.destroy(); } catch {}
+    }
+    this.sessions.delete(normalizedChatId);
+    if (!(await isWatchEnabled(normalizedChatId))) {
+      await writeChatStatus(normalizedChatId, { state: "ready", live: false, pid: process.pid, message: "WhatsApp client stopped after restart trigger because watch is disabled." });
+      return;
+    }
+    await sleep(1500);
+    await this.ensureClient(normalizedChatId);
+  }
+
   async logout(chatId) {
     const normalizedChatId = normalizeChatId(chatId);
     const record = this.sessions.get(normalizedChatId);
+    if (record?.startupTimer) {
+      clearTimeout(record.startupTimer);
+      record.startupTimer = null;
+    }
     if (record?.client) {
       record.closingReason = "logout";
       try { await record.client.destroy(); } catch {}
@@ -681,6 +823,10 @@ class SessionManager {
     for (const [chatId, record] of this.sessions) {
       if (await isWatchEnabled(chatId)) continue;
       if (Date.now() - record.lastActivity < this.idleShutdownMs) continue;
+      if (record.startupTimer) {
+        clearTimeout(record.startupTimer);
+        record.startupTimer = null;
+      }
       record.closingReason = "idle";
       try { await record.client.destroy(); } catch {}
       this.sessions.delete(chatId);
@@ -721,6 +867,16 @@ async function runDaemon() {
   await daemon.writeStatus({ state: "ready", pid: process.pid, message: "WhatsApp multiplex daemon is ready." });
   const manager = new SessionManager();
   let processing = false;
+
+  const restartWatchedAfterUnhandled = (error) => {
+    const reason = `unhandled WhatsApp runtime error: ${shortError(error)}`;
+    daemon.writeStatus({ state: "error", pid: process.pid, message: reason }).catch(() => {});
+    readWatchConfigs().then((watches) => {
+      for (const watch of watches) manager.scheduleRestart(String(watch.chatId), reason);
+    }).catch(() => {});
+  };
+  process.on("unhandledRejection", restartWatchedAfterUnhandled);
+  process.on("uncaughtException", restartWatchedAfterUnhandled);
 
   manager.ensureWatchedClients().catch((error) => {
     daemon.writeStatus({ state: "error", pid: process.pid, message: error?.message || String(error) }).catch(() => {});
