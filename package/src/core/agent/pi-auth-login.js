@@ -1,7 +1,8 @@
 import { AuthStorage } from "@earendil-works/pi-coding-agent";
+import { piAuthFile } from "../../runtime/paths.js";
 
 export function createPiOAuthLogin({ provider, onAuth, onDeviceCode, onPrompt, onProgress, onSelect } = {}) {
-  const authStorage = AuthStorage.create();
+  const authStorage = AuthStorage.create(piAuthFile);
   const oauthProvider = authStorage.getOAuthProviders().find((item) => item.id === provider);
   if (!oauthProvider) {
     throw new Error(`No internal OAuth login flow is available for ${provider}.`);

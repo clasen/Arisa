@@ -1,6 +1,10 @@
 import assert from "node:assert/strict";
+import { execFile } from "node:child_process";
+import { mkdtemp, rm } from "node:fs/promises";
+import os from "node:os";
 import path from "node:path";
 import test from "node:test";
+import { promisify } from "node:util";
 import {
   chatsDir,
   createIpcSocketPath,
@@ -10,6 +14,8 @@ import {
   getToolStateDir,
   stateDir
 } from "../src/runtime/paths.js";
+
+const execFileAsync = promisify(execFile);
 
 test("keeps chat artifact paths scoped below the chat directory", () => {
   const artifactsDir = getChatArtifactsDir("chat-1");
@@ -51,4 +57,26 @@ test("creates POSIX IPC socket paths under the state directory", () => {
   });
 
   assert.equal(socketPath, path.join("/tmp/arisa-home", "state", "arisa.sock"));
+});
+
+test("uses ARISA_HOME for instance-scoped paths", async (t) => {
+  const customHome = await mkdtemp(path.join(os.tmpdir(), "arisa-home-"));
+  t.after(() => rm(customHome, { recursive: true, force: true }));
+
+  const script = `
+const paths = await import(${JSON.stringify(new URL("../src/runtime/paths.js", import.meta.url).href)});
+process.stdout.write(JSON.stringify({
+  arisaHomeDir: paths.arisaHomeDir,
+  configFile: paths.configFile,
+  piAuthFile: paths.piAuthFile
+}));
+`;
+  const { stdout } = await execFileAsync(process.execPath, ["--input-type=module", "--eval", script], {
+    env: { ...process.env, ARISA_HOME: customHome }
+  });
+  const paths = JSON.parse(stdout);
+
+  assert.equal(paths.arisaHomeDir, path.resolve(customHome));
+  assert.equal(paths.configFile, path.join(customHome, "state", "config.json"));
+  assert.equal(paths.piAuthFile, path.join(customHome, "state", "pi-auth.json"));
 });

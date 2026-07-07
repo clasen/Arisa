@@ -86,6 +86,7 @@ All runtime state lives under `~/.arisa/`, split between global state and per-ch
 
 Global:
 - runtime config is stored in `~/.arisa/state/config.json`
+- Pi OAuth credentials are stored in `~/.arisa/state/pi-auth.json`
 - the scheduled-task queue is stored in `~/.arisa/state/tasks.json`
 - installed tools live under `~/.arisa/tools/<tool>/`, each with a default `config.js` template
 - global tool runtime state (daemons, caches, temp) lives under `~/.arisa/state/tools/<tool>/`
@@ -134,6 +135,17 @@ Notes:
 
 - it only affects the current Arisa process and does not update `~/.arisa/state/config.json`
 
+## Multiple instances
+
+Set `ARISA_HOME` to run separate Arisa instances on the same machine:
+
+```bash
+ARISA_HOME=~/.arisa-work arisa
+ARISA_HOME=~/.arisa-personal arisa start
+```
+
+Each home has its own Telegram config, Pi login, installed tools, daemons, chat sessions, artifacts, IPC socket, PID file, and logs. Pi OAuth credentials are stored in `<home>/state/pi-auth.json`, so existing installs authenticate once again after upgrading.
+
 ## Bootstrap flow
 
 On first run, Arisa walks you through three steps:
@@ -156,6 +168,7 @@ src/
 ~/.arisa/
   state/              global config, task queue, IPC socket
     config.json
+    pi-auth.json
     tasks.json
     tools/<tool>/     global tool state (daemons, caches, tmp)
   tools/<tool>/       installed tools (catalog, user-chosen, or agent-created)

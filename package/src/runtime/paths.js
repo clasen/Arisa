@@ -5,9 +5,12 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 export const arisaPackageDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", "..");
-export const arisaHomeDir = path.join(os.homedir(), ".arisa");
+export const arisaHomeDir = process.env.ARISA_HOME
+  ? path.resolve(process.env.ARISA_HOME)
+  : path.join(os.homedir(), ".arisa");
 export const stateDir = path.join(arisaHomeDir, "state");
 export const configFile = path.join(stateDir, "config.json");
+export const piAuthFile = path.join(stateDir, "pi-auth.json");
 export const servicePidFile = path.join(stateDir, "arisa.pid");
 export const serviceLogFile = path.join(stateDir, "arisa.log");
 export function createIpcSocketPath({ homeDir = arisaHomeDir, platform = process.platform } = {}) {

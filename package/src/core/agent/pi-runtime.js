@@ -1,11 +1,12 @@
 import { AuthStorage, ModelRegistry } from "@earendil-works/pi-coding-agent";
+import { piAuthFile } from "../../runtime/paths.js";
 
 function compareText(a, b) {
   return a.localeCompare(b, undefined, { sensitivity: "base", numeric: true });
 }
 
 export function createPiRuntime({ provider, apiKey } = {}) {
-  const authStorage = AuthStorage.create();
+  const authStorage = AuthStorage.create(piAuthFile);
   if (provider && apiKey) {
     authStorage.setRuntimeApiKey(provider, apiKey);
   }
