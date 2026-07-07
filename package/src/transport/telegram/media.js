@@ -32,6 +32,20 @@ function incomingCaptionMetadata(ctx) {
   return ctx.message?.caption ? { caption: ctx.message.caption } : {};
 }
 
+export function formatLocationText(message) {
+  const location = message?.venue?.location || message?.location;
+  if (!location) return "";
+
+  const venue = message.venue;
+  const lines = [];
+  if (venue?.title) lines.push(`Venue: ${venue.title}`);
+  if (venue?.address) lines.push(`Address: ${venue.address}`);
+  lines.push(`Latitude: ${location.latitude}`);
+  lines.push(`Longitude: ${location.longitude}`);
+  lines.push(`Maps: https://maps.google.com/?q=${location.latitude},${location.longitude}`);
+  return lines.join("\n");
+}
+
 export async function captureIncomingArtifact(ctx, artifactStore) {
   const chatId = ctx.chat.id;
   const store = artifactStore.forChat(chatId);
@@ -121,6 +135,14 @@ export async function captureIncomingArtifact(ctx, artifactStore) {
       mimeType: "image/jpeg",
       source: baseSource,
       metadata: { width: photo.width, height: photo.height, ...incomingCaptionMetadata(ctx) }
+    });
+  }
+
+  if (ctx.message?.location) {
+    return store.createText({
+      text: formatLocationText(ctx.message),
+      source: baseSource,
+      metadata: { visibility: "internal", representation: "inline-message" }
     });
   }
 

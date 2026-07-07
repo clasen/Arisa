@@ -1,7 +1,7 @@
 import { Bot, InputFile } from "grammy";
 import path from "node:path";
 import { authorizeChat } from "./auth.js";
-import { captureIncomingArtifact } from "./media.js";
+import { captureIncomingArtifact, formatLocationText } from "./media.js";
 import { renderTelegramHtml } from "./text-format.js";
 import { buildPiAuthRecoveryBlockedMessage, buildPiAuthTelegramMessage, getErrorMessage, getPiAuthIssue, getPiAuthStatus } from "../../core/agent/auth-flow.js";
 import { createPiOAuthLogin } from "../../core/agent/pi-auth-login.js";
@@ -29,6 +29,7 @@ function quotedMessageSummary(message) {
   if (message.document) parts.push(`quotedKind: document`);
   if (message.video) parts.push(`quotedKind: video`);
   if (message.sticker) parts.push(`quotedKind: sticker`);
+  if (message.location) parts.push(`quotedKind: location`, `quotedLocation: ${formatLocationText(message)}`);
 
   if (!message.text && !message.caption) {
     parts.push(`Important: this message replies to a Telegram message with no textual body available in the update. Use the quoted kind and metadata as context.`);
@@ -45,7 +46,7 @@ function getTelegramCommand(ctx) {
 }
 
 function getIncomingMessageText(message) {
-  return message?.text || message?.caption || "";
+  return message?.text || message?.caption || formatLocationText(message) || "";
 }
 
 function baseMimeType(mimeType = "") {
