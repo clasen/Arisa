@@ -38,10 +38,13 @@ Usage:
 Modes:
   login      Start this chat's WhatsApp session, enable watch, and return a QR code when needed.
   status     Show this chat's WhatsApp session status.
-  send       Send one WhatsApp message from this chat's WhatsApp session. Enables watch by default.
-  broadcast  Send one message to multiple recipients from this chat's session. Enables watch by default.
+  send       Send one WhatsApp message from this chat's WhatsApp session. Enables watch by default. Supports humanized delay/typing.
+  broadcast  Send one message to multiple recipients from this chat's session. Enables watch by default. Supports humanized delay/typing.
   inbox      Read/process received WhatsApp replies from this chat's local inbox.
+  sync       Backfill recent messages from known chats/groups into the inbox.
   wait-reply Wait for a reply from an optional recipient after sending.
+  react      React to a WhatsApp message by id, or the latest inbox message.
+  reactions  Show reactions for a WhatsApp message by id, or the latest inbox message.
   watch      Keep this chat's WhatsApp session live and process incoming messages.
   unwatch    Disable event-driven processing for this chat.
   qr         Generate a PNG image from this chat's latest login QR.
@@ -50,7 +53,10 @@ Modes:
 Examples:
   { "chatId": "879964957", "args": { "mode": "login" } }
   { "chatId": "879964957", "args": { "mode": "send", "to": "+5491112345678", "message": "Hello" } }
+  { "chatId": "879964957", "args": { "mode": "send", "to": "+5491112345678", "message": "Hello", "initialDelayMs": "10000", "typingMs": "30000" } }
   { "chatId": "879964957", "args": { "mode": "wait-reply", "from": "+5491112345678" } }
+  { "chatId": "879964957", "args": { "mode": "react", "messageId": "...", "emoji": "👀" } }
+  { "chatId": "879964957", "args": { "mode": "reactions", "messageId": "..." } }
   { "chatId": "879964957", "args": { "mode": "watch" } }
 
 Recommended workflow:
@@ -75,6 +81,10 @@ function bool(value, fallback = true) {
 function number(value, fallback) {
   const parsed = Number.parseInt(String(value ?? ""), 10);
   return Number.isFinite(parsed) ? parsed : fallback;
+}
+
+function boundedNumber(value, fallback, min, max) {
+  return Math.min(max, Math.max(min, number(value, fallback)));
 }
 
 function sleep(ms) {
@@ -329,15 +339,24 @@ function displayTextForInboxItem(item) {
   return item.body || "[non-text message]";
 }
 
+function formatReactions(reactions = []) {
+  if (!Array.isArray(reactions) || !reactions.length) return "";
+  return reactions.map((item) => `${item.emoji || item.reaction || "?"}${item.senderId ? ` ${item.senderId}` : ""}`).join(", ");
+}
+
 function formatInboxMessages(messages) {
   if (!messages.length) return "No WhatsApp replies found.";
   return messages.map((item, index) => [
     `${index + 1}. From: ${item.fromName || item.from}`,
     item.fromPhone ? `Phone: ${item.fromPhone}` : null,
+    item.chatName ? `Chat: ${item.chatName}` : null,
+    item.isGroup ? `Group: yes` : null,
+    item.senderId && item.senderId !== item.from ? `SenderId: ${item.senderId}` : null,
     `At: ${item.receivedAt}`,
     item.type ? `Type: ${item.type}` : null,
     item.location?.mapsUrl ? `Location: ${item.location.mapsUrl}` : null,
     item.location?.description ? `Description: ${item.location.description}` : null,
+    formatReactions(item.reactions) ? `Reactions: ${formatReactions(item.reactions)}` : null,
     displayTextForInboxItem(item) ? `Text: ${displayTextForInboxItem(item)}` : null
   ].filter(Boolean).join("\n")).join("\n\n");
 }
@@ -354,9 +373,28 @@ async function selectInboxMessages({ chatId, from, limit = 20, unreadOnly = fals
   return (await readInbox(chatId)).filter((item) => matchesInboxFilter(item, { from, unreadOnly, after })).slice(-limit);
 }
 
+async function latestInboxMessageId({ chatId, from = "", after = "" }) {
+  const messages = await selectInboxMessages({ chatId, from, limit: 1, unreadOnly: false, after });
+  return messages[0]?.id || "";
+}
+
 async function markMessagesRead(chatId, ids) {
   if (!ids.length) return;
   await updateInboxMessages(chatId, (messages) => messages.map((item) => ids.includes(item.id) ? { ...item, read: true } : item));
+}
+
+async function updateInboxMessageReactions(chatId, messageId, reactions) {
+  if (!messageId) return;
+  await updateInboxMessages(chatId, (messages) => messages.map((item) => item.id === messageId ? { ...item, reactions } : item));
+}
+
+async function knownWhatsAppChatIds(ownerChatId) {
+  const ids = new Set();
+  for (const item of await readInbox(ownerChatId)) {
+    const id = item.chatId || item.from;
+    if (/@(c|g)\.us$/.test(String(id))) ids.add(id);
+  }
+  return [...ids];
 }
 
 async function waitForInboxMessage({ chatId, from, unreadOnly = true, after = new Date().toISOString(), timeoutMs = 60000 }) {
@@ -419,11 +457,15 @@ function buildIncomingMessagePrompt(message, artifact) {
     "System event: Incoming WhatsApp message.",
     `from: ${message.fromName || message.from}`,
     message.fromPhone ? `fromPhone: ${message.fromPhone}` : null,
+    message.chatName ? `chatName: ${message.chatName}` : null,
+    message.isGroup ? `isGroup: true` : null,
+    message.senderId && message.senderId !== message.from ? `senderId: ${message.senderId}` : null,
     `whatsappId: ${message.from}`,
     `receivedAt: ${message.receivedAt}`,
     `type: ${message.type}`,
     message.location?.mapsUrl ? `location: ${message.location.mapsUrl}` : null,
     message.location?.description ? `locationDescription: ${message.location.description}` : null,
+    formatReactions(message.reactions) ? `reactions: ${formatReactions(message.reactions)}` : null,
     `text: ${message.body || "[non-text message]"}`,
     artifact ? `artifactId: ${artifact.id}` : null,
     artifact ? `mimeType: ${artifact.mimeType}` : null,
@@ -435,6 +477,46 @@ function buildIncomingMessagePrompt(message, artifact) {
 
 function hasIncomingMessageTask(tasks, numericChatId, messageId) {
   return tasks.some((task) => task.source?.toolName === toolName && task.source?.chatId === numericChatId && task.source?.messageId === messageId);
+}
+
+function serializedWhatsAppId(value) {
+  if (!value) return "";
+  if (typeof value === "string") return value;
+  return value._serialized || value.serialized || value.id || [value.fromMe ? "true" : "false", value.remote, value.id, value.participant].filter(Boolean).join("_");
+}
+
+async function reactionsFromMessage(message) {
+  try {
+    const lists = await message.getReactions?.();
+    if (!Array.isArray(lists)) return [];
+    return lists.flatMap((group) => (group.senders || []).map((sender) => ({
+      emoji: sender.reaction || group.reaction || group.id || "",
+      senderId: sender.senderId || "",
+      timestamp: sender.timestamp || null
+    }))).filter((item) => item.emoji || item.senderId);
+  } catch {
+    return [];
+  }
+}
+
+function reactionFromEvent(reaction) {
+  return {
+    emoji: reaction.reaction || "",
+    senderId: reaction.senderId || "",
+    timestamp: reaction.timestamp || null
+  };
+}
+
+async function captureReaction(ownerChatId, reaction) {
+  const messageId = serializedWhatsAppId(reaction.msgId || reaction.parentMsgKey);
+  if (!messageId) return;
+  const current = await readInbox(ownerChatId);
+  const found = current.find((item) => item.id === messageId);
+  const existing = Array.isArray(found?.reactions) ? found.reactions : [];
+  const next = reactionFromEvent(reaction);
+  const reactions = existing.filter((item) => !(item.senderId === next.senderId && item.emoji === next.emoji));
+  if (next.emoji) reactions.push(next);
+  await updateInboxMessageReactions(ownerChatId, messageId, reactions);
 }
 
 function incomingMessageTask(chatId, message, artifact = null) {
@@ -541,7 +623,7 @@ async function storeIncomingMediaArtifact(message, chatId) {
       kind,
       mimeType,
       source: { type: "tool", toolName, whatsappMessageId: message.id?._serialized || "" },
-      metadata: { whatsappFrom: message.from, whatsappType: message.type }
+      metadata: { whatsappFrom: message.from, whatsappAuthor: message.author || "", whatsappType: message.type }
     });
   } finally {
     await unlink(tmpPath).catch(() => {});
@@ -568,22 +650,36 @@ async function captureIncomingMessage(ownerChatId, message) {
     return;
   }
   let contact = null;
+  let chat = null;
   try { contact = await message.getContact(); } catch {}
+  try { chat = await message.getChat(); } catch {}
+  const senderId = message.author || message.from;
+  const chatId = message.from;
+  const isGroup = Boolean(chat?.isGroup || /@g\.us$/.test(String(chatId)));
   const location = locationFromMessage(message);
+  const reactions = await reactionsFromMessage(message);
   const inboxMessage = {
     id: message.id?._serialized || `${message.from}-${message.timestamp}-${Date.now()}`,
-    from: message.from,
-    fromPhone: String(message.from || "").replace(/@c\.us$/, ""),
+    from: chatId,
+    chatId,
+    chatName: compact(chat?.name || ""),
+    isGroup,
+    senderId,
+    fromPhone: String(senderId || chatId || "").replace(/@(c|g)\.us$/, ""),
     fromName: compact(contact?.pushname || contact?.name || contact?.number || ""),
     body: messageBodyForInbox(message),
     type: message.type || "unknown",
     location,
+    reactions,
     timestamp: message.timestamp || Math.floor(Date.now() / 1000),
     receivedAt: new Date((message.timestamp || Math.floor(Date.now() / 1000)) * 1000).toISOString(),
     read: false
   };
 
-  if (!(await appendInboxMessage(ownerChatId, inboxMessage))) return;
+  if (!(await appendInboxMessage(ownerChatId, inboxMessage))) {
+    if (reactions.length) await updateInboxMessageReactions(ownerChatId, inboxMessage.id, reactions);
+    return;
+  }
   if (!(await isWatchEnabled(ownerChatId))) return;
 
   const artifact = await storeIncomingMediaArtifact(message, ownerChatId);
@@ -684,6 +780,14 @@ class SessionManager {
       record.lastActivity = Date.now();
       if (message.fromMe) await writeChatStatus(normalizedChatId, { state: "ready", live: true, pid: process.pid, message: "WhatsApp is ready." });
     });
+    client.on("message_reaction", async (reaction) => {
+      record.lastActivity = Date.now();
+      try {
+        await captureReaction(normalizedChatId, reaction);
+      } catch (error) {
+        await writeChatStatus(normalizedChatId, { state: "ready", live: true, pid: process.pid, message: `WhatsApp is ready. Reaction warning: ${error.message || error}` });
+      }
+    });
     client.on("auth_failure", async (message) => {
       if (record.startupTimer) clearTimeout(record.startupTimer);
       record.startupTimer = null;
@@ -744,11 +848,64 @@ class SessionManager {
     throw new Error(`${toolName} session for chat ${chatId} was not ready after ${timeoutMs}ms`);
   }
 
+  async react(chatId, job) {
+    const record = await this.ensureClient(chatId);
+    await this.waitReady(chatId, number(job.readyTimeoutMs, number(config.READY_TIMEOUT_MS, 120000)));
+    record.lastActivity = Date.now();
+    const messageId = String(job.messageId || "").trim();
+    const emoji = String(job.emoji ?? job.reaction ?? "👀");
+    if (!messageId) throw new Error("messageId is required for react");
+    const message = await record.client.getMessageById(messageId);
+    if (!message) throw new Error(`Message not found: ${messageId}`);
+    await message.react(emoji);
+    record.lastActivity = Date.now();
+    return { messageId, emoji, sessionChatId: normalizeChatId(chatId) };
+  }
+
+  async getMessageReactions(chatId, job) {
+    const record = await this.ensureClient(chatId);
+    await this.waitReady(chatId, number(job.readyTimeoutMs, number(config.READY_TIMEOUT_MS, 120000)));
+    record.lastActivity = Date.now();
+    const messageId = String(job.messageId || "").trim();
+    if (!messageId) throw new Error("messageId is required for reactions");
+    const message = await record.client.getMessageById(messageId);
+    if (!message) throw new Error(`Message not found: ${messageId}`);
+    const reactions = await reactionsFromMessage(message);
+    await updateInboxMessageReactions(chatId, messageId, reactions);
+    record.lastActivity = Date.now();
+    return { messageId, reactions, sessionChatId: normalizeChatId(chatId) };
+  }
+
+  async syncRecentMessages(chatId, { limit = 20 } = {}) {
+    const record = await this.ensureClient(chatId);
+    const status = await readChatStatus(chatId, {});
+    if (status.state !== "ready" || !status.live) return { synced: 0, skipped: "not ready" };
+    const ids = await knownWhatsAppChatIds(chatId);
+    let synced = 0;
+    for (const whatsappChatId of ids) {
+      try {
+        const chat = await record.client.getChatById(whatsappChatId);
+        if (!chat?.fetchMessages) continue;
+        const messages = await chat.fetchMessages({ limit });
+        for (const message of messages) {
+          const before = (await readInbox(chatId)).length;
+          await captureIncomingMessage(chatId, message);
+          const after = (await readInbox(chatId)).length;
+          if (after > before) synced += 1;
+        }
+      } catch (error) {
+        if (restartableWhatsAppError(error) && await isWatchEnabled(chatId)) this.scheduleRestart(chatId, `sync error: ${shortError(error)}`);
+      }
+    }
+    return { synced, chats: ids.length };
+  }
+
   async send(chatId, job) {
     const record = await this.ensureClient(chatId);
     await this.waitReady(chatId, number(job.readyTimeoutMs, number(config.READY_TIMEOUT_MS, 120000)));
     record.lastActivity = Date.now();
     const whatsappChatId = normalizeRecipient(job.to);
+    await humanizeSend(record.client, whatsappChatId, job);
     if (job.mediaPath) {
       const media = MessageMedia.fromFilePath(job.mediaPath);
       await record.client.sendMessage(whatsappChatId, media, { caption: job.message || "" });
@@ -856,6 +1013,15 @@ async function processJob(manager, job) {
   if (job.payload.type === "send") {
     return manager.send(chatId, job.payload);
   }
+  if (job.payload.type === "react") {
+    return manager.react(chatId, job.payload);
+  }
+  if (job.payload.type === "reactions") {
+    return manager.getMessageReactions(chatId, job.payload);
+  }
+  if (job.payload.type === "sync") {
+    return manager.syncRecentMessages(chatId, { limit: number(job.payload.limit, 20) });
+  }
   if (job.payload.type === "logout") {
     return withChatLock(job.paths, () => manager.logout(chatId));
   }
@@ -912,19 +1078,51 @@ async function runDaemon() {
       daemon.writeStatus({ state: "error", pid: process.pid, message: error?.message || String(error) }).catch(() => {});
     });
   }, 30000);
+
+  setInterval(() => {
+    readWatchConfigs().then((watches) => Promise.all(watches.map((watch) => manager.syncRecentMessages(String(watch.chatId), { limit: number(config.SYNC_RECENT_LIMIT, 20) })))).catch((error) => {
+      daemon.writeStatus({ state: "error", pid: process.pid, message: error?.message || String(error) }).catch(() => {});
+    });
+  }, number(config.SYNC_INTERVAL_MS, 45000));
 }
 
 function getMessage(request) {
   return String(request.args?.message || request.text || request.artifact?.text || "").trim();
 }
 
-async function sendOne(chatId, to, message, artifact = null) {
+async function humanizeSend(client, whatsappChatId, job) {
+  if (!bool(job.humanizeSend, bool(config.HUMANIZE_SEND, false))) return;
+  const maxMs = number(config.HUMANIZE_SEND_MAX_MS, 60000);
+  const initialDelayMs = boundedNumber(job.initialDelayMs, number(config.HUMANIZE_SEND_INITIAL_DELAY_MS, 0), 0, maxMs);
+  const typingMs = boundedNumber(job.typingMs, number(config.HUMANIZE_SEND_TYPING_MS, 0), 0, maxMs);
+  if (initialDelayMs > 0) await sleep(initialDelayMs);
+  if (typingMs <= 0) return;
+  let chat = null;
+  try {
+    chat = await client.getChatById(whatsappChatId);
+    if (chat?.sendStateTyping) await chat.sendStateTyping();
+    await sleep(typingMs);
+  } finally {
+    if (chat?.clearState) await chat.clearState().catch(() => {});
+  }
+}
+
+function sendTimingArgs(args = {}) {
+  return {
+    humanizeSend: args.humanize ?? args.humanizeSend,
+    initialDelayMs: args.initialDelayMs ?? args.delayMs ?? args.sendDelayMs,
+    typingMs: args.typingMs
+  };
+}
+
+async function sendOne(chatId, to, message, artifact = null, args = {}) {
   return submitChatJob(chatId, {
     type: "send",
     to,
     message,
     mediaPath: artifact?.path || "",
-    readyTimeoutMs: number(config.READY_TIMEOUT_MS, 120000)
+    readyTimeoutMs: number(config.READY_TIMEOUT_MS, 120000),
+    ...sendTimingArgs(args)
   }, {
     timeoutMs: number(config.JOB_TIMEOUT_MS, 120000)
   });
@@ -984,7 +1182,7 @@ async function run(requestFile) {
       if (!message && !request.artifact?.path) throw new Error("Message text or media artifact is required");
       const autoWatch = bool(request.args?.watch ?? request.args?.autoWatch, true);
       if (autoWatch) await enableWatch(chatId);
-      const result = await sendOne(chatId, request.args?.to || request.args?.recipient, message, request.artifact);
+      const result = await sendOne(chatId, request.args?.to || request.args?.recipient, message, request.artifact, request.args);
       const watchNote = autoWatch ? " Watch is enabled for this chat; use wait-reply when you need the immediate answer." : " Watch is disabled by request; run watch or wait-reply to process replies.";
       console.log(JSON.stringify(toolOk({ text: `Message sent to ${result.chatId}.${watchNote}`, json: { ...result, watchEnabled: autoWatch } })));
       return;
@@ -999,7 +1197,7 @@ async function run(requestFile) {
       if (autoWatch) await enableWatch(chatId);
       const sent = [];
       for (const recipient of recipients) {
-        sent.push(await sendOne(chatId, recipient, message, request.artifact));
+        sent.push(await sendOne(chatId, recipient, message, request.artifact, request.args));
         await sleep(number(config.SEND_DELAY_MS, 1200));
       }
       const watchNote = autoWatch ? " Watch is enabled for this chat; use wait-reply when you need an immediate answer from a recipient." : " Watch is disabled by request; run watch or wait-reply to process replies.";
@@ -1007,10 +1205,31 @@ async function run(requestFile) {
       return;
     }
 
+    if (mode === "sync") {
+      const result = await submitChatJob(chatId, { type: "sync", limit: number(request.args?.limit, 20) }, { timeoutMs: number(config.JOB_TIMEOUT_MS, 120000) });
+      console.log(JSON.stringify(toolOk({ text: `Synced ${result.synced || 0} recent WhatsApp message(s) from ${result.chats || 0} chat(s).`, json: result })));
+      return;
+    }
+
     if (mode === "inbox") {
       const messages = await selectInboxMessages({ chatId, from: request.args?.from, limit: number(request.args?.limit, 20), unreadOnly: bool(request.args?.unread ?? request.args?.unreadOnly, false), after: request.args?.after || "" });
       if (bool(request.args?.markRead, true)) await markMessagesRead(chatId, messages.map((item) => item.id));
       console.log(JSON.stringify(toolOk({ text: formatInboxMessages(messages), json: { messages } })));
+      return;
+    }
+
+    if (mode === "react") {
+      const messageId = request.args?.messageId || request.args?.id || await latestInboxMessageId({ chatId, from: request.args?.from, after: request.args?.after || "" });
+      const emoji = request.args?.emoji ?? request.args?.reaction ?? request.text ?? "👀";
+      const result = await submitChatJob(chatId, { type: "react", messageId, emoji, readyTimeoutMs: number(config.READY_TIMEOUT_MS, 120000) }, { timeoutMs: number(config.JOB_TIMEOUT_MS, 120000) });
+      console.log(JSON.stringify(toolOk({ text: `Reacted ${result.emoji} to ${result.messageId}.`, json: result })));
+      return;
+    }
+
+    if (mode === "reactions") {
+      const messageId = request.args?.messageId || request.args?.id || await latestInboxMessageId({ chatId, from: request.args?.from, after: request.args?.after || "" });
+      const result = await submitChatJob(chatId, { type: "reactions", messageId, readyTimeoutMs: number(config.READY_TIMEOUT_MS, 120000) }, { timeoutMs: number(config.JOB_TIMEOUT_MS, 120000) });
+      console.log(JSON.stringify(toolOk({ text: result.reactions?.length ? `Reactions: ${formatReactions(result.reactions)}` : "No reactions found.", json: result })));
       return;
     }
 

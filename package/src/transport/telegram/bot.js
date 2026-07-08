@@ -2,6 +2,7 @@ import { Bot, InputFile } from "grammy";
 import path from "node:path";
 import { authorizeChat } from "./auth.js";
 import { captureIncomingArtifact, formatLocationText } from "./media.js";
+import { buildDeviceCodeTelegramMessage } from "./device-code-message.js";
 import { renderTelegramHtml } from "./text-format.js";
 import { buildPiAuthRecoveryBlockedMessage, buildPiAuthTelegramMessage, getErrorMessage, getPiAuthIssue, getPiAuthStatus } from "../../core/agent/auth-flow.js";
 import { createPiOAuthLogin } from "../../core/agent/pi-auth-login.js";
@@ -365,8 +366,9 @@ export async function createTelegramBot({ config, artifactStore, toolRegistry, t
         ].join("\n"));
       },
       onDeviceCode: async ({ userCode, verificationUri, expiresInSeconds }) => {
-        const expiry = expiresInSeconds ? `\nExpires in ${Math.round(expiresInSeconds / 60)} minute(s).` : "";
-        await bot.api.sendMessage(chatId, `Open this URL: ${verificationUri}\nThen enter code: ${userCode}${expiry}`);
+        const payload = buildDeviceCodeTelegramMessage({ userCode, verificationUri, expiresInSeconds });
+        const { text, ...options } = payload;
+        await bot.api.sendMessage(chatId, text, options);
       },
       onPrompt: async ({ message, controller }) => {
         await bot.api.sendMessage(chatId, `${message}\nReply here with the value.`);

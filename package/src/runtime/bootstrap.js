@@ -6,6 +6,7 @@ import { spawn } from "node:child_process";
 import { Bot } from "grammy";
 import { createPiOAuthLogin } from "../core/agent/pi-auth-login.js";
 import { createPiRuntime, hasProviderAuth, listPiProviders, listProviderModels, supportsProviderOAuth } from "../core/agent/pi-runtime.js";
+import { buildDeviceCodeTelegramMessage } from "../transport/telegram/device-code-message.js";
 import { configFile, ensureArisaHome } from "./paths.js";
 
 const ARISA_BANNER = [
@@ -424,8 +425,8 @@ async function runTelegramBootstrap({ telegramApiKey, setupToken, botInfo }) {
         ].join("\n"));
       },
       onDeviceCode: async ({ userCode, verificationUri, expiresInSeconds }) => {
-        const expiry = expiresInSeconds ? `\nExpires in ${Math.round(expiresInSeconds / 60)} minute(s).` : "";
-        await sendSetupMessage(`Open this URL: ${verificationUri}\nThen enter code: ${userCode}${expiry}`);
+        const { text, ...options } = buildDeviceCodeTelegramMessage({ userCode, verificationUri, expiresInSeconds });
+        await sendSetupMessage(text, options);
       },
       onPrompt: async ({ message, controller }) => {
         await sendSetupMessage(`${message}\nReply here with the value.`);

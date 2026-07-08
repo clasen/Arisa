@@ -38,6 +38,26 @@
       "type": "string",
       "required": false,
       "prompt": "Milliseconds to keep an unwatched per-chat WhatsApp session live before closing the browser and reconnecting on demand."
+    },
+    "HUMANIZE_SEND": {
+      "type": "string",
+      "required": false,
+      "prompt": "Whether send mode should wait/show typing before sending by default: true or false."
+    },
+    "HUMANIZE_SEND_INITIAL_DELAY_MS": {
+      "type": "string",
+      "required": false,
+      "prompt": "Milliseconds to wait before showing typing and sending a WhatsApp message."
+    },
+    "HUMANIZE_SEND_TYPING_MS": {
+      "type": "string",
+      "required": false,
+      "prompt": "Milliseconds to show WhatsApp typing before sending a message."
+    },
+    "HUMANIZE_SEND_MAX_MS": {
+      "type": "string",
+      "required": false,
+      "prompt": "Maximum allowed milliseconds for humanized send delays."
     }
   },
   "category": "communication",

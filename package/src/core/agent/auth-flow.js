@@ -78,11 +78,11 @@ export function buildPiAuthTelegramMessage({ config, issue = null, verified = fa
   if (verified) {
     lines.push("No action needed.");
   } else if (!issue) {
-    lines.push("Run `/auth` to validate these credentials against the provider.");
+    lines.push("Run /auth to validate these credentials against the provider.");
   } else if (status.hasApiKey) {
     lines.push("A Pi API key is configured, but the provider rejected the current request. Update the key and restart Arisa.");
   } else if (status.supportsOAuth) {
-    lines.push("Run `/auth` here in Telegram to renew the Pi login.");
+    lines.push("Run /auth here in Telegram to renew the Pi login.");
   } else {
     lines.push("This provider needs a Pi API key. Re-run `arisa --bootstrap`, provide a key, and restart Arisa.");
   }
@@ -103,7 +103,7 @@ export function buildPiAuthRecoveryBlockedMessage({ config, issue = null, renewa
 
   lines.push(renewalActive
     ? "A Pi login is already in progress. Paste the redirect URL or code here when the provider gives it to you."
-    : "Send `/auth` to start Pi login from Telegram.");
+    : "Send /auth to start Pi login from Telegram.");
 
   return lines.join("\n");
 }

@@ -49,6 +49,10 @@ function safeId(value, fallback, maxLength) {
   return clean || fallback;
 }
 
+function requestUrl(req) {
+  return new URL(req.url || "/", "http://localhost");
+}
+
 function send(ws, payload) {
   if (ws.readyState === ws.OPEN) ws.send(JSON.stringify(payload));
 }
@@ -202,7 +206,7 @@ function createServer(options = {}) {
   const allowedRelayTypes = new Set(["offer", "answer", "ice", "candidate", "signal", "message", "broadcast"]);
 
   const server = http.createServer((req, res) => {
-    const url = new URL(req.url, `http://${req.headers.host || "localhost"}`);
+    const url = requestUrl(req);
     if (url.pathname === config.basePath || url.pathname === `${config.basePath}/`) {
       res.writeHead(200, { "content-type": "application/json; charset=utf-8", "access-control-allow-origin": "*" });
       res.end(JSON.stringify({
@@ -243,7 +247,7 @@ function createServer(options = {}) {
   const wss = new WebSocketServer({ noServer: true, maxPayload: config.maxMessageBytes });
 
   server.on("upgrade", (req, socket, head) => {
-    const url = new URL(req.url, `http://${req.headers.host || "localhost"}`);
+    const url = requestUrl(req);
     if (url.pathname !== wsPath) {
       socket.destroy();
       return;
