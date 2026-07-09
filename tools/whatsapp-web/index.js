@@ -1,4 +1,6 @@
+import { execFile } from "node:child_process";
 import crypto from "node:crypto";
+import { createRequire } from "node:module";
 import path from "node:path";
 import process from "node:process";
 import { fileURLToPath, pathToFileURL } from "node:url";
@@ -19,14 +21,21 @@ const { createDaemonRuntime } = await importCore("core/tools/daemon-runtime.js")
 const { isProcessAlive, readJson, writeJson } = await importCore("core/tools/daemon-processes.js");
 const { chatsDir, getChatToolStateDir, tasksFile } = await importCore("runtime/paths.js");
 
+const require = createRequire(import.meta.url);
+const WebP = require("node-webpmux");
+
 const { Client, LocalAuth, MessageMedia } = pkg;
 const toolName = "whatsapp-web";
-const config = await loadToolConfig(toolName, defaults);
 const daemon = createDaemonRuntime({ toolName, entryPath: new URL(import.meta.url).pathname, beforeStart: cleanupAllBrowserLocks });
-const stateRoot = daemon.paths.root;
-const chatSessionsRoot = path.join(stateRoot, "chats");
-const legacySessionDir = path.join(stateRoot, "session");
+const legacySessionDir = path.join(daemon.paths.root, "session");
+const legacyChatSessionsRoot = path.join(daemon.paths.root, "chats");
 const artifactStore = new ArtifactStore();
+let config = defaults;
+
+async function useChatConfig(chatId) {
+  config = await loadToolConfig(toolName, defaults, normalizeChatId(chatId));
+  return config;
+}
 
 function printHelp() {
   console.log(`whatsapp-web
@@ -45,6 +54,8 @@ Modes:
   wait-reply Wait for a reply from an optional recipient after sending.
   react      React to a WhatsApp message by id, or the latest inbox message.
   reactions  Show reactions for a WhatsApp message by id, or the latest inbox message.
+  delete     Delete a recent sent WhatsApp message by id or recent-match filter.
+  stickers   List, tag, and send saved stickers from this chat.
   watch      Keep this chat's WhatsApp session live and process incoming messages.
   unwatch    Disable event-driven processing for this chat.
   qr         Generate a PNG image from this chat's latest login QR.
@@ -54,17 +65,19 @@ Examples:
   { "chatId": "879964957", "args": { "mode": "login" } }
   { "chatId": "879964957", "args": { "mode": "send", "to": "+5491112345678", "message": "Hello" } }
   { "chatId": "879964957", "args": { "mode": "send", "to": "+5491112345678", "message": "Hello", "initialDelayMs": "10000", "typingMs": "30000" } }
+  { "chatId": "879964957", "args": { "mode": "send", "to": "+5491112345678", "message": "Replying", "quotedMessageId": "..." } }
   { "chatId": "879964957", "args": { "mode": "wait-reply", "from": "+5491112345678" } }
   { "chatId": "879964957", "args": { "mode": "react", "messageId": "...", "emoji": "👀" } }
   { "chatId": "879964957", "args": { "mode": "reactions", "messageId": "..." } }
+  { "chatId": "879964957", "args": { "mode": "delete", "to": "+5491112345678", "text": "caption/text to match" } }
   { "chatId": "879964957", "args": { "mode": "watch" } }
 
 Recommended workflow:
   login once -> keep watch enabled -> send -> wait-reply when the agent needs the immediate answer.
   If WhatsApp is active, watch should stay enabled so replies are processed automatically.
 
-Per-chat sessions: ${chatSessionsRoot}/<chatId>/session
-Legacy global session ignored: ${legacySessionDir}
+Per-chat sessions: ${getChatToolStateDir("<chatId>", toolName)}/session
+Legacy global sessions ignored: ${legacySessionDir} and ${legacyChatSessionsRoot}
 
 Warning: use a dedicated auxiliary number for the bot; WhatsApp Web automation can put accounts at risk of Meta restrictions or bans.
 `);
@@ -103,7 +116,7 @@ function requestChatId(request) {
 }
 
 function chatPaths(chatId) {
-  const root = path.join(chatSessionsRoot, normalizeChatId(chatId));
+  const root = getChatToolStateDir(normalizeChatId(chatId), toolName);
   const commandsDir = path.join(root, "commands");
   return {
     root,
@@ -119,7 +132,6 @@ function chatPaths(chatId) {
 
 async function ensureToolState() {
   await daemon.ensure();
-  await mkdir(chatSessionsRoot, { recursive: true });
 }
 
 async function ensureChatState(paths) {
@@ -157,6 +169,22 @@ function statusText(chatId, status, pid) {
     typeof status.live === "boolean" ? `Live client: ${status.live ? "yes" : "no"}` : "",
     pid ? `Daemon pid: ${pid}` : ""
   ].filter(Boolean).join("\n");
+}
+
+async function effectiveChatStatus(chatId, fallback = {}) {
+  const status = await readChatStatus(chatId, fallback);
+  const pid = await daemon.getPid();
+  const alive = isProcessAlive(pid);
+  if (status.live && !alive) {
+    const repaired = await writeChatStatus(chatId, {
+      state: "reconnecting",
+      live: false,
+      pid: pid || null,
+      message: "WhatsApp daemon was stale; it will reconnect on demand."
+    });
+    return { status: repaired, pid, alive, stale: true };
+  }
+  return { status, pid, alive, stale: false };
 }
 
 async function waitForChatState(chatId, states, timeoutMs) {
@@ -197,8 +225,14 @@ async function submitChatJob(chatId, payload, { timeoutMs = 180000 } = {}) {
 }
 
 async function listSessionChatIds() {
-  const entries = await readdir(chatSessionsRoot, { withFileTypes: true }).catch(() => []);
-  return entries.filter((entry) => entry.isDirectory()).map((entry) => entry.name).filter((entry) => /^-?\d+$/.test(entry)).sort();
+  const entries = await readdir(chatsDir, { withFileTypes: true }).catch(() => []);
+  const ids = [];
+  for (const entry of entries) {
+    if (!entry.isDirectory() || !/^-?\d+$/.test(entry.name)) continue;
+    const paths = chatPaths(entry.name);
+    if (existsSync(paths.root)) ids.push(entry.name);
+  }
+  return ids.sort();
 }
 
 async function claimNextChatJob() {
@@ -249,7 +283,19 @@ async function withChatLock(paths, work, { timeoutMs = 30000, staleMs = 120000 }
   throw new Error(`Timed out waiting for WhatsApp session lock at ${paths.lockFile}`);
 }
 
+async function execFileQuiet(command, args) {
+  await new Promise((resolve) => {
+    execFile(command, args, () => resolve());
+  });
+}
+
+async function killChatBrowserProcesses(paths) {
+  const userDataDir = path.join(paths.sessionDir, "session");
+  await execFileQuiet("pkill", ["-9", "-f", userDataDir]);
+}
+
 async function cleanupBrowserLocks(paths) {
+  await killChatBrowserProcesses(paths);
   for (const name of ["SingletonLock", "SingletonSocket", "SingletonCookie"]) {
     await rm(path.join(paths.sessionDir, "session", name), { force: true }).catch(() => {});
   }
@@ -599,11 +645,117 @@ function mediaKind(mimeType = "", messageType = "") {
 
 function mediaExtension(mimeType = "") {
   const base = mimeType.split(";")[0].trim().toLowerCase();
-  const map = { "audio/ogg": "ogg", "audio/mpeg": "mp3", "audio/mp4": "m4a", "image/jpeg": "jpg", "image/png": "png", "video/mp4": "mp4" };
+  const map = { "audio/ogg": "ogg", "audio/mpeg": "mp3", "audio/mp4": "m4a", "image/jpeg": "jpg", "image/png": "png", "image/webp": "webp", "video/mp4": "mp4" };
   return map[base] || "bin";
 }
 
-async function storeIncomingMediaArtifact(message, chatId) {
+function stickerPaths(chatId) {
+  const root = path.join(getChatToolStateDir(chatId, toolName), "stickers");
+  return { root, filesDir: path.join(root, "files"), previewsDir: path.join(root, "previews"), indexFile: path.join(root, "index.json") };
+}
+
+function parseTags(value) {
+  if (Array.isArray(value)) return value.map((item) => String(item).trim()).filter(Boolean);
+  return String(value || "").split(/[,;#\n]/).map((item) => item.trim()).filter(Boolean);
+}
+
+async function readStickerIndex(chatId) {
+  return readJson(stickerPaths(chatId).indexFile, []);
+}
+
+async function writeStickerIndex(chatId, stickers) {
+  await writeJson(stickerPaths(chatId).indexFile, stickers);
+}
+
+async function writeFirstWebpFrame(inputPath, outputPath) {
+  try {
+    const image = new WebP.Image();
+    await image.load(inputPath);
+    if (!image.hasAnim) return "";
+    const frames = await image.demux({ buffers: true, frame: 0 });
+    const frame = Array.isArray(frames) ? frames[0] : frames;
+    if (!frame) return "";
+    await writeFile(outputPath, Buffer.isBuffer(frame) ? frame : Buffer.from(frame));
+    return outputPath;
+  } catch {
+    return "";
+  }
+}
+
+async function saveStickerToLibrary(ownerChatId, message, media, buffer, context = {}) {
+  if (message.type !== "sticker" && media.mimetype?.split(";")[0].trim() !== "image/webp") return null;
+  const paths = stickerPaths(ownerChatId);
+  await mkdir(paths.filesDir, { recursive: true });
+  await mkdir(paths.previewsDir, { recursive: true });
+  const messageId = message.id?._serialized || `${message.from}-${message.timestamp}-${Date.now()}`;
+  const existing = (await readStickerIndex(ownerChatId)).filter((item) => item.messageId !== messageId);
+  const id = crypto.createHash("sha1").update(messageId).digest("hex").slice(0, 12);
+  const fileName = `${id}.webp`;
+  const filePath = path.join(paths.filesDir, fileName);
+  await writeFile(filePath, buffer);
+  const isAnimated = buffer.includes(Buffer.from("ANIM"));
+  let firstFramePath = "";
+  if (isAnimated) {
+    const previewPath = path.join(paths.previewsDir, `${id}-frame1.webp`);
+    firstFramePath = await writeFirstWebpFrame(filePath, previewPath);
+  }
+  const sticker = {
+    id,
+    messageId,
+    fileName,
+    filePath,
+    firstFramePath,
+    animated: isAnimated,
+    mimeType: media.mimetype.split(";")[0].trim(),
+    tags: [],
+    uses: 0,
+    senderId: context.senderId || message.author || message.from,
+    fromName: context.fromName || "",
+    chatId: message.from,
+    chatName: context.chatName || "",
+    body: message.body || "",
+    receivedAt: new Date((message.timestamp || Math.floor(Date.now() / 1000)) * 1000).toISOString()
+  };
+  existing.push(sticker);
+  existing.sort((a, b) => String(a.receivedAt).localeCompare(String(b.receivedAt)));
+  await writeStickerIndex(ownerChatId, existing.slice(-300));
+  return sticker;
+}
+
+function formatStickerList(stickers) {
+  if (!stickers.length) return "No saved stickers yet.";
+  return stickers.map((item, index) => `${index + 1}. ${item.id}${item.tags?.length ? ` #${item.tags.join(" #")}` : ""}${item.description ? ` — ${item.description}` : ""}${item.fromName ? ` from ${item.fromName}` : ""}${item.receivedAt ? ` at ${item.receivedAt}` : ""}`).join("\n");
+}
+
+async function selectSticker(chatId, { id, tag } = {}) {
+  const stickers = await readStickerIndex(chatId);
+  const selected = id
+    ? stickers.find((item) => item.id === id)
+    : [...stickers].reverse().find((item) => !tag || item.tags?.includes(tag));
+  if (!selected) throw new Error(id ? `Sticker not found: ${id}` : `No sticker found${tag ? ` for tag ${tag}` : ""}`);
+  return selected;
+}
+
+async function tagSticker(chatId, id, tags) {
+  const stickers = await readStickerIndex(chatId);
+  const sticker = stickers.find((item) => item.id === id);
+  if (!sticker) throw new Error(`Sticker not found: ${id}`);
+  sticker.tags = [...new Set([...(sticker.tags || []), ...parseTags(tags)])];
+  await writeStickerIndex(chatId, stickers);
+  return sticker;
+}
+
+async function markStickerUsed(chatId, id) {
+  const stickers = await readStickerIndex(chatId);
+  const sticker = stickers.find((item) => item.id === id);
+  if (sticker) {
+    sticker.uses = Number(sticker.uses || 0) + 1;
+    sticker.lastUsedAt = new Date().toISOString();
+    await writeStickerIndex(chatId, stickers);
+  }
+}
+
+async function storeIncomingMediaArtifact(message, chatId, context = {}) {
   if (!message.hasMedia) return null;
   let media = null;
   try { media = await message.downloadMedia(); } catch { return null; }
@@ -615,7 +767,9 @@ async function storeIncomingMediaArtifact(message, chatId) {
   const fileName = media.filename || `whatsapp-${message.id?._serialized || Date.now()}.${mediaExtension(mimeType)}`;
   await mkdir(paths.mediaTmpDir, { recursive: true });
   const tmpPath = path.join(paths.mediaTmpDir, `${crypto.randomUUID()}-${fileName.replace(/[^a-zA-Z0-9._-]/g, "_")}`);
-  await writeFile(tmpPath, Buffer.from(media.data, "base64"));
+  const buffer = Buffer.from(media.data, "base64");
+  await writeFile(tmpPath, buffer);
+  await saveStickerToLibrary(chatId, message, media, buffer, context);
   try {
     return await artifactStore.forChat(chatId).createFromFile({
       originalPath: tmpPath,
@@ -633,7 +787,7 @@ async function storeIncomingMediaArtifact(message, chatId) {
 
 function restartableWhatsAppError(error) {
   const message = String(error?.message || error || "");
-  return /Execution context was destroyed|ProtocolError|Target closed|Session closed|frame was detached|browser has disconnected|Navigation failed|Cannot find context|Most likely the page has been closed/i.test(message);
+  return /Execution context was destroyed|ProtocolError|Target closed|Session closed|frame was detached|detached Frame|browser has disconnected|Navigation failed|Cannot find context|Most likely the page has been closed/i.test(message);
 }
 
 function shortError(error) {
@@ -682,7 +836,7 @@ async function captureIncomingMessage(ownerChatId, message) {
   }
   if (!(await isWatchEnabled(ownerChatId))) return;
 
-  const artifact = await storeIncomingMediaArtifact(message, ownerChatId);
+  const artifact = await storeIncomingMediaArtifact(message, ownerChatId, { senderId, fromName: inboxMessage.fromName, chatName: inboxMessage.chatName });
   await enqueueArisaTaskForIncomingMessage(ownerChatId, inboxMessage, artifact);
 }
 
@@ -876,6 +1030,18 @@ class SessionManager {
     return { messageId, reactions, sessionChatId: normalizeChatId(chatId) };
   }
 
+  async deleteRecentSent(chatId, job) {
+    const record = await this.ensureClient(chatId);
+    await this.waitReady(chatId, number(job.readyTimeoutMs, number(config.READY_TIMEOUT_MS, 120000)));
+    record.lastActivity = Date.now();
+    const message = await findSentMessageToDelete(record.client, job);
+    if (!message) throw new Error("No matching recent sent message found");
+    const messageId = message.id?._serialized || message.id?.id || String(message.id || "");
+    await message.delete(bool(job.everyone, true));
+    record.lastActivity = Date.now();
+    return { messageId, chatId: normalizeRecipient(job.to), sessionChatId: normalizeChatId(chatId), deleted: true };
+  }
+
   async syncRecentMessages(chatId, { limit = 20 } = {}) {
     const record = await this.ensureClient(chatId);
     const status = await readChatStatus(chatId, {});
@@ -905,15 +1071,29 @@ class SessionManager {
     await this.waitReady(chatId, number(job.readyTimeoutMs, number(config.READY_TIMEOUT_MS, 120000)));
     record.lastActivity = Date.now();
     const whatsappChatId = normalizeRecipient(job.to);
-    await humanizeSend(record.client, whatsappChatId, job);
-    if (job.mediaPath) {
-      const media = MessageMedia.fromFilePath(job.mediaPath);
-      await record.client.sendMessage(whatsappChatId, media, { caption: job.message || "" });
-    } else {
-      await record.client.sendMessage(whatsappChatId, job.message);
+    if (bool(job.dedupe, true)) {
+      const duplicate = await findRecentSentMatching(record.client, job, { withinMs: number(job.dedupeWindowMs, 5 * 60 * 1000) });
+      if (duplicate) {
+        record.lastActivity = Date.now();
+        return { chatId: whatsappChatId, sessionChatId: normalizeChatId(chatId), messageId: serializedMessageId(duplicate), duplicateSkipped: true };
+      }
     }
-    record.lastActivity = Date.now();
-    return { chatId: whatsappChatId, sessionChatId: normalizeChatId(chatId) };
+    try {
+      await humanizeSend(record.client, whatsappChatId, job);
+      const sendOptions = messageSendOptions(job);
+      const sent = job.mediaPath
+        ? await record.client.sendMessage(whatsappChatId, MessageMedia.fromFilePath(job.mediaPath), { ...sendOptions, caption: job.message || "", sendMediaAsSticker: bool(job.asSticker, false) })
+        : await record.client.sendMessage(whatsappChatId, job.message, sendOptions);
+      record.lastActivity = Date.now();
+      return { chatId: whatsappChatId, sessionChatId: normalizeChatId(chatId), messageId: serializedMessageId(sent) };
+    } catch (error) {
+      const maybeSent = await findRecentSentMatching(record.client, job, { withinMs: number(job.recoverWindowMs, 2 * 60 * 1000) }).catch(() => null);
+      if (maybeSent) {
+        record.lastActivity = Date.now();
+        return { chatId: whatsappChatId, sessionChatId: normalizeChatId(chatId), messageId: serializedMessageId(maybeSent), recoveredAfterError: true, warning: shortError(error) };
+      }
+      throw error;
+    }
   }
 
   scheduleRestart(chatId, reason) {
@@ -1006,12 +1186,16 @@ class SessionManager {
 async function processJob(manager, job) {
   if (!job?.payload?.type) throw new Error("Invalid WhatsApp command");
   const chatId = normalizeChatId(job.payload.chatId || job.chatId);
+  await useChatConfig(chatId);
   if (job.payload.type === "ensure") {
     await withChatLock(job.paths, () => manager.ensureClient(chatId));
     return readChatStatus(chatId, {});
   }
   if (job.payload.type === "send") {
     return manager.send(chatId, job.payload);
+  }
+  if (job.payload.type === "delete") {
+    return manager.deleteRecentSent(chatId, job.payload);
   }
   if (job.payload.type === "react") {
     return manager.react(chatId, job.payload);
@@ -1100,18 +1284,64 @@ async function humanizeSend(client, whatsappChatId, job) {
   let chat = null;
   try {
     chat = await client.getChatById(whatsappChatId);
-    if (chat?.sendStateTyping) await chat.sendStateTyping();
-    await sleep(typingMs);
+    const startedAt = Date.now();
+    while (Date.now() - startedAt < typingMs) {
+      if (chat?.sendStateTyping) await chat.sendStateTyping();
+      await sleep(Math.min(7000, typingMs - (Date.now() - startedAt)));
+    }
   } finally {
     if (chat?.clearState) await chat.clearState().catch(() => {});
   }
+}
+
+function serializedMessageId(message) {
+  return message?.id?._serialized || message?.id?.id || String(message?.id || "");
+}
+
+function messageAgeMs(message) {
+  const timestamp = Number(message?.timestamp || 0);
+  if (!timestamp) return Number.POSITIVE_INFINITY;
+  return Date.now() - timestamp * 1000;
+}
+
+function sentMessageMatchesJob(message, job, { contains = false, withinMs = 0 } = {}) {
+  if (!message?.fromMe) return false;
+  if (withinMs > 0 && messageAgeMs(message) > withinMs) return false;
+  if (job.mediaPath && !message.hasMedia) return false;
+  const expected = String(job.text || job.message || "").trim().toLowerCase();
+  if (!expected) return true;
+  const actual = String(message.body || "").trim().toLowerCase();
+  return contains ? actual.includes(expected) : actual === expected;
+}
+
+async function findRecentSentMatching(client, job, options = {}) {
+  const whatsappChatId = normalizeRecipient(job.to);
+  const chat = await client.getChatById(whatsappChatId);
+  const messages = await chat.fetchMessages({ limit: number(job.limit, 30) });
+  return [...messages].reverse().find((message) => sentMessageMatchesJob(message, job, options)) || null;
+}
+
+async function findSentMessageToDelete(client, job) {
+  const messageId = String(job.messageId || "").trim();
+  if (messageId) return client.getMessageById(messageId);
+  return findRecentSentMatching(client, job, { contains: true });
+}
+
+function messageSendOptions(job = {}) {
+  const quotedMessageId = String(job.quotedMessageId || job.quoteMessageId || job.replyTo || "").trim();
+  return quotedMessageId ? { quotedMessageId } : {};
 }
 
 function sendTimingArgs(args = {}) {
   return {
     humanizeSend: args.humanize ?? args.humanizeSend,
     initialDelayMs: args.initialDelayMs ?? args.delayMs ?? args.sendDelayMs,
-    typingMs: args.typingMs
+    typingMs: args.typingMs,
+    dedupe: args.dedupe,
+    dedupeWindowMs: args.dedupeWindowMs,
+    recoverWindowMs: args.recoverWindowMs,
+    asSticker: args.asSticker,
+    quotedMessageId: args.quotedMessageId ?? args.quoteMessageId ?? args.replyTo
   };
 }
 
@@ -1149,6 +1379,7 @@ async function run(requestFile) {
 
   try {
     const chatId = requestChatId(request);
+    await useChatConfig(chatId);
 
     if (mode === "login") {
       await enableWatch(chatId);
@@ -1164,9 +1395,12 @@ async function run(requestFile) {
     }
 
     if (mode === "status") {
-      const status = await readChatStatus(chatId, { state: "needs_login", live: false, message: "No WhatsApp session has been started for this chat." });
-      const pid = await daemon.getPid();
-      console.log(JSON.stringify(toolOk({ text: statusText(chatId, status, pid), json: { pid, alive: isProcessAlive(pid), ...status } })));
+      const { status, pid, alive, stale } = await effectiveChatStatus(chatId, { state: "needs_login", live: false, message: "No WhatsApp session has been started for this chat." });
+      if (stale && await isWatchEnabled(chatId)) {
+        await daemon.start();
+        submitChatJob(chatId, { type: "ensure" }, { timeoutMs: number(config.READY_TIMEOUT_MS, 120000) }).catch(() => {});
+      }
+      console.log(JSON.stringify(toolOk({ text: statusText(chatId, status, pid), json: { pid, alive, staleRecovered: stale, ...status } })));
       return;
     }
 
@@ -1208,6 +1442,43 @@ async function run(requestFile) {
     if (mode === "sync") {
       const result = await submitChatJob(chatId, { type: "sync", limit: number(request.args?.limit, 20) }, { timeoutMs: number(config.JOB_TIMEOUT_MS, 120000) });
       console.log(JSON.stringify(toolOk({ text: `Synced ${result.synced || 0} recent WhatsApp message(s) from ${result.chats || 0} chat(s).`, json: result })));
+      return;
+    }
+
+    if (mode === "stickers") {
+      const action = request.args?.action || "list";
+      if (action === "list") {
+        const stickers = (await readStickerIndex(chatId)).slice(-number(request.args?.limit, 20)).reverse();
+        console.log(JSON.stringify(toolOk({ text: formatStickerList(stickers), json: { stickers } })));
+        return;
+      }
+      if (action === "tag") {
+        const sticker = await tagSticker(chatId, request.args?.id, request.args?.tags || request.args?.tag);
+        console.log(JSON.stringify(toolOk({ text: `Tagged sticker ${sticker.id}: ${sticker.tags.join(", ")}`, json: { sticker } })));
+        return;
+      }
+      if (action === "send") {
+        const sticker = await selectSticker(chatId, { id: request.args?.id, tag: request.args?.tag });
+        const result = await sendOne(chatId, request.args?.to || request.args?.recipient, request.args?.message || "", { path: sticker.filePath }, { ...request.args, asSticker: true });
+        await markStickerUsed(chatId, sticker.id);
+        console.log(JSON.stringify(toolOk({ text: `Sent sticker ${sticker.id} to ${result.chatId}.`, json: { ...result, sticker } })));
+        return;
+      }
+      throw new Error(`Unknown stickers action: ${action}`);
+    }
+
+    if (mode === "delete") {
+      const result = await submitChatJob(chatId, {
+        type: "delete",
+        to: request.args?.to || request.args?.recipient,
+        messageId: request.args?.messageId || request.args?.id,
+        text: request.args?.text || request.args?.message,
+        mediaOnly: request.args?.mediaOnly,
+        limit: request.args?.limit,
+        everyone: request.args?.everyone,
+        readyTimeoutMs: number(config.READY_TIMEOUT_MS, 120000)
+      }, { timeoutMs: number(config.JOB_TIMEOUT_MS, 120000) });
+      console.log(JSON.stringify(toolOk({ text: `Deleted WhatsApp message ${result.messageId}.`, json: result })));
       return;
     }
 
