@@ -54,6 +54,16 @@
       "required": false,
       "prompt": "Milliseconds to wait before showing typing and sending a WhatsApp message."
     },
+    "HUMANIZE_SEND_ONLINE_LEAD_MS": {
+      "type": "string",
+      "required": false,
+      "prompt": "Milliseconds to appear online before WhatsApp typing starts."
+    },
+    "HUMANIZE_SEND_POST_SEND_ONLINE_MS": {
+      "type": "string",
+      "required": false,
+      "prompt": "Milliseconds to remain online after sending before becoming unavailable."
+    },
     "HUMANIZE_SEND_TYPING_MS": {
       "type": "string",
       "required": false,
