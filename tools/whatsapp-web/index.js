@@ -1042,15 +1042,18 @@ class SessionManager {
         return { chatId: whatsappChatId, sessionChatId: normalizeChatId(chatId), messageId: serializedMessageId(duplicate), duplicateSkipped: true };
       }
     }
+    let presence = null;
     try {
-      await humanizeSend(record.client, whatsappChatId, job);
+      presence = await humanizeSend(record.client, whatsappChatId, job);
       const sendOptions = messageSendOptions(job);
       const sent = job.mediaPath
         ? await record.client.sendMessage(whatsappChatId, MessageMedia.fromFilePath(job.mediaPath), { ...sendOptions, caption: job.message || "", sendMediaAsSticker: bool(job.asSticker, false) })
         : await record.client.sendMessage(whatsappChatId, job.message, sendOptions);
+      await finishHumanizeSend(record.client, presence);
       record.lastActivity = Date.now();
       return { chatId: whatsappChatId, sessionChatId: normalizeChatId(chatId), messageId: serializedMessageId(sent) };
     } catch (error) {
+      await finishHumanizeSend(record.client, presence);
       const maybeSent = await findRecentSentMatching(record.client, job, { withinMs: number(job.recoverWindowMs, 2 * 60 * 1000) }).catch(() => null);
       if (maybeSent) {
         record.lastActivity = Date.now();
@@ -1255,24 +1258,50 @@ function getMessage(request) {
   return String(request.args?.message || request.text || request.artifact?.text || "").trim();
 }
 
+function naturalTypingMs(job, config, maxMs) {
+  const configured = boundedNumber(job.typingMs, number(config.HUMANIZE_SEND_TYPING_MS, 0), 0, maxMs);
+  if (configured > 0) return configured;
+  const characters = String(job.text || job.message || "").trim().length;
+  return Math.min(maxMs, Math.max(2500, Math.round(1500 + characters * 55)));
+}
+
 async function humanizeSend(client, whatsappChatId, job) {
-  if (!bool(job.humanizeSend, bool(config.HUMANIZE_SEND, false))) return;
+  if (!bool(job.humanizeSend, bool(config.HUMANIZE_SEND, false))) return null;
   const maxMs = number(config.HUMANIZE_SEND_MAX_MS, 60000);
   const initialDelayMs = boundedNumber(job.initialDelayMs, number(config.HUMANIZE_SEND_INITIAL_DELAY_MS, 0), 0, maxMs);
-  const typingMs = boundedNumber(job.typingMs, number(config.HUMANIZE_SEND_TYPING_MS, 0), 0, maxMs);
+  const typingMs = naturalTypingMs(job, config, maxMs);
+  const onlineLeadMs = boundedNumber(job.onlineLeadMs, number(config.HUMANIZE_SEND_ONLINE_LEAD_MS, 1500), 0, maxMs);
   if (initialDelayMs > 0) await sleep(initialDelayMs);
-  if (typingMs <= 0) return;
+  let online = false;
   let chat = null;
   try {
+    if (client?.sendPresenceAvailable) {
+      await client.sendPresenceAvailable();
+      online = true;
+    }
+    if (onlineLeadMs > 0) await sleep(onlineLeadMs);
     chat = await client.getChatById(whatsappChatId);
     const startedAt = Date.now();
     while (Date.now() - startedAt < typingMs) {
       if (chat?.sendStateTyping) await chat.sendStateTyping();
       await sleep(Math.min(7000, typingMs - (Date.now() - startedAt)));
     }
+    return { online };
+  } catch (error) {
+    if (online && client?.sendPresenceUnavailable) await client.sendPresenceUnavailable().catch(() => {});
+    throw error;
   } finally {
     if (chat?.clearState) await chat.clearState().catch(() => {});
   }
+}
+
+async function finishHumanizeSend(client, presence) {
+  if (!presence?.online || !client?.sendPresenceUnavailable) return;
+  const maxMs = number(config.HUMANIZE_SEND_MAX_MS, 60000);
+  const lingerMs = boundedNumber(null, number(config.HUMANIZE_SEND_POST_SEND_ONLINE_MS, 2500), 0, maxMs);
+  if (client?.sendPresenceAvailable) await client.sendPresenceAvailable().catch(() => {});
+  if (lingerMs > 0) await sleep(lingerMs);
+  await client.sendPresenceUnavailable().catch(() => {});
 }
 
 function serializedMessageId(message) {
@@ -1317,6 +1346,7 @@ function sendTimingArgs(args = {}) {
   return {
     humanizeSend: args.humanize ?? args.humanizeSend,
     initialDelayMs: args.initialDelayMs ?? args.delayMs ?? args.sendDelayMs,
+    onlineLeadMs: args.onlineLeadMs,
     typingMs: args.typingMs,
     dedupe: args.dedupe,
     dedupeWindowMs: args.dedupeWindowMs,
