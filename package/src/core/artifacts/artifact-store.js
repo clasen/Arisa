@@ -3,13 +3,43 @@ import path from "node:path";
 import crypto from "node:crypto";
 import { getChatArtifactsDir, getChatArtifactsIndexFile } from "../../runtime/paths.js";
 
+const UTF8_BOM = Buffer.from([0xef, 0xbb, 0xbf]);
+
 function id() {
   return crypto.randomUUID();
 }
 
+function withUtf8Bom(content) {
+  const bytes = Buffer.isBuffer(content) ? content : Buffer.from(content, "utf8");
+  const body = bytes.subarray(0, UTF8_BOM.length).equals(UTF8_BOM)
+    ? bytes.subarray(UTF8_BOM.length)
+    : bytes;
+  return Buffer.concat([UTF8_BOM, body]);
+}
+
+function isTextMimeType(mimeType = "") {
+  const type = mimeType.split(";", 1)[0].trim().toLowerCase();
+  return type.startsWith("text/")
+    || type === "application/json"
+    || type.endsWith("+json")
+    || type === "application/xml"
+    || type.endsWith("+xml")
+    || type === "application/javascript"
+    || type === "application/ecmascript"
+    || type === "image/svg+xml";
+}
+
 function writeArtifactFile(filePath, content) {
-  if (typeof content === "string") return writeFile(filePath, content, "utf8");
+  if (typeof content === "string") return writeFile(filePath, withUtf8Bom(content));
   return writeFile(filePath, content);
+}
+
+async function copyArtifactFile(originalPath, destPath, mimeType) {
+  if (!isTextMimeType(mimeType)) return copyFile(originalPath, destPath);
+
+  const content = await readFile(originalPath);
+  new TextDecoder("utf-8", { fatal: true }).decode(content);
+  return writeFile(destPath, withUtf8Bom(content));
 }
 
 class ChatArtifactStore {
@@ -63,7 +93,7 @@ class ChatArtifactStore {
     const dir = path.join(this.rootDir, artifactId);
     await mkdir(dir, { recursive: true });
     const destPath = path.join(dir, fileName);
-    await copyFile(originalPath, destPath);
+    await copyArtifactFile(originalPath, destPath, mimeType);
     const artifact = {
       id: artifactId,
       chatId: this.chatId,

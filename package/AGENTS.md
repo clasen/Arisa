@@ -47,6 +47,12 @@ Each tool declares in `tool.manifest.json`:
 - `keywords`: optional intent tags for capability discovery
 - `skillHints`: optional skills to apply when using or editing the tool
 
+## Text encoding
+All textual content generated or sent by Arisa or its tools must use UTF-8. This includes text files, assistant-created attachments, tool exports, email bodies, messages, HTTP responses, and API payloads.
+
+- Text files must start with a UTF-8 byte-order mark (BOM).
+- Protocol payloads must declare UTF-8 through the protocol's standard mechanism and encode their bytes as UTF-8. For example, email and HTTP text content must use a `Content-Type` with `charset=UTF-8`.
+
 ## Tool-to-Arisa IPC
 Tools that expose a web UI or HTTP endpoint own that server, usually through the shared daemon runtime; Arisa core does not mount tool routes or proxies. Use Arisa IPC when a tool needs registered tools, artifacts, tasks, agent events, or runtime paths.
 
@@ -120,6 +126,15 @@ When such a tool is built, implement it with the shared daemon runtime instead o
 - use `beforeStart` only for tool-specific cleanup such as stale browser locks, without deleting persistent session/model data
 - keep daemon tools headless/server-safe by default when they are meant to run on VPS machines
 - if the daemon exposes an HTTP server, keep that server inside the tool; Arisa core does not discover or mount tool routes
+
+Every managed daemon must also follow the scoped health contract:
+- declare `daemon.scope`, `daemon.autoStart`, and `daemon.health: "internal"` in `tool.manifest.json`
+- use `{ type: "global" }` for shared infrastructure, or `{ type: "chat", chatId }` for one isolated process per chat
+- implement `workLoop({ processJob, healthCheck, recover })`; `healthCheck` must exercise the real capability without human input, and `recover` is optional
+- never write `ready` directly: the shared runtime sets it only after the health operation succeeds through the normal command queue
+- keep daemon infrastructure for a chat-scoped process under `getChatToolStateDir(chatId, toolName)/daemon`; keep user data such as sessions, inboxes, and databases outside that subdirectory
+- persist only non-secret launch identity in `startupContext`; reload global or chat-scoped tool config after every process restart
+- use only the standard daemon states: `starting`, `ready`, `degraded`, `unhealthy`, `restarting`, `stopped`, `failed`
 
 ## Manual pipe behavior
 To run a pipe, the agent should:

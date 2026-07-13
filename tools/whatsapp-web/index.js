@@ -5,7 +5,7 @@ import path from "node:path";
 import process from "node:process";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { existsSync } from "node:fs";
-import { mkdir, readFile, readdir, rename, rm, rmdir, stat, unlink, writeFile } from "node:fs/promises";
+import { mkdir, readFile, rm, rmdir, stat, unlink, writeFile } from "node:fs/promises";
 import qrcodeTerminal from "qrcode-terminal";
 import QRCode from "qrcode";
 import pkg from "whatsapp-web.js";
@@ -18,19 +18,51 @@ const { loadToolConfig } = await importCore("core/tools/tool-config.js");
 const { toolError, toolOk } = await importCore("core/tools/tool-result.js");
 const { ArtifactStore } = await importCore("core/artifacts/artifact-store.js");
 const { createDaemonRuntime } = await importCore("core/tools/daemon-runtime.js");
-const { isProcessAlive, readJson, writeJson } = await importCore("core/tools/daemon-processes.js");
-const { chatsDir, getChatToolStateDir, tasksFile } = await importCore("runtime/paths.js");
+const {
+  daemonPaths,
+  isProcessAlive,
+  readDaemonLaunchContext,
+  readJson,
+  registerManagedDaemon,
+  stopManagedDaemon,
+  writeJson
+} = await importCore("core/tools/daemon-processes.js");
+const { getChatToolStateDir, getToolStateDir, tasksFile } = await importCore("runtime/paths.js");
 
 const require = createRequire(import.meta.url);
 const WebP = require("node-webpmux");
 
 const { Client, LocalAuth, MessageMedia } = pkg;
 const toolName = "whatsapp-web";
-const daemon = createDaemonRuntime({ toolName, entryPath: new URL(import.meta.url).pathname, beforeStart: cleanupAllBrowserLocks });
-const legacySessionDir = path.join(daemon.paths.root, "session");
-const legacyChatSessionsRoot = path.join(daemon.paths.root, "chats");
+const entryPath = fileURLToPath(import.meta.url);
+const legacyRoot = getToolStateDir(toolName);
+const legacySessionDir = path.join(legacyRoot, "session");
+const legacyChatSessionsRoot = path.join(legacyRoot, "chats");
 const artifactStore = new ArtifactStore();
 let config = defaults;
+
+async function cleanupLegacyGlobalDaemon() {
+  const paths = daemonPaths(toolName);
+  const { pid } = await readJson(paths.pidFile, {});
+  if (isProcessAlive(pid) && pid !== process.pid) {
+    await stopManagedDaemon(toolName);
+  }
+}
+
+function daemonForChat(chatId, { autoStart = true } = {}) {
+  const normalizedChatId = normalizeChatId(chatId);
+  return createDaemonRuntime({
+    toolName,
+    entryPath,
+    scope: { type: "chat", chatId: normalizedChatId },
+    startupContext: { chatId: normalizedChatId },
+    autoStart,
+    beforeStart: async () => {
+      await cleanupLegacyGlobalDaemon();
+      await cleanupBrowserLocks(chatPaths(normalizedChatId));
+    }
+  });
+}
 
 async function useChatConfig(chatId) {
   config = await loadToolConfig(toolName, defaults, normalizeChatId(chatId));
@@ -117,10 +149,8 @@ function requestChatId(request) {
 
 function chatPaths(chatId) {
   const root = getChatToolStateDir(normalizeChatId(chatId), toolName);
-  const commandsDir = path.join(root, "commands");
   return {
     root,
-    commandsDir,
     sessionDir: path.join(root, "session"),
     statusFile: path.join(root, "status.json"),
     qrImageFile: path.join(root, "whatsapp-login-qr.png"),
@@ -130,20 +160,8 @@ function chatPaths(chatId) {
   };
 }
 
-async function ensureToolState() {
-  await daemon.ensure();
-}
-
 async function ensureChatState(paths) {
-  await mkdir(paths.commandsDir, { recursive: true });
-}
-
-function jobPaths(paths, id) {
-  return {
-    request: path.join(paths.commandsDir, `${id}.request.json`),
-    processing: path.join(paths.commandsDir, `${id}.processing.json`),
-    result: path.join(paths.commandsDir, `${id}.result.json`)
-  };
+  await mkdir(paths.root, { recursive: true });
 }
 
 async function readChatStatus(chatId, fallback = {}) {
@@ -173,7 +191,7 @@ function statusText(chatId, status, pid) {
 
 async function effectiveChatStatus(chatId, fallback = {}) {
   const status = await readChatStatus(chatId, fallback);
-  const pid = await daemon.getPid();
+  const pid = await daemonForChat(chatId).getPid();
   const alive = isProcessAlive(pid);
   if (status.live && !alive) {
     const repaired = await writeChatStatus(chatId, {
@@ -201,64 +219,23 @@ async function waitForLoginSignal(chatId, timeoutMs) {
   return waitForChatState(chatId, ["ready", "needs_login", "expired", "failed"], timeoutMs);
 }
 
-async function submitChatJob(chatId, payload, { timeoutMs = 180000 } = {}) {
+async function submitChatJob(chatId, payload, {
+  timeoutMs = 180000,
+  readyTimeoutMs,
+  requireReady = true
+} = {}) {
   const normalizedChatId = normalizeChatId(chatId);
-  const paths = chatPaths(normalizedChatId);
-  await daemon.start();
-  await ensureChatState(paths);
-
-  const id = crypto.randomUUID();
-  const files = jobPaths(paths, id);
-  await writeJson(files.request, { id, chatId: normalizedChatId, ...payload });
-
-  const start = Date.now();
-  while (Date.now() - start < timeoutMs) {
-    const result = await readJson(files.result, null);
-    if (result) {
-      await unlink(files.result).catch(() => {});
-      if (!result.ok) throw new Error(result.error || `${toolName} job failed`);
-      return result.output || {};
-    }
-    await sleep(250);
-  }
-  throw new Error(`${toolName} job timed out after ${timeoutMs}ms`);
-}
-
-async function listSessionChatIds() {
-  const entries = await readdir(chatsDir, { withFileTypes: true }).catch(() => []);
-  const ids = [];
-  for (const entry of entries) {
-    if (!entry.isDirectory() || !/^-?\d+$/.test(entry.name)) continue;
-    const paths = chatPaths(entry.name);
-    if (existsSync(paths.root)) ids.push(entry.name);
-  }
-  return ids.sort();
-}
-
-async function claimNextChatJob() {
-  for (const chatId of await listSessionChatIds()) {
-    const paths = chatPaths(chatId);
-    const files = await readdir(paths.commandsDir).catch(() => []);
-    for (const file of files.filter((item) => item.endsWith(".request.json")).sort()) {
-      const id = file.replace(/\.request\.json$/, "");
-      const item = jobPaths(paths, id);
-      try {
-        await rename(item.request, item.processing);
-        return { id, chatId, paths, ...item, payload: await readJson(item.processing, null) };
-      } catch {}
-    }
-  }
-  return null;
-}
-
-async function completeJob(job, output) {
-  await writeJson(job.result, { ok: true, output });
-  await unlink(job.processing).catch(() => {});
-}
-
-async function failJob(job, error) {
-  await writeJson(job.result, { ok: false, error: error?.message || String(error) });
-  await unlink(job.processing).catch(() => {});
+  const runtime = daemonForChat(normalizedChatId, {
+    autoStart: await isWatchEnabled(normalizedChatId)
+  });
+  return runtime.submit({
+    chatId: normalizedChatId,
+    payload
+  }, {
+    timeoutMs,
+    readyTimeoutMs,
+    requireReady
+  });
 }
 
 async function withChatLock(paths, work, { timeoutMs = 30000, staleMs = 120000 } = {}) {
@@ -298,12 +275,6 @@ async function cleanupBrowserLocks(paths) {
   await killChatBrowserProcesses(paths);
   for (const name of ["SingletonLock", "SingletonSocket", "SingletonCookie"]) {
     await rm(path.join(paths.sessionDir, "session", name), { force: true }).catch(() => {});
-  }
-}
-
-async function cleanupAllBrowserLocks() {
-  for (const chatId of await listSessionChatIds()) {
-    await cleanupBrowserLocks(chatPaths(chatId));
   }
 }
 
@@ -467,19 +438,12 @@ async function isWatchEnabled(chatId) {
 
 async function enableWatch(chatId) {
   await writeJson(watchFileForChat(chatId), { enabled: true, chatId: Number(chatId), updatedAt: new Date().toISOString() });
+  await setDaemonAutoStart(chatId, true);
 }
 
-async function readWatchConfigs() {
-  const entries = await readdir(chatsDir, { withFileTypes: true }).catch(() => []);
-  const watches = [];
-  for (const entry of entries) {
-    if (!entry.isDirectory()) continue;
-    if (!/^-?\d+$/.test(entry.name)) continue;
-    const chatId = entry.name;
-    const watch = await readWatchConfig(chatId);
-    if (watch.enabled) watches.push({ ...watch, chatId: Number(watch.chatId || chatId) });
-  }
-  return watches;
+async function setDaemonAutoStart(chatId, autoStart) {
+  const runtime = daemonForChat(chatId, { autoStart });
+  await registerManagedDaemon({ ...runtime.registration, autoStart });
 }
 
 async function readTasks() {
@@ -1176,19 +1140,15 @@ class SessionManager {
     }
   }
 
-  async ensureWatchedClients() {
-    for (const watch of await readWatchConfigs()) {
-      await this.ensureClient(String(watch.chatId));
-    }
-  }
 }
 
 async function processJob(manager, job) {
   if (!job?.payload?.type) throw new Error("Invalid WhatsApp command");
-  const chatId = normalizeChatId(job.payload.chatId || job.chatId);
+  const chatId = normalizeChatId(job.chatId);
+  const paths = chatPaths(chatId);
   await useChatConfig(chatId);
   if (job.payload.type === "ensure") {
-    await withChatLock(job.paths, () => manager.ensureClient(chatId));
+    await withChatLock(paths, () => manager.ensureClient(chatId));
     return readChatStatus(chatId, {});
   }
   if (job.payload.type === "send") {
@@ -1207,67 +1167,88 @@ async function processJob(manager, job) {
     return manager.syncRecentMessages(chatId, { limit: number(job.payload.limit, 20) });
   }
   if (job.payload.type === "logout") {
-    return withChatLock(job.paths, () => manager.logout(chatId));
+    return withChatLock(paths, () => manager.logout(chatId));
   }
   throw new Error(`Unknown command type: ${job.payload.type}`);
 }
 
+async function whatsappHealth(manager, chatId) {
+  const watching = await isWatchEnabled(chatId);
+  let record = manager.get(chatId);
+  if (!record?.client && watching) {
+    record = await manager.ensureClient(chatId);
+  }
+  if (!record?.client) {
+    return { message: "WhatsApp scoped daemon is healthy and idle" };
+  }
+  const capability = await readChatStatus(chatId, {});
+  if (capability.state === "needs_login" && capability.qr) {
+    return { message: "WhatsApp browser is healthy and waiting for login", capabilityState: "needs_login" };
+  }
+  const clientState = await record.client.getState();
+  if (clientState !== "CONNECTED") {
+    throw new Error(`WhatsApp client is not connected: ${clientState || capability.state || "unknown"}`);
+  }
+  return { message: "WhatsApp client and browser are connected", clientState };
+}
+
 async function runDaemon() {
-  await ensureToolState();
-  await daemon.writeStatus({ state: "ready", pid: process.pid, message: "WhatsApp multiplex daemon is ready." });
+  const launch = await readDaemonLaunchContext({ expectedToolName: toolName });
+  if (launch?.scope?.type !== "chat") {
+    throw new Error("whatsapp-web daemon requires a chat scope");
+  }
+  const chatId = normalizeChatId(launch.startupContext?.chatId || launch.scope.chatId);
+  await useChatConfig(chatId);
+  const daemon = daemonForChat(chatId, { autoStart: launch.autoStart });
   const manager = new SessionManager();
-  let processing = false;
 
   const restartWatchedAfterUnhandled = (error) => {
     const reason = `unhandled WhatsApp runtime error: ${shortError(error)}`;
-    daemon.writeStatus({ state: "error", pid: process.pid, message: reason }).catch(() => {});
-    readWatchConfigs().then((watches) => {
-      for (const watch of watches) manager.scheduleRestart(String(watch.chatId), reason);
+    daemon.writeStatus({
+      state: "degraded",
+      lastError: { at: new Date().toISOString(), phase: "runtime", message: reason },
+      message: reason
+    }).catch(() => {});
+    isWatchEnabled(chatId).then((enabled) => {
+      if (enabled) manager.scheduleRestart(chatId, reason);
     }).catch(() => {});
   };
   process.on("unhandledRejection", restartWatchedAfterUnhandled);
   process.on("uncaughtException", restartWatchedAfterUnhandled);
 
-  manager.ensureWatchedClients().catch((error) => {
-    daemon.writeStatus({ state: "error", pid: process.pid, message: error?.message || String(error) }).catch(() => {});
-  });
+  if (await isWatchEnabled(chatId)) {
+    manager.ensureClient(chatId).catch((error) => {
+      daemon.writeStatus({
+        state: "degraded",
+        lastError: { at: new Date().toISOString(), phase: "client-start", message: error?.message || String(error) },
+        message: error?.message || String(error)
+      }).catch(() => {});
+    });
+  }
 
   setInterval(async () => {
-    if (processing) return;
-    processing = true;
-    try {
-      const job = await claimNextChatJob();
-      if (job) {
-        try {
-          await completeJob(job, await processJob(manager, job));
-        } catch (error) {
-          await failJob(job, error);
-        }
-      }
-    } catch (error) {
-      await daemon.writeStatus({ state: "error", pid: process.pid, message: error?.message || String(error) });
-    } finally {
-      processing = false;
-    }
-  }, 250);
-
-  setInterval(() => {
-    manager.ensureWatchedClients().catch((error) => {
-      daemon.writeStatus({ state: "error", pid: process.pid, message: error?.message || String(error) }).catch(() => {});
-    });
-  }, 10000);
-
-  setInterval(() => {
-    manager.shutdownIdleClients().catch((error) => {
-      daemon.writeStatus({ state: "error", pid: process.pid, message: error?.message || String(error) }).catch(() => {});
-    });
-  }, 30000);
-
-  setInterval(() => {
-    readWatchConfigs().then((watches) => Promise.all(watches.map((watch) => manager.syncRecentMessages(String(watch.chatId), { limit: number(config.SYNC_RECENT_LIMIT, 20) })))).catch((error) => {
-      daemon.writeStatus({ state: "error", pid: process.pid, message: error?.message || String(error) }).catch(() => {});
+    if (!(await isWatchEnabled(chatId))) return;
+    manager.syncRecentMessages(chatId, { limit: number(config.SYNC_RECENT_LIMIT, 20) }).catch((error) => {
+      daemon.writeStatus({
+        state: "degraded",
+        lastError: { at: new Date().toISOString(), phase: "sync", message: error?.message || String(error) },
+        message: error?.message || String(error)
+      }).catch(() => {});
     });
   }, number(config.SYNC_INTERVAL_MS, 45000));
+
+  const watching = await isWatchEnabled(chatId);
+  await daemon.workLoop({
+    idleTimeoutMs: watching ? 0 : number(config.IDLE_SHUTDOWN_MS, 300000),
+    beforeExit: () => manager.shutdownIdleClients(),
+    processJob: (job) => processJob(manager, job),
+    healthCheck: () => whatsappHealth(manager, chatId),
+    recover: async () => {
+      if (!(await isWatchEnabled(chatId))) return true;
+      await manager.restart(chatId, "daemon health check failed");
+      return true;
+    }
+  });
 }
 
 function getMessage(request) {
@@ -1383,8 +1364,12 @@ async function run(requestFile) {
 
     if (mode === "login") {
       await enableWatch(chatId);
-      const pid = await daemon.start();
-      await submitChatJob(chatId, { type: "ensure" }, { timeoutMs: number(request.args?.timeoutMs, 45000) });
+      const runtime = daemonForChat(chatId, { autoStart: true });
+      const pid = await runtime.start();
+      await submitChatJob(chatId, { type: "ensure" }, {
+        timeoutMs: number(request.args?.timeoutMs, 45000),
+        requireReady: false
+      });
       const status = await waitForLoginSignal(chatId, number(request.args?.timeoutMs, 45000));
       if (status.state === "needs_login" && status.qr) {
         console.log(JSON.stringify(await qrOutput(chatId, status, pid)));
@@ -1397,8 +1382,10 @@ async function run(requestFile) {
     if (mode === "status") {
       const { status, pid, alive, stale } = await effectiveChatStatus(chatId, { state: "needs_login", live: false, message: "No WhatsApp session has been started for this chat." });
       if (stale && await isWatchEnabled(chatId)) {
-        await daemon.start();
-        submitChatJob(chatId, { type: "ensure" }, { timeoutMs: number(config.READY_TIMEOUT_MS, 120000) }).catch(() => {});
+        submitChatJob(chatId, { type: "ensure" }, {
+          timeoutMs: number(config.READY_TIMEOUT_MS, 120000),
+          requireReady: false
+        }).catch(() => {});
       }
       console.log(JSON.stringify(toolOk({ text: statusText(chatId, status, pid), json: { pid, alive, staleRecovered: stale, ...status } })));
       return;
@@ -1406,7 +1393,7 @@ async function run(requestFile) {
 
     if (mode === "qr") {
       const status = await readChatStatus(chatId, {});
-      const pid = await daemon.getPid();
+      const pid = await daemonForChat(chatId).getPid();
       console.log(JSON.stringify(await qrOutput(chatId, status, pid)));
       return;
     }
@@ -1514,19 +1501,28 @@ async function run(requestFile) {
 
     if (mode === "watch") {
       await enableWatch(chatId);
-      await submitChatJob(chatId, { type: "ensure" }, { timeoutMs: number(config.READY_TIMEOUT_MS, 120000) });
+      await submitChatJob(chatId, { type: "ensure" }, {
+        timeoutMs: number(config.READY_TIMEOUT_MS, 120000),
+        requireReady: false
+      });
       console.log(JSON.stringify(toolOk({ text: "WhatsApp event-driven processing enabled for this chat. Arisa will only run when a new WhatsApp message arrives.", json: { enabled: true, chatId: Number(chatId) } })));
       return;
     }
 
     if (mode === "unwatch") {
       await writeJson(watchFileForChat(chatId), { enabled: false, chatId: Number(chatId), updatedAt: new Date().toISOString() });
+      await setDaemonAutoStart(chatId, false);
       console.log(JSON.stringify(toolOk({ text: "WhatsApp event-driven processing disabled for this chat.", json: { enabled: false, chatId: Number(chatId) } })));
       return;
     }
 
     if (mode === "logout") {
-      const result = await submitChatJob(chatId, { type: "logout" }, { timeoutMs: number(config.JOB_TIMEOUT_MS, 120000) });
+      await writeJson(watchFileForChat(chatId), { enabled: false, chatId: Number(chatId), updatedAt: new Date().toISOString() });
+      const result = await submitChatJob(chatId, { type: "logout" }, {
+        timeoutMs: number(config.JOB_TIMEOUT_MS, 120000),
+        requireReady: false
+      });
+      await setDaemonAutoStart(chatId, false);
       console.log(JSON.stringify(toolOk({ text: "WhatsApp session removed for this chat.", json: result })));
       return;
     }

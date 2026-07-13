@@ -6,6 +6,7 @@ import { spawn } from "node:child_process";
 import { Bot } from "grammy";
 import { createPiOAuthLogin } from "../core/agent/pi-auth-login.js";
 import { createPiRuntime, hasProviderAuth, listPiProviders, listProviderModels, supportsProviderOAuth } from "../core/agent/pi-runtime.js";
+import { applyConfigDefaults } from "../core/config/config-defaults.js";
 import { buildDeviceCodeTelegramMessage } from "../transport/telegram/device-code-message.js";
 import { configFile, ensureArisaHome } from "./paths.js";
 
@@ -28,7 +29,7 @@ async function exists(file) {
 }
 
 function buildConfig({ telegramApiKey, telegramMaxChatIds, authorizedChatIds = [], chatMeta = {}, provider, model, piApiKey }) {
-  return {
+  return applyConfigDefaults({
     telegram: {
       token: telegramApiKey,
       maxChatIds: telegramMaxChatIds,
@@ -41,7 +42,7 @@ function buildConfig({ telegramApiKey, telegramMaxChatIds, authorizedChatIds = [
       apiKey: piApiKey
     },
     createdAt: new Date().toISOString()
-  };
+  });
 }
 
 function sortBootstrapProviders(providers) {

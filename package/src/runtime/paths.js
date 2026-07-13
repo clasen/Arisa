@@ -43,6 +43,35 @@ export function getChatToolStateDir(chatId, toolName) {
   return path.join(getChatDir(chatId), "state", "tools", toolName);
 }
 
+export function normalizeDaemonScope(scope = { type: "global" }) {
+  if (!scope || scope === "global" || scope.type === "global") {
+    return { type: "global" };
+  }
+  if (scope === "chat") {
+    throw new Error("chat daemon scope requires chatId");
+  }
+  if (scope.type !== "chat") {
+    throw new Error(`Unsupported daemon scope: ${scope.type || scope}`);
+  }
+  const chatId = String(scope.chatId ?? "").trim();
+  if (!/^-?\d+$/.test(chatId)) {
+    throw new Error(`Invalid chat daemon scope: ${chatId || "missing chatId"}`);
+  }
+  return { type: "chat", chatId };
+}
+
+export function getDaemonInstanceId(scope = { type: "global" }) {
+  const normalized = normalizeDaemonScope(scope);
+  return normalized.type === "global" ? "global" : `chat:${normalized.chatId}`;
+}
+
+export function getDaemonInstanceDir(toolName, scope = { type: "global" }) {
+  const normalized = normalizeDaemonScope(scope);
+  return normalized.type === "global"
+    ? getToolStateDir(toolName)
+    : path.join(getChatToolStateDir(normalized.chatId, toolName), "daemon");
+}
+
 export function getChatPiSessionsDir(chatId) {
   return path.join(getChatDir(chatId), "state", "pi-sessions");
 }

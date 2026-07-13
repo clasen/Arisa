@@ -2,6 +2,11 @@
   "name": "whispermix-transcribe",
   "description": "Transcribe audio files locally with WhisperMix using a persistent daemon that keeps the model warm.",
   "entry": "index.js",
+  "daemon": {
+    "scope": "global",
+    "autoStart": false,
+    "health": "internal"
+  },
   "input": [
     "audio/ogg",
     "audio/mpeg",

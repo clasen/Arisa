@@ -15,8 +15,12 @@ const { toolError, toolOk } = await importCore("core/tools/tool-result.js");
 const { getToolConfigPath } = await importCore("runtime/paths.js");
 
 const toolName = "whispermix-transcribe";
-const config = await loadToolConfig(toolName, defaults);
-const daemon = createDaemonRuntime({ toolName, entryPath: new URL(import.meta.url).pathname });
+let config = await loadToolConfig(toolName, defaults);
+const daemon = createDaemonRuntime({
+  toolName,
+  entryPath: fileURLToPath(import.meta.url),
+  autoStart: false
+});
 
 function printHelp() {
   console.log(`whispermix-transcribe\n\nUsage:\n  node index.js --help\n  node index.js run --request-file <json>\n\nExpected input:\n  {\n    "artifact": { "path": "/abs/audio.ogg", "mimeType": "audio/ogg" },\n    "args": { "model": "efederici/parakeet-tdt-0.6b-v3-int4", "language": "auto" }\n  }\n\nConfig at ${getToolConfigPath(toolName)}:\n  MODEL\n  FALLBACK_MODEL\n  LANGUAGE\n  IDLE_TIMEOUT_MS\n  READY_TIMEOUT_MS\n  JOB_TIMEOUT_MS\n`);
@@ -34,12 +38,13 @@ function normalizeText(result) {
 }
 
 function runProcess(command, args) {
-  return new Promise((resolve) => {
+  return new Promise((resolve, reject) => {
     const child = spawn(command, args, { stdio: ["ignore", "pipe", "pipe"] });
     let stdout = "";
     let stderr = "";
     child.stdout.on("data", (chunk) => { stdout += chunk.toString(); });
     child.stderr.on("data", (chunk) => { stderr += chunk.toString(); });
+    child.once("error", reject);
     child.on("close", (code) => resolve({ code, stdout, stderr }));
   });
 }
@@ -84,6 +89,28 @@ async function transcribe(cache, job) {
   }
 }
 
+async function healthCheck(cache) {
+  const wavPath = path.join(os.tmpdir(), `whispermix-health-${crypto.randomUUID()}.wav`);
+  try {
+    const generated = await runProcess("ffmpeg", [
+      "-y",
+      "-f", "lavfi",
+      "-i", "sine=frequency=1000:sample_rate=16000",
+      "-t", "1",
+      "-f", "wav",
+      wavPath
+    ]);
+    if (generated.code !== 0) {
+      throw new Error(`ffmpeg health audio generation failed: ${generated.stderr || generated.stdout}`.trim());
+    }
+    const model = await getModel(cache, config.MODEL, config.LANGUAGE);
+    await model.fromFile(wavPath);
+    return { message: "WhisperMix model inference and ffmpeg are healthy" };
+  } finally {
+    await unlink(wavPath).catch(() => {});
+  }
+}
+
 async function run(requestFile) {
   const request = JSON.parse(await readFile(requestFile, "utf8"));
   const artifact = request.artifact;
@@ -106,11 +133,17 @@ async function run(requestFile) {
 }
 
 async function runDaemon() {
-  await daemon.writeStatus({ state: "ready", message: "WhisperMix daemon ready" });
+  config = await loadToolConfig(toolName, defaults);
   const cache = new Map();
   await daemon.workLoop({
     idleTimeoutMs: asNumber(config.IDLE_TIMEOUT_MS, 600000),
-    processJob: async (job) => transcribe(cache, job)
+    processJob: async (job) => transcribe(cache, job),
+    healthCheck: () => healthCheck(cache),
+    recover: async () => {
+      cache.clear();
+      config = await loadToolConfig(toolName, defaults);
+      return true;
+    }
   });
 }
 

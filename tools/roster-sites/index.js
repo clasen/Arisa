@@ -1,7 +1,6 @@
-import { spawn } from "node:child_process";
 import dns from "node:dns/promises";
-import { closeSync, openSync } from "node:fs";
-import { mkdir, readFile, readdir, rm, writeFile } from "node:fs/promises";
+import net from "node:net";
+import { mkdir, readFile, readdir, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { createRequire } from "node:module";
 import { fileURLToPath, pathToFileURL } from "node:url";
@@ -19,6 +18,9 @@ const {
   getToolStateDir
 } = pathsModule;
 const { loadToolConfig } = await import(pathToFileURL(path.join(arisaPackageDir, "src/core/tools/tool-config.js")).href);
+const { createDaemonRuntime } = await import(pathToFileURL(path.join(arisaPackageDir, "src/core/tools/daemon-runtime.js")).href);
+const { isProcessAlive, readJson } = await import(pathToFileURL(path.join(arisaPackageDir, "src/core/tools/daemon-processes.js")).href);
+const daemon = createDaemonRuntime({ toolName, entryPath, autoStart: true });
 
 function printHelp() {
   console.log(`roster-sites
@@ -49,94 +51,16 @@ async function loadConfig(chatId = null) {
 function resultOk(output) { return { ok: true, output: { text: JSON.stringify(output, null, 2), mimeType: "application/json" } }; }
 function resultError(error) { return { ok: false, error: error?.message || String(error) }; }
 
-function runtimePaths() {
-  const root = getToolStateDir(toolName);
-  return {
-    root,
-    commandsDir: path.join(root, "commands"),
-    pidFile: path.join(root, "daemon.pid"),
-    statusFile: path.join(root, "status.json"),
-    logFile: path.join(root, "daemon.log")
-  };
-}
-
-async function readJson(file, fallback = {}) {
-  try { return JSON.parse(await readFile(file, "utf8")); } catch { return fallback; }
-}
-
-async function writeJson(file, value) {
-  await mkdir(path.dirname(file), { recursive: true });
-  await writeFile(file, `${JSON.stringify(value, null, 2)}\n`, "utf8");
-}
-
-function isProcessAlive(pid) {
-  if (!pid) return false;
-  try { process.kill(pid, 0); return true; } catch { return false; }
-}
-
-async function waitForExit(pid, timeoutMs = 3000) {
-  const start = Date.now();
-  while (Date.now() - start < timeoutMs) {
-    if (!isProcessAlive(pid)) return true;
-    await new Promise((resolve) => setTimeout(resolve, 100));
-  }
-  return !isProcessAlive(pid);
-}
-
 async function stopDaemon() {
-  const paths = runtimePaths();
-  const { pid } = await readJson(paths.pidFile, {});
-  if (isProcessAlive(pid)) {
-    try { process.kill(pid, "SIGTERM"); } catch {}
-    if (!(await waitForExit(pid))) {
-      try { process.kill(pid, "SIGKILL"); } catch {}
-    }
-  }
-  await rm(paths.pidFile, { force: true });
-  await writeJson(paths.statusFile, { state: "stopped", message: "RosterServer stopped", pid: null });
+  const pid = await daemon.getPid();
+  await daemon.stop();
   return { ok: true, action: "stop", pid };
 }
 
-async function waitReady(timeoutMs = 120000) {
-  const paths = runtimePaths();
-  const started = Date.now();
-  while (Date.now() - started < timeoutMs) {
-    const status = await readJson(paths.statusFile, {});
-    const { pid } = await readJson(paths.pidFile, {});
-    if (status.state === "ready" && isProcessAlive(pid)) return status;
-    if (status.state === "error") throw new Error(status.message || "roster-sites daemon failed");
-    await new Promise((resolve) => setTimeout(resolve, 500));
-  }
-  throw new Error(`roster-sites daemon was not ready after ${timeoutMs}ms`);
-}
-
 async function startDaemon() {
-  const paths = runtimePaths();
-  await mkdir(paths.commandsDir, { recursive: true });
-  const current = await readJson(paths.pidFile, {});
-  if (isProcessAlive(current.pid)) {
-    return { ok: true, action: "start", pid: current.pid, status: await readJson(paths.statusFile, {}), paths };
-  }
-  await rm(paths.commandsDir, { recursive: true, force: true });
-  await mkdir(paths.commandsDir, { recursive: true });
-  const out = openSync(paths.logFile, "a");
-  try {
-    const child = spawn(process.execPath, [entryPath, "daemon"], {
-      cwd: toolDir,
-      detached: true,
-      stdio: ["ignore", out, out],
-      env: process.env
-    });
-    child.unref();
-    const startedAt = new Date().toISOString();
-    await writeJson(paths.pidFile, { pid: child.pid, startedAt, entryPath });
-    await writeJson(path.join(paths.root, "daemon.meta.json"), { toolName, entryPath, autoStart: true, lastStartedAt: startedAt });
-    await writeJson(paths.statusFile, { state: "starting", message: "Starting RosterServer", pid: child.pid });
-    const status = await waitReady();
-    return { ok: true, action: "start", pid: child.pid, status, paths };
-  } finally {
-    closeSync(out);
-  }
+  const pid = await daemon.start();
+  const status = await daemon.ensureReady();
+  return { ok: true, action: "start", pid, status, paths: daemon.paths };
 }
 
 function slugify(value = "") {
@@ -239,28 +163,68 @@ async function startRosterServer(config) {
   return server;
 }
 
+async function probePort(port) {
+  await new Promise((resolve, reject) => {
+    const socket = net.createConnection({ host: "127.0.0.1", port });
+    socket.once("connect", () => {
+      socket.destroy();
+      resolve();
+    });
+    socket.once("error", reject);
+  });
+}
+
+async function probeRosterServer() {
+  const errors = [];
+  for (const port of [443, 80]) {
+    try {
+      await probePort(port);
+      return { message: `RosterServer is accepting connections on port ${port}` };
+    } catch (error) {
+      errors.push(error?.message || String(error));
+    }
+  }
+  throw new Error(`RosterServer listeners are unavailable: ${errors.join("; ")}`);
+}
+
 async function runDaemon() {
-  const keepAlive = setInterval(() => {}, 60000);
   try {
-    const config = await loadConfig();
-    const paths = runtimePaths();
-    await mkdir(paths.root, { recursive: true });
-    await writeJson(paths.statusFile, { state: "starting", message: "Starting RosterServer", wwwPath: config.wwwPath, greenlockStorePath: config.greenlockStorePath, pid: process.pid });
-    await startRosterServer(config);
-    await writeJson(paths.statusFile, { state: "ready", message: "RosterServer is listening", wwwPath: config.wwwPath, greenlockStorePath: config.greenlockStorePath, pid: process.pid });
+    let config = await loadConfig();
+    let server = await startRosterServer(config);
+    await daemon.writeStatus({
+      wwwPath: config.wwwPath,
+      greenlockStorePath: config.greenlockStorePath
+    });
+    await daemon.workLoop({
+      processJob: async () => ({ running: true }),
+      healthCheck: probeRosterServer,
+      recover: async () => {
+        if (typeof server?.stop !== "function") return false;
+        await Promise.resolve(server.stop());
+        config = await loadConfig();
+        server = await startRosterServer(config);
+        await daemon.writeStatus({
+          wwwPath: config.wwwPath,
+          greenlockStorePath: config.greenlockStorePath
+        });
+        return true;
+      }
+    });
   } catch (error) {
-    clearInterval(keepAlive);
-    await writeJson(runtimePaths().statusFile, { state: "error", message: error?.message || String(error), pid: process.pid });
+    await daemon.writeStatus({
+      state: "failed",
+      lastError: { at: new Date().toISOString(), phase: "start", message: error?.message || String(error) },
+      message: error?.message || String(error)
+    });
     console.error(error?.stack || error);
     process.exitCode = 1;
   }
 }
 
 async function statusAction() {
-  const paths = runtimePaths();
-  const status = await readJson(paths.statusFile, {});
-  const { pid } = await readJson(paths.pidFile, {});
-  return { ...status, pid, alive: isProcessAlive(pid), paths };
+  const status = await readJson(daemon.paths.statusFile, {});
+  const pid = await daemon.getPid();
+  return { ...status, pid, alive: isProcessAlive(pid), paths: daemon.paths };
 }
 
 async function dnsAction(domain) {

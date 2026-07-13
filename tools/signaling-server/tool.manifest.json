@@ -3,7 +3,10 @@
   "description": "Daemon tool: standalone minimal WebRTC signaling service for public in-memory rooms.",
   "entry": "index.js",
   "daemon": {
-    "command": "node index.js serve",
+    "command": "node index.js daemon",
+    "scope": "global",
+    "autoStart": true,
+    "health": "internal",
     "healthPath": "/signaling/health",
     "publicPath": "/signaling",
     "websocketPath": "/signaling/ws"

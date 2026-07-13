@@ -2,6 +2,11 @@
   "name": "whatsapp-web",
   "description": "Use isolated per-chat WhatsApp Web sessions to log in, send messages, and receive/process WhatsApp replies via whatsapp-web.js. Recommendation: use a dedicated auxiliary number because WhatsApp Web automation can risk Meta restrictions or bans.",
   "entry": "index.js",
+  "daemon": {
+    "scope": "chat",
+    "autoStart": false,
+    "health": "internal"
+  },
   "input": [
     "text/plain",
     "image/*",

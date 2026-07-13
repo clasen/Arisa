@@ -3,7 +3,10 @@
   "description": "Daemon tool: coturn TURN server for WebRTC fallback relay.",
   "entry": "index.js",
   "daemon": {
-    "command": "node index.js start",
+    "command": "node index.js daemon",
+    "scope": "global",
+    "autoStart": true,
+    "health": "internal",
     "publicPorts": "3478/udp,3478/tcp",
     "iceEndpoint": "/signaling/ice-servers"
   },

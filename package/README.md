@@ -96,7 +96,10 @@ Per chat (`~/.arisa/chats/<chatId>/`):
 - the artifact index is stored in `state/artifacts.json`
 - the Pi session lives under `state/pi-sessions/`
 - chat-scoped tool config overrides live in `config/tools/<tool>/config.js`
+- chat-scoped daemon infrastructure lives in `state/tools/<tool>/daemon/`; persistent tool data stays beside it
 - ephemeral scratch lives under `tmp/`
+
+Managed daemons become ready only after their tool-defined health operation succeeds through the normal command queue. Arisa records heartbeats, successful jobs, errors, and standard lifecycle states, then retries recovery or recreates an unhealthy process with its persisted scope and startup context.
 
 Pi authentication can use either:
 - an API key entered during bootstrap

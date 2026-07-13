@@ -8,9 +8,13 @@ import defaults from "./config.js";
 
 const toolDir = path.dirname(fileURLToPath(import.meta.url));
 const toolName = "signaling-server";
+const entryPath = fileURLToPath(import.meta.url);
 const arisaPackageDir = process.env.ARISA_PACKAGE_DIR || path.resolve(toolDir, "../../package");
 const importCore = (relativePath) => import(pathToFileURL(path.join(arisaPackageDir, "src", relativePath)).href);
 const { loadToolConfig } = await importCore("core/tools/tool-config.js");
+const { createDaemonRuntime } = await importCore("core/tools/daemon-runtime.js");
+const { isProcessAlive, readJson } = await importCore("core/tools/daemon-processes.js");
+const daemon = createDaemonRuntime({ toolName, entryPath, autoStart: true });
 const rooms = new Map();
 
 function printHelp() {
@@ -308,20 +312,85 @@ function createServer(options = {}) {
   }, config.peerHeartbeatMs);
   heartbeat.unref();
 
-  return { server, wss, config };
+  return {
+    server,
+    wss,
+    config,
+    async close() {
+      clearInterval(heartbeat);
+      for (const room of rooms.values()) {
+        for (const client of room.peers.values()) client.ws.terminate();
+      }
+      rooms.clear();
+      await new Promise((resolve) => server.close(() => resolve()));
+      wss.close();
+    }
+  };
+}
+
+async function listen(server, port) {
+  await new Promise((resolve, reject) => {
+    server.once("error", reject);
+    server.listen(port, resolve);
+  });
+}
+
+async function signalingHealth(config) {
+  const response = await fetch(`http://127.0.0.1:${config.port}${config.basePath}/health`);
+  if (!response.ok) throw new Error(`Signaling health returned HTTP ${response.status}`);
+  const body = await response.json();
+  if (body.ok !== true) throw new Error("Signaling health response was not ok");
+  return { message: "Signaling HTTP and event loop are healthy", rooms: body.rooms };
+}
+
+async function runDaemon() {
+  let configOptions = await loadToolConfig(toolName, defaults);
+  let active = createServer(configOptions);
+
+  async function startServer() {
+    await listen(active.server, active.config.port);
+  }
+
+  await startServer();
+  await daemon.workLoop({
+    processJob: async () => ({ port: active.config.port, basePath: active.config.basePath }),
+    healthCheck: () => signalingHealth(active.config),
+    recover: async () => {
+      await active.close();
+      configOptions = await loadToolConfig(toolName, defaults);
+      active = createServer(configOptions);
+      await startServer();
+      return true;
+    }
+  });
 }
 
 async function run(requestFile) {
   const request = JSON.parse(await readFile(requestFile, "utf8"));
   const args = request.args || {};
+  const action = args.action || "status";
+  if (action === "start") {
+    const pid = await daemon.start();
+    const status = await daemon.ensureReady();
+    return console.log(JSON.stringify({ ok: true, output: { text: JSON.stringify({ pid, ...status }, null, 2), mimeType: "application/json" } }));
+  }
+  if (action === "stop") {
+    await daemon.stop();
+    return console.log(JSON.stringify({ ok: true, output: { text: "Signaling daemon stopped.", mimeType: "text/plain" } }));
+  }
+  const status = await readJson(daemon.paths.statusFile, { state: "stopped" });
+  const pid = await daemon.getPid();
   console.log(JSON.stringify({
     ok: true,
     output: {
       text: JSON.stringify({
         name: "signaling-server",
-        action: args.action || "info",
+        action,
+        pid: pid || null,
+        alive: isProcessAlive(pid),
+        status,
         endpoints: ["GET /signaling", "GET /signaling/health", "GET /signaling/client.js", "WS /signaling/ws?room=ROOM&peer=PEER"],
-        note: "Start with: node tools/signaling-server/index.js serve"
+        note: "Use action=start to start the managed daemon."
       }, null, 2),
       mimeType: "application/json"
     }
@@ -331,6 +400,11 @@ async function run(requestFile) {
 const argv = process.argv.slice(2);
 if (!argv.length || argv.includes("--help") || argv[0] === "help") {
   printHelp();
+} else if (argv[0] === "daemon") {
+  runDaemon().catch((error) => {
+    console.error(error?.stack || error);
+    process.exitCode = 1;
+  });
 } else if (argv[0] === "serve") {
   const flags = parseArgs(argv.slice(1));
   const configOptions = await loadToolConfig(toolName, defaults);

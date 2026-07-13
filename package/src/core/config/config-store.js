@@ -1,15 +1,16 @@
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
-import { configFile } from "../../runtime/bootstrap.js";
+import { configFile } from "../../runtime/paths.js";
+import { applyConfigDefaults } from "./config-defaults.js";
 
 export async function loadConfig() {
   const raw = await readFile(configFile, "utf8");
-  return JSON.parse(raw);
+  return applyConfigDefaults(JSON.parse(raw));
 }
 
 export async function saveConfig(config) {
   await mkdir(path.dirname(configFile), { recursive: true });
-  await writeFile(configFile, `${JSON.stringify(config, null, 2)}\n`, "utf8");
+  await writeFile(configFile, `${JSON.stringify(applyConfigDefaults(config), null, 2)}\n`, "utf8");
 }
 
 export async function updateConfig(mutator) {

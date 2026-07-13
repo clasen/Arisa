@@ -2,6 +2,11 @@
   "name": "roster-sites",
   "description": "Manage and publish small HTTPS sites through RosterServer.",
   "entry": "index.js",
+  "daemon": {
+    "scope": "global",
+    "autoStart": true,
+    "health": "internal"
+  },
   "input": [
     "text/html",
     "text/plain",

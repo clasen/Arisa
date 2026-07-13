@@ -78,12 +78,12 @@ test("creates generated file artifacts", async () => {
     source: { type: "assistant" }
   });
 
-  assert.equal(await readFile(artifact.path, "utf8"), "# Hello\n");
+  assert.equal(await readFile(artifact.path, "utf8"), "\ufeff# Hello\n");
   assert.equal(artifact.kind, "document");
   assert.equal(artifact.mimeType, "text/markdown");
 });
 
-test("writes generated text file artifacts as UTF-8", async () => {
+test("writes generated text file artifacts as BOM UTF-8", async () => {
   await resetHome();
   const content = "# Español\nÑandú\n";
   const artifact = await new ArtifactStore().forChat("chat-1").createGeneratedFile({
@@ -92,6 +92,43 @@ test("writes generated text file artifacts as UTF-8", async () => {
     kind: "document",
     mimeType: "text/plain",
     source: { type: "assistant" }
+  });
+
+  assert.deepEqual(await readFile(artifact.path), Buffer.from(`\ufeff${content}`, "utf8"));
+});
+
+test("normalizes copied generated text files to BOM UTF-8", async () => {
+  await resetHome();
+  const originalDir = await mkdtemp(path.join(os.tmpdir(), "arisa-source-file-"));
+  const originalPath = path.join(originalDir, "report.json");
+  const content = "{\"message\":\"Español\"}\n";
+  await writeFile(originalPath, content, "utf8");
+
+  const artifact = await new ArtifactStore().forChat("chat-1").createFromFile({
+    originalPath,
+    fileName: "report.json",
+    kind: "document",
+    mimeType: "application/json",
+    source: { type: "tool", toolName: "reporter" }
+  });
+
+  assert.deepEqual(await readFile(artifact.path), Buffer.from(`\ufeff${content}`, "utf8"));
+  assert.equal(await readFile(originalPath, "utf8"), content);
+});
+
+test("does not duplicate an existing UTF-8 BOM", async () => {
+  await resetHome();
+  const originalDir = await mkdtemp(path.join(os.tmpdir(), "arisa-source-file-"));
+  const originalPath = path.join(originalDir, "report.txt");
+  const content = "\ufeffAlready marked\n";
+  await writeFile(originalPath, content, "utf8");
+
+  const artifact = await new ArtifactStore().forChat("chat-1").createFromFile({
+    originalPath,
+    fileName: "report.txt",
+    kind: "document",
+    mimeType: "text/plain",
+    source: { type: "tool", toolName: "reporter" }
   });
 
   assert.deepEqual(await readFile(artifact.path), Buffer.from(content, "utf8"));
