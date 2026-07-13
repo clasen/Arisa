@@ -1,0 +1,6 @@
+export default {
+  DAILY_SEND_LIMIT: 10,
+  FOLLOW_UP_AFTER_DAYS: 7,
+  SENDER_NAME: "",
+  SENDER_EMAIL: ""
+};

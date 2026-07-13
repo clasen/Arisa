@@ -1,0 +1,18 @@
+{
+  "name": "pr-campaign",
+  "description": "Manage small, personalized PR outreach campaigns with contact history, drafts, daily caps, and follow-up eligibility.",
+  "entry": "index.js",
+  "input": ["text/plain", "application/json"],
+  "output": ["application/json", "text/plain"],
+  "configSchema": {
+    "DAILY_SEND_LIMIT": { "type": "number", "required": false, "prompt": "Maximum campaign emails to send per day." },
+    "FOLLOW_UP_AFTER_DAYS": { "type": "number", "required": false, "prompt": "Days to wait before a follow-up is eligible." },
+    "SENDER_NAME": { "type": "string", "required": false, "prompt": "Name to sign campaign emails." },
+    "SENDER_EMAIL": { "type": "string", "required": false, "prompt": "Authorized sender email address." }
+  },
+  "category": "communication",
+  "keywords": ["campaign", "contacts", "email", "follow-up", "outreach", "pr", "press"],
+  "skillHints": [
+    { "name": "stop-slop", "when": "drafting personalized outreach emails" }
+  ]
+}
