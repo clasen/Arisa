@@ -26,6 +26,9 @@ Actions via args.action:
   send            Send one approved draft through gmail-workspace. args: email, subject, body
   followups       List contacts eligible for a follow-up.
   opt-out         Mark a contact as do-not-contact. args: email
+  record-bounce   Record a permanent delivery failure. args: email, reason?, sourceMessageId?
+  record-sent     Reconcile a message observed in Gmail Sent without sending. args: email, subject?, type?
+  sync-bounces    Scan Gmail delivery failures for tracked contacts and block follow-ups.
   status          Show daily send count and campaign totals.
 
 All contacts and send history are scoped to the current chat. Sending rejects duplicate first touches, opted-out contacts, and sends above the daily cap.
@@ -92,7 +95,7 @@ function draftFirst(contact, game, senderName, includeArisaNote = true) {
   const audienceAngle = contact.angle ? ` It may suit people who come to you for ${contact.angle}.` : "";
   return {
     subject: campaignText(subject),
-    body: campaignText(`${greeting}\n\nI saw your ${contact.referenceGame} coverage. ${contact.personalNote}${audienceAngle}\n\nBlyts is launching Castle Bravo, an Android narrative game that plays out through a messenger. A singer contacts the player after finding “HELP” painted across a Los Angeles lot. Messages, voice notes, photos, and files gradually bring other people into the story.\n\nThe player writes freely to the characters, so the conversations do not follow a fixed reply tree.\n\nGoogle Play: ${game}\n\n${includeArisaNote ? `${arisaNote(contact)}\n\n` : ""}${senderName || "Blyts"}`)
+    body: campaignText(`${greeting}\n\nI saw your ${contact.referenceGame} coverage. ${contact.personalNote}${audienceAngle}\n\nBlyts is launching Castle Bravo, an interactive conspiracy thriller for Android that lives entirely inside a messenger. It combines declassified nuclear-test records, documented electromagnetic phenomena, and verifiable historical events with interactive fiction.\n\nA singer contacts the player after finding “HELP” painted across a Los Angeles lot. That HELP is real, a small unfiction starting point for the case. Messages, voice notes, photos, and files gradually bring other people into the story.\n\nThe player writes freely to the characters, so the conversations do not follow a fixed reply tree.\n\nGoogle Play: ${game}\n\n${includeArisaNote ? `${arisaNote(contact)}\n\n` : ""}${senderName || "Blyts"}`)
   };
 }
 
@@ -114,11 +117,16 @@ async function assertNoExistingGmailDraft(arisa, email) {
   }
 }
 
+function messageHeader(message, name) {
+  return message?.payload?.headers?.find((header) => header.name.toLowerCase() === name.toLowerCase())?.value || "";
+}
+
 function campaignStatus(state, config) {
   const contacts = Object.values(state.contacts);
   return {
     contacts: contacts.length,
     optedOut: contacts.filter((contact) => contact.status === "opted-out").length,
+    bounced: contacts.filter((contact) => contact.status === "bounced").length,
     firstTouches: state.sends.filter((entry) => entry.type === "first").length,
     followUps: state.sends.filter((entry) => entry.type === "follow-up").length,
     sentToday: sentToday(state),
@@ -133,6 +141,32 @@ async function handleRun(request) {
   const state = await loadState(request.chatId);
 
   if (action === "status") return campaignStatus(state, config);
+
+  if (action === "sync-bounces") {
+    const arisa = createArisaClient({ toolName, chatId: request.chatId });
+    const listed = await arisa.tools.run({
+      name: "gmail-workspace",
+      args: { action: "list", q: "(from:mailer-daemon OR from:postmaster OR subject:(\"Delivery Status Notification\" OR \"Undelivered Mail\" OR \"Delivery failed\"))", maxResults: Number(args.limit || 100), includeSpamTrash: "true" }
+    }, { timeoutMs: 120_000 });
+    if (!listed.ok) throw new Error(listed.error || "Could not search Gmail delivery failures");
+    const recorded = [];
+    for (const item of listed.output?.json?.messages || []) {
+      const fetched = await arisa.tools.run({ name: "gmail-workspace", args: { action: "get", id: item.id, format: "metadata" } }, { timeoutMs: 120_000 });
+      if (!fetched.ok) continue;
+      const email = normalizedEmail(messageHeader(fetched.output?.json, "X-Failed-Recipients"));
+      if (!email || !state.contacts[email]) continue;
+      const contact = state.contacts[email];
+      const failures = Array.isArray(contact.deliveryFailures) ? contact.deliveryFailures : [];
+      if (failures.some((failure) => failure.sourceMessageId === item.id)) continue;
+      contact.status = "bounced";
+      failures.push({ reason: "Permanent delivery failure", sourceMessageId: item.id, recordedAt: now() });
+      contact.deliveryFailures = failures;
+      contact.updatedAt = now();
+      recorded.push(email);
+    }
+    if (recorded.length) await saveState(request.chatId, state);
+    return { action, recorded, scanned: listed.output?.json?.messages?.length || 0 };
+  }
 
   if (action === "add-contact") {
     const email = normalizedEmail(required(args.email, "email"));
@@ -169,11 +203,53 @@ async function handleRun(request) {
     return { action, contact };
   }
 
+  if (action === "record-sent") {
+    const email = normalizedEmail(required(args.email, "email"));
+    const contact = contactFor(state, email);
+    if (!contact) throw new Error("Contact not found");
+    const type = args.type === "follow-up" ? "follow-up" : "first";
+    if (!state.sends.some((entry) => entry.email === email && entry.type === type)) {
+      state.sends.push({ email, type, subject: String(args.subject || "").trim(), sentAt: now(), reconciled: true });
+    }
+    contact.drafts = Array.isArray(contact.drafts) ? contact.drafts.map((draft) => draft.type === type && draft.status === "open" ? { ...draft, status: "sent" } : draft) : [];
+    contact.status = "contacted";
+    contact.updatedAt = now();
+    await saveState(request.chatId, state);
+    return { action, email, type, sentAt: state.sends.find((entry) => entry.email === email && entry.type === type)?.sentAt };
+  }
+
+  if (action === "record-bounce") {
+    const email = normalizedEmail(required(args.email, "email"));
+    const contact = state.contacts[email] || {
+      email,
+      name: String(args.name || email).trim(),
+      outlet: String(args.outlet || "").trim(),
+      angle: "",
+      referenceGame: "",
+      personalNote: "",
+      sourceUrl: "",
+      createdAt: now()
+    };
+    const failure = {
+      reason: String(args.reason || "Permanent delivery failure").trim(),
+      sourceMessageId: String(args.sourceMessageId || "").trim() || null,
+      recordedAt: now()
+    };
+    contact.status = "bounced";
+    contact.deliveryFailures = Array.isArray(contact.deliveryFailures) ? contact.deliveryFailures : [];
+    if (!failure.sourceMessageId || !contact.deliveryFailures.some((item) => item.sourceMessageId === failure.sourceMessageId)) contact.deliveryFailures.push(failure);
+    contact.updatedAt = now();
+    state.contacts[email] = contact;
+    await saveState(request.chatId, state);
+    return { action, contact, failure };
+  }
+
   if (action === "draft") {
     const contact = contactFor(state, required(args.email, "email"));
     if (!contact) throw new Error("Contact not found");
     const type = args.type === "follow-up" ? "follow-up" : "first";
     if (contact.status === "opted-out") throw new Error("Contact opted out");
+    if (contact.status === "bounced") throw new Error("Contact has a permanent delivery failure; verify a new address before drafting");
     if (hasDraftOfType(contact, type)) throw new Error(`An open ${type} draft already exists for this contact`);
     const game = required(args.game, "game");
     return { action, type, email: contact.email, ...((type === "follow-up") ? draftFollowUp(contact, game, config.SENDER_NAME) : draftFirst(contact, game, config.SENDER_NAME, args.includeArisaNote !== false)) };
@@ -183,7 +259,7 @@ async function handleRun(request) {
     const waitDays = Number(config.FOLLOW_UP_AFTER_DAYS || 7);
     const cutoff = Date.now() - waitDays * 86_400_000;
     const eligible = Object.values(state.contacts).filter((contact) => {
-      if (contact.status === "opted-out") return false;
+      if (contact.status === "opted-out" || contact.status === "bounced") return false;
       const first = state.sends.find((entry) => entry.email === contact.email && entry.type === "first");
       return first && Date.parse(first.sentAt) <= cutoff && !state.sends.some((entry) => entry.email === contact.email && entry.type === "follow-up");
     });
@@ -195,6 +271,7 @@ async function handleRun(request) {
     const contact = contactFor(state, email);
     if (!contact) throw new Error("Contact not found");
     if (contact.status === "opted-out") throw new Error("Contact opted out");
+    if (contact.status === "bounced") throw new Error("Contact has a permanent delivery failure; verify a new address before drafting");
     const type = args.type === "follow-up" ? "follow-up" : "first";
     if (hasDraftOfType(contact, type)) throw new Error(`An open ${type} draft already exists for this contact`);
     if (type === "first") requirePersonalization(contact);
@@ -218,6 +295,7 @@ async function handleRun(request) {
     const contact = contactFor(state, email);
     if (!contact) throw new Error("Contact not found");
     if (contact.status === "opted-out") throw new Error("Contact opted out");
+    if (contact.status === "bounced") throw new Error("Contact has a permanent delivery failure; verify a new address before sending");
     const type = args.type === "follow-up" ? "follow-up" : "first";
     if (type === "first" && hasFirstTouch(state, email)) throw new Error("A first-touch email was already sent to this contact");
     if (sentToday(state) >= Number(config.DAILY_SEND_LIMIT || 10)) throw new Error("Daily send limit reached");

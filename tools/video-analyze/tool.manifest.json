@@ -1,0 +1,16 @@
+{
+  "name": "video-analyze",
+  "description": "Create a lightweight evenly sampled video contact sheet and JSON timing manifest with ffmpeg. Use audio-extractor and a transcription tool separately when a transcript is needed.",
+  "entry": "index.js",
+  "input": ["video/*"],
+  "output": ["application/zip"],
+  "configSchema": {
+    "FFMPEG_COMMAND": {"type":"string","required":false,"prompt":"Optional ffmpeg command."},
+    "FFPROBE_COMMAND": {"type":"string","required":false,"prompt":"Optional ffprobe command."},
+    "DEFAULT_FRAMES": {"type":"number","required":false,"prompt":"Default number of sampled frames."},
+    "GRID_COLUMNS": {"type":"number","required":false,"prompt":"Columns in the frame grid."},
+    "THUMBNAIL_WIDTH": {"type":"number","required":false,"prompt":"Width of each thumbnail in pixels."}
+  },
+  "category": "media",
+  "keywords": ["video","frames","contact-sheet","grid","ffmpeg","lightweight","analysis"]
+}

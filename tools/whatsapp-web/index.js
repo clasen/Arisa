@@ -136,6 +136,20 @@ function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
+async function withOperationTimeout(work, timeoutMs, label) {
+  let timer;
+  try {
+    return await Promise.race([
+      Promise.resolve().then(work),
+      new Promise((_, reject) => {
+        timer = setTimeout(() => reject(new Error(`${label} timed out after ${timeoutMs}ms`)), timeoutMs);
+      })
+    ]);
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 function normalizeChatId(value) {
   const text = String(value ?? "").trim();
   if (!text) throw new Error("chatId is required for whatsapp-web");
@@ -590,13 +604,24 @@ function makeClient(chatId) {
   const paths = chatPaths(chatId);
   const puppeteer = {
     headless: bool(config.HEADLESS, true) ? "new" : false,
-    args: ["--no-sandbox", "--disable-setuid-sandbox", "--disable-dev-shm-usage"]
+    args: [
+      "--no-sandbox",
+      "--disable-setuid-sandbox",
+      "--disable-dev-shm-usage",
+      "--disable-gpu",
+      "--renderer-process-limit=4",
+      "--disable-site-isolation-trials"
+    ]
   };
   if (config.CHROME_EXECUTABLE_PATH && existsSync(config.CHROME_EXECUTABLE_PATH)) puppeteer.executablePath = config.CHROME_EXECUTABLE_PATH;
   return new Client({
     authStrategy: new LocalAuth({ dataPath: paths.sessionDir }),
     puppeteer,
-    webVersionCache: { type: "local", path: paths.webCacheDir }
+    // Keep the browser and WhatsApp Web on a compatible modern Chrome identity.
+    // The library default advertises Chrome 101, which current WhatsApp Web drops during startup.
+    userAgent: "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/146.0.0.0 Safari/537.36",
+    webVersion: "2.3000.1043234067",
+    webVersionCache: { type: "local", path: paths.webCacheDir, strict: true }
   });
 }
 
@@ -1031,7 +1056,7 @@ class SessionManager {
   }
 
   async send(chatId, job) {
-    const record = await this.ensureClient(chatId);
+    let record = await this.ensureClient(chatId);
     await this.waitReady(chatId, number(job.readyTimeoutMs, number(config.READY_TIMEOUT_MS, 120000)));
     record.lastActivity = Date.now();
     const whatsappChatId = normalizeRecipient(job.to);
@@ -1046,18 +1071,25 @@ class SessionManager {
     try {
       presence = await humanizeSend(record.client, whatsappChatId, job);
       const sendOptions = messageSendOptions(job);
-      const sent = job.mediaPath
-        ? await record.client.sendMessage(whatsappChatId, MessageMedia.fromFilePath(job.mediaPath), { ...sendOptions, caption: job.message || "", sendMediaAsSticker: bool(job.asSticker, false) })
-        : await record.client.sendMessage(whatsappChatId, job.message, sendOptions);
+      const sent = await withOperationTimeout(async () => (job.mediaPath
+        ? record.client.sendMessage(whatsappChatId, MessageMedia.fromFilePath(job.mediaPath), { ...sendOptions, caption: job.message || "", sendMediaAsSticker: bool(job.asSticker, false) })
+        : record.client.sendMessage(whatsappChatId, job.message, sendOptions)), number(job.sendTimeoutMs, 45000), "WhatsApp send");
       await finishHumanizeSend(record.client, presence);
       record.lastActivity = Date.now();
       return { chatId: whatsappChatId, sessionChatId: normalizeChatId(chatId), messageId: serializedMessageId(sent) };
     } catch (error) {
       await finishHumanizeSend(record.client, presence);
-      const maybeSent = await findRecentSentMatching(record.client, job, { withinMs: number(job.recoverWindowMs, 2 * 60 * 1000) }).catch(() => null);
+      const maybeSent = await withOperationTimeout(
+        () => findRecentSentMatching(record.client, job, { withinMs: number(job.recoverWindowMs, 2 * 60 * 1000) }),
+        10000,
+        "WhatsApp sent-message recovery"
+      ).catch(() => null);
       if (maybeSent) {
         record.lastActivity = Date.now();
         return { chatId: whatsappChatId, sessionChatId: normalizeChatId(chatId), messageId: serializedMessageId(maybeSent), recoveredAfterError: true, warning: shortError(error) };
+      }
+      if (restartableWhatsAppError(error) || /timed out/i.test(shortError(error))) {
+        await this.restart(chatId, `send failure: ${shortError(error)}`);
       }
       throw error;
     }
@@ -1093,7 +1125,7 @@ class SessionManager {
     }
     if (record?.client) {
       record.closingReason = "restart";
-      try { await record.client.destroy(); } catch {}
+      await withOperationTimeout(() => record.client.destroy(), 10000, "WhatsApp client shutdown").catch(() => {});
     }
     this.sessions.delete(normalizedChatId);
     if (!(await isWatchEnabled(normalizedChatId))) {
@@ -1178,21 +1210,32 @@ async function processJob(manager, job) {
 async function whatsappHealth(manager, chatId) {
   const watching = await isWatchEnabled(chatId);
   let record = manager.get(chatId);
-  if (!record?.client && watching) {
-    record = await manager.ensureClient(chatId);
-  }
-  if (!record?.client) {
-    return { message: "WhatsApp scoped daemon is healthy and idle" };
-  }
+  if (!record?.client && watching) record = await manager.ensureClient(chatId);
+  if (!record?.client) return { message: "WhatsApp scoped daemon is healthy and idle" };
+
   const capability = await readChatStatus(chatId, {});
   if (capability.state === "needs_login" && capability.qr) {
     return { message: "WhatsApp browser is healthy and waiting for login", capabilityState: "needs_login" };
   }
-  const clientState = await record.client.getState();
-  if (clientState !== "CONNECTED") {
-    throw new Error(`WhatsApp client is not connected: ${clientState || capability.state || "unknown"}`);
+  // Initialization has not reached the QR/login state yet. Do not destroy a
+  // healthy browser mid-navigation just because WhatsApp is not CONNECTED.
+  if (["connecting", "reconnecting"].includes(capability.state)) {
+    return { message: "WhatsApp browser is initializing", capabilityState: capability.state };
   }
-  return { message: "WhatsApp client and browser are connected", clientState };
+
+  try {
+    const clientState = await withOperationTimeout(() => record.client.getState(), 15000, "WhatsApp connection check");
+    if (clientState !== "CONNECTED") throw new Error(`WhatsApp client is not connected: ${clientState || capability.state || "unknown"}`);
+    return { message: "WhatsApp client and browser are connected", clientState };
+  } catch (error) {
+    if (!watching) throw error;
+    await manager.restart(chatId, `health check failed: ${shortError(error)}`);
+    record = manager.get(chatId);
+    await manager.waitReady(chatId, 60000);
+    const clientState = await withOperationTimeout(() => record.client.getState(), 15000, "WhatsApp connection recheck");
+    if (clientState !== "CONNECTED") throw new Error(`WhatsApp client did not recover: ${clientState || "unknown"}`);
+    return { message: "WhatsApp client recovered and is connected", clientState, recovered: true };
+  }
 }
 
 async function runDaemon() {
