@@ -116,6 +116,38 @@ test("isolates daemon process files and context by chat scope", async () => {
   await Promise.all([first.stop(), second.stop()]);
 });
 
+test("supervisor ignores invalid chat directories and recovers valid daemons", async () => {
+  const invalidChatDir = path.join(homeDir, "chats", "24137857-c513-4f53-b39d-1b28f51ebbb6");
+  await mkdir(path.join(invalidChatDir, "state", "tools", "orphaned-tool"), { recursive: true });
+
+  const runtime = runtimeFor({ type: "chat", chatId: "202" }, {
+    autoStart: true,
+    startupContext: { health: "ok" }
+  });
+  let supervisor;
+
+  try {
+    await runtime.submit({ value: "before" }, { timeoutMs: 1_000 });
+    const oldPid = await runtime.getPid();
+    process.kill(oldPid, "SIGKILL");
+    await waitFor(() => !isProcessAlive(oldPid));
+
+    supervisor = createToolProcessSupervisor({ policy });
+    await supervisor.start();
+
+    const newPid = await waitFor(async () => {
+      const pid = await runtime.getPid();
+      const status = await readJson(runtime.paths.statusFile, {});
+      return pid && pid !== oldPid && status.state === "ready" ? pid : null;
+    });
+    assert.notEqual(newPid, oldPid);
+  } finally {
+    await supervisor?.stop();
+    await runtime.stop().catch(() => {});
+    await rm(invalidChatDir, { recursive: true, force: true });
+  }
+});
+
 test("rejects stale readiness even when the pid is alive", async () => {
   const status = {
     state: "ready",

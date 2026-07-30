@@ -337,11 +337,16 @@ async function listChatDaemonRecords() {
   const records = [];
   for (const chatEntry of chatEntries) {
     if (!chatEntry.isDirectory()) continue;
+    let scope;
+    try {
+      scope = normalizeDaemonScope({ type: "chat", chatId: chatEntry.name });
+    } catch {
+      continue;
+    }
     const toolsRoot = path.join(chatsDir, chatEntry.name, "state", "tools");
     const toolEntries = await readdir(toolsRoot, { withFileTypes: true }).catch(() => []);
     for (const toolEntry of toolEntries) {
       if (!toolEntry.isDirectory()) continue;
-      const scope = { type: "chat", chatId: chatEntry.name };
       const meta = await readJson(daemonPaths({ toolName: toolEntry.name, scope }).metaFile, null);
       if (meta?.toolName && meta?.entryPath) records.push(meta);
     }

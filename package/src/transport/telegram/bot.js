@@ -3,9 +3,12 @@ import path from "node:path";
 import { authorizeChat } from "./auth.js";
 import { captureIncomingArtifact, formatLocationText } from "./media.js";
 import { buildDeviceCodeTelegramMessage } from "./device-code-message.js";
+import { buildModelPicker, parseModelPickerAction } from "./model-picker.js";
 import { renderTelegramHtml } from "./text-format.js";
 import { buildPiAuthRecoveryBlockedMessage, buildPiAuthTelegramMessage, getErrorMessage, getPiAuthIssue, getPiAuthStatus } from "../../core/agent/auth-flow.js";
 import { createPiOAuthLogin } from "../../core/agent/pi-auth-login.js";
+import { resolveChatModel, selectChatModel } from "../../core/agent/model-selection.js";
+import { createPiRuntime, listProviderModels } from "../../core/agent/pi-runtime.js";
 import { normalizeArtifactForReasoning, shouldNormalizeArtifactToText } from "../../core/artifacts/normalize-for-reasoning.js";
 
 const slowPromptNoticeMs = 300_000;
@@ -410,6 +413,49 @@ export async function createTelegramBot({ config, artifactStore, toolRegistry, t
     return perChatState.get(chatId);
   }
 
+  function getProviderModels() {
+    const runtime = createPiRuntime({
+      provider: config.pi.provider,
+      apiKey: config.pi.apiKey
+    });
+    return listProviderModels(config.pi.provider, runtime);
+  }
+
+  async function showModelPicker(ctx, page = 0) {
+    const picker = buildModelPicker({
+      provider: config.pi.provider,
+      models: getProviderModels(),
+      selectedModelId: resolveChatModel(config, ctx.chat.id),
+      page,
+      pageSize: config.telegram.modelPickerPageSize
+    });
+    const extra = { reply_markup: picker.replyMarkup };
+    const messageId = ctx.callbackQuery?.message?.message_id;
+    if (messageId) {
+      return ctx.api.editMessageText(ctx.chat.id, messageId, picker.text, extra);
+    }
+    return ctx.reply(picker.text, extra);
+  }
+
+  async function persistChatModel(chatId, model) {
+    const key = chatKey(chatId);
+    const hadSelections = Boolean(config.pi.chatModels);
+    const previousSelection = config.pi.chatModels?.[key];
+    selectChatModel(config, chatId, model);
+    try {
+      await saveConfig(config);
+    } catch (error) {
+      if (previousSelection) {
+        config.pi.chatModels[key] = previousSelection;
+      } else {
+        delete config.pi.chatModels[key];
+        if (!hadSelections) delete config.pi.chatModels;
+      }
+      throw error;
+    }
+    agentManager.resetSession(chatId);
+  }
+
   async function buildIncomingPrompt(ctx) {
     const chatId = ctx.chat.id;
     logger?.log("telegram", `message ${ctx.msg.message_id} in chat ${chatId}`);
@@ -684,6 +730,12 @@ export async function createTelegramBot({ config, artifactStore, toolRegistry, t
     await handleNewCommand(ctx);
   });
 
+  bot.command("model", async (ctx) => {
+    const auth = await authorizeChat({ config, chatId: ctx.chat.id, saveConfig, chatMeta: getIncomingChatMeta(ctx) });
+    if (!auth.ok) return;
+    await showModelPicker(ctx);
+  });
+
   bot.command("auth", async (ctx) => {
     const auth = await authorizeChat({ config, chatId: ctx.chat.id, saveConfig, chatMeta: getIncomingChatMeta(ctx) });
     if (!auth.ok) return;
@@ -714,6 +766,67 @@ export async function createTelegramBot({ config, artifactStore, toolRegistry, t
       const issue = rememberPiAuthIssue(error) || { kind: "validation-failed", message: getErrorMessage(error) };
       piAuthIssue = issue;
       await ctx.reply(buildPiAuthTelegramMessage({ config, issue }));
+    }
+  });
+
+  bot.on("callback_query:data", async (ctx, next) => {
+    const action = parseModelPickerAction(ctx.callbackQuery.data);
+    if (!action) return next();
+    if (action.type === "noop") {
+      await ctx.answerCallbackQuery();
+      return;
+    }
+
+    const auth = await authorizeChat({ config, chatId: ctx.chat.id, saveConfig });
+    if (!auth.ok) {
+      await ctx.answerCallbackQuery({ text: "This chat is not authorized.", show_alert: true });
+      return;
+    }
+
+    try {
+      if (action.type === "page") {
+        await showModelPicker(ctx, action.value);
+        await ctx.answerCallbackQuery();
+        return;
+      }
+
+      if (getChatState(ctx.chat.id).processing) {
+        await ctx.answerCallbackQuery({
+          text: "Wait for the current response before changing models.",
+          show_alert: true
+        });
+        return;
+      }
+
+      const models = getProviderModels();
+      const model = models[action.value];
+      if (!model) {
+        await ctx.answerCallbackQuery({
+          text: "This model list is no longer current. Run /model again.",
+          show_alert: true
+        });
+        return;
+      }
+
+      const currentModelId = resolveChatModel(config, ctx.chat.id);
+      if (model.id === currentModelId) {
+        await ctx.answerCallbackQuery({ text: `Already using ${model.id}.` });
+        return;
+      }
+
+      await persistChatModel(ctx.chat.id, model);
+      await ctx.api.editMessageText(
+        ctx.chat.id,
+        ctx.callbackQuery.message.message_id,
+        `Model changed to ${model.provider}/${model.id}.\nA new chat context will start with your next message.`
+      );
+      await ctx.answerCallbackQuery({ text: `Using ${model.id}.` });
+    } catch (error) {
+      logger?.error("telegram", `model selection failed for chat ${ctx.chat.id}: ${getErrorMessage(error)}`);
+      await ctx.answerCallbackQuery({
+        text: "Could not change the model.",
+        show_alert: true
+      }).catch(() => {});
     }
   });
 
@@ -753,6 +866,7 @@ export async function createTelegramBot({ config, artifactStore, toolRegistry, t
       config.telegram.chatMeta ||= {};
       await bot.api.setMyCommands([
         { command: "new", description: "Start a new chat context" },
+        { command: "model", description: "Choose the model for this chat" },
         { command: "auth", description: "Show Pi authentication status" }
       ]);
       if (!taskTimer) {

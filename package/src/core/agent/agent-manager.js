@@ -3,6 +3,7 @@ import { readFile, stat, unlink } from "node:fs/promises";
 import { createAgentSession, DefaultResourceLoader, SessionManager, defineTool } from "@earendil-works/pi-coding-agent";
 import { Type } from "@sinclair/typebox";
 import { createPiRuntime, hasProviderAuth } from "./pi-runtime.js";
+import { resolveChatModelSelection } from "./model-selection.js";
 import { appendArisaAgentsFile, arisaAgentsFile, arisaInstallDir, buildAgentRuntimeContext } from "./runtime-context.js";
 import { withTimeout } from "./prompt-timeout.js";
 import { buildPiToolPolicy, getCoreCodingTools } from "./core-tools.js";
@@ -126,9 +127,9 @@ export class AgentManager {
     this.sessions.delete(String(chatId));
   }
 
-  createSessionManager(chatId, workspaceDir = arisaInstallDir) {
+  createSessionManager(chatId, workspaceDir = arisaInstallDir, sessionRevision = 0) {
     const sessionKey = String(chatId);
-    const sessionDir = getChatPiSessionsDir(sessionKey);
+    const sessionDir = getChatPiSessionsDir(sessionKey, sessionRevision);
     if (this.pendingNewSessions.has(sessionKey)) {
       this.logger?.log("agent", `starting new persisted session for chat ${sessionKey}`);
       return { sessionManager: SessionManager.create(workspaceDir, sessionDir), isNewSession: true };
@@ -165,14 +166,16 @@ export class AgentManager {
 
   async getSessionContext(chatId, telegram) {
     const sessionKey = String(chatId);
-    const effectiveModelId = this.config.pi.model;
+    const modelSelection = resolveChatModelSelection(this.config, sessionKey);
+    const effectiveModelId = modelSelection.model;
+    const effectiveModelKey = `${modelSelection.provider}/${effectiveModelId}@${modelSelection.sessionRevision}`;
     if (this.sessions.has(sessionKey)) {
       const existing = this.sessions.get(sessionKey);
-      if (existing?.modelId === effectiveModelId) {
+      if (existing?.modelKey === effectiveModelKey) {
         this.logger?.log("agent", `reusing session for chat ${sessionKey}`);
         return existing;
       }
-      this.logger?.log("agent", `model changed for chat ${sessionKey}: ${existing?.modelId || "unknown"} -> ${effectiveModelId}; recreating session`);
+      this.logger?.log("agent", `model changed for chat ${sessionKey}: ${existing?.modelKey || "unknown"} -> ${effectiveModelKey}; recreating session`);
       this.sessions.delete(sessionKey);
       this.pendingNewSessions.add(sessionKey);
     }
@@ -192,7 +195,11 @@ export class AgentManager {
       customToolNames: [...arisaToolNames, "system_shell"]
     });
     await assertDirectory(policy.workspaceDir, "pi.workspaceDir");
-    const { sessionManager, isNewSession } = this.createSessionManager(sessionKey, policy.workspaceDir);
+    const { sessionManager, isNewSession } = this.createSessionManager(
+      sessionKey,
+      policy.workspaceDir,
+      modelSelection.sessionRevision
+    );
     const hasExistingSession = sessionManager.buildSessionContext().messages.length > 0;
     this.logger?.log("agent", `${hasExistingSession ? "resuming" : "creating"} session for chat ${sessionKey} with model ${effectiveModelId}`);
     const customTools = [
@@ -224,7 +231,7 @@ export class AgentManager {
       })}`);
     }
 
-    const ctx = { session, modelId: effectiveModelId };
+    const ctx = { session, modelId: effectiveModelId, modelKey: effectiveModelKey };
     this.sessions.set(sessionKey, ctx);
     if (isNewSession) {
       this.pendingNewSessions.delete(sessionKey);

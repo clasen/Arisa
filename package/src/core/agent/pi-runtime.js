@@ -53,6 +53,14 @@ export function listProviderModels(provider, runtime = createPiRuntime()) {
     .sort((a, b) => compareText(a.name || a.id, b.name || b.id));
 }
 
+export function formatPiModelOption(model) {
+  const capabilities = [
+    model.reasoning ? "reasoning" : null,
+    model.input?.includes("image") ? "image" : null
+  ].filter(Boolean).join(", ");
+  return capabilities ? `${model.id} [${capabilities}]` : model.id;
+}
+
 export function findPiModel({ provider, model, apiKey } = {}) {
   const runtime = createPiRuntime({ provider, apiKey });
   return {

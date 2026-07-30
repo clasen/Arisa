@@ -5,9 +5,10 @@ import { stdin as input, stdout as output } from "node:process";
 import { spawn } from "node:child_process";
 import { Bot } from "grammy";
 import { createPiOAuthLogin } from "../core/agent/pi-auth-login.js";
-import { createPiRuntime, hasProviderAuth, listPiProviders, listProviderModels, supportsProviderOAuth } from "../core/agent/pi-runtime.js";
-import { applyConfigDefaults } from "../core/config/config-defaults.js";
+import { createPiRuntime, formatPiModelOption, hasProviderAuth, listPiProviders, listProviderModels, supportsProviderOAuth } from "../core/agent/pi-runtime.js";
+import { applyConfigDefaults, telegramConfigDefaults } from "../core/config/config-defaults.js";
 import { buildDeviceCodeTelegramMessage } from "../transport/telegram/device-code-message.js";
+import { buildPagedInlineKeyboard } from "../transport/telegram/paged-inline-keyboard.js";
 import { configFile, ensureArisaHome } from "./paths.js";
 
 const ARISA_BANNER = [
@@ -100,30 +101,6 @@ function parseYesNo(value, fallback = true) {
   return null;
 }
 
-function buildPagedInlineKeyboard(action, items, { page = 0, pageSize = 8 } = {}) {
-  const pageCount = Math.max(1, Math.ceil(items.length / pageSize));
-  const currentPage = Math.max(0, Math.min(pageCount - 1, page));
-  const startIndex = currentPage * pageSize;
-  const rows = items.slice(startIndex, startIndex + pageSize).map((item, index) => ([{
-    text: item.text,
-    callback_data: `${action}:${startIndex + index}`
-  }]));
-
-  if (pageCount > 1) {
-    const navigation = [];
-    if (currentPage > 0) {
-      navigation.push({ text: "Previous", callback_data: `${action}-page:${currentPage - 1}` });
-    }
-    navigation.push({ text: `${currentPage + 1}/${pageCount}`, callback_data: "noop:page" });
-    if (currentPage < pageCount - 1) {
-      navigation.push({ text: "Next", callback_data: `${action}-page:${currentPage + 1}` });
-    }
-    rows.push(navigation);
-  }
-
-  return { inline_keyboard: rows };
-}
-
 function getIncomingChatMeta(ctx) {
   return {
     languageCode: ctx.from?.language_code || "",
@@ -136,11 +113,6 @@ function getIncomingChatMeta(ctx) {
 function formatProviderOption(item) {
   const authLabel = item.authConfigured ? "auth configured" : item.supportsOAuth ? "login or API key" : "API key";
   return `${item.provider} (${item.modelCount} models, ${authLabel})`;
-}
-
-function formatModelOption(model) {
-  const capabilities = [model.reasoning ? "reasoning" : null, model.input?.includes("image") ? "image" : null].filter(Boolean).join(", ");
-  return capabilities ? `${model.id} [${capabilities}]` : model.id;
 }
 
 function selectPiLoginOption(options = []) {
@@ -215,7 +187,7 @@ async function collectCliBootstrapChoices({ telegramApiKey, rl, ask }) {
   const models = sortBootstrapModels(selectedProvider.provider, listProviderModels(selectedProvider.provider, runtime));
   console.log(`\nAvailable models for ${selectedProvider.provider}:`);
   models.forEach((model, index) => {
-    console.log(`${index + 1}. ${formatModelOption(model)}`);
+    console.log(`${index + 1}. ${formatPiModelOption(model)}`);
   });
 
   const selectedModel = selectByIndex(models, await ask("Select Pi model by number", "1"));
@@ -326,14 +298,20 @@ async function runTelegramBootstrap({ telegramApiKey, setupToken, botInfo }) {
   const askProvider = async (ctx = null, page = 0) => {
     state = "provider";
     await showSetupPrompt(ctx, "Select the Pi provider Arisa should use:", {
-      reply_markup: buildPagedInlineKeyboard("provider", providers.map((provider) => ({ text: formatProviderOption(provider) })), { page })
+      reply_markup: buildPagedInlineKeyboard("provider", providers.map((provider) => ({ text: formatProviderOption(provider) })), {
+        page,
+        pageSize: telegramConfigDefaults.modelPickerPageSize
+      })
     });
   };
 
   const askModel = async (ctx = null, page = 0) => {
     state = "model";
     const models = sortBootstrapModels(selectedProvider.provider, listProviderModels(selectedProvider.provider, createPiRuntime()));
-    const keyboard = buildPagedInlineKeyboard("model", models.map((model) => ({ text: formatModelOption(model) })), { page });
+    const keyboard = buildPagedInlineKeyboard("model", models.map((model) => ({ text: formatPiModelOption(model) })), {
+      page,
+      pageSize: telegramConfigDefaults.modelPickerPageSize
+    });
     keyboard.inline_keyboard.push([{ text: "Back to providers", callback_data: "back:provider" }]);
     await showSetupPrompt(ctx, `Select the model for ${selectedProvider.provider}:`, {
       reply_markup: keyboard

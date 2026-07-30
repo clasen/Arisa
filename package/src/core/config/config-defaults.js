@@ -14,9 +14,17 @@ export const daemonConfigDefaults = Object.freeze({
   queuePollIntervalMs: 250
 });
 
+export const telegramConfigDefaults = Object.freeze({
+  modelPickerPageSize: 8
+});
+
 export function applyConfigDefaults(config) {
   return {
     ...config,
+    telegram: {
+      ...telegramConfigDefaults,
+      ...(config.telegram || {})
+    },
     daemons: {
       ...daemonConfigDefaults,
       ...(config.daemons || {})

@@ -72,8 +72,14 @@ export function getDaemonInstanceDir(toolName, scope = { type: "global" }) {
     : path.join(getChatToolStateDir(normalized.chatId, toolName), "daemon");
 }
 
-export function getChatPiSessionsDir(chatId) {
-  return path.join(getChatDir(chatId), "state", "pi-sessions");
+export function getChatPiSessionsDir(chatId, sessionRevision = 0) {
+  if (!Number.isSafeInteger(sessionRevision) || sessionRevision < 0) {
+    throw new Error(`Invalid Pi session revision: ${sessionRevision}`);
+  }
+  const sessionsDir = path.join(getChatDir(chatId), "state", "pi-sessions");
+  return sessionRevision === 0
+    ? sessionsDir
+    : path.join(sessionsDir, String(sessionRevision));
 }
 
 export function getToolDir(toolName) {
