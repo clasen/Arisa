@@ -22,7 +22,7 @@ importers:
   .:
     dependencies:
       '@earendil-works/pi-coding-agent':
-        specifier: ^0.80.6
+        specifier: 0.80.6
         version: 0.80.6(ws@8.21.0)(zod@4.4.3)
       '@sinclair/typebox':
         specifier: ^0.34.41
