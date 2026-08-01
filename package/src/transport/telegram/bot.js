@@ -851,17 +851,8 @@ export async function createTelegramBot({ config, artifactStore, toolRegistry, t
         return;
       }
 
-      if (getChatState(ctx.chat.id).processing) {
-        await ctx.answerCallbackQuery({
-          text: action.type === "effort" || action.type === "model-effort"
-            ? "Wait for the current response before changing effort."
-            : "Wait for the current response before changing models.",
-          show_alert: true
-        });
-        return;
-      }
-
       const models = getProviderModels();
+      const chatBusy = getChatState(ctx.chat.id).processing;
 
       if (action.type === "select") {
         const model = models[action.value];
@@ -873,6 +864,7 @@ export async function createTelegramBot({ config, artifactStore, toolRegistry, t
           return;
         }
 
+        // Reasoning models open the effort picker only — no session reset yet.
         if (modelSupportsThinking(model)) {
           await showEffortPicker(ctx, {
             model,
@@ -880,6 +872,14 @@ export async function createTelegramBot({ config, artifactStore, toolRegistry, t
             selectedThinkingLevel: clampModelThinkingLevel(model, resolveChatThinkingLevel(config, ctx.chat.id))
           });
           await ctx.answerCallbackQuery({ text: `Choose effort for ${model.id}.` });
+          return;
+        }
+
+        if (chatBusy) {
+          await ctx.answerCallbackQuery({
+            text: "Wait for the current response before changing models.",
+            show_alert: true
+          });
           return;
         }
 
@@ -925,6 +925,7 @@ export async function createTelegramBot({ config, artifactStore, toolRegistry, t
           return;
         }
 
+        // Effort-only updates do not reset the session, so they are safe while busy.
         if (model.id === currentModelId) {
           await persistChatEffort(ctx.chat.id, model, action.level);
           await ctx.api.editMessageText(
@@ -933,6 +934,14 @@ export async function createTelegramBot({ config, artifactStore, toolRegistry, t
             `Effort set to ${action.level} for ${model.provider}/${model.id}.`
           );
           await ctx.answerCallbackQuery({ text: `Effort: ${action.level}.` });
+          return;
+        }
+
+        if (chatBusy) {
+          await ctx.answerCallbackQuery({
+            text: "Wait for the current response before changing models.",
+            show_alert: true
+          });
           return;
         }
 
