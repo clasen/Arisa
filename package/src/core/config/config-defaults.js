@@ -18,12 +18,20 @@ export const telegramConfigDefaults = Object.freeze({
   modelPickerPageSize: 8
 });
 
+export const piConfigDefaults = Object.freeze({
+  thinkingLevel: "medium"
+});
+
 export function applyConfigDefaults(config) {
   return {
     ...config,
     telegram: {
       ...telegramConfigDefaults,
       ...(config.telegram || {})
+    },
+    pi: {
+      ...piConfigDefaults,
+      ...(config.pi || {})
     },
     daemons: {
       ...daemonConfigDefaults,

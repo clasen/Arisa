@@ -3,12 +3,12 @@ import path from "node:path";
 import { authorizeChat } from "./auth.js";
 import { captureIncomingArtifact, formatLocationText } from "./media.js";
 import { buildDeviceCodeTelegramMessage } from "./device-code-message.js";
-import { buildModelPicker, parseModelPickerAction } from "./model-picker.js";
+import { buildEffortPicker, buildModelPicker, parseEffortPickerAction, parseModelPickerAction } from "./model-picker.js";
 import { renderTelegramHtml } from "./text-format.js";
 import { buildPiAuthRecoveryBlockedMessage, buildPiAuthTelegramMessage, getErrorMessage, getPiAuthIssue, getPiAuthStatus } from "../../core/agent/auth-flow.js";
 import { createPiOAuthLogin } from "../../core/agent/pi-auth-login.js";
-import { resolveChatModel, selectChatModel } from "../../core/agent/model-selection.js";
-import { createPiRuntime, listProviderModels } from "../../core/agent/pi-runtime.js";
+import { resolveChatModel, resolveChatThinkingLevel, selectChatModel, selectChatThinkingLevel } from "../../core/agent/model-selection.js";
+import { clampModelThinkingLevel, createPiRuntime, listModelThinkingLevels, listProviderModels, modelSupportsThinking } from "../../core/agent/pi-runtime.js";
 import { normalizeArtifactForReasoning, shouldNormalizeArtifactToText } from "../../core/artifacts/normalize-for-reasoning.js";
 
 const slowPromptNoticeMs = 300_000;
@@ -426,6 +426,7 @@ export async function createTelegramBot({ config, artifactStore, toolRegistry, t
       provider: config.pi.provider,
       models: getProviderModels(),
       selectedModelId: resolveChatModel(config, ctx.chat.id),
+      selectedThinkingLevel: resolveChatThinkingLevel(config, ctx.chat.id),
       page,
       pageSize: config.telegram.modelPickerPageSize
     });
@@ -437,11 +438,42 @@ export async function createTelegramBot({ config, artifactStore, toolRegistry, t
     return ctx.reply(picker.text, extra);
   }
 
-  async function persistChatModel(chatId, model) {
+  async function showEffortPicker(ctx, { model, modelIndex, selectedThinkingLevel } = {}) {
+    const models = getProviderModels();
+    const resolvedModel = model || models.find((item) => item.id === resolveChatModel(config, ctx.chat.id));
+    if (!resolvedModel) {
+      throw new Error(`Model not found for provider ${config.pi.provider}`);
+    }
+    if (!modelSupportsThinking(resolvedModel)) {
+      const text = `${resolvedModel.provider}/${resolvedModel.id} does not support effort levels.`;
+      if (ctx.callbackQuery?.message?.message_id) {
+        return ctx.api.editMessageText(ctx.chat.id, ctx.callbackQuery.message.message_id, text);
+      }
+      return ctx.reply(text);
+    }
+    const levels = listModelThinkingLevels(resolvedModel);
+    const picker = buildEffortPicker({
+      provider: resolvedModel.provider,
+      modelId: resolvedModel.id,
+      levels,
+      selectedThinkingLevel: selectedThinkingLevel
+        ?? clampModelThinkingLevel(resolvedModel, resolveChatThinkingLevel(config, ctx.chat.id)),
+      modelIndex
+    });
+    const extra = { reply_markup: picker.replyMarkup };
+    const messageId = ctx.callbackQuery?.message?.message_id;
+    if (messageId) {
+      return ctx.api.editMessageText(ctx.chat.id, messageId, picker.text, extra);
+    }
+    return ctx.reply(picker.text, extra);
+  }
+
+  async function persistChatModel(chatId, model, thinkingLevel) {
     const key = chatKey(chatId);
     const hadSelections = Boolean(config.pi.chatModels);
     const previousSelection = config.pi.chatModels?.[key];
-    selectChatModel(config, chatId, model);
+    const level = clampModelThinkingLevel(model, thinkingLevel ?? resolveChatThinkingLevel(config, chatId));
+    selectChatModel(config, chatId, model, { thinkingLevel: level });
     try {
       await saveConfig(config);
     } catch (error) {
@@ -454,6 +486,27 @@ export async function createTelegramBot({ config, artifactStore, toolRegistry, t
       throw error;
     }
     agentManager.resetSession(chatId);
+    return level;
+  }
+
+  async function persistChatEffort(chatId, model, thinkingLevel) {
+    const key = chatKey(chatId);
+    const hadSelections = Boolean(config.pi.chatModels);
+    const previousSelection = config.pi.chatModels?.[key];
+    const level = clampModelThinkingLevel(model, thinkingLevel);
+    selectChatThinkingLevel(config, chatId, level);
+    try {
+      await saveConfig(config);
+    } catch (error) {
+      if (previousSelection) {
+        config.pi.chatModels[key] = previousSelection;
+      } else {
+        delete config.pi.chatModels[key];
+        if (!hadSelections) delete config.pi.chatModels;
+      }
+      throw error;
+    }
+    return level;
   }
 
   async function buildIncomingPrompt(ctx) {
@@ -736,6 +789,12 @@ export async function createTelegramBot({ config, artifactStore, toolRegistry, t
     await showModelPicker(ctx);
   });
 
+  bot.command("effort", async (ctx) => {
+    const auth = await authorizeChat({ config, chatId: ctx.chat.id, saveConfig, chatMeta: getIncomingChatMeta(ctx) });
+    if (!auth.ok) return;
+    await showEffortPicker(ctx);
+  });
+
   bot.command("auth", async (ctx) => {
     const auth = await authorizeChat({ config, chatId: ctx.chat.id, saveConfig, chatMeta: getIncomingChatMeta(ctx) });
     if (!auth.ok) return;
@@ -770,7 +829,9 @@ export async function createTelegramBot({ config, artifactStore, toolRegistry, t
   });
 
   bot.on("callback_query:data", async (ctx, next) => {
-    const action = parseModelPickerAction(ctx.callbackQuery.data);
+    const modelAction = parseModelPickerAction(ctx.callbackQuery.data);
+    const effortAction = modelAction ? null : parseEffortPickerAction(ctx.callbackQuery.data);
+    const action = modelAction || effortAction;
     if (!action) return next();
     if (action.type === "noop") {
       await ctx.answerCallbackQuery();
@@ -792,39 +853,140 @@ export async function createTelegramBot({ config, artifactStore, toolRegistry, t
 
       if (getChatState(ctx.chat.id).processing) {
         await ctx.answerCallbackQuery({
-          text: "Wait for the current response before changing models.",
+          text: action.type === "effort" || action.type === "model-effort"
+            ? "Wait for the current response before changing effort."
+            : "Wait for the current response before changing models.",
           show_alert: true
         });
         return;
       }
 
       const models = getProviderModels();
-      const model = models[action.value];
-      if (!model) {
-        await ctx.answerCallbackQuery({
-          text: "This model list is no longer current. Run /model again.",
-          show_alert: true
-        });
+
+      if (action.type === "select") {
+        const model = models[action.value];
+        if (!model) {
+          await ctx.answerCallbackQuery({
+            text: "This model list is no longer current. Run /model again.",
+            show_alert: true
+          });
+          return;
+        }
+
+        if (modelSupportsThinking(model)) {
+          await showEffortPicker(ctx, {
+            model,
+            modelIndex: action.value,
+            selectedThinkingLevel: clampModelThinkingLevel(model, resolveChatThinkingLevel(config, ctx.chat.id))
+          });
+          await ctx.answerCallbackQuery({ text: `Choose effort for ${model.id}.` });
+          return;
+        }
+
+        const currentModelId = resolveChatModel(config, ctx.chat.id);
+        const currentEffort = resolveChatThinkingLevel(config, ctx.chat.id);
+        if (model.id === currentModelId && currentEffort === "off") {
+          await ctx.answerCallbackQuery({ text: `Already using ${model.id}.` });
+          return;
+        }
+
+        await persistChatModel(ctx.chat.id, model, "off");
+        await ctx.api.editMessageText(
+          ctx.chat.id,
+          ctx.callbackQuery.message.message_id,
+          `Model changed to ${model.provider}/${model.id}.\nA new chat context will start with your next message.`
+        );
+        await ctx.answerCallbackQuery({ text: `Using ${model.id}.` });
         return;
       }
 
-      const currentModelId = resolveChatModel(config, ctx.chat.id);
-      if (model.id === currentModelId) {
-        await ctx.answerCallbackQuery({ text: `Already using ${model.id}.` });
+      if (action.type === "model-effort") {
+        const model = models[action.modelIndex];
+        if (!model) {
+          await ctx.answerCallbackQuery({
+            text: "This model list is no longer current. Run /model again.",
+            show_alert: true
+          });
+          return;
+        }
+        const levels = listModelThinkingLevels(model);
+        if (!levels.includes(action.level)) {
+          await ctx.answerCallbackQuery({
+            text: "That effort level is not available for this model.",
+            show_alert: true
+          });
+          return;
+        }
+
+        const currentModelId = resolveChatModel(config, ctx.chat.id);
+        const currentEffort = resolveChatThinkingLevel(config, ctx.chat.id);
+        if (model.id === currentModelId && action.level === currentEffort) {
+          await ctx.answerCallbackQuery({ text: `Already using ${model.id} at ${action.level}.` });
+          return;
+        }
+
+        if (model.id === currentModelId) {
+          await persistChatEffort(ctx.chat.id, model, action.level);
+          await ctx.api.editMessageText(
+            ctx.chat.id,
+            ctx.callbackQuery.message.message_id,
+            `Effort set to ${action.level} for ${model.provider}/${model.id}.`
+          );
+          await ctx.answerCallbackQuery({ text: `Effort: ${action.level}.` });
+          return;
+        }
+
+        await persistChatModel(ctx.chat.id, model, action.level);
+        await ctx.api.editMessageText(
+          ctx.chat.id,
+          ctx.callbackQuery.message.message_id,
+          `Model changed to ${model.provider}/${model.id} (effort: ${action.level}).\nA new chat context will start with your next message.`
+        );
+        await ctx.answerCallbackQuery({ text: `Using ${model.id} / ${action.level}.` });
         return;
       }
 
-      await persistChatModel(ctx.chat.id, model);
-      await ctx.api.editMessageText(
-        ctx.chat.id,
-        ctx.callbackQuery.message.message_id,
-        `Model changed to ${model.provider}/${model.id}.\nA new chat context will start with your next message.`
-      );
-      await ctx.answerCallbackQuery({ text: `Using ${model.id}.` });
+      if (action.type === "effort") {
+        const model = models.find((item) => item.id === resolveChatModel(config, ctx.chat.id));
+        if (!model) {
+          await ctx.answerCallbackQuery({
+            text: "Current model is unavailable. Run /model again.",
+            show_alert: true
+          });
+          return;
+        }
+        if (!modelSupportsThinking(model)) {
+          await ctx.answerCallbackQuery({
+            text: "This model does not support effort levels.",
+            show_alert: true
+          });
+          return;
+        }
+        const levels = listModelThinkingLevels(model);
+        if (!levels.includes(action.level)) {
+          await ctx.answerCallbackQuery({
+            text: "That effort level is not available for this model.",
+            show_alert: true
+          });
+          return;
+        }
+        const currentEffort = resolveChatThinkingLevel(config, ctx.chat.id);
+        if (action.level === currentEffort) {
+          await ctx.answerCallbackQuery({ text: `Already using effort ${action.level}.` });
+          return;
+        }
+        await persistChatEffort(ctx.chat.id, model, action.level);
+        await ctx.api.editMessageText(
+          ctx.chat.id,
+          ctx.callbackQuery.message.message_id,
+          `Effort set to ${action.level} for ${model.provider}/${model.id}.`
+        );
+        await ctx.answerCallbackQuery({ text: `Effort: ${action.level}.` });
+      }
     } catch (error) {
       logger?.error("telegram", `model selection failed for chat ${ctx.chat.id}: ${getErrorMessage(error)}`);
       await ctx.answerCallbackQuery({
-        text: "Could not change the model.",
+        text: "Could not change the model or effort.",
         show_alert: true
       }).catch(() => {});
     }
@@ -867,6 +1029,7 @@ export async function createTelegramBot({ config, artifactStore, toolRegistry, t
       await bot.api.setMyCommands([
         { command: "new", description: "Start a new chat context" },
         { command: "model", description: "Choose the model for this chat" },
+        { command: "effort", description: "Choose reasoning effort for this chat" },
         { command: "auth", description: "Show Pi authentication status" }
       ]);
       if (!taskTimer) {

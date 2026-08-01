@@ -25,6 +25,8 @@ test("classifies invalidated Pi authentication tokens", () => {
 test("classifies missing Pi authentication", () => {
   for (const error of [
     new Error("No auth found for provider"),
+    new Error("No API key for provider: openai-codex"),
+    new Error('No API key found for "openai-codex"'),
     new Error("authentication credentials are missing")
   ]) {
     assert.deepEqual(getPiAuthIssue(error), {

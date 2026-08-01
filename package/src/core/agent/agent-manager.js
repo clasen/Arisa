@@ -8,6 +8,7 @@ import { appendArisaAgentsFile, arisaAgentsFile, arisaInstallDir, buildAgentRunt
 import { withTimeout } from "./prompt-timeout.js";
 import { buildPiToolPolicy, getCoreCodingTools } from "./core-tools.js";
 import { createSystemShellTool } from "./system-shell-tool.js";
+import { clampModelThinkingLevel } from "./pi-runtime.js";
 import { arisaHomeDir, getChatPiSessionsDir } from "../../runtime/paths.js";
 
 const piValidationTimeoutMs = 60_000;
@@ -172,6 +173,11 @@ export class AgentManager {
     if (this.sessions.has(sessionKey)) {
       const existing = this.sessions.get(sessionKey);
       if (existing?.modelKey === effectiveModelKey) {
+        const desiredThinkingLevel = clampModelThinkingLevel(existing.session.model, modelSelection.thinkingLevel);
+        if (existing.session.thinkingLevel !== desiredThinkingLevel) {
+          this.logger?.log("agent", `updating effort for chat ${sessionKey}: ${existing.session.thinkingLevel} -> ${desiredThinkingLevel}`);
+          existing.session.setThinkingLevel(desiredThinkingLevel);
+        }
         this.logger?.log("agent", `reusing session for chat ${sessionKey}`);
         return existing;
       }
@@ -189,6 +195,7 @@ export class AgentManager {
     if (requiresProviderAuth(model) && !this.config.pi.apiKey && !hasProviderAuth(this.config.pi.provider, { authStorage, modelRegistry })) {
       throw new Error(`No auth found for ${this.config.pi.provider}. Re-run bootstrap and complete login for this provider before Telegram starts.`);
     }
+    const thinkingLevel = clampModelThinkingLevel(model, modelSelection.thinkingLevel);
 
     const policy = buildPiToolPolicy({
       config: this.config,
@@ -201,7 +208,7 @@ export class AgentManager {
       modelSelection.sessionRevision
     );
     const hasExistingSession = sessionManager.buildSessionContext().messages.length > 0;
-    this.logger?.log("agent", `${hasExistingSession ? "resuming" : "creating"} session for chat ${sessionKey} with model ${effectiveModelId}`);
+    this.logger?.log("agent", `${hasExistingSession ? "resuming" : "creating"} session for chat ${sessionKey} with model ${effectiveModelId} effort ${thinkingLevel}`);
     const customTools = [
       ...this.createTools(telegram, chatId, policy),
       createSystemShellTool({ workspaceDir: policy.workspaceDir, shell: policy.shell })
@@ -217,6 +224,7 @@ export class AgentManager {
       authStorage,
       modelRegistry,
       model,
+      thinkingLevel,
       tools: policy.tools,
       excludeTools: policy.excludeTools,
       customTools,

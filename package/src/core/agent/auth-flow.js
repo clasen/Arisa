@@ -9,6 +9,7 @@ const authInvalidatedPatterns = [
 
 const missingAuthPatterns = [
   /no auth found/i,
+  /no api key(?: found)? for/i,
   /auth(?:entication)? .*missing/i
 ];
 

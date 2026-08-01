@@ -1,33 +1,52 @@
 import assert from "node:assert/strict";
 import path from "node:path";
 import test from "node:test";
-import { resolveChatModel, selectChatModel } from "../src/core/agent/model-selection.js";
-import { applyConfigDefaults, telegramConfigDefaults } from "../src/core/config/config-defaults.js";
+import {
+  resolveChatModel,
+  resolveChatModelSelection,
+  resolveChatThinkingLevel,
+  selectChatModel,
+  selectChatThinkingLevel
+} from "../src/core/agent/model-selection.js";
+import { applyConfigDefaults, piConfigDefaults, telegramConfigDefaults } from "../src/core/config/config-defaults.js";
+import {
+  clampModelThinkingLevel,
+  listModelThinkingLevels,
+  modelSupportsThinking
+} from "../src/core/agent/pi-runtime.js";
 import { getChatPiSessionsDir } from "../src/runtime/paths.js";
-import { buildModelPicker, parseModelPickerAction } from "../src/transport/telegram/model-picker.js";
+import {
+  buildEffortPicker,
+  buildModelPicker,
+  parseEffortPickerAction,
+  parseModelPickerAction
+} from "../src/transport/telegram/model-picker.js";
 
 function createConfig() {
-  return {
+  return applyConfigDefaults({
     telegram: {},
     pi: {
       provider: "openai-codex",
       model: "gpt-default"
     }
-  };
+  });
 }
 
 test("resolves the default model until a chat selects one", () => {
   const config = createConfig();
 
   assert.equal(resolveChatModel(config, 123), "gpt-default");
+  assert.equal(resolveChatThinkingLevel(config, 123), piConfigDefaults.thinkingLevel);
 
-  selectChatModel(config, 123, { provider: "openai-codex", id: "gpt-selected" });
+  selectChatModel(config, 123, { provider: "openai-codex", id: "gpt-selected" }, { thinkingLevel: "high" });
 
   assert.equal(resolveChatModel(config, 123), "gpt-selected");
+  assert.equal(resolveChatThinkingLevel(config, 123), "high");
   assert.equal(resolveChatModel(config, 456), "gpt-default");
   assert.deepEqual(config.pi.chatModels["123"], {
     provider: "openai-codex",
     model: "gpt-selected",
+    thinkingLevel: "high",
     sessionRevision: 1
   });
 });
@@ -35,8 +54,8 @@ test("resolves the default model until a chat selects one", () => {
 test("starts a distinct persisted Pi session revision on every model change", () => {
   const config = createConfig();
 
-  selectChatModel(config, 123, { provider: "openai-codex", id: "gpt-a" });
-  selectChatModel(config, 123, { provider: "openai-codex", id: "gpt-b" });
+  selectChatModel(config, 123, { provider: "openai-codex", id: "gpt-a" }, { thinkingLevel: "medium" });
+  selectChatModel(config, 123, { provider: "openai-codex", id: "gpt-b" }, { thinkingLevel: "high" });
 
   assert.equal(config.pi.chatModels["123"].sessionRevision, 2);
   assert.equal(
@@ -45,13 +64,28 @@ test("starts a distinct persisted Pi session revision on every model change", ()
   );
 });
 
+test("updates effort without bumping the session revision", () => {
+  const config = createConfig();
+
+  selectChatModel(config, 123, { provider: "openai-codex", id: "gpt-a" }, { thinkingLevel: "medium" });
+  selectChatThinkingLevel(config, 123, "high");
+
+  assert.deepEqual(resolveChatModelSelection(config, 123), {
+    provider: "openai-codex",
+    model: "gpt-a",
+    thinkingLevel: "high",
+    sessionRevision: 1
+  });
+});
+
 test("ignores a chat selection from a different active provider", () => {
   const config = createConfig();
   config.pi.chatModels = {
-    123: { provider: "anthropic", model: "claude-selected" }
+    123: { provider: "anthropic", model: "claude-selected", thinkingLevel: "high", sessionRevision: 1 }
   };
 
   assert.equal(resolveChatModel(config, 123), "gpt-default");
+  assert.equal(resolveChatThinkingLevel(config, 123), piConfigDefaults.thinkingLevel);
 });
 
 test("rejects selecting a model outside the active provider", () => {
@@ -74,14 +108,38 @@ test("builds a paged model picker and marks the current model", () => {
     provider: "openai-codex",
     models,
     selectedModelId: "gpt-b",
+    selectedThinkingLevel: "high",
     page: 0,
     pageSize: 2
   });
 
   assert.match(picker.text, /openai-codex\/gpt-b/);
+  assert.match(picker.text, /Effort: high/);
   assert.equal(picker.replyMarkup.inline_keyboard[0][0].callback_data, "model:0");
   assert.match(picker.replyMarkup.inline_keyboard[1][0].text, /^✓ gpt-b \[reasoning, image\]$/);
   assert.equal(picker.replyMarkup.inline_keyboard[2][1].callback_data, "model-page:1");
+});
+
+test("builds an effort picker for the current model or pending model choice", () => {
+  const current = buildEffortPicker({
+    provider: "openai-codex",
+    modelId: "gpt-b",
+    levels: ["off", "low", "medium", "high"],
+    selectedThinkingLevel: "medium"
+  });
+  assert.match(current.text, /Current model: openai-codex\/gpt-b/);
+  assert.equal(current.replyMarkup.inline_keyboard[1][0].callback_data, "effort:low");
+  assert.match(current.replyMarkup.inline_keyboard[2][0].text, /^✓ medium$/);
+
+  const pending = buildEffortPicker({
+    provider: "openai-codex",
+    modelId: "gpt-b",
+    levels: ["off", "high"],
+    selectedThinkingLevel: "high",
+    modelIndex: 4
+  });
+  assert.match(pending.text, /^Model: openai-codex\/gpt-b/);
+  assert.equal(pending.replyMarkup.inline_keyboard[1][0].callback_data, "model-effort:4:high");
 });
 
 test("parses only model picker callback data", () => {
@@ -90,10 +148,48 @@ test("parses only model picker callback data", () => {
   assert.deepEqual(parseModelPickerAction("noop:page"), { type: "noop", value: null });
   assert.equal(parseModelPickerAction("provider:1"), null);
   assert.equal(parseModelPickerAction("model:-1"), null);
+  assert.equal(parseModelPickerAction("effort:high"), null);
 });
 
-test("centralizes the model picker page size in Telegram config defaults", () => {
-  const config = applyConfigDefaults(createConfig());
+test("parses effort picker callback data", () => {
+  assert.deepEqual(parseEffortPickerAction("effort:high"), { type: "effort", level: "high" });
+  assert.deepEqual(parseEffortPickerAction("model-effort:3:medium"), {
+    type: "model-effort",
+    modelIndex: 3,
+    level: "medium"
+  });
+  assert.deepEqual(parseEffortPickerAction("noop:page"), { type: "noop", value: null });
+  assert.equal(parseEffortPickerAction("model:1"), null);
+});
+
+test("centralizes picker defaults in config", () => {
+  const config = applyConfigDefaults({
+    telegram: {},
+    pi: { provider: "openai-codex", model: "gpt-default" }
+  });
 
   assert.equal(config.telegram.modelPickerPageSize, telegramConfigDefaults.modelPickerPageSize);
+  assert.equal(config.pi.thinkingLevel, piConfigDefaults.thinkingLevel);
+});
+
+test("lists and clamps thinking levels from model capabilities", () => {
+  const reasoning = {
+    reasoning: true,
+    thinkingLevelMap: { xhigh: "xhigh", minimal: "low", max: null }
+  };
+  assert.deepEqual(listModelThinkingLevels(reasoning), [
+    "off",
+    "minimal",
+    "low",
+    "medium",
+    "high",
+    "xhigh"
+  ]);
+  assert.equal(clampModelThinkingLevel(reasoning, "max"), "xhigh");
+  assert.equal(modelSupportsThinking(reasoning), true);
+
+  const plain = { reasoning: false };
+  assert.deepEqual(listModelThinkingLevels(plain), ["off"]);
+  assert.equal(clampModelThinkingLevel(plain, "high"), "off");
+  assert.equal(modelSupportsThinking(plain), false);
 });
