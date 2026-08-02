@@ -29,10 +29,17 @@ Usage:
 
 Actions via args.action:
   auth-help       Show safe OAuth setup options; cookies are not accepted
-  auth-status     Run: gws auth status
+  auth-status     Run: gws auth status and a read-only Gmail API probe
   list/search     List Gmail message IDs. args: q?, maxResults?, labelIds?, includeSpamTrash?
+  list-drafts     List Gmail drafts and duplicate-recipient groups. args: maxResults?
   get             Read one message. args: id, format? full|metadata|raw|minimal
+  draft           Create a Gmail draft. args: to, subject, body, cc?, bcc?, from?
+  update-draft    Replace a Gmail draft. args: id, to, subject, body, cc?, bcc?, from?
+  replace-draft-text Replace literal text in drafts. args: ids?, replacements [{from,to}], onlyIfContains?, maxResults?
+  replace-draft-subject-text Replace text in decoded draft subjects. args: ids?, replacements [{from,to}], maxResults?
+  delete-draft   Delete a Gmail draft. args: id
   send            Send email. args: to, subject, body, cc?, bcc?, from?
+  reply           Reply in the same Gmail thread. args: id, body, to?, cc?, bcc?, from?, replyAll?
   mark-read       Remove UNREAD label. args: id
   mark-unread     Add UNREAD label. args: id
   archive         Remove INBOX label. args: id
@@ -65,6 +72,20 @@ function headerValue(headers = [], name) {
   return headers.find((h) => String(h.name).toLowerCase() === name.toLowerCase())?.value || "";
 }
 
+function extractEmailAddress(value = "") {
+  const match = String(value).match(/<([^>]+)>/);
+  return (match?.[1] || String(value).split(/[,;]/)[0] || "").trim();
+}
+
+function replySubject(subject = "") {
+  const text = String(subject || "").trim();
+  return /^re:/i.test(text) ? text : `Re: ${text}`;
+}
+
+function appendReference(references = "", messageId = "") {
+  return [references, messageId].map((value) => String(value || "").trim()).filter(Boolean).join(" ");
+}
+
 function extractTextPart(payload) {
   if (!payload) return "";
   if (payload.mimeType === "text/plain" && payload.body?.data) return decodeB64url(payload.body.data);
@@ -76,14 +97,21 @@ function extractTextPart(payload) {
   return "";
 }
 
-function makeEmail({ to, subject, body, cc, bcc, from }) {
+function encodeHeader(value = "") {
+  const text = String(value);
+  return /[^\x20-\x7e]/.test(text) ? `=?UTF-8?B?${Buffer.from(text, "utf8").toString("base64")}?=` : text;
+}
+
+function makeEmail({ to, subject, body, cc, bcc, from, inReplyTo, references }) {
   if (!to) throw new Error("args.to is required");
   const lines = [];
   if (from) lines.push(`From: ${from}`);
   lines.push(`To: ${to}`);
   if (cc) lines.push(`Cc: ${cc}`);
   if (bcc) lines.push(`Bcc: ${bcc}`);
-  lines.push(`Subject: ${subject || ""}`);
+  lines.push(`Subject: ${encodeHeader(subject)}`);
+  if (inReplyTo) lines.push(`In-Reply-To: ${inReplyTo}`);
+  if (references) lines.push(`References: ${references}`);
   lines.push("MIME-Version: 1.0");
   lines.push('Content-Type: text/plain; charset="UTF-8"');
   lines.push("Content-Transfer-Encoding: 8bit");
@@ -173,6 +201,50 @@ function formatList(data) {
   return messages.map((m, i) => `${i + 1}. ${m.id} thread:${m.threadId}`).join("\n") + (data.nextPageToken ? `\nnextPageToken: ${data.nextPageToken}` : "");
 }
 
+function rawHeader(raw, name) {
+  const match = String(raw || "").match(new RegExp(`^${name}:\\s*(.+)$`, "im"));
+  return match?.[1]?.trim() || "";
+}
+
+function rawGreeting(raw) {
+  const divider = String(raw || "").match(/\r?\n\r?\n([\s\S]*)$/);
+  return divider?.[1]?.match(/^\s*([^\r\n]{1,120},)/)?.[1]?.trim() || "";
+}
+
+function decodeMimeWords(value = "") {
+  return String(value).replace(/=\?([^?]+)\?([bqBQ])\?([^?]+)\?=/g, (_, charset, encoding, text) => {
+    if (!/^utf-?8$/i.test(charset)) return _;
+    if (encoding.toLowerCase() === "b") return Buffer.from(text, "base64").toString("utf8");
+    return text.replace(/_/g, " ").replace(/=([0-9a-f]{2})/gi, (m, hex) => String.fromCharCode(parseInt(hex, 16)));
+  });
+}
+
+function replaceRawSubject(raw, subject) {
+  return String(raw).replace(/^Subject:\s*.*$/im, `Subject: ${encodeHeader(subject)}`);
+}
+
+function normalizeReplacements(value) {
+  const input = Array.isArray(value) ? value : typeof value === "string" ? JSON.parse(value) : [];
+  if (!Array.isArray(input) || !input.length) throw new Error("args.replacements must contain at least one replacement");
+  return input.map((item) => {
+    const from = String(item.from ?? "");
+    const to = String(item.to ?? "");
+    if (!from) throw new Error("Each replacement requires a non-empty from value");
+    return { from, to };
+  });
+}
+
+function applyLiteralReplacements(raw, replacements) {
+  let next = String(raw || "");
+  for (const { from, to } of replacements) next = next.split(from).join(to);
+  return next;
+}
+
+function rawContainsAll(raw, terms = []) {
+  const text = String(raw || "").toLowerCase();
+  return terms.every((term) => text.includes(String(term).toLowerCase()));
+}
+
 function formatMessage(message) {
   const headers = message.payload?.headers || [];
   const subject = headerValue(headers, "Subject");
@@ -211,6 +283,33 @@ function changedMessageIds(historyData) {
   return [...seen.values()];
 }
 
+function formatDuration(seconds) {
+  const value = Number(seconds);
+  if (!Number.isFinite(value) || value <= 0) return "unknown";
+  const days = Math.floor(value / 86400);
+  const hours = Math.floor((value % 86400) / 3600);
+  if (days > 0) return `${days}d ${hours}h`;
+  const minutes = Math.floor((value % 3600) / 60);
+  return `${hours}h ${minutes}m`;
+}
+
+async function savedTokenStatus(request) {
+  if (!request.chatId) return { exists: false };
+  const token = await readJsonSafe(await statePath(request, "token.json"), null);
+  if (!token) return { exists: false };
+  const refreshSeconds = token.refresh_token_expires_in ? Number(token.refresh_token_expires_in) : null;
+  return {
+    exists: true,
+    hasRefreshToken: Boolean(token.refresh_token),
+    accessTokenTtl: formatDuration(token.expires_in),
+    refreshTokenTtl: refreshSeconds ? formatDuration(refreshSeconds) : "no fixed expiry reported",
+    durable: Boolean(token.refresh_token) && !refreshSeconds,
+    note: refreshSeconds
+      ? "This OAuth refresh token has a fixed expiry, usually because the Google OAuth consent app is in Testing mode. Re-authenticate with a Production OAuth app for a durable Gmail session."
+      : "Refresh token has no fixed expiry reported; Google can still revoke it if unused for months, the app is revoked, or the password/security state changes."
+  };
+}
+
 async function handle(request, config) {
   const action = String(request.args?.action || request.args?.cmd || request.text || "list").trim().toLowerCase();
   const uid = userId(request, config);
@@ -221,7 +320,24 @@ async function handle(request, config) {
 
   if (action === "auth-status") {
     const { stdout, stderr } = await runCommand(["auth", "status"], config);
-    return { text: (stdout || stderr).trim(), json: { stdout, stderr } };
+    const tokenStatus = await savedTokenStatus(request);
+    let gmailProbe = { ok: false };
+    try {
+      const probe = await gwsJson(["gmail", "users", "messages", "list", "--params", JSON.stringify({ userId: uid, maxResults: 1 })], config);
+      gmailProbe = { ok: true, resultSizeEstimate: probe.resultSizeEstimate ?? null };
+    } catch (error) {
+      gmailProbe = { ok: false, error: error.message || String(error) };
+    }
+    const lines = [
+      (stdout || stderr).trim(),
+      "",
+      `Gmail API probe: ${gmailProbe.ok ? "ok" : "failed"}`,
+      tokenStatus.exists ? `Saved refresh token: ${tokenStatus.hasRefreshToken ? "yes" : "no"}` : "Saved refresh token: no",
+      tokenStatus.exists ? `Access token TTL: ${tokenStatus.accessTokenTtl}` : "",
+      tokenStatus.exists ? `Refresh token TTL: ${tokenStatus.refreshTokenTtl}` : "",
+      tokenStatus.note || ""
+    ].filter(Boolean).join("\n");
+    return { text: lines, json: { stdout, stderr, gmailProbe, tokenStatus } };
   }
 
   if (action === "list" || action === "search") {
@@ -235,6 +351,107 @@ async function handle(request, config) {
     return { text: formatList(data), json: data };
   }
 
+  if (action === "list-drafts") {
+    const draftsList = [];
+    let pageToken = request.args?.pageToken ? String(request.args.pageToken) : "";
+    const maxPages = Number(request.args?.maxPages || 10);
+    for (let page = 0; page < maxPages; page += 1) {
+      const params = { userId: uid, maxResults: Number(request.args?.maxResults || 100) };
+      if (pageToken) params.pageToken = pageToken;
+      const data = await gwsJson(["gmail", "users", "drafts", "list", "--params", JSON.stringify(params)], config);
+      draftsList.push(...(data.drafts || []));
+      pageToken = data.nextPageToken || "";
+      if (!pageToken) break;
+    }
+    const drafts = [];
+    for (const draft of draftsList) {
+      const current = await gwsJson(["gmail", "users", "drafts", "get", "--params", JSON.stringify({ userId: uid, id: String(draft.id), format: "raw" })], config);
+      const raw = decodeB64url(current.message?.raw || "");
+      drafts.push({
+        id: String(draft.id),
+        messageId: current.message?.id || draft.message?.id || "",
+        to: rawHeader(raw, "To").toLowerCase(),
+        greeting: rawGreeting(raw),
+        subject: rawHeader(raw, "Subject")
+      });
+    }
+    const grouped = new Map();
+    for (const draft of drafts) {
+      if (!draft.to) continue;
+      grouped.set(draft.to, [...(grouped.get(draft.to) || []), draft]);
+    }
+    const duplicates = [...grouped.entries()]
+      .filter(([, entries]) => entries.length > 1)
+      .map(([to, entries]) => ({ to, drafts: entries }));
+    return { text: `${drafts.length} draft(s). ${duplicates.length} duplicate recipient group(s).`, json: { drafts, duplicates } };
+  }
+
+  if (action === "replace-draft-text") {
+    const replacements = normalizeReplacements(request.args?.replacements);
+    const ids = Array.isArray(request.args?.ids)
+      ? request.args.ids.map(String)
+      : String(request.args?.ids || "").split(",").map((s) => s.trim()).filter(Boolean);
+    const onlyIfContains = Array.isArray(request.args?.onlyIfContains)
+      ? request.args.onlyIfContains
+      : String(request.args?.onlyIfContains || "").split("||").map((s) => s.trim()).filter(Boolean);
+    const targetIds = [];
+    if (ids.length) {
+      targetIds.push(...ids);
+    } else {
+      const data = await gwsJson(["gmail", "users", "drafts", "list", "--params", JSON.stringify({ userId: uid, maxResults: Number(request.args?.maxResults || 150) })], config);
+      targetIds.push(...(data.drafts || []).map((draft) => String(draft.id)));
+    }
+    const updated = [];
+    const unchanged = [];
+    for (const id of targetIds) {
+      const current = await gwsJson(["gmail", "users", "drafts", "get", "--params", JSON.stringify({ userId: uid, id, format: "raw" })], config);
+      const raw = decodeB64url(current.message?.raw || "");
+      if (onlyIfContains.length && !rawContainsAll(raw, onlyIfContains)) {
+        unchanged.push({ id, reason: "filter_not_matched", to: rawHeader(raw, "To"), subject: rawHeader(raw, "Subject") });
+        continue;
+      }
+      const rewritten = applyLiteralReplacements(raw, replacements);
+      if (rewritten === raw) {
+        unchanged.push({ id, reason: "no_match", to: rawHeader(raw, "To"), subject: rawHeader(raw, "Subject") });
+        continue;
+      }
+      const result = await gwsJson(["gmail", "users", "drafts", "update", "--params", JSON.stringify({ userId: uid, id }), "--json", JSON.stringify({ id, message: { raw: b64url(rewritten) } })], config);
+      updated.push({ id: result.id || id, to: rawHeader(rewritten, "To"), subject: rawHeader(rewritten, "Subject") });
+    }
+    return { text: `Updated ${updated.length} draft(s). ${unchanged.length} unchanged.`, json: { updated, unchanged } };
+  }
+
+  if (action === "replace-draft-subject-text") {
+    const replacements = normalizeReplacements(request.args?.replacements);
+    const ids = Array.isArray(request.args?.ids)
+      ? request.args.ids.map(String)
+      : String(request.args?.ids || "").split(",").map((s) => s.trim()).filter(Boolean);
+    const targetIds = [];
+    if (ids.length) {
+      targetIds.push(...ids);
+    } else {
+      const data = await gwsJson(["gmail", "users", "drafts", "list", "--params", JSON.stringify({ userId: uid, maxResults: Number(request.args?.maxResults || 150) })], config);
+      targetIds.push(...(data.drafts || []).map((draft) => String(draft.id)));
+    }
+    const updated = [];
+    const unchanged = [];
+    for (const id of targetIds) {
+      const current = await gwsJson(["gmail", "users", "drafts", "get", "--params", JSON.stringify({ userId: uid, id, format: "raw" })], config);
+      const raw = decodeB64url(current.message?.raw || "");
+      const subjectHeader = rawHeader(raw, "Subject");
+      const subject = decodeMimeWords(subjectHeader);
+      const nextSubject = applyLiteralReplacements(subject, replacements);
+      if (nextSubject === subject) {
+        unchanged.push({ id, reason: "no_match", subject });
+        continue;
+      }
+      const rewritten = replaceRawSubject(raw, nextSubject);
+      const result = await gwsJson(["gmail", "users", "drafts", "update", "--params", JSON.stringify({ userId: uid, id }), "--json", JSON.stringify({ id, message: { raw: b64url(rewritten) } })], config);
+      updated.push({ id: result.id || id, to: rawHeader(rewritten, "To"), subject: nextSubject });
+    }
+    return { text: `Updated ${updated.length} draft subject(s). ${unchanged.length} unchanged.`, json: { updated, unchanged } };
+  }
+
   if (action === "get") {
     const id = request.args?.id || request.args?.messageId;
     if (!id) throw new Error("args.id is required");
@@ -243,10 +460,49 @@ async function handle(request, config) {
     return { text: formatMessage(data), json: data };
   }
 
+  if (action === "draft") {
+    const raw = b64url(makeEmail(request.args || {}));
+    const data = await gwsJson(["gmail", "users", "drafts", "create", "--params", JSON.stringify({ userId: uid }), "--json", JSON.stringify({ message: { raw } })], config);
+    return { text: `Draft created. Draft ID: ${data.id || "unknown"}`, json: data };
+  }
+
+  if (action === "update-draft") {
+    const id = request.args?.id || request.args?.draftId;
+    if (!id) throw new Error("args.id is required");
+    const raw = b64url(makeEmail(request.args || {}));
+    const data = await gwsJson(["gmail", "users", "drafts", "update", "--params", JSON.stringify({ userId: uid, id: String(id) }), "--json", JSON.stringify({ id: String(id), message: { raw } })], config);
+    return { text: `Draft updated. Draft ID: ${data.id || id}`, json: data };
+  }
+
+  if (action === "delete-draft") {
+    const id = request.args?.id || request.args?.draftId;
+    if (!id) throw new Error("args.id is required");
+    await gwsJson(["gmail", "users", "drafts", "delete", "--params", JSON.stringify({ userId: uid, id: String(id) })], config);
+    return { text: `Draft deleted: ${id}`, json: { id: String(id) } };
+  }
+
   if (action === "send") {
     const raw = b64url(makeEmail(request.args || {}));
     const data = await gwsJson(["gmail", "users", "messages", "send", "--params", JSON.stringify({ userId: uid }), "--json", JSON.stringify({ raw })], config);
     return { text: `Email sent. Message ID: ${data.id || "unknown"}`, json: data };
+  }
+
+  if (action === "reply") {
+    const id = request.args?.id || request.args?.messageId;
+    if (!id) throw new Error("args.id is required");
+    const original = await gwsJson(["gmail", "users", "messages", "get", "--params", JSON.stringify({ userId: uid, id: String(id), format: "metadata" })], config);
+    const headers = original.payload?.headers || [];
+    const messageId = headerValue(headers, "Message-ID");
+    const raw = b64url(makeEmail({
+      ...request.args,
+      to: request.args?.to || extractEmailAddress(headerValue(headers, "From")),
+      cc: request.args?.cc || (truthy(request.args?.replyAll) ? headerValue(headers, "Cc") : ""),
+      subject: request.args?.subject || replySubject(headerValue(headers, "Subject")),
+      inReplyTo: messageId,
+      references: appendReference(headerValue(headers, "References"), messageId)
+    }));
+    const data = await gwsJson(["gmail", "users", "messages", "send", "--params", JSON.stringify({ userId: uid }), "--json", JSON.stringify({ raw, threadId: original.threadId })], config);
+    return { text: `Reply sent. Message ID: ${data.id || "unknown"}`, json: data };
   }
 
   if (["mark-read", "mark-unread", "archive"].includes(action)) {
@@ -324,7 +580,8 @@ async function handle(request, config) {
   }
 
   if (action === "raw") {
-    const argv = request.args?.argv;
+    const rawArgv = request.args?.argv;
+    const argv = Array.isArray(rawArgv) ? rawArgv : typeof rawArgv === "string" ? JSON.parse(rawArgv) : rawArgv;
     if (!Array.isArray(argv) || argv[0] !== "gmail") throw new Error('args.argv must be an array starting with "gmail"');
     const { stdout, stderr } = await runCommand(argv.map(String), config);
     return { text: (stdout || stderr).trim(), json: { stdout, stderr } };
