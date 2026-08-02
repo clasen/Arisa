@@ -179,7 +179,6 @@ export class AgentManager {
           existing.session.setThinkingLevel(desiredThinkingLevel);
         }
         this.logger?.log("agent", `reusing session for chat ${sessionKey}`);
-        existing.hasExistingSession = true;
         return existing;
       }
       this.logger?.log("agent", `model changed for chat ${sessionKey}: ${existing?.modelKey || "unknown"} -> ${effectiveModelKey}; recreating session`);
@@ -240,7 +239,7 @@ export class AgentManager {
       })}`);
     }
 
-    const ctx = { session, modelId: effectiveModelId, modelKey: effectiveModelKey, hasExistingSession };
+    const ctx = { session, modelId: effectiveModelId, modelKey: effectiveModelKey };
     this.sessions.set(sessionKey, ctx);
     if (isNewSession) {
       this.pendingNewSessions.delete(sessionKey);
