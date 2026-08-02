@@ -110,18 +110,27 @@ export class AgentManager {
     this.logger = logger;
     this.sessions = new Map();
     this.pendingNewSessions = new Set();
+    this.pendingSessionHandoffs = new Map();
   }
 
   setConfig(config) {
     this.config = config;
     this.sessions.clear();
     this.pendingNewSessions.clear();
+    this.pendingSessionHandoffs.clear();
   }
 
-  resetSession(chatId) {
+  resetSession(chatId, { handoff = "", parentSession = "" } = {}) {
     const sessionKey = String(chatId);
     this.sessions.delete(sessionKey);
     this.pendingNewSessions.add(sessionKey);
+    const text = String(handoff || "").trim();
+    const parent = String(parentSession || "").trim();
+    if (text || parent) {
+      this.pendingSessionHandoffs.set(sessionKey, { text, parentSession: parent });
+    } else {
+      this.pendingSessionHandoffs.delete(sessionKey);
+    }
   }
 
   clearSessionCache(chatId) {
@@ -133,7 +142,21 @@ export class AgentManager {
     const sessionDir = getChatPiSessionsDir(sessionKey, sessionRevision);
     if (this.pendingNewSessions.has(sessionKey)) {
       this.logger?.log("agent", `starting new persisted session for chat ${sessionKey}`);
-      return { sessionManager: SessionManager.create(workspaceDir, sessionDir), isNewSession: true };
+      const handoff = this.pendingSessionHandoffs.get(sessionKey);
+      const sessionManager = SessionManager.create(
+        workspaceDir,
+        sessionDir,
+        handoff?.parentSession ? { parentSession: handoff.parentSession } : undefined
+      );
+      if (handoff?.text) {
+        sessionManager.appendCustomMessageEntry(
+          "arisa-session-handoff",
+          handoff.text,
+          false,
+          { source: "telegram-new" }
+        );
+      }
+      return { sessionManager, isNewSession: true };
     }
     this.logger?.log("agent", `recovering persisted session for chat ${sessionKey}`);
     return { sessionManager: SessionManager.continueRecent(workspaceDir, sessionDir), isNewSession: false };
@@ -243,6 +266,7 @@ export class AgentManager {
     this.sessions.set(sessionKey, ctx);
     if (isNewSession) {
       this.pendingNewSessions.delete(sessionKey);
+      this.pendingSessionHandoffs.delete(sessionKey);
     }
     return ctx;
   }

@@ -265,6 +265,28 @@ async function collectText(session, prompt, { logger, chatId, onSlowPrompt } = {
   return text.trim();
 }
 
+function buildSessionHandoffPrompt() {
+  return [
+    "Prepare a concise handoff for the next Arisa session.",
+    "Review the entire active session, including any previous compaction summaries and the latest messages.",
+    "Keep only durable context: current goals or projects, decisions, user preferences, unresolved tasks, and important facts needed to continue.",
+    "Use at most 8 short bullets and at most 1600 characters.",
+    "Exclude secrets, tokens, passwords, cookies, API keys, private file paths, full transcripts, and stale chatter.",
+    "Do not take actions, call tools, send messages, or explain the process.",
+    "Return only the handoff."
+  ].join("\n");
+}
+
+function sanitizeSessionHandoff(text) {
+  const sanitized = String(text || "")
+    .replace(/-----BEGIN [^-]*PRIVATE KEY-----[\s\S]*?-----END [^-]*PRIVATE KEY-----/gi, "[redacted private key]")
+    .replace(/\b(?:sk-[A-Za-z0-9_-]{12,}|gh[opsu]_[A-Za-z0-9_-]{12,}|Bearer\s+[A-Za-z0-9._-]+)\b/gi, "[redacted credential]")
+    .replace(/(?:api[_ -]?key|access[_ -]?token|refresh[_ -]?token|client[_ -]?secret|password|cookie|secret)\s*[:=]\s*[^\s,;]+/gi, "[redacted credential]")
+    .trim();
+  if (sanitized.length <= 4000) return sanitized;
+  return `${sanitized.slice(0, 3997).trim()}...`;
+}
+
 async function withTyping(ctx, work) {
   await ctx.api.sendChatAction(ctx.chat.id, "typing");
   const timer = setInterval(() => {
@@ -747,8 +769,26 @@ export async function createTelegramBot({ config, artifactStore, toolRegistry, t
     }
   }
 
+  async function summarizeSessionBeforeReset(chatId) {
+    try {
+      const context = await agentManager.getSessionContext(chatId, createTelegramSessionBridge(chatId));
+      const parentSession = context.session.sessionFile || "";
+      if (!context.session.messages.length) return { handoff: "", parentSession: "" };
+
+      const summary = await collectText(context.session, buildSessionHandoffPrompt(), { logger, chatId });
+      return { handoff: sanitizeSessionHandoff(summary), parentSession };
+    } catch (error) {
+      logger?.log("agent", `session handoff summary failed for chat ${chatId}: ${getErrorMessage(error)}`);
+      return { handoff: "", parentSession: "" };
+    }
+  }
+
   async function handleNewCommand(ctx) {
-    agentManager.resetSession(ctx.chat.id);
+    const chatState = getChatState(ctx.chat.id);
+    const handoff = chatState.processing
+      ? { handoff: "", parentSession: "" }
+      : await withTyping(ctx, () => summarizeSessionBeforeReset(ctx.chat.id));
+    agentManager.resetSession(ctx.chat.id, handoff);
     perChatState.set(ctx.chat.id, { processing: false, nextPrompt: "" });
     await enqueuePrompt({
       chatId: ctx.chat.id,
