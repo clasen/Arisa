@@ -94,15 +94,15 @@ Modes:
   logout     Stop and remove only this chat's local WhatsApp session.
 
 Examples:
-  { "chatId": "879964957", "args": { "mode": "login" } }
-  { "chatId": "879964957", "args": { "mode": "send", "to": "+5491112345678", "message": "Hello" } }
-  { "chatId": "879964957", "args": { "mode": "send", "to": "+5491112345678", "message": "Hello", "initialDelayMs": "10000", "typingMs": "30000" } }
-  { "chatId": "879964957", "args": { "mode": "send", "to": "+5491112345678", "message": "Replying", "quotedMessageId": "..." } }
-  { "chatId": "879964957", "args": { "mode": "wait-reply", "from": "+5491112345678" } }
-  { "chatId": "879964957", "args": { "mode": "react", "messageId": "...", "emoji": "👀" } }
-  { "chatId": "879964957", "args": { "mode": "reactions", "messageId": "..." } }
-  { "chatId": "879964957", "args": { "mode": "delete", "to": "+5491112345678", "text": "caption/text to match" } }
-  { "chatId": "879964957", "args": { "mode": "watch" } }
+  { "chatId": "123456789", "args": { "mode": "login" } }
+  { "chatId": "123456789", "args": { "mode": "send", "to": "+15551234567", "message": "Hello" } }
+  { "chatId": "123456789", "args": { "mode": "send", "to": "+15551234567", "message": "Hello", "initialDelayMs": "10000", "typingMs": "30000" } }
+  { "chatId": "123456789", "args": { "mode": "send", "to": "+15551234567", "message": "Replying", "quotedMessageId": "..." } }
+  { "chatId": "123456789", "args": { "mode": "wait-reply", "from": "+15551234567" } }
+  { "chatId": "123456789", "args": { "mode": "react", "messageId": "...", "emoji": "👀" } }
+  { "chatId": "123456789", "args": { "mode": "reactions", "messageId": "..." } }
+  { "chatId": "123456789", "args": { "mode": "delete", "to": "+15551234567", "text": "caption/text to match" } }
+  { "chatId": "123456789", "args": { "mode": "watch" } }
 
 Recommended workflow:
   login once -> keep watch enabled -> send -> wait-reply when the agent needs the immediate answer.
@@ -423,7 +423,7 @@ async function knownWhatsAppChatIds(ownerChatId) {
   const ids = new Set();
   for (const item of await readInbox(ownerChatId)) {
     const id = item.chatId || item.from;
-    if (/@(c|g)\.us$/.test(String(id))) ids.add(id);
+    if (/@(c|g)\.us$/.test(String(id)) || /@lid$/.test(String(id))) ids.add(id);
   }
   return [...ids];
 }
@@ -506,7 +506,12 @@ function hasIncomingMessageTask(tasks, numericChatId, messageId) {
 function serializedWhatsAppId(value) {
   if (!value) return "";
   if (typeof value === "string") return value;
-  return value._serialized || value.serialized || value.id || [value.fromMe ? "true" : "false", value.remote, value.id, value.participant].filter(Boolean).join("_");
+  const serialized = value._serialized || value.$1 || value.serialized;
+  if (serialized) return serialized;
+  const remote = typeof value.remote === "object"
+    ? value.remote?._serialized || value.remote?.$1
+    : value.remote;
+  return value.id || [value.fromMe ? "true" : "false", remote, value.id, value.participant].filter(Boolean).join("_");
 }
 
 async function reactionsFromMessage(message) {
@@ -614,15 +619,16 @@ function makeClient(chatId) {
     ]
   };
   if (config.CHROME_EXECUTABLE_PATH && existsSync(config.CHROME_EXECUTABLE_PATH)) puppeteer.executablePath = config.CHROME_EXECUTABLE_PATH;
-  return new Client({
+  const clientOptions = {
     authStrategy: new LocalAuth({ dataPath: paths.sessionDir }),
     puppeteer,
     // Keep the browser and WhatsApp Web on a compatible modern Chrome identity.
     // The library default advertises Chrome 101, which current WhatsApp Web drops during startup.
     userAgent: "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/146.0.0.0 Safari/537.36",
-    webVersion: "2.3000.1043234067",
-    webVersionCache: { type: "local", path: paths.webCacheDir, strict: true }
-  });
+    webVersionCache: { type: "local", path: paths.webCacheDir, strict: bool(config.WEB_VERSION_CACHE_STRICT, false) }
+  };
+  if (config.WEB_VERSION) clientOptions.webVersion = config.WEB_VERSION;
+  return new Client(clientOptions);
 }
 
 function mediaKind(mimeType = "", messageType = "") {
@@ -676,7 +682,7 @@ async function saveStickerToLibrary(ownerChatId, message, media, buffer, context
   const paths = stickerPaths(ownerChatId);
   await mkdir(paths.filesDir, { recursive: true });
   await mkdir(paths.previewsDir, { recursive: true });
-  const messageId = message.id?._serialized || `${message.from}-${message.timestamp}-${Date.now()}`;
+  const messageId = serializedWhatsAppId(message.id) || `${message.from}-${message.timestamp}-${Date.now()}`;
   const existing = (await readStickerIndex(ownerChatId)).filter((item) => item.messageId !== messageId);
   const id = crypto.createHash("sha1").update(messageId).digest("hex").slice(0, 12);
   const fileName = `${id}.webp`;
@@ -753,7 +759,7 @@ async function storeIncomingMediaArtifact(message, chatId, context = {}) {
   const paths = chatPaths(chatId);
   const mimeType = media.mimetype.split(";")[0].trim();
   const kind = mediaKind(mimeType, message.type);
-  const fileName = media.filename || `whatsapp-${message.id?._serialized || Date.now()}.${mediaExtension(mimeType)}`;
+  const fileName = media.filename || `whatsapp-${serializedWhatsAppId(message.id) || Date.now()}.${mediaExtension(mimeType)}`;
   await mkdir(paths.mediaTmpDir, { recursive: true });
   const tmpPath = path.join(paths.mediaTmpDir, `${crypto.randomUUID()}-${fileName.replace(/[^a-zA-Z0-9._-]/g, "_")}`);
   const buffer = Buffer.from(media.data, "base64");
@@ -765,7 +771,7 @@ async function storeIncomingMediaArtifact(message, chatId, context = {}) {
       fileName,
       kind,
       mimeType,
-      source: { type: "tool", toolName, whatsappMessageId: message.id?._serialized || "" },
+      source: { type: "tool", toolName, whatsappMessageId: serializedWhatsAppId(message.id) },
       metadata: { whatsappFrom: message.from, whatsappAuthor: message.author || "", whatsappType: message.type }
     });
   } finally {
@@ -802,7 +808,7 @@ async function captureIncomingMessage(ownerChatId, message) {
   const location = locationFromMessage(message);
   const reactions = await reactionsFromMessage(message);
   const inboxMessage = {
-    id: message.id?._serialized || `${message.from}-${message.timestamp}-${Date.now()}`,
+    id: serializedWhatsAppId(message.id) || `${message.from}-${message.timestamp}-${Date.now()}`,
     from: chatId,
     chatId,
     chatName: compact(chat?.name || ""),
@@ -1025,7 +1031,7 @@ class SessionManager {
     record.lastActivity = Date.now();
     const message = await findSentMessageToDelete(record.client, job);
     if (!message) throw new Error("No matching recent sent message found");
-    const messageId = message.id?._serialized || message.id?.id || String(message.id || "");
+    const messageId = serializedWhatsAppId(message.id);
     await message.delete(bool(job.everyone, true));
     record.lastActivity = Date.now();
     return { messageId, chatId: normalizeRecipient(job.to), sessionChatId: normalizeChatId(chatId), deleted: true };
@@ -1071,9 +1077,19 @@ class SessionManager {
     try {
       presence = await humanizeSend(record.client, whatsappChatId, job);
       const sendOptions = messageSendOptions(job);
-      const sent = await withOperationTimeout(async () => (job.mediaPath
-        ? record.client.sendMessage(whatsappChatId, MessageMedia.fromFilePath(job.mediaPath), { ...sendOptions, caption: job.message || "", sendMediaAsSticker: bool(job.asSticker, false) })
-        : record.client.sendMessage(whatsappChatId, job.message, sendOptions)), number(job.sendTimeoutMs, 45000), "WhatsApp send");
+      const sent = await withOperationTimeout(async () => {
+        const content = job.mediaPath ? MessageMedia.fromFilePath(job.mediaPath) : job.message;
+        const options = job.mediaPath
+          ? { ...sendOptions, caption: job.message || "", sendMediaAsSticker: bool(job.asSticker, false) }
+          : sendOptions;
+        try {
+          return await record.client.sendMessage(whatsappChatId, content, options);
+        } catch (error) {
+          if (String(error?.message || error) !== "r") throw error;
+          const chat = await record.client.getChatById(whatsappChatId);
+          return chat.sendMessage(content, options);
+        }
+      }, number(job.sendTimeoutMs, 45000), "WhatsApp send");
       await finishHumanizeSend(record.client, presence);
       record.lastActivity = Date.now();
       return { chatId: whatsappChatId, sessionChatId: normalizeChatId(chatId), messageId: serializedMessageId(sent) };
@@ -1319,20 +1335,31 @@ async function humanizeSend(client, whatsappChatId, job) {
   let chat = null;
   try {
     if (client?.sendPresenceAvailable) {
-      await client.sendPresenceAvailable();
-      online = true;
+      try {
+        await client.sendPresenceAvailable();
+        online = true;
+      } catch {
+        // Presence is cosmetic; do not block an outgoing message.
+      }
     }
     if (onlineLeadMs > 0) await sleep(onlineLeadMs);
-    chat = await client.getChatById(whatsappChatId);
+    try {
+      chat = await client.getChatById(whatsappChatId);
+    } catch {
+      // Chat lookup is only needed for typing and may be incompatible with a new WA Web build.
+    }
     const startedAt = Date.now();
-    while (Date.now() - startedAt < typingMs) {
-      if (chat?.sendStateTyping) await chat.sendStateTyping();
-      await sleep(Math.min(7000, typingMs - (Date.now() - startedAt)));
+    while (chat?.sendStateTyping && Date.now() - startedAt < typingMs) {
+      try {
+        await chat.sendStateTyping();
+      } catch {
+        // WhatsApp Web currently throws `r` for typing on some chats; send anyway.
+        break;
+      }
+      const remainingMs = typingMs - (Date.now() - startedAt);
+      if (remainingMs > 0) await sleep(Math.min(7000, remainingMs));
     }
     return { online };
-  } catch (error) {
-    if (online && client?.sendPresenceUnavailable) await client.sendPresenceUnavailable().catch(() => {});
-    throw error;
   } finally {
     if (chat?.clearState) await chat.clearState().catch(() => {});
   }
@@ -1348,7 +1375,7 @@ async function finishHumanizeSend(client, presence) {
 }
 
 function serializedMessageId(message) {
-  return message?.id?._serialized || message?.id?.id || String(message?.id || "");
+  return serializedWhatsAppId(message?.id);
 }
 
 function messageAgeMs(message) {
@@ -1368,10 +1395,16 @@ function sentMessageMatchesJob(message, job, { contains = false, withinMs = 0 } 
 }
 
 async function findRecentSentMatching(client, job, options = {}) {
-  const whatsappChatId = normalizeRecipient(job.to);
-  const chat = await client.getChatById(whatsappChatId);
-  const messages = await chat.fetchMessages({ limit: number(job.limit, 30) });
-  return [...messages].reverse().find((message) => sentMessageMatchesJob(message, job, options)) || null;
+  try {
+    const whatsappChatId = normalizeRecipient(job.to);
+    const chat = await client.getChatById(whatsappChatId);
+    if (!chat?.fetchMessages) return null;
+    const messages = await chat.fetchMessages({ limit: number(job.limit, 30) });
+    return [...messages].reverse().find((message) => sentMessageMatchesJob(message, job, options)) || null;
+  } catch {
+    // Dedupe/recovery must never prevent a fresh send when WA Web message lookup changes.
+    return null;
+  }
 }
 
 async function findSentMessageToDelete(client, job) {
@@ -1382,7 +1415,9 @@ async function findSentMessageToDelete(client, job) {
 
 function messageSendOptions(job = {}) {
   const quotedMessageId = String(job.quotedMessageId || job.quoteMessageId || job.replyTo || "").trim();
-  return quotedMessageId ? { quotedMessageId } : {};
+  const options = { sendSeen: false };
+  if (quotedMessageId) options.quotedMessageId = quotedMessageId;
+  return options;
 }
 
 function sendTimingArgs(args = {}) {

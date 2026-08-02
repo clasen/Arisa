@@ -39,6 +39,16 @@
       "required": false,
       "prompt": "Optional path to Chrome/Chromium executable for WhatsApp Web."
     },
+    "WEB_VERSION": {
+      "type": "string",
+      "required": false,
+      "prompt": "Optional WhatsApp Web version override. Leave empty to use the current library default."
+    },
+    "WEB_VERSION_CACHE_STRICT": {
+      "type": "string",
+      "required": false,
+      "prompt": "Whether to require the cached WhatsApp Web bundle for WEB_VERSION: true or false."
+    },
     "IDLE_SHUTDOWN_MS": {
       "type": "string",
       "required": false,
