@@ -219,7 +219,7 @@ function buildStartupMessage(chatMeta = {}) {
   return "Arisa is back online.";
 }
 
-async function collectText(session, prompt, { logger, chatId, onSlowPrompt } = {}) {
+export async function collectText(session, prompt, { logger, chatId, onSlowPrompt } = {}) {
   let text = "";
   let assistantErrorMessage = "";
   let shouldSeparateAssistantMessage = false;
@@ -235,8 +235,13 @@ async function collectText(session, prompt, { logger, chatId, onSlowPrompt } = {
       }
       text += event.assistantMessageEvent.delta;
     }
-    if (event.type === "message_end" && event.message?.stopReason === "error") {
-      assistantErrorMessage = event.message.errorMessage || "assistant message ended with error";
+    if (event.type === "message_end" && event.message?.role === "assistant") {
+      if (event.message.stopReason === "error") {
+        assistantErrorMessage = event.message.errorMessage || "assistant message ended with error";
+      } else if (event.message.stopReason !== "aborted") {
+        // Auto-compaction and retry can emit a transient error before a successful continuation.
+        assistantErrorMessage = "";
+      }
     }
     const logMessage = sessionEventLogMessage(event);
     if (logMessage) logger?.log("agent", `chat ${chatId} ${logMessage}`);

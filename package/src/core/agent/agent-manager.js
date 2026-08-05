@@ -24,6 +24,33 @@ const arisaToolNames = [
   "send_artifact"
 ];
 
+export const defaultScheduledTaskListLimit = 50;
+export const maxScheduledTaskListLimit = 100;
+
+export function selectScheduledTasks(tasks = [], { status, limit = defaultScheduledTaskListLimit } = {}) {
+  const parsedLimit = Number(limit);
+  const resolvedLimit = Math.min(
+    Math.max(Number.isFinite(parsedLimit) ? Math.trunc(parsedLimit) : defaultScheduledTaskListLimit, 1),
+    maxScheduledTaskListLimit
+  );
+  const allTasks = Array.isArray(tasks) ? tasks : [];
+  const orderedTasks = status
+    ? [...allTasks].reverse()
+    : [
+        ...allTasks.filter((task) => task.status === "pending" || task.status === "running").reverse(),
+        ...allTasks.filter((task) => task.status !== "pending" && task.status !== "running").reverse()
+      ];
+  const visibleTasks = orderedTasks.slice(0, resolvedLimit);
+
+  return {
+    tasks: visibleTasks,
+    total: allTasks.length,
+    returned: visibleTasks.length,
+    limit: resolvedLimit,
+    truncated: visibleTasks.length < allTasks.length
+  };
+}
+
 function isLocalBaseUrl(value) {
   if (typeof value !== "string" || !value.trim()) return false;
   try {
@@ -434,15 +461,20 @@ export class AgentManager {
       defineTool({
         name: "list_scheduled_tasks",
         label: "List scheduled tasks",
-        description: "List scheduled async tasks for the current Telegram chat.",
+        description: "List scheduled async tasks for the current Telegram chat. Results default to 50 tasks, always include pending/running tasks, and accept an optional limit up to 100.",
         parameters: Type.Object({
-          status: Type.Optional(Type.String())
+          status: Type.Optional(Type.String()),
+          limit: Type.Optional(Type.Integer({ minimum: 1, maximum: maxScheduledTaskListLimit }))
         }),
         execute: async (_id, params) => {
           const tasks = await this.taskStore.list({ chatId, status: params.status });
+          const result = selectScheduledTasks(tasks, {
+            status: params.status,
+            limit: params.limit
+          });
           return {
-            content: [{ type: "text", text: JSON.stringify(tasks, null, 2) }],
-            details: { tasks }
+            content: [{ type: "text", text: JSON.stringify(result, null, 2) }],
+            details: result
           };
         }
       }),
