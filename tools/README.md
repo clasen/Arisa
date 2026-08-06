@@ -7,6 +7,7 @@ This is the official Arisa tool catalog. Each subdirectory is a self-contained t
 | Tool | Function | Input | Output | Requires | Install footprint |
 |------|----------|-------|--------|----------|-------------------|
 | [`audio-extractor`](./audio-extractor/) | Extracts and normalizes audio from video or audio media via ffmpeg | audio + video | `audio/wav`, `audio/mpeg` | ffmpeg + ffprobe | Medium — 0 npm deps + external binaries |
+| [`campaign-draft-runner`](./campaign-draft-runner/) | Discovers and verifies public editorial contacts, filters prior recipients, researches coverage, and creates profile-driven Gmail drafts without sending | `text/plain`, `application/json` | `application/json`, `text/plain` | `pr-campaign`, `gmail-workspace`, and optionally `web-browser` | Medium — 0 npm deps + Gmail setup |
 | [`context-vault`](./context-vault/) | Stores, searches, updates, and forgets chat-scoped user context and preferences | `text/plain`, `application/json` | `text/plain`, `application/json` | - | Low — 1 npm dep |
 | [`file-document`](./file-document/) | Returns an existing local file as a document artifact | `text/plain` | `text/markdown`, `text/plain`, `application/octet-stream` | - | Low — 0 npm deps |
 | [`gmail-workspace`](./gmail-workspace/) | Reads, searches, sends, and manages Gmail through Google Workspace CLI using OAuth/API credentials | `text/plain`, `application/json` | `text/plain`, `application/json` | Google Workspace OAuth/API credentials | Medium — 1 npm dep + OAuth setup |
