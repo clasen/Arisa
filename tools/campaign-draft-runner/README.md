@@ -46,6 +46,7 @@ Minimal profile structure:
   "discovery": {
     "enabled": true,
     "webTool": "web-browser",
+    "minEligiblePool": 3,
     "queriesPerRun": 2,
     "maxResults": 6,
     "queries": ["topic publication editor contact"]
@@ -81,4 +82,4 @@ Minimal profile structure:
 }
 ```
 
-Use `action: "status"` to inspect campaign and Gmail draft counts.
+Use `action: "status"` to inspect campaign and Gmail draft counts. `minEligiblePool` asks discovery to maintain a backlog of unused, eligible contacts so recurring one-draft runs do not depend on finding a new contact during every interval.

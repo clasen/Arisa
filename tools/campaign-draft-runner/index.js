@@ -454,12 +454,15 @@ async function handleRun(request) {
     let allContacts = await listAllContacts(arisa, profile);
     let candidateContacts = await listContacts(arisa, profile);
     const draftRecipients = await gmailDraftRecipients(arisa, profile);
-    let selected = chooseContacts(allContacts, candidateContacts, draftRecipients, profile, limit);
-    const discovery = await discoverContacts(arisa, request.chatId, profile, allContacts, draftRecipients, limit - selected.length);
+    const poolTarget = Math.max(limit, Number(profile.discovery?.minEligiblePool || limit));
+    let eligiblePool = chooseContacts(allContacts, candidateContacts, draftRecipients, profile, poolTarget);
+    let selected = eligiblePool.slice(0, limit);
+    const discovery = await discoverContacts(arisa, request.chatId, profile, allContacts, draftRecipients, poolTarget - eligiblePool.length);
     if (discovery.found) {
       allContacts = await listAllContacts(arisa, profile);
       candidateContacts = await listContacts(arisa, profile);
-      selected = chooseContacts(allContacts, candidateContacts, draftRecipients, profile, limit);
+      eligiblePool = chooseContacts(allContacts, candidateContacts, draftRecipients, profile, poolTarget);
+      selected = eligiblePool.slice(0, limit);
     }
     const verified = [];
     const drafted = [];
@@ -484,6 +487,8 @@ async function handleRun(request) {
       profile: profile.name,
       dryRun,
       candidates: candidateContacts.length,
+      eligiblePool: eligiblePool.length,
+      poolTarget,
       discovery,
       selected: selected.map((contact) => ({ email: contact.email, outlet: contact.outlet, score: scoreContact(contact, profile), language: detectLanguage(contact, profile) })),
       verified: verified.length,
