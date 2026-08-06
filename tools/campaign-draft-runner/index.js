@@ -19,7 +19,7 @@ Usage:
   node index.js run --request-file <json>
 
 Actions via args.action:
-  run-batch   Verify contacts selected by a profile and create Gmail drafts only. args: profile?, limit?, dryRun?
+  run-batch   Verify contacts selected by a profile and create Gmail drafts only. args: profile?, limit?, dryRun?, untilDrafted?, retryDelaySeconds?
   status      Return campaign status and Gmail draft count. args: profile?
 
 Profiles live under the chat-scoped state directory:
@@ -537,13 +537,30 @@ async function handleRun(request) {
   }
 }
 
+function wait(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+async function runRequest(request) {
+  if (!truthy(request.args?.untilDrafted) || request.args?.action === "status" || truthy(request.args?.dryRun)) {
+    return handleRun(request);
+  }
+  let attempts = 0;
+  while (true) {
+    attempts += 1;
+    const output = await handleRun(request);
+    if (output.drafted > 0) return { ...output, attempts };
+    await wait(Math.max(5_000, Number(request.args?.retryDelaySeconds || 15) * 1000));
+  }
+}
+
 async function main() {
   const [command, flag, requestFile] = process.argv.slice(2);
   if (command === "--help" || command === "help" || !command) return printHelp();
   if (command !== "run" || flag !== "--request-file" || !requestFile) throw new Error("Usage: node index.js run --request-file <json>");
   try {
     const request = JSON.parse(await readFile(requestFile, "utf8"));
-    const output = await handleRun(request);
+    const output = await runRequest(request);
     console.log(JSON.stringify({ ok: true, output: { text: JSON.stringify(output, null, 2), json: output, mimeType: "application/json" } }));
   } catch (error) {
     console.log(JSON.stringify({ ok: false, error: error?.message || String(error) }));

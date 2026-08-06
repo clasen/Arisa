@@ -83,3 +83,5 @@ Minimal profile structure:
 ```
 
 Use `action: "status"` to inspect campaign and Gmail draft counts. `minEligiblePool` asks discovery to maintain a backlog of unused, eligible contacts so recurring one-draft runs do not depend on finding a new contact during every interval.
+
+Set `untilDrafted: "true"` on a non-dry run to retry discovery with rotating queries until at least one new draft is created. `retryDelaySeconds` controls the pause between attempts.
