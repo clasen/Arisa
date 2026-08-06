@@ -169,6 +169,24 @@ function pageLooksEditorial(result, page, settings) {
   return !matchesAny(text, settings.pageExcludePatterns || []);
 }
 
+function contactPageUrls(text, sourceUrl, limit = 2) {
+  let source;
+  try { source = new URL(sourceUrl); }
+  catch { return []; }
+  const urls = [];
+  const matches = String(text || "").matchAll(/\[[^\]]*\]\((https?:\/\/[^)\s]+|\/[^)\s]+)\)/g);
+  for (const match of matches) {
+    try {
+      const url = new URL(match[1], source);
+      if (url.hostname.replace(/^www\./i, "") !== source.hostname.replace(/^www\./i, "")) continue;
+      if (!/(contact|about|team|staff|editor|press|write-for-us|submit)/i.test(`${url.pathname}${url.search}`)) continue;
+      if (!urls.includes(url.toString())) urls.push(url.toString());
+      if (urls.length >= limit) break;
+    } catch {}
+  }
+  return urls;
+}
+
 async function readDiscoveryState(chatId) {
   const file = path.join(getChatToolStateDir(chatId, toolName), "discovery-state.json");
   try {
@@ -219,7 +237,7 @@ async function discoverContacts(arisa, chatId, profile, allContacts, draftRecipi
       if (added.length >= needed) break;
       const outlet = resultOutlet(result);
       const key = outletKey({ outlet });
-      if (seenUrls.has(result.url) || (profile.selection?.skipOutletsAlreadyUsed !== false && usedOutlets.has(key))) {
+      if (profile.selection?.skipOutletsAlreadyUsed !== false && usedOutlets.has(key)) {
         skippedUsed += 1;
         continue;
       }
@@ -232,7 +250,17 @@ async function discoverContacts(arisa, chatId, profile, allContacts, draftRecipi
         continue;
       }
       if (!pageLooksEditorial(result, page, settings)) continue;
-      const emails = emailAddresses(`${result.snippet}\n${page.text || ""}`)
+      let pageText = page.text || "";
+      if (!emailAddresses(`${result.snippet}\n${pageText}`).length) {
+        for (const contactUrl of contactPageUrls(pageText, result.url, Number(settings.contactPagesPerResult || 2))) {
+          try {
+            const contactPage = await runTool(arisa, webTool, { mode: "open", url: contactUrl }, Number(settings.timeoutMs || 90_000));
+            pagesOpened += 1;
+            pageText += `\n${contactPage.text || ""}`;
+          } catch {}
+        }
+      }
+      const emails = emailAddresses(`${result.snippet}\n${pageText}`)
         .filter((email) => !knownEmails.has(email))
         .filter((email) => discoveryEmailScore(email) > 0 || (creatorSource(result) && discoveryEmailScore(email) > -100))
         .sort((a, b) => discoveryEmailScore(b) - discoveryEmailScore(a));

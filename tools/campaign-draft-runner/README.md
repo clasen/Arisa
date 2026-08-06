@@ -5,7 +5,7 @@ Runs recurring, profile-driven outreach research and creates Gmail drafts. It ne
 The tool can:
 
 - select unused contacts from `pr-campaign`;
-- discover public editorial contacts through `web-browser` when the eligible pool runs low;
+- discover public editorial contacts through `web-browser`, following same-site contact and staff links when result pages do not expose an address;
 - reject previously used recipients and outlets;
 - verify email domains before drafting;
 - research coverage on the contact's own site;
