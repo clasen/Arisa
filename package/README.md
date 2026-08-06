@@ -36,7 +36,7 @@ On EmulatorBench, it built SEGA Genesis and Game Boy Color emulators from scratc
 
 Prime Intellect also reports **95.5% Best@1 on ARC-AGI-3 with Opus 5**, just above the reported 95.4% human-expert baseline. These are Prime Agent results, not Arisa benchmarks.
 
-![Prime Agent ARC-AGI-3 test-time compute scaling](https://raw.githubusercontent.com/clasen/Arisa/main/package/docs/images/prime-agent-arc-agi-3.jpeg)
+![Prime Agent ARC-AGI-3 test-time compute scaling](./package/docs/images/prime-agent-arc-agi-3.jpeg)
 
 ## Core concept
 
