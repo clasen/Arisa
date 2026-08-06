@@ -3,12 +3,13 @@
 ## Core boundaries
 Arisa core owns transport, sessions, artifacts, and tool orchestration:
 - Telegram transport handles inbound and outbound messaging.
-- Pi Agent keeps one session per authorized chat.
+- The active agent runtime keeps one session per authorized chat; Prime is the default for new installs and Pi is temporary rollback support.
 - Incoming messages and files (text, voice, photo, document) and generated files become artifacts.
 - The tool registry handles tool discovery, help lookup, config writes, and execution.
 - Tools are isolated packages with their own manifest, entrypoint, and config defaults.
 - No tools ship with the core; installed tools live under `~/.arisa/tools/<toolName>`.
 - The Arisa install directory (your working directory) contains only the core. Never create or install tools inside it.
+- The pinned Prime runtime is installed and checksum-verified by Arisa under `~/.arisa/runtimes/prime-agent/<version>`; it is separate from mutable Prime state.
 
 New capabilities belong in tools by default. Solve requests by creating or editing a tool under `~/.arisa/tools/<toolName>`. Modifying core is the last resort: do it only after confirming the capability cannot be delivered through the tool architecture, explaining why the core change is unavoidable, and receiving explicit user approval.
 
@@ -20,6 +21,7 @@ Do not build runtime paths by hand. Use `src/runtime/paths.js`:
 - `getChatArtifactsDir(chatId)` / `getChatArtifactsIndexFile(chatId)`: chat artifacts and artifact index. Artifacts are never global.
 - `getChatToolConfigPath(chatId, toolName)`: chat-scoped config overrides.
 - `getToolTmpDir(toolName)` / `getChatToolTmpDir(chatId, toolName)`: ephemeral scratch. Create only while a request runs; remove when empty.
+- `primeRuntimesDir`: root for immutable, versioned Prime Agent installs managed by Arisa. Prime auth, sessions, kernels, and other mutable state do not belong there.
 
 Tools receive `chatId` from the registry. Any persisted or indexed user content must be scoped by chat. Avoid ad hoc roots like `~/.arisa/state/<toolName>`, `~/.arisa/state/chats`, or runtime data inside `~/.arisa/tools/<toolName>`.
 
@@ -74,37 +76,37 @@ const result = await arisa.tools.run({
 }, { timeoutMs: 120_000 });
 ```
 
-The IPC channel is a local socket under `~/.arisa/state`. Every request must include `toolName`; chat-scoped capabilities also require `chatId`. Exposed capabilities are explicit: tools (`run`), artifacts (`createText`, `listRecent`, `get`), tasks (`add`, `list`, `cancel`), agent events (`enqueueEvent`), and runtime paths (`getChatToolStateDir`, `getToolStateDir`, `getChatToolTmpDir`, `getToolTmpDir`, `getChatArtifactsDir`). Do not expose raw `agentManager`, `taskStore`, `artifactStore`, or `toolRegistry` access.
+The IPC channel is a local socket under `~/.arisa/state`. Every request must include `toolName`; chat-scoped capabilities also require `chatId`. Prime bridge requests additionally carry a random capability token bound to that chat. Exposed capabilities are explicit: tools (`list`, `help`, `skills`, `setConfig`, `run`), artifacts (`createText`, `listRecent`, `get`, `deliver`), tasks (`add`, `list`, `cancel`, `cancelAll`), agent events (`enqueueEvent`), and runtime paths (`getChatToolStateDir`, `getToolStateDir`, `getChatToolTmpDir`, `getToolTmpDir`, `getChatArtifactsDir`). Do not expose raw `agentManager`, `taskStore`, `artifactStore`, or `toolRegistry` access.
 
 ## Conceptual pipe model
 There are two different moments where pipes can happen:
 
 1. **Pre-reasoning normalization pipes**
-   - These happen before Pi Agent reasons.
-   - Their job is to convert raw inbound media into a form Pi Agent can reason about well.
+   - These happen before the active agent runtime reasons.
+   - Their job is to convert raw inbound media into a form the agent can reason about well.
    - Example: incoming Telegram audio must be transcribed first.
-   - In that case, the transcript becomes the effective user message content for Pi Agent.
-   - Pi Agent should reason over the transcript, not treat the raw audio as the primary message.
+   - In that case, the transcript becomes the effective user message content for the agent.
+   - The agent should reason over the transcript, not treat the raw audio as the primary message.
 
 2. **Reasoned action pipes**
-   - These happen after Pi Agent starts reasoning.
-   - Pi Agent may decide to chain tools to achieve a user goal.
+   - These happen after the agent starts reasoning.
+   - The agent may decide to chain tools to achieve a user goal.
    - Example: text -> TTS audio, or future multi-step workflows.
 
-Not every pipe should be decided by Pi Agent at runtime. Some pipes are part of the transport/input normalization layer and must happen before reasoning.
+Not every pipe should be decided by the agent at runtime. Some pipes are part of the transport/input normalization layer and must happen before reasoning.
 
 ## Telegram inbound pipeline
-- text -> send directly to Pi Agent
-- voice -> transcribe first -> send transcript to Pi Agent
+- text -> send directly to the active agent runtime
+- voice -> transcribe first -> send transcript to the active agent runtime
 - image/document/other media -> keep as artifacts, and add normalization pipes when needed
 
-If inbound media was normalized before reasoning, Pi Agent should use the normalized result as the actual message content.
-For example, if a voice note was transcribed, Pi Agent should answer the meaning of the transcript, not simply return the raw transcript unless the user explicitly asked for transcription.
+If inbound media was normalized before reasoning, the agent should use the normalized result as the actual message content.
+For example, if a voice note was transcribed, the agent should answer the meaning of the transcript, not simply return the raw transcript unless the user explicitly asked for transcription.
 
 ## Telegram outbound replies
 - Short textual replies are sent inline as a normal Telegram message.
 - When a textual reply is too large to read comfortably inline, it is delivered as a generated Markdown artifact instead of a long inline message. The transport handles this automatically in `sendTextReply`: replies over the inline length limit become a `reply-<timestamp>.md` artifact sent as a document.
-- This is a transport-layer concern. Pi Agent should write the full answer it wants to deliver and not pre-split or truncate it to fit the chat; the transport decides between inline text and a Markdown attachment.
+- This is a transport-layer concern. The agent should write the full answer it wants to deliver and not pre-split or truncate it to fit the chat; the transport decides between inline text and a Markdown attachment.
 
 ## How to inspect CLI tools
 Before using a tool, inspect its help:
@@ -152,11 +154,11 @@ Example manual pipe:
 Delivery is generic: any `run_tool` output that produces a file becomes an artifact, and `send_artifact(artifactId)` delivers it to the chat. The delivery method and filename are derived from the artifact (its `delivery` hint, `kind`, and stored name); internal local paths are never exposed. No caption is sent by default: the filename already appears on the attachment, so it is never duplicated into the caption text (which would let Telegram autolink a filename like `example.md` as a URL). A caption is shown only when an explicit one is passed. Tools declare their delivery intent by returning `delivery: { method }` in their output; they do not deliver to the transport themselves. As a shortcut, `run_tool` accepts `deliver: true` to generate and deliver in a single step; use it only when the user should receive the file now, not for intermediate pipe steps.
 
 ## Async event queue flow
-Beyond time-based scheduling, tools can drive an event queue that wakes the agent only when there is something to evaluate. Everything goes through the `asyncTask` (single) or `asyncTasks` (array) field the pipeline already supports; no new Pi tools are needed. The 1s poller drains tasks by `kind`:
+Beyond time-based scheduling, tools can drive an event queue that wakes the agent only when there is something to evaluate. Everything goes through the `asyncTask` (single) or `asyncTasks` (array) field the pipeline already supports; no new native agent tools are needed. The 1s poller drains tasks by `kind`:
 
-- `agent_task`: a scheduled prompt. The poller delivers it as a prompt for Pi to fulfill (time-based work).
+- `agent_task`: a scheduled prompt. The poller delivers it as a prompt for the active runtime to fulfill (time-based work).
 - `poll_tool`: a recurring checker the poller **runs directly as a tool** (no agent turn spent). The poller materializes its output with the same logic as `run_tool`, so any `agent_event` the checker emits is enqueued for the next tick. Its `recurrence` reschedules the next poll.
-- `agent_event`: an incoming event. The poller delivers it as a prompt so Pi evaluates it and decides the next action (it may stay silent).
+- `agent_event`: an incoming event. The poller delivers it as a prompt so the active runtime evaluates it and decides the next action (it may stay silent).
 
 Tasks without a `runAt` fire immediately, so `agent_event` and the first `poll_tool` run on the next tick.
 

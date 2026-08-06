@@ -120,9 +120,11 @@ test("requires chatId for chat-scoped IPC methods", async () => {
     "artifacts.createText",
     "artifacts.listRecent",
     "artifacts.get",
+    "artifacts.deliver",
     "tasks.add",
     "tasks.list",
     "tasks.cancel",
+    "tasks.cancelAll",
     "agent.enqueueEvent",
     "paths.getChatToolStateDir",
     "paths.getChatToolTmpDir",
@@ -138,6 +140,44 @@ test("requires chatId for chat-scoped IPC methods", async () => {
       new RegExp(`${method.replace(".", "\\.")} requires chatId`)
     );
   }
+});
+
+test("delivers only artifacts resolved from the requesting chat", async () => {
+  const artifact = { id: "artifact-1", chatId: "chat-a", path: "/safe/chat-a/file.txt" };
+  const deliveries = [];
+  const capabilities = createCapabilities({
+    artifactStore: {
+      forChat: (chatId) => ({
+        get: async (artifactId) => String(chatId) === "chat-a" && artifactId === artifact.id ? artifact : null
+      })
+    },
+    agentManager: {
+      authorizePrimeCapability: (chatId, token) => chatId === "chat-a" && token === "bound-token",
+      deliverArtifact: async (payload) => {
+        deliveries.push(payload);
+        return { ok: true };
+      }
+    }
+  });
+
+  await assert.rejects(() => capabilities.dispatch({
+    method: "artifacts.deliver",
+    toolName: "prime-agent-bridge",
+    chatId: "chat-b",
+    capabilityToken: "bound-token",
+    params: { artifactId: "artifact-1", path: artifact.path }
+  }), /invalid Prime chat capability/);
+  assert.equal(deliveries.length, 0);
+
+  await capabilities.dispatch({
+    method: "artifacts.deliver",
+    toolName: "prime-agent-bridge",
+    chatId: "chat-a",
+    capabilityToken: "bound-token",
+    params: { artifactId: "artifact-1", path: "/attacker/chosen/path" }
+  });
+  assert.equal(deliveries.length, 1);
+  assert.equal(deliveries[0].artifact.path, artifact.path);
 });
 
 test("normalizes tool run args and rejects arrays", async () => {

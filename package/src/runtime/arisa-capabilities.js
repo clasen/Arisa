@@ -41,9 +41,37 @@ function normalizeLimit(limit) {
   return Math.min(value, 100);
 }
 
-export function createArisaCapabilities({ artifactStore, taskStore, agentManager } = {}) {
-  async function dispatch({ method, toolName, chatId = null, params = {} } = {}) {
+export function createArisaCapabilities({ artifactStore, taskStore, toolRegistry, agentManager } = {}) {
+  async function dispatch({ method, toolName, chatId = null, capabilityToken = "", params = {} } = {}) {
     const scopedToolName = requireToolName(toolName);
+    if (scopedToolName === "prime-agent-bridge" && !agentManager?.authorizePrimeCapability?.(chatId, capabilityToken)) {
+      throw new Error("invalid Prime chat capability");
+    }
+
+    if (method === "tools.list") {
+      await toolRegistry.load();
+      return toolRegistry.list();
+    }
+
+    if (method === "tools.help") {
+      await toolRegistry.load();
+      return toolRegistry.help(requireString(params.name, "name"));
+    }
+
+    if (method === "tools.skills") {
+      await toolRegistry.load();
+      return toolRegistry.resolveSkills(requireString(params.name, "name"));
+    }
+
+    if (method === "tools.setConfig") {
+      await toolRegistry.load();
+      return toolRegistry.setConfig(
+        requireString(params.name, "name"),
+        requireString(params.field, "field"),
+        requireString(params.value, "value"),
+        requireChatId(chatId, method)
+      );
+    }
 
     if (method === "tools.run") {
       if (!agentManager?.runTool) {
@@ -90,6 +118,20 @@ export function createArisaCapabilities({ artifactStore, taskStore, agentManager
       return artifactStore.forChat(scopedChatId).get(requireString(params.artifactId, "artifactId"));
     }
 
+    if (method === "artifacts.deliver") {
+      const scopedChatId = requireChatId(chatId, method);
+      const artifactId = requireString(params.artifactId, "artifactId");
+      const artifact = await artifactStore.forChat(scopedChatId).get(artifactId);
+      if (!artifact?.path) throw new Error(`Artifact not found or has no file: ${artifactId}`);
+      if (!agentManager?.deliverArtifact) throw new Error("artifact delivery is unavailable");
+      return agentManager.deliverArtifact({
+        chatId: scopedChatId,
+        artifact,
+        caption: params.caption,
+        method: params.method
+      });
+    }
+
     if (method === "tasks.add") {
       const scopedChatId = requireChatId(chatId, method);
       return taskStore.add(params.task || {}, {
@@ -116,6 +158,11 @@ export function createArisaCapabilities({ artifactStore, taskStore, agentManager
         throw new Error("task does not belong to chatId");
       }
       return taskStore.cancel(taskId);
+    }
+
+    if (method === "tasks.cancelAll") {
+      const scopedChatId = requireChatId(chatId, method);
+      return taskStore.cancelAll({ chatId: scopedChatId });
     }
 
     if (method === "agent.enqueueEvent") {

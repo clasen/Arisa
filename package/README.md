@@ -1,38 +1,54 @@
 # Arisa
 
-[Arisa](https://arisa.sh) is a personal assistant you talk to through Telegram, powered by [Pi Agent](https://pi.dev).
+[Arisa](https://arisa.sh) is a personal assistant you talk to through Telegram, powered by [Prime Agent](https://github.com/PrimeIntellect-ai/prime-agent).
 
 ## Origin
 
-The initial inspiration was OpenClaw, which has interesting ideas but carries a lot of weight (about **85 MB**, **55 dependencies**) compared to Arisa (**37 kB**, **3 dependencies**): when it generates tools they end up disorganized, and the overall framework feels overloaded.
+The initial inspiration was OpenClaw, which has interesting ideas but carries a lot of weight compared with Arisa's focused core: when it generates tools they end up disorganized, and the overall framework feels overloaded.
 
 The real heart of OpenClaw is Pi Agent: a [minimal terminal coding harness](https://www.youtube.com/watch?v=Dli5slNaJu0) that lets an AI agent reason and act with very little infrastructure. That part is genuinely good.
 
 Telegram bots, on the other hand, work extremely well as a human interface. Simple, reliable, always in your pocket.
 
-So Arisa keeps exactly those two things (Pi Agent & Telegram) and nothing more. No pre-loaded opinions about what the agent should do or which tools it should have. The idea is that the agent builds itself around the user, not the other way around.
+Arisa now keeps Telegram as its interface and uses Prime Agent as its reasoning engine, while retaining Pi temporarily as a rollback runtime for existing installations.
 
 It is designed around a simple idea:
 
 - **Telegram is the human interface**
-- **Pi Agent is the reasoning engine**
+- **Prime Agent is the reasoning engine**
 - **everything is an artifact**
 - **capabilities live in isolated CLI tools**
 - **tools can be chained through pipes**
 
 If a capability does not exist yet, the system adds a new tool for it. The agent grows from real use, not from assumptions.
 
+## Why Prime Agent changes the equation
+
+Prime Agent is more than a model backend. Its [RLM and Continual Harness architecture](https://www.primeintellect.ai/blog/prime-agent) puts context, delegation, and adaptation inside the reasoning loop:
+
+- **Programmatic context:** persistent IPython keeps history, tools, and working data addressable as variables.
+- **Recursive workers:** sub-agents are asynchronous function calls with their own session, history, and kernel. They can run in parallel, stay in the background, and be resumed later.
+- **Evidence-backed improvement:** `/refine` turns actual outcomes into small, durable updates to prompts, memories, skills, or sub-agent specifications.
+
+That is Arisa's architectural differential from [OpenClaw](https://github.com/openclaw/openclaw): OpenClaw offers a broad Gateway for channels, devices, apps, and plugins; Arisa keeps a focused Telegram, artifact, and CLI-tool shell while Prime supplies recursive, long-horizon reasoning.
+
+On EmulatorBench, it built SEGA Genesis and Game Boy Color emulators from scratch in Rust, reproducing target hardware behavior against diagnostic tests.
+
+Prime Intellect also reports **95.5% Best@1 on ARC-AGI-3 with Opus 5**, just above the reported 95.4% human-expert baseline. These are Prime Agent results, not Arisa benchmarks.
+
+![Prime Agent ARC-AGI-3 test-time compute scaling](docs/images/prime-agent-arc-agi-3.jpeg)
+
 ## Core concept
 
 Arisa separates two different kinds of pipes:
 
 1. **Pre-reasoning normalization pipes**
-   - These happen before Pi Agent reasons.
+   - These happen before Prime Agent reasons.
    - Example: a Telegram voice message is transcribed first.
-   - Pi Agent then reasons over the transcript, not over the raw audio.
+   - Prime Agent then reasons over the transcript, not over the raw audio.
 
 2. **Reasoned action pipes**
-   - These happen after Pi Agent starts reasoning.
+   - These happen after Prime Agent starts reasoning.
    - Example: text -> TTS audio.
    - Future tools can form larger chains.
 
@@ -40,7 +56,7 @@ This distinction is important. Some transformations belong to the transport/inpu
 
 ## Zero tools, assembled on demand
 
-A fresh install ships with **zero tools**. The core is only Telegram transport, the Pi Agent reasoning loop, the artifact store, and the tool registry. Out of the box Arisa cannot transcribe audio, browse the web, or speak; it gains each capability only once a tool that provides it is installed.
+A fresh install ships with **zero Arisa modular tools**. The core is Telegram transport, the Prime Agent reasoning loop with its native IPython tool, the artifact store, and the tool registry. Out of the box Arisa cannot transcribe audio, browse the web, or speak; it gains each capability only once a tool that provides it is installed.
 
 Arisa assembles its own toolset from real use:
 
@@ -55,8 +71,8 @@ The result is a toolset shaped by how you actually use the assistant, not by def
 ## Current behavior
 
 ### Telegram input
-- text messages go directly to Pi Agent
-- audio/voice messages are transcribed first when a transcription tool is installed, then passed to Pi Agent as text; otherwise the agent is told transcription failed and can offer to install one
+- text messages go directly to Prime Agent
+- audio/voice messages are transcribed first when a transcription tool is installed, then passed to Prime Agent as text; otherwise the agent is told transcription failed and can offer to install one
 - media is stored as artifacts
 
 ### Tool model
@@ -86,7 +102,8 @@ All runtime state lives under `~/.arisa/`, split between global state and per-ch
 
 Global:
 - runtime config is stored in `~/.arisa/state/config.json`
-- Pi OAuth credentials are stored in `~/.arisa/state/pi-auth.json`
+- Prime auth is stored in `~/.arisa/state/prime-agent/auth.json`; compatible Pi OAuth credentials are copied there with `0600` permissions
+- managed Prime releases live under `~/.arisa/runtimes/prime-agent/<version>/`
 - the scheduled-task queue is stored in `~/.arisa/state/tasks.json`
 - installed tools live under `~/.arisa/tools/<tool>/`, each with a default `config.js` template
 - global tool runtime state (daemons, caches, temp) lives under `~/.arisa/state/tools/<tool>/`
@@ -94,7 +111,7 @@ Global:
 Per chat (`~/.arisa/chats/<chatId>/`):
 - artifact files are stored under `artifacts/`
 - the artifact index is stored in `state/artifacts.json`
-- the Pi session lives under `state/pi-sessions/`
+- Prime sessions live under `state/prime-sessions/<revision>/`; legacy Pi sessions remain under `state/pi-sessions/`
 - chat-scoped tool config overrides live in `config/tools/<tool>/config.js`
 - chat-scoped daemon infrastructure lives in `state/tools/<tool>/daemon/`; persistent tool data stays beside it
 - ephemeral scratch lives under `tmp/`
@@ -117,6 +134,25 @@ Then run:
 arisa
 ```
 
+On first start, Arisa downloads the pinned Prime Agent release, verifies its
+official SHA-256 checksum, and installs it privately under
+`~/.arisa/runtimes/prime-agent/<version>/`. It never installs Prime globally and
+does not depend on a `prime-agent` command already being present on `PATH`.
+
+Arisa intentionally rejects other Prime versions until their RPC contract passes
+the Arisa test suite. Prime runs IPython kernels and recursive workers with the
+permissions of your user account; it is not a sandbox.
+
+To use an externally managed Prime installation instead, configure an explicit
+command:
+
+```bash
+arisa --agent.runtime prime --prime.command /absolute/path/to/prime-agent
+```
+
+`PRIME_AGENT_DOWNLOAD_BASE_URL` may point managed installs at a trusted HTTPS
+mirror with the same versioned tarball and `SHA256SUMS` layout.
+
 Command modes:
 
 ```bash
@@ -131,12 +167,32 @@ arisa --silent           # run without verbose logs
 Runtime model override (current process only):
 
 ```bash
-arisa --pi.model lmstudio/google/gemma-4-26b-a4b
+arisa --agent.runtime prime --prime.model lmstudio/google/gemma-4-26b-a4b
 ```
 
 Notes:
 
 - it only affects the current Arisa process and does not update `~/.arisa/state/config.json`
+- `--pi.*` remains a deprecated alias for `--prime.*` while the Prime runtime is active
+
+## Prime migration and rollback
+
+New installs use `agent.runtime: "prime"`. Existing installs remain on Pi until
+that setting is changed, so one pilot chat can be validated before changing the
+default service configuration. During this transition:
+
+- Prime configuration, auth, and kernels live in `~/.arisa/state/prime-agent/`
+- Prime chat sessions live in `state/prime-sessions/<revision>/`
+- existing `state/pi-sessions/` JSONL files remain untouched
+- the first Prime session creates a bounded, secret-sanitized handoff from the
+  latest Pi session when possible
+- setting `agent.runtime` back to `"pi"` rolls back to the preserved Pi runtime
+- Prime schedules and heartbeats are not exposed; Arisa remains the source of
+  truth for Telegram, tools, artifacts, tasks, and polling
+
+Prime stays alive per active chat and closes after 90 idle minutes by default.
+An RPC crash during a turn is reported as an interruption; Arisa does not claim
+that work continued after the process was lost.
 
 ## Multiple instances
 
@@ -174,6 +230,8 @@ src/
     pi-auth.json
     tasks.json
     tools/<tool>/     global tool state (daemons, caches, tmp)
+  runtimes/
+    prime-agent/<version>/  verified managed Prime release
   tools/<tool>/       installed tools (catalog, user-chosen, or agent-created)
   chats/<chatId>/
     artifacts/        per-chat artifact files
@@ -201,7 +259,7 @@ No "I can't do that" when the thing is realistically buildable.
 
 ## Notes
 
-- `AGENTS.md` defines the project-level behavioral rules for Pi Agent
+- `AGENTS.md` defines the project-level behavioral rules for the active agent runtime
 - `src/transport/telegram/bot.js` builds the per-message runtime prompt
 - tool help is part of the architecture and should be consulted before use when details are unclear
 
@@ -210,7 +268,7 @@ No "I can't do that" when the thing is realistically buildable.
 This is currently a functional V1. The core provides:
 
 - Telegram transport
-- Pi Agent integration
+- Prime Agent v0.7.0 RPC integration, with temporary Pi rollback support
 - artifact-based message handling
 - the isolated CLI tool registry (starts empty)
 - pre-reasoning and post-reasoning pipes

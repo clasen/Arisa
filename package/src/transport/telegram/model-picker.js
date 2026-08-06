@@ -1,6 +1,10 @@
 import { formatPiModelOption } from "../../core/agent/pi-runtime.js";
 import { buildPagedInlineKeyboard } from "./paged-inline-keyboard.js";
 
+export function reverseModelOrder(models) {
+  return [...models].reverse();
+}
+
 export function parseModelPickerAction(data) {
   if (data === "noop:page") return { type: "noop", value: null };
   const match = /^(model|model-page):(\d+)$/.exec(String(data || ""));

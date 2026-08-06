@@ -22,16 +22,46 @@ export const piConfigDefaults = Object.freeze({
   thinkingLevel: "medium"
 });
 
+export const primeConfigDefaults = Object.freeze({
+  command: "",
+  version: "0.7.0",
+  thinkingLevel: "medium",
+  idleMinutes: 90
+});
+
+function cloneChatModels(chatModels) {
+  if (!chatModels || typeof chatModels !== "object") return chatModels;
+  return Object.fromEntries(Object.entries(chatModels).map(([chatId, selection]) => [
+    chatId,
+    selection && typeof selection === "object" ? { ...selection } : selection
+  ]));
+}
+
 export function applyConfigDefaults(config) {
+  const legacyPi = config.pi || {};
+  const configuredPrime = config.prime || {};
   return {
     ...config,
+    agent: {
+      runtime: "pi",
+      ...(config.agent || {})
+    },
     telegram: {
       ...telegramConfigDefaults,
       ...(config.telegram || {})
     },
     pi: {
       ...piConfigDefaults,
-      ...(config.pi || {})
+      ...legacyPi
+    },
+    prime: {
+      ...primeConfigDefaults,
+      provider: configuredPrime.provider ?? legacyPi.provider,
+      model: configuredPrime.model ?? legacyPi.model,
+      apiKey: configuredPrime.apiKey ?? legacyPi.apiKey,
+      workspaceDir: configuredPrime.workspaceDir ?? legacyPi.workspaceDir,
+      chatModels: cloneChatModels(configuredPrime.chatModels ?? legacyPi.chatModels),
+      ...configuredPrime
     },
     daemons: {
       ...daemonConfigDefaults,

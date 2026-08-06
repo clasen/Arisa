@@ -3,11 +3,11 @@ import path from "node:path";
 import { authorizeChat } from "./auth.js";
 import { captureIncomingArtifact, formatLocationText } from "./media.js";
 import { buildDeviceCodeTelegramMessage } from "./device-code-message.js";
-import { buildEffortPicker, buildModelPicker, parseEffortPickerAction, parseModelPickerAction } from "./model-picker.js";
+import { buildEffortPicker, buildModelPicker, parseEffortPickerAction, parseModelPickerAction, reverseModelOrder } from "./model-picker.js";
 import { renderTelegramHtml } from "./text-format.js";
 import { buildPiAuthRecoveryBlockedMessage, buildPiAuthTelegramMessage, getErrorMessage, getPiAuthIssue, getPiAuthStatus } from "../../core/agent/auth-flow.js";
 import { createPiOAuthLogin } from "../../core/agent/pi-auth-login.js";
-import { resolveChatModel, resolveChatThinkingLevel, selectChatModel, selectChatThinkingLevel } from "../../core/agent/model-selection.js";
+import { getAgentConfig, resolveChatModel, resolveChatThinkingLevel, selectChatModel, selectChatThinkingLevel } from "../../core/agent/model-selection.js";
 import { clampModelThinkingLevel, createPiRuntime, listModelThinkingLevels, listProviderModels, modelSupportsThinking } from "../../core/agent/pi-runtime.js";
 import { normalizeArtifactForReasoning, shouldNormalizeArtifactToText } from "../../core/artifacts/normalize-for-reasoning.js";
 
@@ -69,7 +69,7 @@ export function shouldIncludeArtifactReference({ artifact, messageText = "" } = 
   return !isInlineTextArtifact(artifact, messageText);
 }
 
-export function buildPrompt({ ctx, artifact, transcript, toolResult }) {
+export function buildPrompt({ ctx, artifact, transcript, toolResult, runtime = "pi" }) {
   const parts = [
     `Incoming Telegram message.`,
     `chatId: ${ctx.chat.id}`,
@@ -97,7 +97,9 @@ export function buildPrompt({ ctx, artifact, transcript, toolResult }) {
     parts.push(`Important: pre-reasoning media normalization could not be completed, so you do not have a transcript for this audio/video message.`);
   }
 
-  parts.push(`Use read/write/edit for file work in the active workspace, bash for bash-compatible commands, and system_shell for native system commands such as PowerShell on Windows.`);
+  parts.push(runtime === "prime"
+    ? `Use Prime's persistent ipython tool for file work, shell commands, and programmatic exploration in the active workspace.`
+    : `Use read/write/edit for file work in the active workspace, bash for bash-compatible commands, and system_shell for native system commands such as PowerShell on Windows.`);
   parts.push(`If you need an Arisa modular CLI tool, use list_tools/tool_help/run_tool.`);
   parts.push(`If a tool config is missing, ask the user naturally and then use set_tool_config.`);
   parts.push(`To deliver a file to the chat: run_tool with deliver:true to generate and send in one step, or send_artifact with an existing artifactId (e.g. an inbound file).`);
@@ -113,7 +115,7 @@ function buildNewSessionPrompt(ctx) {
   ].join("\n");
 }
 
-async function buildAsyncTaskPrompt({ task, artifactStore, toolRegistry, logger }) {
+async function buildAsyncTaskPrompt({ task, artifactStore, toolRegistry, logger, runtime = "pi" }) {
   const taskText = task.payload.prompt || "";
   const parts = [
     "Scheduled task fired.",
@@ -157,11 +159,13 @@ async function buildAsyncTaskPrompt({ task, artifactStore, toolRegistry, logger 
   }
 
   parts.push("Treat this as a new request for the chat and fulfill it now.");
-  parts.push("If needed, use read/write/edit, bash, system_shell, or Arisa modular tools via run_tool.");
+  parts.push(runtime === "prime"
+    ? "If needed, use Prime's persistent ipython tool or Arisa modular tools via run_tool."
+    : "If needed, use read/write/edit, bash, system_shell, or Arisa modular tools via run_tool.");
   return parts.filter(Boolean).join("\n");
 }
 
-function buildAsyncEventPrompt(task) {
+function buildAsyncEventPrompt(task, runtime = "pi") {
   return [
     "External event arrived.",
     `taskId: ${task.id}`,
@@ -169,7 +173,9 @@ function buildAsyncEventPrompt(task) {
     task.payload.prompt ? `event: ${task.payload.prompt}` : null,
     "A polling checker detected this external event. Evaluate it and decide the next action.",
     "If it warrants no action, you may stay silent.",
-    "If needed, use read/write/edit, bash, system_shell, or Arisa modular tools via run_tool."
+    runtime === "prime"
+      ? "If needed, use Prime's persistent ipython tool or Arisa modular tools via run_tool."
+      : "If needed, use read/write/edit, bash, system_shell, or Arisa modular tools via run_tool."
   ].filter(Boolean).join("\n");
 }
 
@@ -310,6 +316,7 @@ export async function createTelegramBot({ config, artifactStore, toolRegistry, t
   const perChatState = new Map();
   const notifiedPromptErrors = new WeakSet();
   const authRenewals = new Map();
+  const pendingPrimeUi = new Map();
   let piAuthIssue = null;
   let taskTimer = null;
 
@@ -355,7 +362,8 @@ export async function createTelegramBot({ config, artifactStore, toolRegistry, t
   async function finishAuthRenewal(chatId, renewal) {
     try {
       await renewal.promise;
-      await agentManager.validatePiAgent();
+      await agentManager.syncPrimeCredentials?.();
+      await agentManager.validateAgent();
       agentManager.clearSessionCache(chatId);
       piAuthIssue = null;
       logger?.log("telegram", `Pi auth renewal completed for chat ${chatId}`);
@@ -440,18 +448,22 @@ export async function createTelegramBot({ config, artifactStore, toolRegistry, t
     return perChatState.get(chatId);
   }
 
-  function getProviderModels() {
+  async function getProviderModels(chatId) {
+    if (config.agent?.runtime === "prime") {
+      return reverseModelOrder(await agentManager.getAvailableModels(chatId));
+    }
     const runtime = createPiRuntime({
       provider: config.pi.provider,
       apiKey: config.pi.apiKey
     });
-    return listProviderModels(config.pi.provider, runtime);
+    return reverseModelOrder(listProviderModels(config.pi.provider, runtime));
   }
 
   async function showModelPicker(ctx, page = 0) {
+    const agentConfig = getAgentConfig(config);
     const picker = buildModelPicker({
-      provider: config.pi.provider,
-      models: getProviderModels(),
+      provider: agentConfig.provider,
+      models: await getProviderModels(ctx.chat.id),
       selectedModelId: resolveChatModel(config, ctx.chat.id),
       selectedThinkingLevel: resolveChatThinkingLevel(config, ctx.chat.id),
       page,
@@ -466,10 +478,11 @@ export async function createTelegramBot({ config, artifactStore, toolRegistry, t
   }
 
   async function showEffortPicker(ctx, { model, modelIndex, selectedThinkingLevel } = {}) {
-    const models = getProviderModels();
+    const agentConfig = getAgentConfig(config);
+    const models = await getProviderModels(ctx.chat.id);
     const resolvedModel = model || models.find((item) => item.id === resolveChatModel(config, ctx.chat.id));
     if (!resolvedModel) {
-      throw new Error(`Model not found for provider ${config.pi.provider}`);
+      throw new Error(`Model not found for provider ${agentConfig.provider}`);
     }
     if (!modelSupportsThinking(resolvedModel)) {
       const text = `${resolvedModel.provider}/${resolvedModel.id} does not support effort levels.`;
@@ -496,20 +509,23 @@ export async function createTelegramBot({ config, artifactStore, toolRegistry, t
   }
 
   async function persistChatModel(chatId, model, thinkingLevel) {
+    const agentConfig = getAgentConfig(config);
     const key = chatKey(chatId);
-    const hadSelections = Boolean(config.pi.chatModels);
-    const previousSelection = config.pi.chatModels?.[key];
+    const hadSelections = Boolean(agentConfig.chatModels);
+    const previousSelection = agentConfig.chatModels?.[key];
     const level = clampModelThinkingLevel(model, thinkingLevel ?? resolveChatThinkingLevel(config, chatId));
+    await agentManager.setPrimeModel?.(chatId, model);
     selectChatModel(config, chatId, model, { thinkingLevel: level });
     try {
       await saveConfig(config);
     } catch (error) {
       if (previousSelection) {
-        config.pi.chatModels[key] = previousSelection;
+        agentConfig.chatModels[key] = previousSelection;
       } else {
-        delete config.pi.chatModels[key];
-        if (!hadSelections) delete config.pi.chatModels;
+        delete agentConfig.chatModels[key];
+        if (!hadSelections) delete agentConfig.chatModels;
       }
+      if (config.agent?.runtime === "prime") agentManager.clearSessionCache(chatId);
       throw error;
     }
     agentManager.resetSession(chatId);
@@ -517,20 +533,23 @@ export async function createTelegramBot({ config, artifactStore, toolRegistry, t
   }
 
   async function persistChatEffort(chatId, model, thinkingLevel) {
+    const agentConfig = getAgentConfig(config);
     const key = chatKey(chatId);
-    const hadSelections = Boolean(config.pi.chatModels);
-    const previousSelection = config.pi.chatModels?.[key];
+    const hadSelections = Boolean(agentConfig.chatModels);
+    const previousSelection = agentConfig.chatModels?.[key];
     const level = clampModelThinkingLevel(model, thinkingLevel);
+    await agentManager.setPrimeThinkingLevel?.(chatId, level);
     selectChatThinkingLevel(config, chatId, level);
     try {
       await saveConfig(config);
     } catch (error) {
       if (previousSelection) {
-        config.pi.chatModels[key] = previousSelection;
+        agentConfig.chatModels[key] = previousSelection;
       } else {
-        delete config.pi.chatModels[key];
-        if (!hadSelections) delete config.pi.chatModels;
+        delete agentConfig.chatModels[key];
+        if (!hadSelections) delete agentConfig.chatModels;
       }
+      if (config.agent?.runtime === "prime") agentManager.clearSessionCache(chatId);
       throw error;
     }
     return level;
@@ -547,7 +566,7 @@ export async function createTelegramBot({ config, artifactStore, toolRegistry, t
     if (shouldNormalizeArtifactToText(artifact) && !transcript) {
       logger?.log("telegram", `media normalization unavailable for chat ${ctx.chat.id}: ${toolResult?.error || toolResult?.missingConfig?.join(", ") || "unknown error"}`);
     }
-    return buildPrompt({ ctx, artifact, transcript, toolResult });
+    return buildPrompt({ ctx, artifact, transcript, toolResult, runtime: config.agent?.runtime });
   }
 
   async function sendTextReply({ sendText, sendDocument, chatId, text }) {
@@ -588,6 +607,83 @@ export async function createTelegramBot({ config, artifactStore, toolRegistry, t
     };
   }
 
+  function finishPrimeUi(chatId, response) {
+    const key = chatKey(chatId);
+    const pending = pendingPrimeUi.get(key);
+    if (!pending) return false;
+    pendingPrimeUi.delete(key);
+    clearTimeout(pending.timer);
+    pending.resolve(response);
+    return true;
+  }
+
+  async function handlePrimeUiRequest(chatId, request) {
+    const params = request.params || request;
+    const method = request.method;
+    const message = params.message || params.title || `Prime Agent requests ${method}.`;
+    if (method === "notify") {
+      await bot.api.sendMessage(chatId, message);
+      return {};
+    }
+
+    const key = chatKey(chatId);
+    finishPrimeUi(chatId, { cancelled: true });
+    const token = Math.random().toString(36).slice(2, 10);
+    const promise = new Promise((resolve) => {
+      const timeoutMs = Number(params.timeoutMs || params.timeout || 300_000);
+      const timer = setTimeout(() => finishPrimeUi(chatId, { cancelled: true }), Math.max(timeoutMs, 60_000));
+      timer.unref?.();
+      pendingPrimeUi.set(key, { method, params, token, resolve, timer });
+    });
+
+    if (method === "select") {
+      const options = Array.isArray(params.options) ? params.options : [];
+      const rows = options.map((option, index) => ([{
+        text: typeof option === "string" ? option : (option.label || option.value || String(index + 1)),
+        callback_data: `primeui:${token}:${index}`
+      }]));
+      rows.push([{ text: "Cancel", callback_data: `primeui:${token}:cancel` }]);
+      await bot.api.sendMessage(chatId, message, { reply_markup: { inline_keyboard: rows } });
+    } else if (method === "confirm") {
+      await bot.api.sendMessage(chatId, message, {
+        reply_markup: { inline_keyboard: [[
+          { text: "Yes", callback_data: `primeui:${token}:yes` },
+          { text: "No", callback_data: `primeui:${token}:no` }
+        ]] }
+      });
+    } else if (method === "input" || method === "editor") {
+      await bot.api.sendMessage(chatId, `${message}\nReply to this chat with the value.`);
+    } else {
+      finishPrimeUi(chatId, { cancelled: true });
+    }
+    return promise;
+  }
+
+  agentManager.setPrimeUiHandler?.(handlePrimeUiRequest);
+  agentManager.setPrimeOutputHandler?.(async (chatId, text) => {
+    await sendTextReply({
+      sendText: (message, extra) => bot.api.sendMessage(chatId, message, extra),
+      sendDocument: (file, extra) => bot.api.sendDocument(chatId, file, extra),
+      chatId,
+      text
+    });
+  });
+  agentManager.setArtifactDeliveryHandler?.(async ({ chatId, artifact, caption, method }) => {
+    const resolvedMethod = method
+      || artifact.metadata?.delivery?.method
+      || (artifact.kind === "audio" || artifact.mimeType?.startsWith("audio/") ? "audio"
+        : artifact.kind === "image" || artifact.mimeType?.startsWith("image/") ? "photo"
+          : artifact.kind === "video" || artifact.mimeType?.startsWith("video/") ? "video"
+            : "document");
+    const safeCaption = caption && !/(^|\s)(\/[^\s]|[A-Za-z]:[\\/])/.test(caption) ? caption : undefined;
+    await createTelegramSessionBridge(chatId).sendMedia(artifact.path, {
+      method: resolvedMethod,
+      caption: safeCaption,
+      filename: path.basename(artifact.path)
+    });
+    return { ok: true, artifactId: artifact.id, method: resolvedMethod };
+  });
+
   async function processPromptForChat({ chatId, prompt, ctx = null }) {
     const work = async () => {
       const { session } = await agentManager.getSessionContext(chatId, createTelegramSessionBridge(chatId));
@@ -602,7 +698,11 @@ export async function createTelegramBot({ config, artifactStore, toolRegistry, t
           )
         });
       } catch (error) {
-        agentManager.resetSession(chatId);
+        if (config.agent?.runtime === "prime") {
+          agentManager.clearSessionCache(chatId);
+        } else {
+          agentManager.resetSession(chatId);
+        }
         throw error;
       }
       if (text) {
@@ -722,7 +822,7 @@ export async function createTelegramBot({ config, artifactStore, toolRegistry, t
       logger?.log("tasks", `running task ${task.id} for chat ${chatId}`);
       await enqueuePrompt({
         chatId,
-        prompt: await buildAsyncTaskPrompt({ task, artifactStore, toolRegistry, logger }),
+        prompt: await buildAsyncTaskPrompt({ task, artifactStore, toolRegistry, logger, runtime: config.agent?.runtime }),
         label: `scheduled task ${task.id}`
       });
       await taskStore.complete(task.id);
@@ -733,7 +833,7 @@ export async function createTelegramBot({ config, artifactStore, toolRegistry, t
       logger?.log("tasks", `agent event ${task.id} for chat ${chatId}`);
       await enqueuePrompt({
         chatId,
-        prompt: buildAsyncEventPrompt(task),
+        prompt: buildAsyncEventPrompt(task, config.agent?.runtime),
         label: `agent event ${task.id}`
       });
       await taskStore.complete(task.id);
@@ -848,7 +948,8 @@ export async function createTelegramBot({ config, artifactStore, toolRegistry, t
     if (status.hasApiKey || !status.supportsOAuth) {
       await withTyping(ctx, async () => {
         try {
-          await agentManager.validatePiAgent();
+          await agentManager.syncPrimeCredentials?.();
+          await agentManager.validateAgent();
           agentManager.clearSessionCache(ctx.chat.id);
           piAuthIssue = null;
           await ctx.reply(buildPiAuthTelegramMessage({ config, verified: true }));
@@ -873,7 +974,52 @@ export async function createTelegramBot({ config, artifactStore, toolRegistry, t
     }
   });
 
+  bot.command("login", async (ctx) => {
+    const auth = await authorizeChat({ config, chatId: ctx.chat.id, saveConfig, chatMeta: getIncomingChatMeta(ctx) });
+    if (!auth.ok) return;
+    if (config.agent?.runtime !== "prime") {
+      await ctx.reply("/login is available when agent.runtime is set to prime. Use /auth for the Pi rollback runtime.");
+      return;
+    }
+    try {
+      await enqueuePrompt({ chatId: ctx.chat.id, prompt: "/login", label: "Prime login command", ctx });
+      await agentManager.validateAgent();
+      agentManager.clearSessionCache(ctx.chat.id);
+      piAuthIssue = null;
+      await ctx.reply("Prime Agent authentication is working.");
+    } catch (error) {
+      const issue = rememberPiAuthIssue(error) || { kind: "validation-failed", message: getErrorMessage(error) };
+      piAuthIssue = issue;
+      await ctx.reply(`Prime Agent login could not be validated: ${getErrorMessage(error)}`);
+    }
+  });
+
   bot.on("callback_query:data", async (ctx, next) => {
+    const primeUiMatch = /^primeui:([a-z0-9]+):(.+)$/.exec(ctx.callbackQuery.data);
+    if (primeUiMatch) {
+      const pending = pendingPrimeUi.get(chatKey(ctx.chat.id));
+      if (!pending || pending.token !== primeUiMatch[1]) {
+        await ctx.answerCallbackQuery({ text: "This Prime Agent request has expired." });
+        return;
+      }
+      const choice = primeUiMatch[2];
+      if (pending.method === "confirm") {
+        finishPrimeUi(ctx.chat.id, choice === "yes" ? { confirmed: true } : { confirmed: false });
+      } else if (pending.method === "select") {
+        const index = Number(choice);
+        const option = pending.params.options?.[index];
+        if (choice === "cancel" || option == null) {
+          finishPrimeUi(ctx.chat.id, { cancelled: true });
+        } else {
+          finishPrimeUi(ctx.chat.id, { value: typeof option === "string" ? option : (option.value ?? option.label) });
+        }
+      } else {
+        finishPrimeUi(ctx.chat.id, { cancelled: true });
+      }
+      await ctx.answerCallbackQuery();
+      await ctx.editMessageReplyMarkup({ reply_markup: { inline_keyboard: [] } }).catch(() => {});
+      return;
+    }
     const modelAction = parseModelPickerAction(ctx.callbackQuery.data);
     const effortAction = modelAction ? null : parseEffortPickerAction(ctx.callbackQuery.data);
     const action = modelAction || effortAction;
@@ -896,7 +1042,7 @@ export async function createTelegramBot({ config, artifactStore, toolRegistry, t
         return;
       }
 
-      const models = getProviderModels();
+      const models = await getProviderModels(ctx.chat.id);
       const chatBusy = getChatState(ctx.chat.id).processing;
 
       if (action.type === "select") {
@@ -1055,6 +1201,18 @@ export async function createTelegramBot({ config, artifactStore, toolRegistry, t
 
     if (await submitAuthRenewalInput(ctx)) return;
 
+    const pendingUi = pendingPrimeUi.get(chatKey(ctx.chat.id));
+    if (pendingUi && (pendingUi.method === "input" || pendingUi.method === "editor")) {
+      const value = getIncomingMessageText(ctx.message).trim();
+      if (!value) {
+        await ctx.reply("Please send a text value, or use the Prime Agent dialog again to cancel.");
+        return;
+      }
+      finishPrimeUi(ctx.chat.id, { value });
+      await ctx.reply("Got it. Continuing Prime Agent.");
+      return;
+    }
+
     if (piAuthIssue) {
       await ctx.reply(buildPiAuthRecoveryBlockedMessage({
         config,
@@ -1084,7 +1242,8 @@ export async function createTelegramBot({ config, artifactStore, toolRegistry, t
         { command: "new", description: "Start a new chat context" },
         { command: "model", description: "Choose the model for this chat" },
         { command: "effort", description: "Choose reasoning effort for this chat" },
-        { command: "auth", description: "Show Pi authentication status" }
+        { command: "auth", description: "Show authentication status" },
+        { command: "login", description: "Open Prime Agent login" }
       ]);
       if (!taskTimer) {
         taskTimer = setInterval(() => {

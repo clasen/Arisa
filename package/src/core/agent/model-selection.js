@@ -2,6 +2,10 @@ function chatKey(chatId) {
   return String(chatId);
 }
 
+export function getAgentConfig(config) {
+  return config?.agent?.runtime === "prime" ? config.prime : config.pi;
+}
+
 function normalizeSessionRevision(sessionRevision) {
   if (sessionRevision == null) return 0;
   if (!Number.isSafeInteger(sessionRevision) || sessionRevision < 0) {
@@ -11,12 +15,13 @@ function normalizeSessionRevision(sessionRevision) {
 }
 
 export function resolveChatModelSelection(config, chatId) {
-  const selection = config.pi.chatModels?.[chatKey(chatId)];
-  if (!selection || selection.provider !== config.pi.provider) {
+  const agentConfig = getAgentConfig(config);
+  const selection = agentConfig.chatModels?.[chatKey(chatId)];
+  if (!selection || selection.provider !== agentConfig.provider) {
     return {
-      provider: config.pi.provider,
-      model: config.pi.model,
-      thinkingLevel: config.pi.thinkingLevel,
+      provider: agentConfig.provider,
+      model: agentConfig.model,
+      thinkingLevel: agentConfig.thinkingLevel,
       sessionRevision: 0
     };
   }
@@ -24,7 +29,7 @@ export function resolveChatModelSelection(config, chatId) {
   return {
     provider: selection.provider,
     model: selection.model,
-    thinkingLevel: selection.thinkingLevel ?? config.pi.thinkingLevel,
+    thinkingLevel: selection.thinkingLevel ?? agentConfig.thinkingLevel,
     sessionRevision
   };
 }
@@ -38,13 +43,14 @@ export function resolveChatThinkingLevel(config, chatId) {
 }
 
 export function selectChatModel(config, chatId, model, { thinkingLevel } = {}) {
-  if (model.provider !== config.pi.provider) {
-    throw new Error(`Cannot select model from provider ${model.provider}; active provider is ${config.pi.provider}`);
+  const agentConfig = getAgentConfig(config);
+  if (model.provider !== agentConfig.provider) {
+    throw new Error(`Cannot select model from provider ${model.provider}; active provider is ${agentConfig.provider}`);
   }
-  config.pi.chatModels ||= {};
+  agentConfig.chatModels ||= {};
   const key = chatKey(chatId);
-  const sessionRevision = (config.pi.chatModels[key]?.sessionRevision || 0) + 1;
-  config.pi.chatModels[key] = {
+  const sessionRevision = (agentConfig.chatModels[key]?.sessionRevision || 0) + 1;
+  agentConfig.chatModels[key] = {
     provider: model.provider,
     model: model.id,
     thinkingLevel,
@@ -53,10 +59,11 @@ export function selectChatModel(config, chatId, model, { thinkingLevel } = {}) {
 }
 
 export function selectChatThinkingLevel(config, chatId, thinkingLevel) {
-  config.pi.chatModels ||= {};
+  const agentConfig = getAgentConfig(config);
+  agentConfig.chatModels ||= {};
   const key = chatKey(chatId);
   const current = resolveChatModelSelection(config, chatId);
-  config.pi.chatModels[key] = {
+  agentConfig.chatModels[key] = {
     provider: current.provider,
     model: current.model,
     thinkingLevel,

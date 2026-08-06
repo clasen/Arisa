@@ -73,6 +73,25 @@ test("applies runtime overrides without dropping persisted Pi config", () => {
   assert.equal(next.pi.shellTimeoutMs, 90000);
 });
 
+test("applies Prime overrides and accepts deprecated Pi aliases without coupling configs", () => {
+  const config = {
+    agent: { runtime: "prime" },
+    pi: { provider: "openai-codex", model: "old", apiKey: "pi-key" },
+    prime: { provider: "openai-codex", model: "current", apiKey: "prime-key", idleMinutes: 90 }
+  };
+  const explicit = applyRuntimeOverrides(config, {
+    prime: { model: "anthropic/claude", idleMinutes: "45" }
+  });
+  assert.equal(explicit.prime.provider, "anthropic");
+  assert.equal(explicit.prime.model, "claude");
+  assert.equal(explicit.prime.idleMinutes, 45);
+  assert.equal(explicit.pi.model, "old");
+
+  const aliased = applyRuntimeOverrides(config, { pi: { model: "openai-codex/new" } });
+  assert.equal(aliased.prime.model, "new");
+  assert.equal(aliased.pi.model, "old");
+});
+
 test("system_shell runs commands from the configured workspace", async () => {
   const workspaceDir = await mkdtemp(path.join(os.tmpdir(), "arisa-shell-"));
   const tool = createSystemShellTool({

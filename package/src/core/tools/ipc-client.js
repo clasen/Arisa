@@ -53,7 +53,12 @@ function requestIpc({ socketPath, request, timeoutMs = DEFAULT_TIMEOUT_MS }) {
   });
 }
 
-export function createArisaClient({ toolName, chatId = null, socketPath = process.env.ARISA_IPC_SOCKET || arisaIpcSocketFile } = {}) {
+export function createArisaClient({
+  toolName,
+  chatId = null,
+  capabilityToken = process.env.ARISA_IPC_TOKEN || "",
+  socketPath = process.env.ARISA_IPC_SOCKET || arisaIpcSocketFile
+} = {}) {
   if (typeof toolName !== "string" || !toolName.trim()) {
     throw new Error("toolName is required");
   }
@@ -66,6 +71,7 @@ export function createArisaClient({ toolName, chatId = null, socketPath = proces
       method,
       toolName,
       chatId,
+      capabilityToken,
       params
     }
   });
@@ -74,17 +80,23 @@ export function createArisaClient({ toolName, chatId = null, socketPath = proces
     artifacts: {
       createText: (params) => call("artifacts.createText", params),
       listRecent: (params) => call("artifacts.listRecent", params),
-      get: (params) => call("artifacts.get", params)
+      get: (params) => call("artifacts.get", params),
+      deliver: (params) => call("artifacts.deliver", params, { timeoutMs: 120_000 })
     },
     tasks: {
       add: (params) => call("tasks.add", params),
       list: (params) => call("tasks.list", params),
-      cancel: (params) => call("tasks.cancel", params)
+      cancel: (params) => call("tasks.cancel", params),
+      cancelAll: () => call("tasks.cancelAll")
     },
     agent: {
       enqueueEvent: (params) => call("agent.enqueueEvent", params)
     },
     tools: {
+      list: () => call("tools.list"),
+      help: (params) => call("tools.help", params),
+      skills: (params) => call("tools.skills", params),
+      setConfig: (params) => call("tools.setConfig", params),
       run: (params, options) => call("tools.run", params, options)
     },
     paths: {

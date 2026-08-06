@@ -14,12 +14,13 @@ import {
   listModelThinkingLevels,
   modelSupportsThinking
 } from "../src/core/agent/pi-runtime.js";
-import { getChatPiSessionsDir } from "../src/runtime/paths.js";
+import { getChatPiSessionsDir, getChatPrimeSessionsDir } from "../src/runtime/paths.js";
 import {
   buildEffortPicker,
   buildModelPicker,
   parseEffortPickerAction,
-  parseModelPickerAction
+  parseModelPickerAction,
+  reverseModelOrder
 } from "../src/transport/telegram/model-picker.js";
 
 function createConfig() {
@@ -62,6 +63,23 @@ test("starts a distinct persisted Pi session revision on every model change", ()
     getChatPiSessionsDir(123, config.pi.chatModels["123"].sessionRevision),
     path.join(getChatPiSessionsDir(123), "2")
   );
+});
+
+test("uses isolated Prime selections and session revisions", () => {
+  const config = applyConfigDefaults({
+    agent: { runtime: "prime" },
+    telegram: {},
+    pi: {
+      provider: "openai-codex",
+      model: "pi-model",
+      chatModels: { "123": { provider: "openai-codex", model: "pi-chat", sessionRevision: 2 } }
+    }
+  });
+  selectChatModel(config, 123, { provider: "openai-codex", id: "prime-model" }, { thinkingLevel: "high" });
+  assert.equal(config.prime.chatModels["123"].model, "prime-model");
+  assert.equal(config.prime.chatModels["123"].sessionRevision, 3);
+  assert.equal(config.pi.chatModels["123"].model, "pi-chat");
+  assert.equal(getChatPrimeSessionsDir(123, 3), path.join(path.dirname(getChatPrimeSessionsDir(123)), "3"));
 });
 
 test("updates effort without bumping the session revision", () => {
@@ -118,6 +136,25 @@ test("builds a paged model picker and marks the current model", () => {
   assert.equal(picker.replyMarkup.inline_keyboard[0][0].callback_data, "model:0");
   assert.match(picker.replyMarkup.inline_keyboard[1][0].text, /^✓ gpt-b \[reasoning, image\]$/);
   assert.equal(picker.replyMarkup.inline_keyboard[2][1].callback_data, "model-page:1");
+});
+
+test("reverses model order without mutating the provider list", () => {
+  const models = [
+    { provider: "openai-codex", id: "gpt-old" },
+    { provider: "openai-codex", id: "gpt-current" },
+    { provider: "openai-codex", id: "gpt-new" }
+  ];
+
+  assert.deepEqual(reverseModelOrder(models).map((model) => model.id), [
+    "gpt-new",
+    "gpt-current",
+    "gpt-old"
+  ]);
+  assert.deepEqual(models.map((model) => model.id), [
+    "gpt-old",
+    "gpt-current",
+    "gpt-new"
+  ]);
 });
 
 test("builds an effort picker for the current model or pending model choice", () => {

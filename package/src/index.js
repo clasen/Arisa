@@ -1,7 +1,8 @@
 #!/usr/bin/env node
 
 import { bootstrapIfNeeded } from "./runtime/bootstrap.js";
-import { createApp } from "./runtime/create-app.js";
+import { applyRuntimeOverrides, createApp, prepareAgentRuntime } from "./runtime/create-app.js";
+import { loadConfig } from "./core/config/config-store.js";
 import { createLogger } from "./runtime/logger.js";
 import { getServiceStatus, registerServiceProcess, startService, stopService, unregisterServiceProcess } from "./runtime/service-manager.js";
 import { flushArisaHome } from "./runtime/flush.js";
@@ -69,17 +70,25 @@ function toNestedOverrides(nestedFlags) {
 
 function toServiceRunnerArgs(nestedFlags) {
   const args = [];
-  const serviceSafePiFlags = [
+  const serviceSafeAgentFlags = [
+    "agent.runtime",
     "pi.provider",
     "pi.model",
     "pi.workspaceDir",
     "pi.tools",
     "pi.excludeTools",
     "pi.shellPath",
-    "pi.shellTimeoutMs"
+    "pi.shellTimeoutMs",
+    "prime.provider",
+    "prime.model",
+    "prime.workspaceDir",
+    "prime.command",
+    "prime.version",
+    "prime.thinkingLevel",
+    "prime.idleMinutes"
   ];
 
-  for (const flag of serviceSafePiFlags) {
+  for (const flag of serviceSafeAgentFlags) {
     if (nestedFlags[flag]) {
       args.push(`--${flag}`, nestedFlags[flag]);
     }
@@ -117,6 +126,8 @@ async function startRuntimeApp() {
 }
 
 async function startBackgroundService() {
+  const persistedConfig = await loadConfig();
+  await prepareAgentRuntime(applyRuntimeOverrides(persistedConfig, runtimeOverrides), { logger });
   const result = await startService({ verbose, cliArgs: toServiceRunnerArgs(cli.nestedFlags) });
   if (!result.ok) {
     console.log(`Arisa is already running in background (pid ${result.pid}).`);
@@ -129,6 +140,12 @@ async function startBackgroundService() {
 
 async function runForeground() {
   const hasRuntimePiOverrides = Boolean(
+    runtimeOverrides?.prime?.model
+    || runtimeOverrides?.prime?.provider
+    || runtimeOverrides?.prime?.apiKey
+    || runtimeOverrides?.prime?.workspaceDir
+    || runtimeOverrides?.agent?.runtime
+    ||
     runtimeOverrides?.pi?.model
     || runtimeOverrides?.pi?.provider
     || runtimeOverrides?.pi?.apiKey

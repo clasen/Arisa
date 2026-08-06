@@ -12,6 +12,8 @@ import {
   getChatToolConfigPath,
   getChatToolStateDir,
   getToolStateDir,
+  primeRuntimesDir,
+  runtimesDir,
   stateDir
 } from "../src/runtime/paths.js";
 
@@ -57,6 +59,11 @@ test("creates POSIX IPC socket paths under the state directory", () => {
   });
 
   assert.equal(socketPath, path.join("/tmp/arisa-home", "state", "arisa.sock"));
+});
+
+test("keeps managed agent runtimes separate from mutable agent state", () => {
+  assert.equal(primeRuntimesDir, path.join(runtimesDir, "prime-agent"));
+  assert.equal(runtimesDir, path.join(path.dirname(stateDir), "runtimes"));
 });
 
 test("uses ARISA_HOME for instance-scoped paths", async (t) => {

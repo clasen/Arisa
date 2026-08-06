@@ -11,6 +11,8 @@ export const arisaHomeDir = process.env.ARISA_HOME
 export const stateDir = path.join(arisaHomeDir, "state");
 export const configFile = path.join(stateDir, "config.json");
 export const piAuthFile = path.join(stateDir, "pi-auth.json");
+export const primeStateDir = path.join(stateDir, "prime-agent");
+export const primeAuthFile = path.join(primeStateDir, "auth.json");
 export const servicePidFile = path.join(stateDir, "arisa.pid");
 export const serviceLogFile = path.join(stateDir, "arisa.log");
 export function createIpcSocketPath({ homeDir = arisaHomeDir, platform = process.platform } = {}) {
@@ -26,6 +28,8 @@ export const tasksFile = path.join(stateDir, "tasks.json");
 export const toolsDir = path.join(arisaHomeDir, "tools");
 export const chatsDir = path.join(arisaHomeDir, "chats");
 export const toolStateDir = path.join(stateDir, "tools");
+export const runtimesDir = path.join(arisaHomeDir, "runtimes");
+export const primeRuntimesDir = path.join(runtimesDir, "prime-agent");
 
 export function getChatDir(chatId) {
   return path.join(chatsDir, String(chatId));
@@ -82,6 +86,18 @@ export function getChatPiSessionsDir(chatId, sessionRevision = 0) {
     : path.join(sessionsDir, String(sessionRevision));
 }
 
+export function getChatPrimeSessionsDir(chatId, sessionRevision = 0) {
+  if (!Number.isSafeInteger(sessionRevision) || sessionRevision < 0) {
+    throw new Error(`Invalid Prime session revision: ${sessionRevision}`);
+  }
+  const sessionsDir = path.join(getChatDir(chatId), "state", "prime-sessions");
+  return path.join(sessionsDir, String(sessionRevision));
+}
+
+export function getChatPrimeHandoffFile(chatId, sessionRevision = 0) {
+  return path.join(getChatPrimeSessionsDir(chatId, sessionRevision), "arisa-handoff.txt");
+}
+
 export function getToolDir(toolName) {
   return path.join(toolsDir, toolName);
 }
@@ -116,7 +132,8 @@ export function getChatToolTmpDir(chatId, toolName) {
 
 export async function ensureArisaHome() {
   await mkdir(stateDir, { recursive: true });
+  await mkdir(primeStateDir, { recursive: true });
   await mkdir(toolsDir, { recursive: true });
   await mkdir(chatsDir, { recursive: true });
+  await mkdir(primeRuntimesDir, { recursive: true });
 }
-
