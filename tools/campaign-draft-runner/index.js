@@ -130,7 +130,8 @@ function parseSearchResults(text) {
 function emailAddresses(text) {
   const normalized = String(text || "")
     .replace(/\s*(?:\[at\]|\(at\))\s*/gi, "@")
-    .replace(/\s*(?:\[dot\]|\(dot\))\s*/gi, ".");
+    .replace(/\s*(?:\[dot\]|\(dot\))\s*/gi, ".")
+    .replace(/(?<=[a-z0-9])\s*DOT\s*(?=[a-z])/gi, ".");
   return [...new Set((normalized.match(/[a-z0-9.!#$%&'*+/=?^_`{|}~-]+@[a-z0-9.-]+\.[a-z]{2,}/gi) || []).map(normalizedEmail))];
 }
 
@@ -165,7 +166,9 @@ function pageLooksEditorial(result, page, settings) {
   const text = `${result.title} ${result.snippet} ${page.text || ""}`.toLowerCase();
   const editorialSignals = settings.editorialPatterns || ["review", "editor", "journalist", "magazine", "news", "podcast", "coverage", "critic", "newsletter", "youtube"];
   const gameSignals = settings.gamePatterns || ["video game", "videogame", "gaming", "mobile game", "indie game", "android game", "iphone game", "puzzle game", "adventure game"];
+  const requiredGroups = settings.pageRequiredKeywordGroups || [];
   if (!matchesAny(text, editorialSignals) || !matchesAny(text, gameSignals)) return false;
+  if (requiredGroups.some((patterns) => !matchesAny(text, patterns))) return false;
   return !matchesAny(text, settings.pageExcludePatterns || []);
 }
 
@@ -262,7 +265,11 @@ async function discoverContacts(arisa, chatId, profile, allContacts, draftRecipi
       }
       const emails = emailAddresses(`${result.snippet}\n${pageText}`)
         .filter((email) => !knownEmails.has(email))
-        .filter((email) => discoveryEmailScore(email) > 0 || (creatorSource(result) && discoveryEmailScore(email) > -100))
+        .filter((email) => {
+          const score = discoveryEmailScore(email);
+          const local = email.split("@")[0] || "";
+          return score > 0 || (score === 0 && local.length >= 6) || (creatorSource(result) && score > -100);
+        })
         .sort((a, b) => discoveryEmailScore(b) - discoveryEmailScore(a));
       const email = emails[0];
       if (!email) continue;
