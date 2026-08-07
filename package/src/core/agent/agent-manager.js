@@ -10,7 +10,7 @@ import { withTimeout } from "./prompt-timeout.js";
 import { buildPiToolPolicy, getCoreCodingTools } from "./core-tools.js";
 import { createSystemShellTool } from "./system-shell-tool.js";
 import { clampModelThinkingLevel } from "./pi-runtime.js";
-import { PrimeRpcSession } from "./prime-rpc-session.js";
+import { PrimeRpcSession, PrimeRpcSessionClosedError } from "./prime-rpc-session.js";
 import { syncPrimeAuth } from "./prime-auth.js";
 import {
   arisaHomeDir,
@@ -184,6 +184,7 @@ export class AgentManager {
     this.primeCapabilities = new Map();
     this.pendingPrimeSessions = new Map();
     this.sessionClosePromises = new Map();
+    this.primeSessionGenerations = new Map();
   }
 
   isPrimeRuntime() {
@@ -250,14 +251,38 @@ export class AgentManager {
     }
   }
 
-  trackPendingPrimeSession(sessionKey, modelKey, promise) {
+  trackPendingPrimeSession(sessionKey, modelKey, generation, promise) {
     const key = String(sessionKey);
-    this.pendingPrimeSessions.set(key, { modelKey, promise });
+    this.pendingPrimeSessions.set(key, { modelKey, generation, promise });
     void promise.finally(() => {
       if (this.pendingPrimeSessions.get(key)?.promise === promise) {
         this.pendingPrimeSessions.delete(key);
       }
     }).catch(() => {});
+  }
+
+  getPrimeSessionGeneration(sessionKey) {
+    return this.primeSessionGenerations.get(String(sessionKey)) || 0;
+  }
+
+  invalidatePrimeSessionGeneration(sessionKey) {
+    const key = String(sessionKey);
+    this.primeSessionGenerations.set(key, this.getPrimeSessionGeneration(key) + 1);
+  }
+
+  async acceptPrimeSessionGeneration(sessionKey, generation, context) {
+    const key = String(sessionKey);
+    if (this.getPrimeSessionGeneration(key) === generation) return context;
+
+    if (this.sessions.get(key) === context) this.sessions.delete(key);
+    const idleTimer = this.idleTimers.get(key);
+    if (idleTimer) clearTimeout(idleTimer);
+    this.idleTimers.delete(key);
+    this.primeCapabilities.delete(key);
+    context?.unsubscribe?.();
+    this.pendingNewSessions.add(key);
+    await context?.session?.close?.();
+    throw new PrimeRpcSessionClosedError("Prime RPC session reset during startup");
   }
 
   schedulePrimeIdleClose(sessionKey, session) {
@@ -283,6 +308,7 @@ export class AgentManager {
 
   resetSession(chatId, { handoff = "", parentSession = "" } = {}) {
     const sessionKey = String(chatId);
+    this.invalidatePrimeSessionGeneration(sessionKey);
     this.closeCachedSession(sessionKey);
     this.pendingNewSessions.add(sessionKey);
     const text = String(handoff || "").trim();
@@ -429,15 +455,17 @@ export class AgentManager {
     const sessionKey = String(chatId);
     const modelSelection = resolveChatModelSelection(this.config, sessionKey);
     const modelKey = `${modelSelection.provider}/${modelSelection.model}@${modelSelection.sessionRevision}`;
+    const generation = this.getPrimeSessionGeneration(sessionKey);
     const pending = this.pendingPrimeSessions.get(sessionKey);
-    if (pending?.modelKey === modelKey) return pending.promise;
+    if (pending?.modelKey === modelKey && pending.generation === generation) return pending.promise;
     if (pending) {
       await pending.promise.catch(() => {});
       return this.getPrimeSessionContext(sessionKey);
     }
 
-    const creation = this.createPrimeSessionContext(sessionKey, modelSelection, modelKey);
-    this.trackPendingPrimeSession(sessionKey, modelKey, creation);
+    const creation = this.createPrimeSessionContext(sessionKey, modelSelection, modelKey)
+      .then((context) => this.acceptPrimeSessionGeneration(sessionKey, generation, context));
+    this.trackPendingPrimeSession(sessionKey, modelKey, generation, creation);
     return creation;
   }
 

@@ -66,3 +66,31 @@ test("waits for a cached Prime session to close before reopening", async () => {
   await Promise.all([closing, waiting]);
   assert.equal(waitFinished, true);
 });
+
+test("discards a Prime session that finishes starting after /new", async () => {
+  const manager = createManager();
+  let releaseCreation;
+  const creationGate = new Promise((resolve) => { releaseCreation = resolve; });
+  let creationCount = 0;
+  let staleCloseCount = 0;
+  manager.createPrimeSessionContext = async () => {
+    creationCount += 1;
+    if (creationCount === 1) await creationGate;
+    return {
+      session: { close: async () => { staleCloseCount += 1; } },
+      modelKey: "test/model@0"
+    };
+  };
+
+  const staleCreation = manager.getPrimeSessionContext("42");
+  manager.resetSession("42");
+  const freshCreation = manager.getPrimeSessionContext("42");
+  releaseCreation();
+
+  await assert.rejects(staleCreation, /reset during startup/);
+  const context = await freshCreation;
+
+  assert.equal(creationCount, 2);
+  assert.equal(staleCloseCount, 1);
+  assert.equal(context.modelKey, "test/model@0");
+});

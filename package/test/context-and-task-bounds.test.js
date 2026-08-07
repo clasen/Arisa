@@ -1,6 +1,6 @@
 ﻿import assert from "node:assert/strict";
 import test from "node:test";
-import { collectText, createChatStateStore } from "../src/transport/telegram/bot.js";
+import { collectText, createChatStateStore, drainChatPromptQueue } from "../src/transport/telegram/bot.js";
 import { selectScheduledTasks } from "../src/core/agent/agent-manager.js";
 
 function createSession(events) {
@@ -63,7 +63,30 @@ test("chat state uses one queue for numeric and string chat IDs", () => {
 
   const resetState = states.reset("879964957");
   assert.strictEqual(states.get(879964957), resetState);
-  assert.deepEqual(resetState, { processing: false, nextPrompt: "" });
+  assert.deepEqual(resetState, { processing: false, nextPrompt: "", continueAfterClose: false });
+});
+
+test("a queued /new continues only after the active Prime session closes", async () => {
+  const chatState = { processing: true, nextPrompt: "", continueAfterClose: false };
+  const processed = [];
+  const interruption = new Error("Prime RPC session closed");
+  interruption.code = "ARISA_PRIME_RPC_SESSION_CLOSED";
+
+  await drainChatPromptQueue({
+    chatState,
+    initialPrompt: "old request",
+    processPrompt: async ({ prompt }) => {
+      processed.push(prompt);
+      if (prompt === "old request") {
+        chatState.nextPrompt = "new session confirmation";
+        chatState.continueAfterClose = true;
+        throw interruption;
+      }
+    }
+  });
+
+  assert.deepEqual(processed, ["old request", "new session confirmation"]);
+  assert.deepEqual(chatState, { processing: false, nextPrompt: "", continueAfterClose: false });
 });
 
 test("selectScheduledTasks bounds history while keeping active tasks", () => {

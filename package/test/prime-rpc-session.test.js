@@ -197,3 +197,27 @@ test("delivers a later spontaneous agent turn once", async () => {
   assert.deepEqual(delivered, ["worker result"]);
   await session.close();
 });
+
+test("waits for a stuck Prime RPC to exit before allowing session reuse", async () => {
+  const child = fakeChild();
+  const signals = [];
+  child.kill = (signal) => {
+    signals.push(signal);
+    if (signal === "SIGKILL") {
+      child.signalCode = signal;
+      queueMicrotask(() => child.emit("close", null, signal));
+    }
+    return true;
+  };
+
+  const session = new PrimeRpcSession({
+    closeTimeoutMs: 5,
+    terminateTimeoutMs: 5
+  });
+  session.child = child;
+
+  await session.close();
+
+  assert.deepEqual(signals, ["SIGTERM", "SIGKILL"]);
+  assert.equal(child.signalCode, "SIGKILL");
+});

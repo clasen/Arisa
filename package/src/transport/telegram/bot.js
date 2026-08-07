@@ -10,6 +10,7 @@ import { createPiOAuthLogin } from "../../core/agent/pi-auth-login.js";
 import { getAgentConfig, resolveChatModel, resolveChatThinkingLevel, selectChatModel, selectChatThinkingLevel } from "../../core/agent/model-selection.js";
 import { clampModelThinkingLevel, createPiRuntime, listModelThinkingLevels, listProviderModels, modelSupportsThinking } from "../../core/agent/pi-runtime.js";
 import { normalizeArtifactForReasoning, shouldNormalizeArtifactToText } from "../../core/artifacts/normalize-for-reasoning.js";
+import { isPrimeRpcSessionClosedError } from "../../core/agent/prime-rpc-session.js";
 
 const slowPromptNoticeMs = 300_000;
 
@@ -315,7 +316,7 @@ export function createChatStateStore() {
   const states = new Map();
 
   function reset(chatId) {
-    const state = { processing: false, nextPrompt: "" };
+    const state = { processing: false, nextPrompt: "", continueAfterClose: false };
     states.set(String(chatId), state);
     return state;
   }
@@ -327,6 +328,45 @@ export function createChatStateStore() {
     },
     reset
   };
+}
+
+export async function drainChatPromptQueue({
+  chatState,
+  initialPrompt,
+  initialCtx = null,
+  processPrompt,
+  onPromptFailure,
+  onPromptInterrupted
+}) {
+  let currentPrompt = initialPrompt;
+  let currentCtx = initialCtx;
+
+  try {
+    while (currentPrompt) {
+      try {
+        await processPrompt({ prompt: currentPrompt, ctx: currentCtx });
+      } catch (error) {
+        if (isPrimeRpcSessionClosedError(error) && chatState.continueAfterClose && chatState.nextPrompt) {
+          await onPromptInterrupted?.(error);
+        } else {
+          await onPromptFailure?.(error);
+          throw error;
+        }
+      } finally {
+        currentCtx = null;
+      }
+
+      if (chatState.nextPrompt) {
+        currentPrompt = chatState.nextPrompt;
+        chatState.nextPrompt = "";
+        chatState.continueAfterClose = false;
+      } else {
+        currentPrompt = "";
+      }
+    }
+  } finally {
+    chatState.processing = false;
+  }
 }
 
 export async function createTelegramBot({ config, artifactStore, toolRegistry, taskStore, agentManager, saveConfig, updateConfig, logger }) {
@@ -734,46 +774,41 @@ export async function createTelegramBot({ config, artifactStore, toolRegistry, t
     return work();
   }
 
-  async function enqueuePrompt({ chatId, prompt, label, ctx = null }) {
+  async function enqueuePrompt({ chatId, prompt, label, ctx = null, replaceQueued = false }) {
     const chatState = getChatState(chatId);
 
     if (chatState.processing) {
       logger?.log("telegram", `chat ${chatId} busy, queueing ${label}`);
-      chatState.nextPrompt = chatState.nextPrompt
-        ? `${chatState.nextPrompt}\n\n${prompt}`
-        : prompt;
+      if (replaceQueued) {
+        chatState.nextPrompt = prompt;
+        chatState.continueAfterClose = true;
+      } else {
+        chatState.nextPrompt = chatState.nextPrompt
+          ? `${chatState.nextPrompt}\n\n${prompt}`
+          : prompt;
+      }
       return;
     }
 
     chatState.processing = true;
     logger?.log("telegram", `processing ${label} in chat ${chatId}`);
-    let currentPrompt = prompt;
-    let currentCtx = ctx;
-
-    try {
-      while (currentPrompt) {
-        try {
-          logger?.log("telegram", `prompt dispatch for chat ${chatId}`);
-          await processPromptForChat({ chatId, prompt: currentPrompt, ctx: currentCtx });
-        } catch (error) {
-          const message = getErrorMessage(error);
-          logger?.error("telegram", `${label} failed for chat ${chatId}: ${message}`);
-          await notifyPiAuthIssueIfNeeded(chatId, error);
-          throw error;
-        } finally {
-          currentCtx = null;
-        }
-
-        if (chatState.nextPrompt) {
-          currentPrompt = chatState.nextPrompt;
-          chatState.nextPrompt = "";
-        } else {
-          currentPrompt = "";
-        }
+    return drainChatPromptQueue({
+      chatState,
+      initialPrompt: prompt,
+      initialCtx: ctx,
+      processPrompt: ({ prompt: currentPrompt, ctx: currentCtx }) => {
+        logger?.log("telegram", `prompt dispatch for chat ${chatId}`);
+        return processPromptForChat({ chatId, prompt: currentPrompt, ctx: currentCtx });
+      },
+      onPromptInterrupted: (error) => {
+        logger?.log("telegram", `${label} interrupted by queued /new for chat ${chatId}: ${getErrorMessage(error)}`);
+      },
+      onPromptFailure: async (error) => {
+        const message = getErrorMessage(error);
+        logger?.error("telegram", `${label} failed for chat ${chatId}: ${message}`);
+        await notifyPiAuthIssueIfNeeded(chatId, error);
       }
-    } finally {
-      chatState.processing = false;
-    }
+    });
   }
 
   async function enqueueOrProcess(ctx) {
@@ -905,16 +940,17 @@ export async function createTelegramBot({ config, artifactStore, toolRegistry, t
 
   async function handleNewCommand(ctx) {
     const chatState = getChatState(ctx.chat.id);
-    const handoff = chatState.processing
+    const wasProcessing = chatState.processing;
+    const handoff = wasProcessing
       ? { handoff: "", parentSession: "" }
       : await withTyping(ctx, () => summarizeSessionBeforeReset(ctx.chat.id));
     agentManager.resetSession(ctx.chat.id, handoff);
-    perChatState.reset(ctx.chat.id);
     await enqueuePrompt({
       chatId: ctx.chat.id,
       prompt: buildNewSessionPrompt(ctx),
       label: "new-session command",
-      ctx
+      ctx,
+      replaceQueued: wasProcessing
     });
   }
 

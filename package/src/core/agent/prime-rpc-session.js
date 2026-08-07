@@ -5,7 +5,9 @@ import { StringDecoder } from "node:string_decoder";
 
 const defaultRequestTimeoutMs = 30_000;
 const defaultPromptTimeoutMs = 24 * 60 * 60 * 1000;
-const closeTimeoutMs = 5_000;
+const defaultCloseTimeoutMs = 5_000;
+const defaultTerminateTimeoutMs = 5_000;
+const primeRpcSessionClosedCode = "ARISA_PRIME_RPC_SESSION_CLOSED";
 
 function deferred() {
   let resolve;
@@ -17,8 +19,32 @@ function deferred() {
   return { promise, resolve, reject };
 }
 
+async function settlesWithin(promise, timeoutMs) {
+  let timer;
+  try {
+    return await Promise.race([
+      promise.then(() => true),
+      new Promise((resolve) => { timer = setTimeout(() => resolve(false), timeoutMs); })
+    ]);
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 function commandVersion(output) {
   return String(output || "").match(/\bv?(\d+\.\d+\.\d+(?:[-+][\w.-]+)?)\b/)?.[1] || "";
+}
+
+export class PrimeRpcSessionClosedError extends Error {
+  constructor(message = "Prime RPC session closed") {
+    super(message);
+    this.name = "PrimeRpcSessionClosedError";
+    this.code = primeRpcSessionClosedCode;
+  }
+}
+
+export function isPrimeRpcSessionClosedError(error) {
+  return error?.code === primeRpcSessionClosedCode;
 }
 
 export async function validatePrimeBinary({ command = "prime-agent", commandArgs = [], expectedVersion = "0.7.0", spawnImpl = spawn } = {}) {
@@ -78,7 +104,9 @@ export class PrimeRpcSession {
     onUnsolicitedText,
     spawnImpl = spawn,
     requestTimeoutMs = defaultRequestTimeoutMs,
-    promptTimeoutMs = defaultPromptTimeoutMs
+    promptTimeoutMs = defaultPromptTimeoutMs,
+    closeTimeoutMs = defaultCloseTimeoutMs,
+    terminateTimeoutMs = defaultTerminateTimeoutMs
   } = {}) {
     this.command = command;
     this.commandArgs = [...commandArgs];
@@ -101,6 +129,8 @@ export class PrimeRpcSession {
     this.spawnImpl = spawnImpl;
     this.requestTimeoutMs = requestTimeoutMs;
     this.promptTimeoutMs = promptTimeoutMs;
+    this.closeTimeoutMs = closeTimeoutMs;
+    this.terminateTimeoutMs = terminateTimeoutMs;
     this.listeners = new Set();
     this.pending = new Map();
     this.messages = [];
@@ -352,9 +382,7 @@ export class PrimeRpcSession {
     this.write({ type: "extension_ui_response", id, ...response });
   }
 
-  handleExit(error) {
-    const child = this.child;
-    this.child = null;
+  rejectPending(error) {
     for (const [id, pending] of this.pending) {
       clearTimeout(pending.timer);
       pending.reject(error);
@@ -365,6 +393,12 @@ export class PrimeRpcSession {
       this.promptCompletion.reject(error);
       this.promptCompletion = null;
     }
+  }
+
+  handleExit(error) {
+    const child = this.child;
+    this.child = null;
+    this.rejectPending(error);
     if (child) this.emit({ type: "runtime_error", error });
   }
 
@@ -372,14 +406,17 @@ export class PrimeRpcSession {
     const child = this.child;
     if (!child) return;
     this.child = null;
+    this.rejectPending(new PrimeRpcSessionClosedError());
+    if (child.exitCode != null || child.signalCode != null) return;
+
     const closed = new Promise((resolve) => child.once("close", resolve));
     child.stdin?.end();
-    let closeTimer;
-    await Promise.race([
-      closed,
-      new Promise((resolve) => { closeTimer = setTimeout(resolve, closeTimeoutMs); })
-    ]);
-    clearTimeout(closeTimer);
-    if (child.exitCode == null && child.signalCode == null) child.kill("SIGTERM");
+    if (await settlesWithin(closed, this.closeTimeoutMs)) return;
+
+    child.kill("SIGTERM");
+    if (await settlesWithin(closed, this.terminateTimeoutMs)) return;
+
+    child.kill("SIGKILL");
+    await closed;
   }
 }
