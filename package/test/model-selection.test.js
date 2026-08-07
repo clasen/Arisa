@@ -22,6 +22,7 @@ import {
   parseModelPickerAction,
   reverseModelOrder
 } from "../src/transport/telegram/model-picker.js";
+import { closeModelPicker } from "../src/transport/telegram/bot.js";
 
 function createConfig() {
   return applyConfigDefaults({
@@ -177,6 +178,32 @@ test("builds an effort picker for the current model or pending model choice", ()
   });
   assert.match(pending.text, /^Model: openai-codex\/gpt-b/);
   assert.equal(pending.replyMarkup.inline_keyboard[1][0].callback_data, "model-effort:4:high");
+});
+
+test("closes the picker after selecting the already active model and effort", async () => {
+  const calls = [];
+  const ctx = {
+    chat: { id: 123 },
+    callbackQuery: { message: { message_id: 456 } },
+    api: {
+      async editMessageText(...args) {
+        calls.push(["editMessageText", ...args]);
+      }
+    },
+    async answerCallbackQuery(...args) {
+      calls.push(["answerCallbackQuery", ...args]);
+    }
+  };
+
+  await closeModelPicker(ctx, {
+    messageText: "Already using openai-codex/gpt-b (effort: high).",
+    callbackText: "Already using gpt-b at high."
+  });
+
+  assert.deepEqual(calls, [
+    ["editMessageText", 123, 456, "Already using openai-codex/gpt-b (effort: high)."],
+    ["answerCallbackQuery", { text: "Already using gpt-b at high." }]
+  ]);
 });
 
 test("parses only model picker callback data", () => {

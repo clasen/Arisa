@@ -373,6 +373,15 @@ export async function drainChatPromptQueue({
   }
 }
 
+export async function closeModelPicker(ctx, { messageText, callbackText }) {
+  await ctx.api.editMessageText(
+    ctx.chat.id,
+    ctx.callbackQuery.message.message_id,
+    messageText
+  );
+  await ctx.answerCallbackQuery({ text: callbackText });
+}
+
 export async function createTelegramBot({ config, artifactStore, toolRegistry, taskStore, agentManager, saveConfig, updateConfig, logger }) {
   const bot = new Bot(config.telegram.token);
   const perChatState = createChatStateStore();
@@ -1137,7 +1146,10 @@ export async function createTelegramBot({ config, artifactStore, toolRegistry, t
         const currentModelId = resolveChatModel(config, ctx.chat.id);
         const currentEffort = resolveChatThinkingLevel(config, ctx.chat.id);
         if (model.id === currentModelId && currentEffort === "off") {
-          await ctx.answerCallbackQuery({ text: `Already using ${model.id}.` });
+          await closeModelPicker(ctx, {
+            messageText: `Already using ${model.provider}/${model.id}.`,
+            callbackText: `Already using ${model.id}.`
+          });
           return;
         }
 
@@ -1172,7 +1184,10 @@ export async function createTelegramBot({ config, artifactStore, toolRegistry, t
         const currentModelId = resolveChatModel(config, ctx.chat.id);
         const currentEffort = resolveChatThinkingLevel(config, ctx.chat.id);
         if (model.id === currentModelId && action.level === currentEffort) {
-          await ctx.answerCallbackQuery({ text: `Already using ${model.id} at ${action.level}.` });
+          await closeModelPicker(ctx, {
+            messageText: `Already using ${model.provider}/${model.id} (effort: ${action.level}).`,
+            callbackText: `Already using ${model.id} at ${action.level}.`
+          });
           return;
         }
 
@@ -1232,7 +1247,10 @@ export async function createTelegramBot({ config, artifactStore, toolRegistry, t
         }
         const currentEffort = resolveChatThinkingLevel(config, ctx.chat.id);
         if (action.level === currentEffort) {
-          await ctx.answerCallbackQuery({ text: `Already using effort ${action.level}.` });
+          await closeModelPicker(ctx, {
+            messageText: `Already using effort ${action.level} for ${model.provider}/${model.id}.`,
+            callbackText: `Already using effort ${action.level}.`
+          });
           return;
         }
         await persistChatEffort(ctx.chat.id, model, action.level);
