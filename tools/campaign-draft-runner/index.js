@@ -1,4 +1,4 @@
-import { mkdir, open, readFile, rm, stat, writeFile } from "node:fs/promises";
+import { mkdir, open, readFile, rename, rm, stat, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import defaults from "./config.js";
@@ -19,7 +19,7 @@ Usage:
   node index.js run --request-file <json>
 
 Actions via args.action:
-  run-batch   Verify contacts selected by a profile and create Gmail drafts only. args: profile?, limit?, dryRun?, untilDrafted?, retryDelaySeconds?
+  run-batch   Verify contacts selected by a profile and create Gmail drafts only. args: profile?, limit?, dryRun?, untilDrafted?, retryDelaySeconds?, maxAttempts?, maxRuntimeSeconds?
   status      Return campaign status and Gmail draft count. args: profile?
 
 Profiles live under the chat-scoped state directory:
@@ -30,6 +30,15 @@ The runner is generic. Campaign-specific copy, keywords, language detection, and
 }
 
 function clean(value) { return String(value || "").trim(); }
+function decodeHtmlEntities(value) {
+  const named = { amp: "&", apos: "'", quot: "\"", lt: "<", gt: ">", nbsp: " " };
+  return String(value || "").replace(/&(#x[0-9a-f]+|#\d+|amp|apos|quot|lt|gt|nbsp);/gi, (match, entity) => {
+    const lower = entity.toLowerCase();
+    if (lower.startsWith("#x")) return String.fromCodePoint(Number.parseInt(lower.slice(2), 16));
+    if (lower.startsWith("#")) return String.fromCodePoint(Number.parseInt(lower.slice(1), 10));
+    return named[lower] ?? match;
+  });
+}
 function normalizedEmail(value) { return clean(value).toLowerCase(); }
 function truthy(value) { return value === true || value === "true" || value === "1" || value === 1 || value === "yes"; }
 
@@ -67,6 +76,8 @@ function isSelectable(contact, profile) {
   const exclude = profile.selection?.excludeKeywords || [];
   const allowedLanguages = profile.selection?.allowedLanguages || [];
   const requiredKeywordGroups = profile.selection?.requiredKeywordGroups || [];
+  if (!isPlausibleEmail(contact.email)) return false;
+  if (profile.selection?.requireSourceProvenance !== false && !contactEmailFitsSource(contact)) return false;
   if (include.length && !matchesAny(text, include)) return false;
   if (requiredKeywordGroups.some((patterns) => !matchesAny(text, patterns))) return false;
   if (exclude.length && matchesAny(text, exclude)) return false;
@@ -117,29 +128,76 @@ function parseSearchResults(text) {
   const lines = String(text || "").split(/\r?\n/);
   const results = [];
   for (let index = 0; index < lines.length; index += 1) {
-    const titleMatch = lines[index].match(/^\d+\.\s+(.+)$/);
+    const titleMatch = lines[index].match(/^\s*(?:\d+[.)]|[-*])\s+(.+)$/);
     if (!titleMatch) continue;
-    const urlMatch = lines[index + 1]?.match(/^URL:\s*(.+)$/i);
-    const snippetMatch = lines[index + 2]?.match(/^Snippet:\s*(.*)$/i);
-    if (!urlMatch) continue;
-    results.push({ title: titleMatch[1].trim(), url: urlMatch[1].trim(), snippet: snippetMatch?.[1]?.trim() || "" });
+    let url = "";
+    const snippets = [];
+    for (let offset = 1; offset <= 6 && index + offset < lines.length; offset += 1) {
+      const line = lines[index + offset].trim();
+      if (/^(?:\d+[.)]|[-*])\s+/.test(line)) break;
+      const urlMatch = line.match(/^(?:URL|Link):\s*(https?:\/\/\S+)/i);
+      const snippetMatch = line.match(/^(?:Snippet|Description):\s*(.*)$/i);
+      if (urlMatch) url = urlMatch[1];
+      else if (snippetMatch) snippets.push(snippetMatch[1]);
+      else if (url && line && !/^[-=]+$/.test(line)) snippets.push(line);
+    }
+    if (url) results.push({ title: decodeHtmlEntities(titleMatch[1]).trim(), url: url.trim(), snippet: decodeHtmlEntities(snippets.join(" ")).trim() });
   }
-  return results;
+  return [...new Map(results.map((result) => [result.url, result])).values()];
 }
 
 function emailAddresses(text) {
   const normalized = String(text || "")
-    .replace(/\s*(?:\[at\]|\(at\))\s*/gi, "@")
-    .replace(/\s*(?:\[dot\]|\(dot\))\s*/gi, ".")
-    .replace(/(?<=[a-z0-9])\s*DOT\s*(?=[a-z])/gi, ".");
-  return [...new Set((normalized.match(/[a-z0-9.!#$%&'*+/=?^_`{|}~-]+@[a-z0-9.-]+\.[a-z]{2,}/gi) || []).map(normalizedEmail))];
+    .replace(/\s*(?:\[at\]|\(at\)|\{at\}|\bat\b)\s*/gi, "@")
+    .replace(/\s*(?:\[dot\]|\(dot\)|\{dot\}|\bdot\b)\s*/gi, ".")
+    .replace(/(?<=\w)\s+@\s+(?=\w)/g, "@")
+    .replace(/(?<=\w)\s+\.\s+(?=\w)/g, ".")
+    .replace(/^mailto:/gim, "");
+  return [...new Set((normalized.match(/[a-z0-9.!#$%&'*+/=?^_`{|}~-]+@[a-z0-9.-]+\.[a-z]{2,}/gi) || [])
+    .map((email) => normalizedEmail(email.replace(/[),.;:]+$/, ""))))];
 }
 
 function discoveryEmailScore(email) {
   const local = email.split("@")[0] || "";
+  if (!local || /[＊*•…]/.test(local) || /(?:hidden|redacted|example|yourname|emailaddress)/i.test(local)) return -100;
   const preferred = /^(editor|editorial|press|news|tips|contact|hello|info|reviews?|submissions?)\b/i.test(local) ? 5 : 0;
   const rejected = /(?:advert|sales|sponsor|marketing|publishing|business|jobs?|careers?|support|privacy|legal|billing|webmaster|noreply|no-reply)/i.test(local) ? -100 : 0;
   return preferred + rejected;
+}
+
+function isPlausibleEmail(value) {
+  const email = normalizedEmail(value);
+  if (!/^[a-z0-9](?:[a-z0-9.!#$%&'*+/=?^_`{|}~-]*[a-z0-9])?@[a-z0-9](?:[a-z0-9-]*[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]*[a-z0-9])?)+$/i.test(email)) return false;
+  if (email.includes("..") || discoveryEmailScore(email) <= -100) return false;
+  return emailAddresses(email).length === 1 && emailAddresses(email)[0] === email;
+}
+
+function contactEmailFitsSource(contact) {
+  const email = normalizedEmail(contact.email);
+  if (!isPlausibleEmail(email)) return false;
+  const domain = email.split("@")[1] || "";
+  const host = sourceHost(contact.sourceUrl);
+  if (!domain || !host) return false;
+  if (baseDomain(domain) === baseDomain(host)) return true;
+  return /^(gmail|outlook|hotmail|yahoo|protonmail|icloud|gmx|mail)\./i.test(domain);
+}
+
+function baseDomain(host) {
+  const parts = clean(host).toLowerCase().replace(/^www\./, "").split(".").filter(Boolean);
+  if (parts.length <= 2) return parts.join(".");
+  const secondLevel = new Set(["co.uk", "com.au", "co.jp", "co.kr", "com.br", "com.mx", "co.nz"]);
+  const tail2 = parts.slice(-2).join(".");
+  return secondLevel.has(tail2) ? parts.slice(-3).join(".") : tail2;
+}
+
+function emailFitsSource(email, result, totalEmails) {
+  if (discoveryEmailScore(email) <= -100) return false;
+  const domain = email.split("@")[1] || "";
+  const host = sourceHost(result.url);
+  if (!domain || !host) return false;
+  if (baseDomain(domain) === baseDomain(host)) return true;
+  const freeMail = /^(gmail|outlook|hotmail|yahoo|protonmail|icloud|gmx|mail)\./i.test(domain);
+  return freeMail && totalEmails === 1;
 }
 
 function resultOutlet(result) {
@@ -165,9 +223,12 @@ function discoveryResultAllowed(result, settings) {
 function pageLooksEditorial(result, page, settings) {
   const text = `${result.title} ${result.snippet} ${page.text || ""}`.toLowerCase();
   const editorialSignals = settings.editorialPatterns || ["review", "editor", "journalist", "magazine", "news", "podcast", "coverage", "critic", "newsletter", "youtube"];
+  const activeEditorialSignals = creatorSource(result)
+    ? editorialSignals
+    : editorialSignals.filter((pattern) => !/^(youtube|twitch|channel|creator)$/i.test(pattern));
   const gameSignals = settings.gamePatterns || ["video game", "videogame", "gaming", "mobile game", "indie game", "android game", "iphone game", "puzzle game", "adventure game"];
   const requiredGroups = settings.pageRequiredKeywordGroups || [];
-  if (!matchesAny(text, editorialSignals) || !matchesAny(text, gameSignals)) return false;
+  if (!matchesAny(text, activeEditorialSignals) || !matchesAny(text, gameSignals)) return false;
   if (requiredGroups.some((patterns) => !matchesAny(text, patterns))) return false;
   return !matchesAny(text, settings.pageExcludePatterns || []);
 }
@@ -201,106 +262,215 @@ async function readDiscoveryState(chatId) {
 
 async function saveDiscoveryState(file, data) {
   await mkdir(path.dirname(file), { recursive: true });
-  await writeFile(file, `\uFEFF${JSON.stringify(data, null, 2)}\n`, "utf8");
+  const temporary = `${file}.${process.pid}.${Date.now()}.tmp`;
+  await writeFile(temporary, `\uFEFF${JSON.stringify(data, null, 2)}\n`, "utf8");
+  await rename(temporary, file);
+}
+
+function queryCatalog(settings) {
+  const queries = [...(settings.queries || [])];
+  const templates = settings.queryTemplates || [];
+  const markets = settings.markets || [];
+  const audiences = settings.audiences || [""];
+  const contacts = settings.contactIntents || [""];
+  for (const market of markets) {
+    const values = typeof market === "string" ? { market } : market;
+    for (const template of templates) {
+      for (const audience of audiences) {
+        for (const contact of contacts) {
+          const query = String(template)
+            .replace(/{{\s*market\s*}}/g, clean(values.market || values.label))
+            .replace(/{{\s*terms\s*}}/g, clean(values.terms || values.gameTerms))
+            .replace(/{{\s*language\s*}}/g, clean(values.language))
+            .replace(/{{\s*audience\s*}}/g, clean(audience))
+            .replace(/{{\s*contact\s*}}/g, clean(contact))
+            .replace(/\s+/g, " ")
+            .trim();
+          if (query) queries.push(query);
+        }
+      }
+    }
+  }
+  const unique = [...new Set(queries)];
+  const hash = (value) => {
+    let total = 2166136261;
+    for (const character of value) total = Math.imul(total ^ character.charCodeAt(0), 16777619) >>> 0;
+    return total;
+  };
+  return unique.sort((a, b) => hash(a) - hash(b));
 }
 
 function nextDiscoveryQueries(settings, state) {
-  const queries = settings.queries || [];
+  const queries = queryCatalog(settings);
   if (!queries.length) return [];
-  const count = Math.max(1, Math.min(Number(settings.queriesPerRun || 2), queries.length));
-  return Array.from({ length: count }, (_, offset) => queries[(state.cursor + offset) % queries.length]);
+  const count = Math.max(1, Math.min(Number(settings.queryBudgetPerRun || settings.queriesPerRun || 2), queries.length));
+  return Array.from({ length: count }, (_, offset) => queries[(Number(state.cursor || 0) + offset) % queries.length]);
 }
 
-async function discoverContacts(arisa, chatId, profile, allContacts, draftRecipients, needed) {
+function seenUrlRecently(seenUrls, url, cooldownDays) {
+  const seenAt = seenUrls[url];
+  if (!seenAt) return false;
+  return Date.now() - new Date(seenAt).getTime() < cooldownDays * 24 * 60 * 60 * 1000;
+}
+
+function compactSeenUrls(seenUrls, limit = 3000) {
+  return Object.fromEntries(Object.entries(seenUrls)
+    .sort((a, b) => String(b[1]).localeCompare(String(a[1])))
+    .slice(0, limit));
+}
+
+async function discoverContacts(arisa, chatId, profile, allContacts, draftRecipients, needed, options = {}) {
   const settings = profile.discovery;
-  if (!settings?.enabled || needed < 1) return { queries: [], pagesOpened: 0, found: 0, added: [], skippedUsed: 0 };
+  const dryRun = Boolean(options.dryRun);
+  if (!settings?.enabled || needed < 1) {
+    return { queries: [], searches: 0, pagesOpened: 0, found: 0, added: [], skippedUsed: 0, skippedSeen: 0, rejectedEmails: 0 };
+  }
 
   const campaignTool = profile.campaignTool || defaults.CAMPAIGN_TOOL;
   const webTool = settings.webTool || profile.personalization?.webTool || "web-browser";
   const knownEmails = new Set([...allContacts.map((contact) => normalizedEmail(contact.email)), ...draftRecipients]);
+  const knownOutlets = new Set(allContacts.map(outletKey).filter(Boolean));
   const usedOutlets = new Set(allContacts.filter((contact) => contact.status && contact.status !== (profile.contactStatus || "new")).map(outletKey).filter(Boolean));
   const { file, data: state } = await readDiscoveryState(chatId);
+  const catalog = queryCatalog(settings);
   const queries = nextDiscoveryQueries(settings, state);
-  const seenUrls = new Set(state.seenUrls || []);
+  const oldSeen = Array.isArray(state.seenUrls)
+    ? Object.fromEntries(state.seenUrls.map((url) => [url, "1970-01-01T00:00:00.000Z"]))
+    : (state.seenUrls || {});
+  const seenUrls = { ...oldSeen };
+  const cooldownDays = Math.max(1, Number(settings.urlCooldownDays || 45));
+  const pageBudget = Math.max(1, Number(settings.pageBudgetPerRun || 30));
+  const queryStats = state.queryStats || {};
   const added = [];
   let pagesOpened = 0;
+  let searches = 0;
   let skippedUsed = 0;
+  let skippedSeen = 0;
+  let rejectedEmails = 0;
 
   for (const query of queries) {
-    if (added.length >= needed) break;
+    if (added.length >= needed || pagesOpened >= pageBudget) break;
+    const stats = queryStats[query] || { runs: 0, results: 0, prospects: 0, errors: 0 };
+    stats.runs += 1;
+    stats.lastRunAt = new Date().toISOString();
     let results = [];
     try {
-      const search = await runTool(arisa, webTool, { mode: "search", maxResults: String(settings.maxResults || 6) }, Number(settings.timeoutMs || 90_000), query);
+      const search = await runTool(arisa, webTool, { mode: "search", maxResults: String(settings.maxResults || 8) }, Number(settings.timeoutMs || 90_000), query);
+      searches += 1;
       results = parseSearchResults(search.text).filter((result) => discoveryResultAllowed(result, settings));
-    } catch {
+      stats.results += results.length;
+    } catch (error) {
+      stats.errors += 1;
+      stats.lastError = clean(error?.message || error).slice(0, 300);
+      queryStats[query] = stats;
       continue;
     }
 
     for (const result of results) {
-      if (added.length >= needed) break;
-      const outlet = resultOutlet(result);
-      const key = outletKey({ outlet });
-      if (profile.selection?.skipOutletsAlreadyUsed !== false && usedOutlets.has(key)) {
-        skippedUsed += 1;
+      if (added.length >= needed || pagesOpened >= pageBudget) break;
+      if (seenUrlRecently(seenUrls, result.url, cooldownDays)) {
+        skippedSeen += 1;
         continue;
       }
-      seenUrls.add(result.url);
+      const outlet = resultOutlet(result);
+      const key = outletKey({ outlet });
+      if ((settings.dedupeAgainstAllOutlets !== false && knownOutlets.has(key)) ||
+          (profile.selection?.skipOutletsAlreadyUsed !== false && usedOutlets.has(key))) {
+        skippedUsed += 1;
+        seenUrls[result.url] = new Date().toISOString();
+        continue;
+      }
+
       let page;
       try {
         page = await runTool(arisa, webTool, { mode: "open", url: result.url }, Number(settings.timeoutMs || 90_000));
         pagesOpened += 1;
-      } catch {
+        seenUrls[result.url] = new Date().toISOString();
+      } catch (error) {
+        stats.errors += 1;
         continue;
       }
       if (!pageLooksEditorial(result, page, settings)) continue;
+
       let pageText = page.text || "";
       if (!emailAddresses(`${result.snippet}\n${pageText}`).length) {
-        for (const contactUrl of contactPageUrls(pageText, result.url, Number(settings.contactPagesPerResult || 2))) {
+        for (const contactUrl of contactPageUrls(pageText, result.url, Number(settings.contactPagesPerResult || 3))) {
+          if (pagesOpened >= pageBudget) break;
+          if (seenUrlRecently(seenUrls, contactUrl, cooldownDays)) continue;
           try {
             const contactPage = await runTool(arisa, webTool, { mode: "open", url: contactUrl }, Number(settings.timeoutMs || 90_000));
             pagesOpened += 1;
+            seenUrls[contactUrl] = new Date().toISOString();
             pageText += `\n${contactPage.text || ""}`;
-          } catch {}
+          } catch {
+            seenUrls[contactUrl] = new Date().toISOString();
+          }
         }
       }
-      const emails = emailAddresses(`${result.snippet}\n${pageText}`)
-        .filter((email) => !knownEmails.has(email))
-        .filter((email) => {
-          const score = discoveryEmailScore(email);
-          const local = email.split("@")[0] || "";
-          return score > 0 || (score === 0 && local.length >= 6) || (creatorSource(result) && score > -100);
-        })
-        .sort((a, b) => discoveryEmailScore(b) - discoveryEmailScore(a));
-      const email = emails[0];
-      if (!email) continue;
 
-      try {
-        const created = await runTool(arisa, campaignTool, {
-          action: "add-contact",
-          email,
-          name: outlet,
-          outlet,
-          angle: settings.angle || "Independent and mobile game editorial coverage",
-          referenceGame: result.title,
-          personalNote: `${settings.personalNote || "Discovered from a public editorial/contact page."} Search: ${query}`,
-          sourceUrl: result.url,
-          verify: "true"
-        });
-        const contact = created.contact || { email, outlet };
-        knownEmails.add(email);
-        added.push({ email, outlet, sourceUrl: result.url });
-        if (key) usedOutlets.add(key);
-      } catch {}
+      const extractedEmails = emailAddresses(`${result.snippet}\n${pageText}`);
+      const emails = extractedEmails
+        .filter((email) => !knownEmails.has(email))
+        .filter((email) => emailFitsSource(email, result, extractedEmails.length))
+        .sort((a, b) => discoveryEmailScore(b) - discoveryEmailScore(a));
+      let prospect = null;
+      for (const email of emails) {
+        try {
+          const verification = await runTool(arisa, campaignTool, { action: "verify-email", email });
+          if (verification.check?.deliverable !== true) {
+            rejectedEmails += 1;
+            continue;
+          }
+          prospect = { email, outlet, sourceUrl: result.url, query, verification: verification.check };
+          break;
+        } catch {
+          rejectedEmails += 1;
+        }
+      }
+      if (!prospect) continue;
+
+      if (!dryRun) {
+        try {
+          await runTool(arisa, campaignTool, {
+            action: "add-contact",
+            email: prospect.email,
+            name: outlet,
+            outlet,
+            angle: settings.angle || "Independent and mobile game editorial coverage",
+            referenceGame: result.title,
+            personalNote: `${settings.personalNote || "Discovered from a public editorial/contact page."} Search: ${query}`,
+            sourceUrl: result.url,
+            verify: "true"
+          });
+        } catch (error) {
+          stats.errors += 1;
+          continue;
+        }
+      }
+      knownEmails.add(prospect.email);
+      if (key) {
+        knownOutlets.add(key);
+        usedOutlets.add(key);
+      }
+      added.push({ email: prospect.email, outlet, sourceUrl: result.url, query, dryRun });
+      stats.prospects += 1;
     }
+    queryStats[query] = stats;
   }
 
-  state.cursor = ((state.cursor || 0) + queries.length) % Math.max(1, (settings.queries || []).length);
-  state.seenUrls = [...seenUrls].slice(-1000);
-  state.updatedAt = new Date().toISOString();
-  await saveDiscoveryState(file, state);
-  return { queries, pagesOpened, found: added.length, added, skippedUsed };
+  if (!dryRun) {
+    state.cursor = (Number(state.cursor || 0) + queries.length) % Math.max(1, catalog.length);
+    state.seenUrls = compactSeenUrls(seenUrls, Number(settings.seenUrlLimit || 3000));
+    state.queryStats = queryStats;
+    state.runs = [...(state.runs || []), {
+      at: new Date().toISOString(), queries, searches, pagesOpened, found: added.length,
+      skippedSeen, skippedUsed, rejectedEmails
+    }].slice(-200);
+    state.updatedAt = new Date().toISOString();
+    await saveDiscoveryState(file, state);
+  }
+  return { queries, searches, pagesOpened, found: added.length, added, skippedUsed, skippedSeen, rejectedEmails, dryRun };
 }
-
 function isUsableResearchResult(result, contact) {
   const url = String(result?.url || "").trim();
   if (!/^https?:\/\//i.test(url)) return false;
@@ -339,7 +509,7 @@ function personalizedOpening(language, research, profile) {
   const template = templates[language] || templates[profile.defaultLanguage || "en"];
   if (!template) return "";
   const values = {
-    title: research.title.replace(/[\r\n]+/g, " ").trim(),
+    title: decodeHtmlEntities(research.title).replace(/[\r\n]+/g, " ").trim(),
     url: research.url.trim(),
     campaign: clean(profile.name)
   };
@@ -374,24 +544,28 @@ async function acquireRunLock(chatId) {
   await mkdir(tmpDir, { recursive: true });
   try {
     const handle = await open(lockFile, "wx");
-    await handle.writeFile(`${process.pid}\n`);
+    await handle.writeFile(JSON.stringify({ pid: process.pid, startedAt: new Date().toISOString() }));
     await handle.close();
     return { tmpDir, lockFile };
   } catch (error) {
-    if (error.code === "EEXIST") {
-      try {
-        const info = await stat(lockFile);
-        if (Date.now() - info.mtimeMs > 30 * 60 * 1000) {
-          await rm(lockFile, { force: true });
-          return acquireRunLock(chatId);
-        }
-      } catch {}
-      throw new Error("Another campaign draft batch is already running");
+    if (error.code !== "EEXIST") throw error;
+    let ownerAlive = true;
+    try {
+      const raw = await readFile(lockFile, "utf8");
+      const parsed = raw.trim().startsWith("{") ? JSON.parse(raw) : { pid: Number(raw.trim()) };
+      if (!Number.isInteger(parsed.pid) || parsed.pid < 2) ownerAlive = false;
+      else process.kill(parsed.pid, 0);
+    } catch (lockError) {
+      if (lockError?.code === "EPERM") ownerAlive = true;
+      else ownerAlive = false;
     }
-    throw error;
+    if (!ownerAlive) {
+      await rm(lockFile, { force: true });
+      return acquireRunLock(chatId);
+    }
+    throw new Error("Another campaign draft batch is already running");
   }
 }
-
 async function releaseRunLock(lock) {
   if (!lock) return;
   await rm(lock.lockFile, { force: true });
@@ -413,11 +587,17 @@ async function listAllContacts(arisa, profile) {
 
 async function gmailDraftRecipients(arisa, profile) {
   const gmailTool = profile.gmailTool || defaults.GMAIL_TOOL;
-  const data = await runTool(arisa, gmailTool, { action: "list-drafts", maxResults: "500" });
-  return new Set((data.drafts || []).map((draft) => normalizedEmail(draft.to)).filter(Boolean));
+  const data = await runTool(arisa, gmailTool, { action: "list-drafts", maxResults: "5000" });
+  const recipients = new Set();
+  for (const draft of data.drafts || []) {
+    const parsed = emailAddresses(draft.to || "");
+    if (parsed.length) parsed.forEach((email) => recipients.add(email));
+    else if (clean(draft.to).includes("@")) recipients.add(normalizedEmail(draft.to));
+  }
+  return recipients;
 }
 
-function chooseContacts(allContacts, candidateContacts, draftRecipients, profile, limit) {
+function chooseContacts(allContacts, candidateContacts, draftRecipients, profile, limit, excludedEmails = new Set()) {
   const alreadyUsedOutlets = new Set();
   if (profile.selection?.skipOutletsAlreadyUsed !== false) {
     for (const contact of allContacts) {
@@ -428,8 +608,16 @@ function chooseContacts(allContacts, candidateContacts, draftRecipients, profile
     }
   }
   const chosenOutlets = new Set();
+  const chosenEmails = new Set();
   return candidateContacts
     .filter((contact) => !draftRecipients.has(normalizedEmail(contact.email)))
+    .filter((contact) => !excludedEmails.has(normalizedEmail(contact.email)))
+    .filter((contact) => {
+      const email = normalizedEmail(contact.email);
+      if (!email || chosenEmails.has(email)) return false;
+      chosenEmails.add(email);
+      return true;
+    })
     .filter((contact) => !alreadyUsedOutlets.has(outletKey(contact)))
     .filter((contact) => !contact.emailCheck || contact.emailCheck.deliverable === true)
     .filter((contact) => isSelectable(contact, profile))
@@ -456,9 +644,9 @@ async function createDraft(arisa, profile, contact) {
   if (!template) throw new Error(`No template found for language ${language}`);
   const campaignTool = profile.campaignTool || defaults.CAMPAIGN_TOOL;
   const research = await researchContact(arisa, profile, contact);
-  const subject = render(template.subject, contact, profile);
-  const renderedBody = render(template.body, contact, profile);
-  const body = replaceOpeningParagraph(renderedBody, personalizedOpening(language, research, profile));
+  const subject = decodeHtmlEntities(render(template.subject, contact, profile));
+  const renderedBody = decodeHtmlEntities(render(template.body, contact, profile));
+  const body = decodeHtmlEntities(replaceOpeningParagraph(renderedBody, personalizedOpening(language, research, profile)));
   const data = await runTool(arisa, campaignTool, { action: "create-draft", email: contact.email, subject, body, type: profile.draftType || "first" });
   return {
     email: contact.email,
@@ -484,26 +672,31 @@ async function handleRun(request) {
 
   const lock = await acquireRunLock(request.chatId);
   try {
-    const limit = Math.max(1, Math.min(50, Number(args.limit || profile.limit || config.DEFAULT_LIMIT || 10)));
+    const limit = Math.max(1, Math.min(10, Number(args.limit || profile.limit || config.DEFAULT_LIMIT || 1)));
     const dryRun = truthy(args.dryRun);
+    const excludedEmails = new Set((args._excludedEmails || []).map(normalizedEmail));
     let allContacts = await listAllContacts(arisa, profile);
     let candidateContacts = await listContacts(arisa, profile);
     const draftRecipients = await gmailDraftRecipients(arisa, profile);
     const poolTarget = Math.max(limit, Number(profile.discovery?.minEligiblePool || limit));
-    let eligiblePool = chooseContacts(allContacts, candidateContacts, draftRecipients, profile, poolTarget);
-    let selected = eligiblePool.slice(0, limit);
-    const discovery = await discoverContacts(arisa, request.chatId, profile, allContacts, draftRecipients, poolTarget - eligiblePool.length);
-    if (discovery.found) {
+    const candidatesPerDraft = Math.max(1, Number(profile.candidatesPerDraft || 6));
+    let eligiblePool = chooseContacts(allContacts, candidateContacts, draftRecipients, profile, poolTarget, excludedEmails);
+    const discovery = await discoverContacts(
+      arisa, request.chatId, profile, allContacts, draftRecipients,
+      Math.max(0, poolTarget - eligiblePool.length), { dryRun }
+    );
+    if (discovery.found && !dryRun) {
       allContacts = await listAllContacts(arisa, profile);
       candidateContacts = await listContacts(arisa, profile);
-      eligiblePool = chooseContacts(allContacts, candidateContacts, draftRecipients, profile, poolTarget);
-      selected = eligiblePool.slice(0, limit);
+      eligiblePool = chooseContacts(allContacts, candidateContacts, draftRecipients, profile, poolTarget, excludedEmails);
     }
+    const selected = eligiblePool.slice(0, Math.min(eligiblePool.length, limit * candidatesPerDraft));
     const verified = [];
     const drafted = [];
     const skipped = [];
 
     for (const contact of selected) {
+      if (drafted.length >= limit) break;
       try {
         const check = await verifyContact(arisa, profile, contact);
         verified.push({ email: contact.email, status: check.status, deliverable: check.deliverable });
@@ -511,7 +704,14 @@ async function handleRun(request) {
           skipped.push({ email: contact.email, reason: `verification ${check.status}` });
           continue;
         }
-        if (!dryRun) drafted.push(await createDraft(arisa, profile, contact));
+        if (!dryRun) {
+          const latestDraftRecipients = await gmailDraftRecipients(arisa, profile);
+          if (latestDraftRecipients.has(normalizedEmail(contact.email))) {
+            skipped.push({ email: contact.email, reason: "already present in Gmail drafts" });
+            continue;
+          }
+          drafted.push(await createDraft(arisa, profile, contact));
+        }
       } catch (error) {
         skipped.push({ email: contact.email, reason: error?.message || String(error) });
       }
@@ -545,15 +745,26 @@ async function runRequest(request) {
   if (!truthy(request.args?.untilDrafted) || request.args?.action === "status" || truthy(request.args?.dryRun)) {
     return handleRun(request);
   }
-  let attempts = 0;
-  while (true) {
-    attempts += 1;
-    const output = await handleRun(request);
-    if (output.drafted > 0) return { ...output, attempts };
-    await wait(Math.max(5_000, Number(request.args?.retryDelaySeconds || 15) * 1000));
+  const startedAt = Date.now();
+  const maxAttempts = Math.max(1, Math.min(10, Number(request.args?.maxAttempts || 3)));
+  const maxRuntimeMs = Math.max(30_000, Math.min(9 * 60_000, Number(request.args?.maxRuntimeSeconds || 480) * 1000));
+  const excludedEmails = new Set((request.args?._excludedEmails || []).map(normalizedEmail));
+  let lastOutput = null;
+  for (let attempts = 1; attempts <= maxAttempts; attempts += 1) {
+    const attemptRequest = { ...request, args: { ...(request.args || {}), _excludedEmails: [...excludedEmails] } };
+    lastOutput = await handleRun(attemptRequest);
+    if (lastOutput.drafted > 0) return { ...lastOutput, attempts, exhausted: false, elapsedMs: Date.now() - startedAt };
+    for (const item of lastOutput.skipped || []) {
+      if (item.email) excludedEmails.add(normalizedEmail(item.email));
+    }
+    const delayMs = Math.max(5_000, Math.min(60_000, Number(request.args?.retryDelaySeconds || 15) * 1000));
+    if (attempts >= maxAttempts || Date.now() - startedAt + delayMs >= maxRuntimeMs) {
+      return { ...lastOutput, attempts, exhausted: true, elapsedMs: Date.now() - startedAt };
+    }
+    await wait(delayMs);
   }
+  return { ...(lastOutput || {}), attempts: maxAttempts, exhausted: true, elapsedMs: Date.now() - startedAt };
 }
-
 async function main() {
   const [command, flag, requestFile] = process.argv.slice(2);
   if (command === "--help" || command === "help" || !command) return printHelp();
