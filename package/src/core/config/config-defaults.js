@@ -18,6 +18,11 @@ export const telegramConfigDefaults = Object.freeze({
   modelPickerPageSize: 8
 });
 
+export const cliLogConfig = Object.freeze({
+  recentLines: 100,
+  followPollIntervalMs: 250
+});
+
 export const piConfigDefaults = Object.freeze({
   thinkingLevel: "medium"
 });

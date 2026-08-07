@@ -6,6 +6,7 @@ import { loadConfig } from "./core/config/config-store.js";
 import { createLogger } from "./runtime/logger.js";
 import { getServiceStatus, registerServiceProcess, startService, stopService, unregisterServiceProcess } from "./runtime/service-manager.js";
 import { flushArisaHome } from "./runtime/flush.js";
+import { readPackageVersion, showServiceLogs } from "./runtime/log-viewer.js";
 import { arisaPackageDir } from "./runtime/paths.js";
 
 process.env.ARISA_PACKAGE_DIR = arisaPackageDir;
@@ -221,6 +222,14 @@ async function main() {
       return;
     }
     console.log(`Arisa is running in background (pid ${status.pid}).`);
+    return;
+  }
+
+  if (command === "log") {
+    await showServiceLogs({
+      version: await readPackageVersion(),
+      follow: !cli.flags["no-follow"]
+    });
     return;
   }
 
