@@ -93,10 +93,25 @@ function detectLanguage(contact, profile) {
   return profile.defaultLanguage || "en";
 }
 
+function referenceOutlet(value) {
+  return decodeHtmlEntities(clean(value))
+    .replace(/\s*\(@[^)]+\)\s*(?:\/.*)?$/i, "")
+    .replace(/\s*\/\s*(?:Posts?|Home)\s*\/\s*(?:X|Twitter)\s*$/i, "")
+    .replace(/\s*[|–—-]\s*(?:X|Twitter)\s*$/i, "")
+    .trim();
+}
+
+function displayOutlet(contact) {
+  const outlet = decodeHtmlEntities(clean(contact.outlet || contact.name));
+  if (!/^(?:x|twitter|posts?|home)$/i.test(outlet)) return outlet || "there";
+  return referenceOutlet(contact.referenceGame) || outlet;
+}
+
 function render(template, contact, profile) {
+  const outlet = displayOutlet(contact);
   const values = {
-    outlet: clean(contact.outlet || contact.name || "there"),
-    name: clean(contact.name || contact.outlet || "there"),
+    outlet,
+    name: outlet,
     email: clean(contact.email),
     referenceGame: clean(contact.referenceGame),
     personalNote: clean(contact.personalNote),
@@ -203,6 +218,14 @@ function emailFitsSource(email, result, totalEmails) {
 function resultOutlet(result) {
   const host = sourceHost(result.url);
   const title = decodeHtmlEntities(clean(result.title));
+  if (/(^|\.)(x|twitter)\.com$/i.test(host)) {
+    const titleOutlet = referenceOutlet(title);
+    if (titleOutlet && !/^(?:x|twitter|posts?|home)$/i.test(titleOutlet)) return titleOutlet;
+    try {
+      const handle = decodeURIComponent(new URL(result.url).pathname.split("/").filter(Boolean)[0] || "");
+      if (handle) return handle;
+    } catch {}
+  }
   if (/(^|\.)youtube\.com$/i.test(host)) {
     return title.replace(/\s*[-|]\s*YouTube\s*$/i, "").trim() || host;
   }
