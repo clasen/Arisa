@@ -15,7 +15,8 @@ test("prepares the pinned managed runtime for an active Prime configuration", as
         command: process.execPath,
         commandArgs: ["/managed/prime-agent/cli.js"],
         managed: true,
-        runtimeDir: "/managed/prime-agent/0.7.0"
+        runtimeDir: "/managed/prime-agent/0.7.0",
+        kernelVenvDir: "/managed/prime-kernel"
       };
     }
   });
@@ -25,6 +26,7 @@ test("prepares the pinned managed runtime for an active Prime configuration", as
   assert.equal(prepared.prime.command, process.execPath);
   assert.deepEqual(prepared.prime.commandArgs, ["/managed/prime-agent/cli.js"]);
   assert.equal(prepared.prime.managedRuntime, true);
+  assert.equal(prepared.prime.kernelVenvDir, "/managed/prime-kernel");
   assert.equal(config.prime.command, "");
 });
 

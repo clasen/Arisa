@@ -34,12 +34,14 @@ function versionSpawner(version = "0.7.0") {
 function rpcSpawner({ onUnsolicitedText } = {}) {
   let call = 0;
   let rpcChild;
+  let rpcOptions;
   const requests = [];
-  const spawnImpl = (_command, args) => {
+  const spawnImpl = (_command, args, options) => {
     call += 1;
     if (call % 2 === 1) return versionSpawner()(_command, ["--version"]);
     assert.ok(args.includes("rpc"));
     assert.ok(args.includes("--offline"));
+    rpcOptions = options;
     rpcChild = fakeChild();
     rpcChild.stdin.once("finish", () => {
       rpcChild.exitCode = 0;
@@ -84,7 +86,7 @@ function rpcSpawner({ onUnsolicitedText } = {}) {
     });
     return rpcChild;
   };
-  return { spawnImpl, requests, get child() { return rpcChild; }, onUnsolicitedText };
+  return { spawnImpl, requests, get child() { return rpcChild; }, get options() { return rpcOptions; }, onUnsolicitedText };
 }
 
 test("requires the pinned Prime Agent version", async () => {
@@ -125,6 +127,7 @@ test("handles fragmented JSONL and waits for agent_end", async () => {
     cwd: process.cwd(),
     agentDir: process.cwd(),
     sessionDir: process.cwd(),
+    kernelVenvDir: "/managed/prime-kernel",
     chatId: "42",
     noSession: true,
     spawnImpl: fake.spawnImpl
@@ -134,6 +137,7 @@ test("handles fragmented JSONL and waits for agent_end", async () => {
     if (event.type === "message_update") text += event.assistantMessageEvent.delta;
   });
   await session.prompt("hello");
+  assert.equal(fake.options.env.PRIME_AGENT_KERNEL_VENV, "/managed/prime-kernel");
   assert.equal(text, "OK");
   assert.equal(session.sessionFile, "/session.jsonl");
   assert.deepEqual(await session.getAvailableModels(), [{ provider: "test", id: "model", reasoning: true }]);

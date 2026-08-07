@@ -372,6 +372,7 @@ export class AgentManager {
       cwd: workspaceDir,
       agentDir: primeStateDir,
       sessionDir: primeStateDir,
+      kernelVenvDir: prime.kernelVenvDir,
       chatId: "validation",
       noSession: true,
       logger: this.logger
@@ -504,6 +505,7 @@ export class AgentManager {
       cwd: workspaceDir,
       agentDir: primeStateDir,
       sessionDir,
+      kernelVenvDir: prime.kernelVenvDir,
       extensionPath: path.join(arisaPackageDir, "src", "core", "agent", "prime-arisa-extension.js"),
       chatId: sessionKey,
       continueSession: !this.pendingNewSessions.has(sessionKey),

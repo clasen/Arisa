@@ -6,13 +6,14 @@ import path from "node:path";
 import { Readable } from "node:stream";
 import { pipeline } from "node:stream/promises";
 import { validatePrimeBinary } from "../core/agent/prime-rpc-session.js";
-import { primeRuntimesDir } from "./paths.js";
+import { primeRuntimesDir, primeStateDir } from "./paths.js";
 
 export const defaultPrimeReleaseBaseUrl = "https://pub-728493de92a943e2a9b2d17b4719f318.r2.dev";
 
 const installLockStaleMs = 10 * 60 * 1000;
 const installLockTimeoutMs = 5 * 60 * 1000;
 const installLockPollMs = 250;
+const managedPrimeInstallerSchema = 2;
 
 function delay(milliseconds) {
   return new Promise((resolve) => setTimeout(resolve, milliseconds));
@@ -128,10 +129,46 @@ async function runProcess(command, args, { cwd, env, spawnImpl = spawn } = {}) {
   });
 }
 
-async function isManagedPrimeReady(paths) {
+export async function validatePrimeKernel({ kernelVenvDir, spawnImpl = spawn } = {}) {
+  const normalizedKernelVenvDir = path.resolve(String(kernelVenvDir || ""));
+  const python = path.join(
+    normalizedKernelVenvDir,
+    process.platform === "win32" ? "Scripts" : "bin",
+    process.platform === "win32" ? "python.exe" : "python"
+  );
+  const result = await new Promise((resolve, reject) => {
+    const child = spawnImpl(python, [
+      "-c",
+      "import IPython; import ipykernel; print(IPython.__version__)"
+    ], {
+      stdio: ["ignore", "pipe", "pipe"],
+      windowsHide: true
+    });
+    let stdout = "";
+    let stderr = "";
+    child.stdout?.on("data", (chunk) => { stdout += chunk.toString("utf8"); });
+    child.stderr?.on("data", (chunk) => { stderr += chunk.toString("utf8"); });
+    child.once("error", reject);
+    child.once("close", (exitCode) => resolve({ exitCode, stdout, stderr }));
+  }).catch((error) => {
+    if (error?.code === "ENOENT") {
+      throw new Error(`Prime kernel Python was not created at ${python}`);
+    }
+    throw error;
+  });
+
+  if (result.exitCode !== 0) {
+    throw new Error(`Prime kernel validation failed: ${(result.stderr || result.stdout).trim() || `exit ${result.exitCode}`}`);
+  }
+  return { kernelVenvDir: normalizedKernelVenvDir, python };
+}
+
+async function isManagedPrimeReady(paths, kernelVenvDir) {
   try {
     const marker = JSON.parse(await readFile(paths.markerFile, "utf8"));
     if (marker.version !== paths.version) return false;
+    if (marker.installerSchema !== managedPrimeInstallerSchema) return false;
+    if (marker.kernelVenvDir !== kernelVenvDir) return false;
     await access(paths.cliPath);
     return true;
   } catch {
@@ -139,7 +176,7 @@ async function isManagedPrimeReady(paths) {
   }
 }
 
-async function acquireInstallLock(paths) {
+async function acquireInstallLock(paths, kernelVenvDir) {
   const deadline = Date.now() + installLockTimeoutMs;
   while (Date.now() < deadline) {
     try {
@@ -148,7 +185,7 @@ async function acquireInstallLock(paths) {
       return handle;
     } catch (error) {
       if (error?.code !== "EEXIST") throw error;
-      if (await isManagedPrimeReady(paths)) return null;
+      if (await isManagedPrimeReady(paths, kernelVenvDir)) return null;
       try {
         const lockStat = await stat(paths.lockFile);
         if (Date.now() - lockStat.mtimeMs > installLockStaleMs) {
@@ -192,12 +229,13 @@ async function replaceRuntimeDirectory(stagingDir, runtimeDir) {
   if (backedUp) await rm(backupDir, { recursive: true, force: true }).catch(() => {});
 }
 
-function managedPrimeResolution(paths) {
+function managedPrimeResolution(paths, kernelVenvDir) {
   return {
     command: process.execPath,
     commandArgs: [paths.cliPath],
     managed: true,
     runtimeDir: paths.runtimeDir,
+    kernelVenvDir,
     version: paths.version
   };
 }
@@ -216,21 +254,24 @@ export async function installManagedPrimeAgent({
   version,
   baseUrl = process.env.PRIME_AGENT_DOWNLOAD_BASE_URL || defaultPrimeReleaseBaseUrl,
   runtimesRoot = primeRuntimesDir,
+  kernelVenvDir = process.env.PRIME_AGENT_KERNEL_VENV || path.join(primeStateDir, "kernel-venv"),
   fetchImpl = globalThis.fetch,
   spawnImpl = spawn,
   validateImpl = validatePrimeBinary,
+  validateKernelImpl = validatePrimeKernel,
   logger
 } = {}) {
   const paths = getManagedPrimePaths(version, { runtimesRoot });
-  if (await isManagedPrimeReady(paths)) return managedPrimeResolution(paths);
+  const resolvedKernelVenvDir = path.resolve(kernelVenvDir);
+  if (await isManagedPrimeReady(paths, resolvedKernelVenvDir)) return managedPrimeResolution(paths, resolvedKernelVenvDir);
 
   await mkdir(runtimesRoot, { recursive: true, mode: 0o700 });
-  const lockHandle = await acquireInstallLock(paths);
-  if (!lockHandle) return managedPrimeResolution(paths);
+  const lockHandle = await acquireInstallLock(paths, resolvedKernelVenvDir);
+  if (!lockHandle) return managedPrimeResolution(paths, resolvedKernelVenvDir);
 
   let stagingDir = "";
   try {
-    if (await isManagedPrimeReady(paths)) return managedPrimeResolution(paths);
+    if (await isManagedPrimeReady(paths, resolvedKernelVenvDir)) return managedPrimeResolution(paths, resolvedKernelVenvDir);
     const releaseBaseUrl = normalizeBaseUrl(baseUrl);
     const tarballName = `prime-agent-${paths.version}.tgz`;
     const releaseUrl = `${releaseBaseUrl}/releases/v${paths.version}`;
@@ -255,6 +296,7 @@ export async function installManagedPrimeAgent({
       "--omit=dev",
       "--no-audit",
       "--no-fund",
+      "--ignore-scripts=false",
       "--loglevel=error",
       "--progress=false",
       tarballFile
@@ -262,6 +304,10 @@ export async function installManagedPrimeAgent({
       cwd: stagingDir,
       env: {
         ...process.env,
+        PRIME_AGENT_BOOTSTRAP_KERNEL_ON_INSTALL: "1",
+        PRIME_AGENT_BOOTSTRAP_TOOLS_ON_INSTALL: "1",
+        PRIME_AGENT_INSTALL_UV: "1",
+        PRIME_AGENT_KERNEL_VENV: resolvedKernelVenvDir,
         npm_config_cache: npmCacheDir,
         npm_config_update_notifier: "false"
       },
@@ -275,10 +321,16 @@ export async function installManagedPrimeAgent({
       commandArgs: [stagingPaths.cliPath],
       expectedVersion: paths.version
     });
+    await validateKernelImpl({
+      kernelVenvDir: resolvedKernelVenvDir,
+      spawnImpl
+    });
     await rm(npmCacheDir, { recursive: true, force: true });
     await writeFile(stagingPaths.markerFile, `${JSON.stringify({
       name: "prime-agent",
       version: paths.version,
+      installerSchema: managedPrimeInstallerSchema,
+      kernelVenvDir: resolvedKernelVenvDir,
       source: tarballUrl,
       sha256: expectedSha256,
       installedAt: new Date().toISOString()
@@ -287,7 +339,7 @@ export async function installManagedPrimeAgent({
     await replaceRuntimeDirectory(stagingDir, paths.runtimeDir);
     stagingDir = "";
     logger?.log("prime", `managed Prime Agent v${paths.version} is ready`);
-    return managedPrimeResolution(paths);
+    return managedPrimeResolution(paths, resolvedKernelVenvDir);
   } catch (error) {
     throw new Error(`Could not install Prime Agent v${paths.version}: ${errorMessage(error)}`);
   } finally {

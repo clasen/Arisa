@@ -67,6 +67,7 @@ export class PrimeRpcSession {
     cwd,
     agentDir,
     sessionDir,
+    kernelVenvDir,
     extensionPath,
     chatId,
     continueSession = true,
@@ -88,6 +89,7 @@ export class PrimeRpcSession {
     this.cwd = cwd;
     this.agentDir = agentDir;
     this.sessionDir = sessionDir;
+    this.kernelVenvDir = kernelVenvDir;
     this.extensionPath = extensionPath;
     this.chatId = String(chatId ?? "");
     this.continueSession = continueSession;
@@ -165,6 +167,7 @@ export class PrimeRpcSession {
       ...this.extraEnv,
       PRIME_AGENT_CODING_AGENT_DIR: this.agentDir,
       PRIME_AGENT_SESSION_DIR: this.sessionDir,
+      ...(this.kernelVenvDir ? { PRIME_AGENT_KERNEL_VENV: this.kernelVenvDir } : {}),
       ARISA_CHAT_ID: this.chatId,
       PI_OFFLINE: "1",
       PI_SKIP_VERSION_CHECK: "1"

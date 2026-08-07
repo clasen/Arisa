@@ -138,6 +138,10 @@ On first start, Arisa downloads the pinned Prime Agent release, verifies its
 official SHA-256 checksum, and installs it privately under
 `~/.arisa/runtimes/prime-agent/<version>/`. It never installs Prime globally and
 does not depend on a `prime-agent` command already being present on `PATH`.
+The same first start installs `uv`, prepares Prime's IPython environment under
+`~/.arisa/state/prime-agent/kernel-venv/`, and validates that kernel before
+marking the managed runtime as ready. Existing managed installs made before this
+bootstrap check are repaired automatically on their next start.
 
 Arisa intentionally rejects other Prime versions until their RPC contract passes
 the Arisa test suite. Prime runs IPython kernels and recursive workers with the

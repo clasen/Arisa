@@ -139,7 +139,8 @@ export async function prepareAgentRuntime(config, { logger, resolvePrimeImpl = r
       command: runtime.command,
       commandArgs: runtime.commandArgs,
       managedRuntime: runtime.managed,
-      runtimeDir: runtime.runtimeDir
+      runtimeDir: runtime.runtimeDir,
+      kernelVenvDir: runtime.kernelVenvDir
     }
   };
 }

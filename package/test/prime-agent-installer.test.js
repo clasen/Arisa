@@ -9,7 +9,8 @@ import {
   getManagedPrimePaths,
   installManagedPrimeAgent,
   parsePrimeChecksumManifest,
-  resolvePrimeAgentRuntime
+  resolvePrimeAgentRuntime,
+  validatePrimeKernel
 } from "../src/runtime/prime-agent-installer.js";
 
 function successfulChild(run) {
@@ -45,6 +46,8 @@ test("installs a verified Prime release privately and reuses it", async (t) => {
   const checksum = crypto.createHash("sha256").update(tarball).digest("hex");
   const fetched = [];
   let installCount = 0;
+  let kernelValidationCount = 0;
+  const kernelVenvDir = path.join(runtimesRoot, "kernel-venv");
 
   const fetchImpl = async (url) => {
     fetched.push(url);
@@ -53,8 +56,12 @@ test("installs a verified Prime release privately and reuses it", async (t) => {
     }
     return new Response(tarball);
   };
-  const spawnImpl = (_command, args) => successfulChild(async () => {
+  const spawnImpl = (_command, args, options) => successfulChild(async () => {
     installCount += 1;
+    assert.equal(options.env.PRIME_AGENT_BOOTSTRAP_KERNEL_ON_INSTALL, "1");
+    assert.equal(options.env.PRIME_AGENT_BOOTSTRAP_TOOLS_ON_INSTALL, "1");
+    assert.equal(options.env.PRIME_AGENT_INSTALL_UV, "1");
+    assert.equal(options.env.PRIME_AGENT_KERNEL_VENV, kernelVenvDir);
     const prefixIndex = args.indexOf("--prefix");
     assert.notEqual(prefixIndex, -1);
     const stagingDir = args[prefixIndex + 1];
@@ -68,26 +75,36 @@ test("installs a verified Prime release privately and reuses it", async (t) => {
     await access(commandArgs[0]);
     return { command, version: expectedVersion };
   };
+  const validateKernelImpl = async ({ kernelVenvDir: receivedKernelVenvDir }) => {
+    kernelValidationCount += 1;
+    assert.equal(receivedKernelVenvDir, kernelVenvDir);
+  };
 
   const installed = await installManagedPrimeAgent({
     version: "0.7.0",
     baseUrl: "https://releases.example.test",
     runtimesRoot,
+    kernelVenvDir,
     fetchImpl,
     spawnImpl,
-    validateImpl
+    validateImpl,
+    validateKernelImpl
   });
   const paths = getManagedPrimePaths("0.7.0", { runtimesRoot });
   assert.equal(installed.command, process.execPath);
   assert.deepEqual(installed.commandArgs, [paths.cliPath]);
   assert.equal(installed.managed, true);
+  assert.equal(installed.kernelVenvDir, kernelVenvDir);
   assert.equal(installCount, 1);
+  assert.equal(kernelValidationCount, 1);
   assert.deepEqual(fetched, [
     "https://releases.example.test/releases/v0.7.0/SHA256SUMS",
     "https://releases.example.test/releases/v0.7.0/prime-agent-0.7.0.tgz"
   ]);
   const marker = JSON.parse(await readFile(paths.markerFile, "utf8"));
   assert.equal(marker.version, "0.7.0");
+  assert.equal(marker.installerSchema, 2);
+  assert.equal(marker.kernelVenvDir, kernelVenvDir);
   assert.equal(marker.sha256, checksum);
   await access(paths.cliPath);
   await access(path.join(paths.runtimeDir, "prime-agent-0.7.0.tgz"));
@@ -96,12 +113,51 @@ test("installs a verified Prime release privately and reuses it", async (t) => {
     version: "0.7.0",
     baseUrl: "https://releases.example.test",
     runtimesRoot,
+    kernelVenvDir,
     fetchImpl: async () => { throw new Error("must not fetch"); },
     spawnImpl: () => { throw new Error("must not install"); },
-    validateImpl
+    validateImpl,
+    validateKernelImpl
   });
   assert.deepEqual(reused.commandArgs, [paths.cliPath]);
   assert.equal(installCount, 1);
+
+  delete marker.installerSchema;
+  await writeFile(paths.markerFile, `${JSON.stringify(marker)}\n`, "utf8");
+  await installManagedPrimeAgent({
+    version: "0.7.0",
+    baseUrl: "https://releases.example.test",
+    runtimesRoot,
+    kernelVenvDir,
+    fetchImpl,
+    spawnImpl,
+    validateImpl,
+    validateKernelImpl
+  });
+  assert.equal(installCount, 2);
+  assert.equal(kernelValidationCount, 2);
+});
+
+test("validates the persistent Prime IPython kernel", async () => {
+  const kernelVenvDir = path.join(os.tmpdir(), "arisa-kernel-validation");
+  const result = await validatePrimeKernel({
+    kernelVenvDir,
+    spawnImpl: (command, args, options) => {
+      assert.equal(command, path.join(kernelVenvDir, process.platform === "win32" ? "Scripts" : "bin", process.platform === "win32" ? "python.exe" : "python"));
+      assert.match(args[1], /import IPython; import ipykernel/);
+      assert.deepEqual(options.stdio, ["ignore", "pipe", "pipe"]);
+      const child = new EventEmitter();
+      child.stdout = new EventEmitter();
+      child.stderr = new EventEmitter();
+      queueMicrotask(() => {
+        child.stdout.emit("data", Buffer.from("9.0.0\n"));
+        child.emit("close", 0);
+      });
+      return child;
+    }
+  });
+
+  assert.equal(result.kernelVenvDir, kernelVenvDir);
 });
 
 test("rejects a release whose tarball does not match the official manifest entry", async (t) => {
