@@ -49,7 +49,16 @@ Minimal profile structure:
     "minEligiblePool": 3,
     "queriesPerRun": 2,
     "maxResults": 6,
-    "queries": ["topic publication editor contact"]
+    "queries": ["topic publication editor contact"],
+    "creativeDiscovery": {
+      "enabled": true,
+      "queryBudgetPerRun": 4,
+      "seeds": ["Comparable title"],
+      "themes": ["adjacent audience theme"],
+      "audiences": ["reviewer", "YouTube creator"],
+      "contactIntents": ["contact email"],
+      "templates": ["\"{{seed}}\" review {{audience}} {{contact}}"]
+    }
   },
   "personalization": {
     "enabled": true,
@@ -85,5 +94,7 @@ Minimal profile structure:
 Use `action: "status"` to inspect campaign and Gmail draft counts. `minEligiblePool` asks discovery to maintain a backlog of unused, eligible contacts so recurring one-draft runs do not depend on finding a new contact during every interval.
 
 Set `untilDrafted: "true"` on a non-dry run to retry discovery with rotating queries until at least one new draft is created. `retryDelaySeconds` controls the pause between attempts; `maxAttempts` and `maxRuntimeSeconds` keep the retry loop bounded.
+
+When the normal pass leaves no eligible candidates, `discovery.creativeDiscovery` provides a bounded fallback. It builds and rotates queries from comparable titles (`seeds`), adjacent audience ideas (`themes`), outlet types (`audiences`), contact intents, and templates. The fallback has its own persistent cursor, query budget, page budget, and optional URL cooldown, so repeated zero-result runs explore new combinations rather than repeating the same searches. Existing email verification, provenance, deduplication, exclusions, and draft-only safeguards still apply.
 
 Research source URLs are omitted from personalized openings by default so outreach contains only the campaign link. Set `personalization.includeSourceUrl: true` only when a profile explicitly needs the source URL in the email.

@@ -26,6 +26,7 @@ Profiles live under the chat-scoped state directory:
   <chatToolStateDir>/profiles/<profile>.json
 
 Profiles may enable web research to cite relevant articles or videos in the opening paragraph.
+When discovery.creativeDiscovery.enabled is true, zero-candidate runs automatically rotate through comparable titles, adjacent themes, audiences, and contact intents before returning no result.
 The runner is generic. Campaign-specific copy, keywords, language detection, and tool names belong in the profile JSON.`);
 }
 
@@ -313,6 +314,16 @@ async function saveDiscoveryState(file, data) {
   await rename(temporary, file);
 }
 
+function stableHash(value) {
+  let total = 2166136261;
+  for (const character of String(value)) total = Math.imul(total ^ character.charCodeAt(0), 16777619) >>> 0;
+  return total;
+}
+
+function uniqueSortedQueries(queries) {
+  return [...new Set(queries.map(clean).filter(Boolean))].sort((a, b) => stableHash(a) - stableHash(b));
+}
+
 function queryCatalog(settings) {
   const queries = [...(settings.queries || [])];
   const templates = settings.queryTemplates || [];
@@ -337,20 +348,61 @@ function queryCatalog(settings) {
       }
     }
   }
-  const unique = [...new Set(queries)];
-  const hash = (value) => {
-    let total = 2166136261;
-    for (const character of value) total = Math.imul(total ^ character.charCodeAt(0), 16777619) >>> 0;
-    return total;
-  };
-  return unique.sort((a, b) => hash(a) - hash(b));
+  return uniqueSortedQueries(queries);
+}
+
+function creativeQueryCatalog(settings) {
+  const creative = settings.creativeDiscovery;
+  if (creative?.enabled !== true) return [];
+  const queries = [...(creative.queries || [])];
+  const templates = creative.templates || [
+    '"{{seed}}" review {{audience}} {{contact}}',
+    '"{{seed}}" similar games {{audience}} {{contact}}',
+    '{{theme}} games {{audience}} {{contact}}',
+    'site:youtube.com "{{seed}}" business email'
+  ];
+  const seeds = creative.seeds || [];
+  const themes = creative.themes || [];
+  const audiences = creative.audiences || settings.audiences || ["reviewer"];
+  const contacts = creative.contactIntents || settings.contactIntents || ["contact email"];
+  const concepts = [
+    ...seeds.map((seed) => ({ seed, theme: "" })),
+    ...themes.map((theme) => ({ seed: "", theme }))
+  ];
+  for (const concept of concepts) {
+    for (const template of templates) {
+      if (template.includes("{{seed}}") && !concept.seed) continue;
+      if (template.includes("{{theme}}") && !concept.theme) continue;
+      for (const audience of audiences) {
+        for (const contact of contacts) {
+          const query = String(template)
+            .replace(/{{\s*seed\s*}}/g, clean(concept.seed))
+            .replace(/{{\s*theme\s*}}/g, clean(concept.theme))
+            .replace(/{{\s*audience\s*}}/g, clean(audience))
+            .replace(/{{\s*contact\s*}}/g, clean(contact))
+            .replace(/\s+/g, " ")
+            .trim();
+          if (query) queries.push(query);
+        }
+      }
+    }
+  }
+  return uniqueSortedQueries(queries);
+}
+
+function nextQueries(catalog, cursor, count) {
+  if (!catalog.length) return [];
+  const limit = Math.max(1, Math.min(Number(count || 2), catalog.length));
+  return Array.from({ length: limit }, (_, offset) => catalog[(Number(cursor || 0) + offset) % catalog.length]);
 }
 
 function nextDiscoveryQueries(settings, state) {
-  const queries = queryCatalog(settings);
-  if (!queries.length) return [];
-  const count = Math.max(1, Math.min(Number(settings.queryBudgetPerRun || settings.queriesPerRun || 2), queries.length));
-  return Array.from({ length: count }, (_, offset) => queries[(Number(state.cursor || 0) + offset) % queries.length]);
+  return nextQueries(queryCatalog(settings), state.cursor, settings.queryBudgetPerRun || settings.queriesPerRun || 2);
+}
+
+function nextCreativeQueries(settings, state) {
+  const creative = settings.creativeDiscovery || {};
+  return nextQueries(creativeQueryCatalog(settings), state.creativeCursor, creative.queryBudgetPerRun || settings.queryBudgetPerRun || 4);
 }
 
 function seenUrlRecently(seenUrls, url, cooldownDays) {
@@ -378,14 +430,17 @@ async function discoverContacts(arisa, chatId, profile, allContacts, draftRecipi
   const knownOutlets = new Set(allContacts.map(outletKey).filter(Boolean));
   const usedOutlets = new Set(allContacts.filter((contact) => contact.status && contact.status !== (profile.contactStatus || "new")).map(outletKey).filter(Boolean));
   const { file, data: state } = await readDiscoveryState(chatId);
-  const catalog = queryCatalog(settings);
-  const queries = nextDiscoveryQueries(settings, state);
+  const creativeMode = options.mode === "creative";
+  const creativeSettings = settings.creativeDiscovery || {};
+  const catalog = creativeMode ? creativeQueryCatalog(settings) : queryCatalog(settings);
+  const queries = creativeMode ? nextCreativeQueries(settings, state) : nextDiscoveryQueries(settings, state);
+  const cursorKey = creativeMode ? "creativeCursor" : "cursor";
   const oldSeen = Array.isArray(state.seenUrls)
     ? Object.fromEntries(state.seenUrls.map((url) => [url, "1970-01-01T00:00:00.000Z"]))
     : (state.seenUrls || {});
   const seenUrls = { ...oldSeen };
-  const cooldownDays = Math.max(1, Number(settings.urlCooldownDays || 45));
-  const pageBudget = Math.max(1, Number(settings.pageBudgetPerRun || 30));
+  const cooldownDays = Math.max(1, Number((creativeMode ? creativeSettings.urlCooldownDays : null) || settings.urlCooldownDays || 45));
+  const pageBudget = Math.max(1, Number((creativeMode ? creativeSettings.pageBudgetPerRun : null) || settings.pageBudgetPerRun || 30));
   const queryStats = state.queryStats || {};
   const added = [];
   let pagesOpened = 0;
@@ -505,17 +560,18 @@ async function discoverContacts(arisa, chatId, profile, allContacts, draftRecipi
   }
 
   if (!dryRun) {
-    state.cursor = (Number(state.cursor || 0) + queries.length) % Math.max(1, catalog.length);
+    state[cursorKey] = (Number(state[cursorKey] || 0) + queries.length) % Math.max(1, catalog.length);
     state.seenUrls = compactSeenUrls(seenUrls, Number(settings.seenUrlLimit || 3000));
     state.queryStats = queryStats;
     state.runs = [...(state.runs || []), {
-      at: new Date().toISOString(), queries, searches, pagesOpened, found: added.length,
+      at: new Date().toISOString(), mode: creativeMode ? "creative" : "standard",
+      queries, searches, pagesOpened, found: added.length,
       skippedSeen, skippedUsed, rejectedEmails
     }].slice(-200);
     state.updatedAt = new Date().toISOString();
     await saveDiscoveryState(file, state);
   }
-  return { queries, searches, pagesOpened, found: added.length, added, skippedUsed, skippedSeen, rejectedEmails, dryRun };
+  return { mode: creativeMode ? "creative" : "standard", queries, searches, pagesOpened, found: added.length, added, skippedUsed, skippedSeen, rejectedEmails, dryRun };
 }
 function researchTitleUsable(value) {
   const title = decodeHtmlEntities(value).replace(/[\r\n]+/g, " ").trim();
@@ -750,12 +806,25 @@ async function handleRun(request) {
     let eligiblePool = chooseContacts(allContacts, candidateContacts, draftRecipients, profile, poolTarget, excludedEmails);
     const discovery = await discoverContacts(
       arisa, request.chatId, profile, allContacts, draftRecipients,
-      Math.max(0, poolTarget - eligiblePool.length), { dryRun }
+      Math.max(0, poolTarget - eligiblePool.length), { dryRun, mode: "standard" }
     );
     if (discovery.found && !dryRun) {
       allContacts = await listAllContacts(arisa, profile);
       candidateContacts = await listContacts(arisa, profile);
       eligiblePool = chooseContacts(allContacts, candidateContacts, draftRecipients, profile, poolTarget, excludedEmails);
+    }
+
+    let creativeDiscovery = null;
+    if (eligiblePool.length === 0 && profile.discovery?.creativeDiscovery?.enabled === true) {
+      creativeDiscovery = await discoverContacts(
+        arisa, request.chatId, profile, allContacts, draftRecipients,
+        poolTarget, { dryRun, mode: "creative" }
+      );
+      if (creativeDiscovery.found && !dryRun) {
+        allContacts = await listAllContacts(arisa, profile);
+        candidateContacts = await listContacts(arisa, profile);
+        eligiblePool = chooseContacts(allContacts, candidateContacts, draftRecipients, profile, poolTarget, excludedEmails);
+      }
     }
     const selected = eligiblePool.slice(0, Math.min(eligiblePool.length, limit * candidatesPerDraft));
     const verified = [];
@@ -792,6 +861,7 @@ async function handleRun(request) {
       eligiblePool: eligiblePool.length,
       poolTarget,
       discovery,
+      creativeDiscovery,
       selected: selected.map((contact) => ({ email: contact.email, outlet: contact.outlet, score: scoreContact(contact, profile), language: detectLanguage(contact, profile) })),
       verified: verified.length,
       drafted: drafted.length,
