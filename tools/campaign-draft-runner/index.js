@@ -476,8 +476,19 @@ async function discoverContacts(arisa, chatId, profile, allContacts, draftRecipi
   }
   return { queries, searches, pagesOpened, found: added.length, added, skippedUsed, skippedSeen, rejectedEmails, dryRun };
 }
+function researchTitleUsable(value) {
+  const title = decodeHtmlEntities(value).replace(/[\r\n]+/g, " ").trim();
+  const normalized = title
+    .replace(/\s*[-|–—]\s*(YouTube|Spotify|Apple Podcasts?)\s*$/i, "")
+    .replace(/^[\s\-–—|:：]+|[\s\-–—|:：]+$/g, "")
+    .trim();
+  if (normalized.length < 6) return false;
+  return !/^(youtube|spotify|apple podcasts?|podcast|video|watch|home|untitled)$/i.test(normalized);
+}
+
 function isUsableResearchResult(result, contact) {
   const url = String(result?.url || "").trim();
+  if (!researchTitleUsable(result?.title)) return false;
   if (!/^https?:\/\//i.test(url)) return false;
   if (/(contact|about|privacy|terms|advertis|presskit|submit|login|sign-in)/i.test(url)) return false;
   try {
@@ -509,7 +520,7 @@ async function researchContact(arisa, profile, contact) {
 }
 
 function personalizedOpening(language, research, profile) {
-  if (!research?.title || !research?.url) return "";
+  if (!research?.url || !researchTitleUsable(research?.title)) return "";
   const personalization = profile.personalization || {};
   const templates = personalization.openingTemplates || {};
   const template = templates[language] || templates[profile.defaultLanguage || "en"];
