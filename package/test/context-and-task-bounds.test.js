@@ -1,6 +1,6 @@
 ﻿import assert from "node:assert/strict";
 import test from "node:test";
-import { collectText } from "../src/transport/telegram/bot.js";
+import { collectText, createChatStateStore } from "../src/transport/telegram/bot.js";
 import { selectScheduledTasks } from "../src/core/agent/agent-manager.js";
 
 function createSession(events) {
@@ -49,6 +49,21 @@ test("collectText preserves the final assistant error", async () => {
   ]);
 
   await assert.rejects(() => collectText(session, "hello"), /terminal failure/);
+});
+
+test("chat state uses one queue for numeric and string chat IDs", () => {
+  const states = createChatStateStore();
+  const telegramState = states.get(879964957);
+  telegramState.processing = true;
+  telegramState.nextPrompt = "queued prompt";
+
+  assert.strictEqual(states.get("879964957"), telegramState);
+  assert.equal(states.get("879964957").processing, true);
+  assert.equal(states.get("879964957").nextPrompt, "queued prompt");
+
+  const resetState = states.reset("879964957");
+  assert.strictEqual(states.get(879964957), resetState);
+  assert.deepEqual(resetState, { processing: false, nextPrompt: "" });
 });
 
 test("selectScheduledTasks bounds history while keeping active tasks", () => {

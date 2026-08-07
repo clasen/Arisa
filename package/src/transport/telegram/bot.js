@@ -311,9 +311,27 @@ async function withTyping(ctx, work) {
   }
 }
 
+export function createChatStateStore() {
+  const states = new Map();
+
+  function reset(chatId) {
+    const state = { processing: false, nextPrompt: "" };
+    states.set(String(chatId), state);
+    return state;
+  }
+
+  return {
+    get(chatId) {
+      const key = String(chatId);
+      return states.get(key) || reset(key);
+    },
+    reset
+  };
+}
+
 export async function createTelegramBot({ config, artifactStore, toolRegistry, taskStore, agentManager, saveConfig, updateConfig, logger }) {
   const bot = new Bot(config.telegram.token);
-  const perChatState = new Map();
+  const perChatState = createChatStateStore();
   const notifiedPromptErrors = new WeakSet();
   const authRenewals = new Map();
   const pendingPrimeUi = new Map();
@@ -442,9 +460,6 @@ export async function createTelegramBot({ config, artifactStore, toolRegistry, t
   }
 
   function getChatState(chatId) {
-    if (!perChatState.has(chatId)) {
-      perChatState.set(chatId, { processing: false, nextPrompt: "" });
-    }
     return perChatState.get(chatId);
   }
 
@@ -894,7 +909,7 @@ export async function createTelegramBot({ config, artifactStore, toolRegistry, t
       ? { handoff: "", parentSession: "" }
       : await withTyping(ctx, () => summarizeSessionBeforeReset(ctx.chat.id));
     agentManager.resetSession(ctx.chat.id, handoff);
-    perChatState.set(ctx.chat.id, { processing: false, nextPrompt: "" });
+    perChatState.reset(ctx.chat.id);
     await enqueuePrompt({
       chatId: ctx.chat.id,
       prompt: buildNewSessionPrompt(ctx),
