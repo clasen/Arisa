@@ -505,7 +505,8 @@ async function researchContact(arisa, profile, contact) {
 
 function personalizedOpening(language, research, profile) {
   if (!research?.title || !research?.url) return "";
-  const templates = profile.personalization?.openingTemplates || {};
+  const personalization = profile.personalization || {};
+  const templates = personalization.openingTemplates || {};
   const template = templates[language] || templates[profile.defaultLanguage || "en"];
   if (!template) return "";
   const values = {
@@ -513,7 +514,16 @@ function personalizedOpening(language, research, profile) {
     url: research.url.trim(),
     campaign: clean(profile.name)
   };
-  return String(template).replace(/{{\s*(title|url|campaign)\s*}}/g, (_, key) => values[key]);
+  const withoutSourceUrl = personalization.includeSourceUrl === true
+    ? String(template)
+    : String(template)
+      .replace(/\s*[:：]\s*{{\s*url\s*}}/gi, "")
+      .replace(/\s*{{\s*url\s*}}/gi, "");
+  return withoutSourceUrl
+    .replace(/{{\s*(title|url|campaign)\s*}}/g, (_, key) => values[key])
+    .replace(/[ \t]+([,.!?;:，。！？；：])/g, "$1")
+    .replace(/[ \t]{2,}/g, " ")
+    .trim();
 }
 
 function replaceOpeningParagraph(body, opening) {
