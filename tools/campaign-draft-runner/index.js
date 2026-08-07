@@ -101,10 +101,28 @@ function referenceOutlet(value) {
     .trim();
 }
 
+function emailOutlet(value) {
+  const local = clean(value).split("@")[0].split("+")[0];
+  const withoutRole = local.replace(/(?:colaboraciones|collaborations?|businessinquiries|business|contacto|contact|press|editorial|media|official|channel|youtube|reviews?)$/i, "");
+  const readable = (withoutRole || local)
+    .replace(/([a-z])([A-Z])/g, "$1 $2")
+    .replace(/[._-]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+  if (readable.length < 2 || /^(?:info|hello|mail|team|admin)$/i.test(readable)) return "";
+  return readable.replace(/\b[a-z]/g, (letter) => letter.toUpperCase());
+}
+
+function looksLikeContentTitle(value) {
+  const outlet = clean(value);
+  return outlet.length > 55 || /#|\.{3}|\b(?:best|top)\s+\d*|[-|–—]\s*YouTube$/i.test(outlet);
+}
+
 function displayOutlet(contact) {
   const outlet = decodeHtmlEntities(clean(contact.outlet || contact.name));
-  if (!/^(?:x|twitter|posts?|home)$/i.test(outlet)) return outlet || "there";
-  return referenceOutlet(contact.referenceGame) || outlet;
+  if (/^(?:x|twitter|posts?|home)$/i.test(outlet)) return referenceOutlet(contact.referenceGame) || emailOutlet(contact.email) || outlet;
+  if (looksLikeContentTitle(outlet)) return emailOutlet(contact.email) || outlet;
+  return outlet || emailOutlet(contact.email) || "there";
 }
 
 function render(template, contact, profile) {
