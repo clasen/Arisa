@@ -50,7 +50,7 @@ export function createArisaCapabilities({ artifactStore, taskStore, toolRegistry
 
     if (method === "tools.list") {
       await toolRegistry.load();
-      return toolRegistry.list();
+      return toolRegistry.listWithRuntime(chatId);
     }
 
     if (method === "tools.help") {

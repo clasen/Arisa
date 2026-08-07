@@ -754,7 +754,7 @@ export class AgentManager {
       defineTool({
         name: "list_tools",
         label: "List tools",
-        description: "List Arisa core, native shell, and modular CLI tools with their capabilities.",
+        description: "List Arisa core, native shell, and modular CLI tools with their capabilities and daemon diagnostics.",
         parameters: Type.Object({}),
         execute: async () => {
           await this.toolRegistry.load();
@@ -770,7 +770,7 @@ export class AgentManager {
             shell: policy.shell.shellPath || (process.platform === "win32" ? "powershell" : "sh"),
             enabled: !(policy.excludeTools || []).includes("system_shell")
           }];
-          const cliTools = this.toolRegistry.list().map((tool) => ({
+          const cliTools = (await this.toolRegistry.listWithRuntime(chatId)).map((tool) => ({
             ...tool,
             source: "arisa-modular",
             invocation: "run_tool"

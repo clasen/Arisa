@@ -1,6 +1,6 @@
 ﻿import assert from "node:assert/strict";
 import test from "node:test";
-import { collectText, createChatStateStore, drainChatPromptQueue } from "../src/transport/telegram/bot.js";
+import { collectText, createChatStateStore, drainChatPromptQueue, isSilentReply } from "../src/transport/telegram/bot.js";
 import { selectScheduledTasks } from "../src/core/agent/agent-manager.js";
 
 function createSession(events) {
@@ -49,6 +49,18 @@ test("collectText preserves the final assistant error", async () => {
   ]);
 
   await assert.rejects(() => collectText(session, "hello"), /terminal failure/);
+});
+
+test("recognizes one or repeated NO_REPLY tokens as a silent reply", () => {
+  assert.equal(isSilentReply("NO_REPLY"), true);
+  assert.equal(isSilentReply("\nNO_REPLY\n\nNO_REPLY\n"), true);
+});
+
+test("does not suppress real text that mentions NO_REPLY", () => {
+  assert.equal(isSilentReply("NO_REPLY means no notification was needed."), false);
+  assert.equal(isSilentReply("NO_REPLY\n\nThere is an important message."), false);
+  assert.equal(isSilentReply("no_reply"), false);
+  assert.equal(isSilentReply(""), false);
 });
 
 test("chat state uses one queue for numeric and string chat IDs", () => {

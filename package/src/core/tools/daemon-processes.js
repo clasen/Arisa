@@ -97,6 +97,59 @@ export async function writeDaemonStatus(pathsOrIdentity, patch) {
   return next;
 }
 
+function daemonDisposition({ state, alive, autoStart, restartRequested }) {
+  if (state === "failed") return "requires-attention";
+  if (state === "restarting" || restartRequested) return "automatic-retry";
+  if (["degraded", "unhealthy"].includes(state)) return autoStart ? "automatic-recovery" : "requires-attention";
+  if (state === "stopped") return autoStart ? "automatic-restart" : "leave-stopped";
+  if (state === "ready" && !alive) return autoStart ? "automatic-restart" : "start-on-demand";
+  if (state === "ready") return "available";
+  if (state === "starting") return "starting";
+  return autoStart ? "automatic-start" : "start-on-demand";
+}
+
+function redactDiagnosticText(value) {
+  if (!value) return null;
+  return String(value)
+    .replace(/\b(Bearer)\s+[^\s,;]+/gi, "$1 [redacted]")
+    .replace(/\b(token|secret|password|api[_-]?key)(\s*[=:]\s*)[^\s,;&]+/gi, "$1$2[redacted]")
+    .replace(/([?&](?:token|secret|password|api[_-]?key)=)[^\s&#]+/gi, "$1[redacted]")
+    .replace(/(https?:\/\/[^\s:/]+:)[^\s@/]+@/gi, "$1[redacted]@");
+}
+
+function diagnosticError(lastError) {
+  if (!lastError) return null;
+  return {
+    ...lastError,
+    message: redactDiagnosticText(lastError.message)
+  };
+}
+
+export async function readDaemonDiagnostic({ toolName, scope, autoStart = false }) {
+  const paths = daemonPaths({ toolName, scope });
+  const status = await readJson(paths.statusFile, {});
+  const { pid } = await readJson(paths.pidFile, {});
+  const state = status.state || "not-started";
+  const alive = isProcessAlive(pid);
+  const restartRequested = Boolean(status.restartRequested);
+  const hasActiveError = ["degraded", "unhealthy", "restarting", "failed"].includes(state);
+  return {
+    state,
+    alive,
+    pid: alive ? pid : null,
+    message: redactDiagnosticText(status.message),
+    lastError: hasActiveError ? diagnosticError(status.lastError) : null,
+    restart: {
+      attempts: Number(status.restartAttempts || 0),
+      requested: restartRequested,
+      nextAt: status.nextRestartAt || null
+    },
+    disposition: daemonDisposition({ state, alive, autoStart: Boolean(autoStart), restartRequested }),
+    updatedAt: status.updatedAt || null,
+    logFile: paths.logFile
+  };
+}
+
 function registrationRecord({ paths, entryPath, autoStart, startupContext, current = {}, startedAt = null }) {
   return {
     toolName: paths.toolName,
@@ -285,9 +338,29 @@ export async function startManagedDaemon({
     } finally {
       closeSync(out);
     }
+    const pidRegistration = writeJson(paths.pidFile, { pid: child.pid, startedAt });
+    child.once("exit", async (exitCode, signal) => {
+      await pidRegistration.catch(() => {});
+      const currentPid = (await readJson(paths.pidFile, {})).pid;
+      const currentStatus = await readJson(paths.statusFile, {});
+      if (currentPid !== child.pid || ["stopped", "failed"].includes(currentStatus.state)) return;
+      const exitReason = signal ? `signal ${signal}` : `exit code ${exitCode}`;
+      await writeDaemonStatus(paths, {
+        state: "degraded",
+        pid: null,
+        heartbeatAt: null,
+        lastError: {
+          at: new Date().toISOString(),
+          phase: "process-exit",
+          message: `Daemon process exited with ${exitReason}`,
+          code: signal || `EXIT_${exitCode}`
+        },
+        message: `Daemon process exited with ${exitReason}`
+      }).catch(() => {});
+    });
     child.unref();
 
-    await writeJson(paths.pidFile, { pid: child.pid, startedAt });
+    await pidRegistration;
     await writeDaemonStatus(paths, {
       state: "starting",
       pid: child.pid,
@@ -301,7 +374,8 @@ export async function startManagedDaemon({
       lastError: {
         at: new Date().toISOString(),
         phase: "start",
-        message: error?.message || String(error)
+        message: error?.message || String(error),
+        ...(error?.code ? { code: error.code } : {})
       },
       message: error?.message || String(error)
     }).catch(() => {});

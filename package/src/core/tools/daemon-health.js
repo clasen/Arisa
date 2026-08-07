@@ -17,12 +17,20 @@ function errorRecord(phase, error) {
   return {
     at: new Date().toISOString(),
     phase,
-    message: error?.message || String(error)
+    message: error?.message || String(error),
+    ...(error?.code ? { code: error.code } : {})
   };
 }
 
 function isTimeout(error) {
   return ["DAEMON_JOB_TIMEOUT", "DAEMON_OPERATION_TIMEOUT"].includes(error?.code);
+}
+
+function recordedError(status, fallback) {
+  if (!status.lastError?.message) return fallback;
+  const error = new Error(status.lastError.message);
+  if (status.lastError.code) error.code = status.lastError.code;
+  return error;
 }
 
 function healthDue(status, policy, now = Date.now()) {
@@ -156,6 +164,7 @@ export async function superviseDaemon(record, policy) {
   const alive = isProcessAlive(pid);
 
   if (!alive) {
+    if (status.state === "failed") return "failed";
     if (!record.autoStart && !status.restartRequested && ["stopped", "unhealthy", "failed"].includes(status.state)) {
       return status.state;
     }
@@ -165,7 +174,7 @@ export async function superviseDaemon(record, policy) {
     if (status.state === "restarting") {
       return restartIfDue(record, paths, status, policy);
     }
-    return scheduleRestart(record, paths, status, policy, new Error("Daemon process exited"));
+    return scheduleRestart(record, paths, status, policy, recordedError(status, new Error("Daemon process exited")));
   }
 
   if (!healthDue(status, policy)) return "healthy";

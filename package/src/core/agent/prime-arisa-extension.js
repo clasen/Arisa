@@ -55,7 +55,7 @@ export default function arisaPrimeExtension(pi) {
   pi.registerTool({
     name: "list_tools",
     label: "List Arisa tools",
-    description: "List Arisa modular tools and their capabilities.",
+    description: "List Arisa modular tools with capabilities, daemon health, and recommended disposition.",
     parameters: Type.Object({}),
     async execute() {
       return asToolResult(await (await client()).tools.list());

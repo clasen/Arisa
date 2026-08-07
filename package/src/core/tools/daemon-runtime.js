@@ -289,7 +289,8 @@ export function createDaemonRuntime({
               lastError: {
                 at: new Date().toISOString(),
                 phase: operation || "job",
-                message: error?.message || String(error)
+                message: error?.message || String(error),
+                ...(error?.code ? { code: error.code } : {})
               },
               message: error?.message || String(error)
             });
@@ -315,7 +316,8 @@ export function createDaemonRuntime({
           lastError: {
             at: new Date().toISOString(),
             phase: "work-loop",
-            message: error?.message || String(error)
+            message: error?.message || String(error),
+            ...(error?.code ? { code: error.code } : {})
           },
           message: error?.message || String(error)
         });

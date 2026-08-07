@@ -277,6 +277,10 @@ export async function collectText(session, prompt, { logger, chatId, onSlowPromp
   return text.trim();
 }
 
+export function isSilentReply(text) {
+  return /^(?:NO_REPLY)(?:\s+NO_REPLY)*$/.test(String(text || "").trim());
+}
+
 function buildSessionHandoffPrompt() {
   return [
     "Prepare a concise handoff for the next Arisa session.",
@@ -626,6 +630,11 @@ export async function createTelegramBot({ config, artifactStore, toolRegistry, t
 
   async function sendTextReply({ sendText, sendDocument, chatId, text }) {
     const maxInlineReplyLength = 3500;
+
+    if (isSilentReply(text)) {
+      logger?.log("telegram", `suppressing silent reply for chat ${chatId}`);
+      return;
+    }
 
     if (text.length > maxInlineReplyLength) {
       logger?.log("telegram", `sending long reply as markdown attachment for chat ${chatId}`);

@@ -4,6 +4,7 @@ import { spawn } from "node:child_process";
 import { arisaIpcSocketFile, arisaPackageDir, getToolConfigPath, getToolTmpDir, getChatToolTmpDir, toolsDir as userToolsRoot } from "../../runtime/paths.js";
 import { loadToolConfig, parseConfigModule, writeToolConfig } from "./tool-config.js";
 import { normalizeToolResult } from "./tool-result.js";
+import { readDaemonDiagnostic } from "./daemon-processes.js";
 import { SkillRegistry } from "../skills/skill-registry.js";
 
 function toolEnv() {
@@ -102,6 +103,32 @@ export class ToolRegistry {
       category: tool.category,
       keywords: tool.keywords || [],
       skillHints: tool.skillHints || []
+    }));
+  }
+
+  async listWithRuntime(chatId = null) {
+    return Promise.all(this.list().map(async (listedTool) => {
+      const daemon = this.get(listedTool.name)?.daemon;
+      if (!daemon) return listedTool;
+      if (daemon.scope === "chat" && (chatId == null || chatId === "")) {
+        throw new Error(`Daemon status for ${listedTool.name} requires chatId`);
+      }
+      const scope = daemon.scope === "chat"
+        ? { type: "chat", chatId }
+        : { type: "global" };
+      return {
+        ...listedTool,
+        daemon: {
+          scope: daemon.scope,
+          autoStart: Boolean(daemon.autoStart),
+          health: daemon.health || null,
+          runtime: await readDaemonDiagnostic({
+            toolName: listedTool.name,
+            scope,
+            autoStart: daemon.autoStart
+          })
+        }
+      };
     }));
   }
 

@@ -34,14 +34,18 @@ await writeFile(
 const {
   daemonPaths,
   isProcessAlive,
+  readDaemonDiagnostic,
   readJson,
-  stopManagedDaemon
+  stopManagedDaemon,
+  writeDaemonStatus
 } = await import("../src/core/tools/daemon-processes.js");
 const {
   createDaemonRuntime,
   isDaemonReady
 } = await import("../src/core/tools/daemon-runtime.js");
-const { createToolProcessSupervisor } = await import("../src/runtime/tool-process-supervisor.js");
+const { createToolProcessSupervisor, formatDaemonOutcome } = await import("../src/runtime/tool-process-supervisor.js");
+const { superviseDaemon } = await import("../src/core/tools/daemon-health.js");
+const { ToolRegistry } = await import("../src/core/tools/tool-registry.js");
 
 const fixtureEntry = fileURLToPath(new URL("../test-fixtures/fake-daemon.js", import.meta.url));
 
@@ -168,6 +172,76 @@ test("does not auto-start an intentionally stopped on-demand daemon", async () =
   assert.equal(isProcessAlive(await runtime.getPid()), false);
   assert.equal((await readJson(runtime.paths.statusFile, {})).state, "stopped");
   await supervisor.stop();
+});
+
+test("describes an intentionally stopped on-demand daemon without treating it as a failure", async () => {
+  const runtime = runtimeFor({ type: "global" }, { autoStart: false });
+  await writeDaemonStatus(runtime.paths, {
+    state: "stopped",
+    pid: null,
+    message: "Idle timeout reached",
+    restartAttempts: 0,
+    restartRequested: false
+  });
+
+  const diagnostic = await readDaemonDiagnostic(runtime.registration);
+  assert.equal(diagnostic.state, "stopped");
+  assert.equal(diagnostic.disposition, "leave-stopped");
+  assert.equal(diagnostic.lastError, null);
+});
+
+test("keeps a terminal daemon failure stable until it receives explicit attention", async () => {
+  const runtime = runtimeFor({ type: "global" }, { autoStart: true });
+  await writeDaemonStatus(runtime.paths, {
+    state: "failed",
+    pid: null,
+    message: "Daemon restart limit reached: synthetic crash",
+    restartAttempts: policy.restartLimit + 1,
+    restartRequested: false,
+    lastError: { phase: "restart", message: "synthetic crash token=private-value", code: "SYNTHETIC" }
+  });
+
+  assert.equal(await superviseDaemon(runtime.registration, policy), "failed");
+  assert.equal(await superviseDaemon(runtime.registration, policy), "failed");
+  const status = await readJson(runtime.paths.statusFile, {});
+  assert.equal(status.restartAttempts, policy.restartLimit + 1);
+
+  const diagnostic = await readDaemonDiagnostic(runtime.registration);
+  assert.equal(diagnostic.disposition, "requires-attention");
+  assert.equal(diagnostic.lastError.code, "SYNTHETIC");
+  assert.equal(diagnostic.lastError.message, "synthetic crash token=[redacted]");
+  assert.match(
+    formatDaemonOutcome(runtime.registration, "failed", diagnostic, policy),
+    /failed \| error\[restart\]=synthetic crash token=\[redacted\] \| code=SYNTHETIC \| restarts=3\/2 \| action=requires-attention \| log=/
+  );
+});
+
+test("includes scoped daemon diagnostics when Arisa lists tools", async () => {
+  const runtime = runtimeFor({ type: "chat", chatId: "101" }, { autoStart: false });
+  await writeDaemonStatus(runtime.paths, {
+    state: "stopped",
+    pid: null,
+    message: "Idle timeout reached",
+    restartAttempts: 0,
+    restartRequested: false
+  });
+  const registry = new ToolRegistry();
+  registry.tools.set("fake-daemon", {
+    name: "fake-daemon",
+    description: "Fake daemon",
+    input: [],
+    output: [],
+    configSchema: {},
+    category: null,
+    keywords: [],
+    skillHints: [],
+    daemon: { scope: "chat", autoStart: false, health: "internal" }
+  });
+
+  const [tool] = await registry.listWithRuntime("101");
+  assert.equal(tool.daemon.scope, "chat");
+  assert.equal(tool.daemon.runtime.state, "stopped");
+  assert.equal(tool.daemon.runtime.disposition, "leave-stopped");
 });
 
 test("external supervisor recovers internally before restarting", async () => {
