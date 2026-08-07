@@ -1,5 +1,6 @@
 ﻿import assert from "node:assert/strict";
 import test from "node:test";
+import { prepareConfigForSave } from "../src/core/config/config-store.js";
 import { prepareAgentRuntime } from "../src/runtime/create-app.js";
 
 test("prepares the pinned managed runtime for an active Prime configuration", async () => {
@@ -41,4 +42,24 @@ test("does not prepare Prime while the rollback Pi runtime is active", async () 
   });
 
   assert.equal(prepared, config);
+});
+
+test("does not persist managed Prime process details", () => {
+  const persisted = prepareConfigForSave({
+    agent: { runtime: "prime" },
+    prime: {
+      command: process.execPath,
+      commandArgs: ["/managed/prime-agent/cli.js"],
+      managedRuntime: true,
+      runtimeDir: "/managed/prime-agent/0.7.0",
+      kernelVenvDir: "/managed/prime-kernel",
+      version: "0.7.0"
+    }
+  });
+
+  assert.equal(persisted.prime.command, "");
+  assert.equal("commandArgs" in persisted.prime, false);
+  assert.equal("managedRuntime" in persisted.prime, false);
+  assert.equal("runtimeDir" in persisted.prime, false);
+  assert.equal("kernelVenvDir" in persisted.prime, false);
 });
