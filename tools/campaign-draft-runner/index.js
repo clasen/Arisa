@@ -202,8 +202,13 @@ function emailFitsSource(email, result, totalEmails) {
 
 function resultOutlet(result) {
   const host = sourceHost(result.url);
+  const title = decodeHtmlEntities(clean(result.title));
   if (/(^|\.)youtube\.com$/i.test(host)) {
-    return clean(result.title).replace(/\s*[-|]\s*YouTube\s*$/i, "").trim() || host;
+    return title.replace(/\s*[-|]\s*YouTube\s*$/i, "").trim() || host;
+  }
+  if (/(^|\.)(spotify\.com|podcasts\.apple\.com|podbean\.com|spreaker\.com|buzzsprout\.com|anchor\.fm)$/i.test(host)) {
+    const showName = title.split(/\s*[|–—]\s*/)[0].trim();
+    if (showName && !/^(spotify|apple podcasts?|podcast)$/i.test(showName)) return showName;
   }
   const label = host.split(".").slice(0, -1).join(".") || host;
   return label.replace(/[-_]+/g, " ").replace(/\b\w/g, (letter) => letter.toUpperCase()).trim();
