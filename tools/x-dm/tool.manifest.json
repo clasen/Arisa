@@ -1,6 +1,6 @@
 {
   "name": "x-dm",
-  "description": "Audit X/Twitter outreach history, validate DM availability, and send one explicitly approved DM at a time with campaign tracking, deduplication, caps, locking, and hard browser timeouts.",
+  "description": "Safely manage X/Twitter outreach and the logged-in account bio with account pinning, explicit confirmations, delivery safeguards, and post-change verification.",
   "entry": "index.js",
   "input": [
     "text/plain",
@@ -70,6 +70,8 @@
     "campaign",
     "playwright",
     "cookies",
-    "social"
+    "social",
+    "profile",
+    "bio"
   ]
 }

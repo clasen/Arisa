@@ -3,7 +3,10 @@ import assert from "node:assert/strict";
 import {
   assessDeliveryEvidence,
   auditState,
+  bioWithAppend,
   campaignIdFrom,
+  checkedBio,
+  comparableBio,
   cooldownGuard,
   duplicateGuard,
   exactBoolean,
@@ -137,4 +140,13 @@ test("cookie parsing and message hashes are deterministic", () => {
 test("cooldown reports the remaining wait", () => {
   const state = normalizeState({ sends: [{ username: "one", sentAt: new Date().toISOString() }] });
   assert.match(cooldownGuard(state, 60), /Cooldown active/);
+});
+
+test("bio helpers enforce length, avoid duplicate appends, and tolerate X URL normalization", () => {
+  assert.equal(checkedBio(" PR for Example Studio "), "PR for Example Studio");
+  assert.throws(() => checkedBio("x".repeat(161)), /160 characters/);
+  assert.equal(bioWithAppend("Arisa", "PR for Example Studio"), "Arisa | PR for Example Studio");
+  assert.equal(bioWithAppend("Arisa | PR for Example Studio", "PR for Example Studio"), "Arisa | PR for Example Studio");
+  assert.equal(comparableBio("example.org"), comparableBio("http://example.org"));
+  assert.equal(comparableBio("https://example.org"), comparableBio("http://example.org"));
 });

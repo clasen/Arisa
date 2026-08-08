@@ -44,6 +44,8 @@ Actions:
   search   Search visible X posts or people without sending. args: query, mode=posts|people, maxResults?
   verify-delivery Read a bound target conversation and reconcile one unresolved uncertain attempt. args: attemptId, username, message
   resolve-uncertain Record human confirmation of one uncertain attempt without opening X. args: attemptId, username, message, outcome=delivered|not-sent, confirm=true
+  get-bio  Read the logged-in account bio without changing it.
+  update-bio Replace or append to the logged-in account bio. args: bio? or appendText?, confirm=true
   send     Send one approved DM. args: username, message, campaignId?, confirm=true, dryRun=false
 
 Safety and reliability:
@@ -393,6 +395,76 @@ async function openProfile(page, username) {
   if (/This account doesn.?t exist|Account suspended|Profile not found/i.test(body)) throw new Error(`@${username} profile is not available.`);
   if (/Continue with|Sign in to X|Log in/i.test(body)) throw new Error("X session is not logged in or requires verification.");
   return { body, status: response?.status() || null, profileUrl: page.url() };
+}
+
+function normalizedBio(value) {
+  return String(value ?? "").replace(/\r\n/g, "\n").trim();
+}
+
+function checkedBio(value) {
+  const bio = normalizedBio(value);
+  if (!bio) throw new Error("The X bio cannot be empty.");
+  if ([...bio].length > 160) throw new Error("The X bio must be 160 characters or fewer.");
+  return bio;
+}
+
+function comparableBio(value) {
+  return normalizedBio(value).replace(/https?:\/\//gi, "");
+}
+
+function bioWithAppend(current, addition) {
+  const base = normalizedBio(current);
+  const extra = normalizedBio(addition);
+  if (!extra) throw new Error("update-bio requires args.bio or args.appendText.");
+  if (base.toLowerCase().includes(extra.toLowerCase())) return base;
+  return checkedBio(base ? `${base} | ${extra}` : extra);
+}
+
+async function openOwnProfileEditor(page, handle) {
+  const field = page.locator('textarea[name="description"], input[name="description"], [data-testid="Profile_Edit_Bio"]').first();
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    await page.goto(`https://x.com/${encodeURIComponent(handle)}`, { waitUntil: "domcontentloaded", timeout: 45000 });
+    const editButton = page.locator('[data-testid="editProfileButton"]').first();
+    await editButton.waitFor({ state: "visible", timeout: 15000 });
+    await editButton.click();
+    const visible = await field.waitFor({ state: "visible", timeout: 10000 }).then(() => true).catch(() => false);
+    if (visible) return field;
+    await page.keyboard.press("Escape").catch(() => {});
+  }
+  const diagnostics = await page.locator('textarea, input, [contenteditable="true"]').evaluateAll((nodes) => nodes.map((node) => ({
+    tag: node.tagName.toLowerCase(),
+    name: node.getAttribute("name") || "",
+    testid: node.getAttribute("data-testid") || "",
+    aria: node.getAttribute("aria-label") || "",
+    placeholder: node.getAttribute("placeholder") || "",
+    contenteditable: node.getAttribute("contenteditable") || ""
+  })).slice(0, 30)).catch(() => []);
+  throw new Error(`X profile editor opened, but the bio field was not found. Fields: ${JSON.stringify(diagnostics)}`);
+}
+
+async function readOwnBio(page, handle) {
+  const field = await openOwnProfileEditor(page, handle);
+  const bio = normalizedBio(await field.inputValue());
+  await page.keyboard.press("Escape").catch(() => {});
+  return bio;
+}
+
+async function updateOwnBio(page, handle, desiredBio) {
+  const field = await openOwnProfileEditor(page, handle);
+  const previous = normalizedBio(await field.inputValue());
+  if (previous === desiredBio) {
+    await page.keyboard.press("Escape").catch(() => {});
+    return { previous, bio: desiredBio, changed: false, verified: true };
+  }
+  await field.fill(desiredBio);
+  const saveButton = page.locator('[data-testid="Profile_Save_Button"]').first();
+  await saveButton.waitFor({ state: "visible", timeout: 10000 });
+  if (await saveButton.isDisabled().catch(() => false)) throw new Error("X kept the profile Save button disabled.");
+  await saveButton.click();
+  await page.waitForSelector('[data-testid="Profile_Save_Button"]', { state: "detached", timeout: 15000 }).catch(() => {});
+  const verifiedBio = await readOwnBio(page, handle);
+  if (comparableBio(verifiedBio) !== comparableBio(desiredBio)) throw new Error("X did not retain the requested bio; refusing to report success.");
+  return { previous, bio: verifiedBio, changed: true, verified: true };
 }
 
 async function firstVisibleEnabled(locator) {
@@ -1002,6 +1074,26 @@ async function browserAction(request, args, config) {
     const { statePath } = await statePaths(request);
     const state = await readState(statePath);
     const action = String(args.action || "status").toLowerCase();
+    if (action === "get-bio" || action === "update-bio") {
+      const handle = cleanHandle(account.handle || config.EXPECTED_ACCOUNT_HANDLE);
+      if (!handle) return toolError("Could not determine the logged-in X handle; refusing the profile operation.");
+      const current = await readOwnBio(page, handle);
+      if (action === "get-bio") return toolOk({ text: `@${handle} bio: ${current || "(empty)"}`, json: { account: { handle }, bio: current } });
+      const desired = normalizedBio(args.appendText) ? bioWithAppend(current, args.appendText) : checkedBio(args.bio);
+      if (!exactBoolean(args.confirm, true)) return toolOk({
+        text: `Dry run only. Would change @${handle}'s bio to:
+
+${desired}
+
+Pass confirm=true to apply exactly this bio.`,
+        json: { dryRun: true, account: { handle }, previous: current, bio: desired }
+      });
+      const result = await updateOwnBio(page, handle, desired);
+      return toolOk({
+        text: result.changed ? `Updated and verified @${handle}'s X bio.` : `@${handle}'s X bio already matched the requested text.`,
+        json: { account: { handle }, ...result }
+      });
+    }
     if (action === "status") {
       const campaignId = args.campaignId ? campaignIdFrom(args) : "";
       return toolOk({ text: `X session is logged in${account.handle ? ` as @${account.handle}` : ""}. ${auditState(state, campaignId).sent} DM(s) recorded.`, json: { account, campaign: auditState(state, campaignId) } });
@@ -1145,7 +1237,7 @@ async function execute(requestFile) {
   const action = String(args.action || "status").toLowerCase();
   if (action === "audit") return auditAction(request, args);
   if (action === "resolve-uncertain") return resolveUncertainAction(request, args);
-  if (!["status", "check", "search", "verify-delivery", "send"].includes(action)) return toolError(`Unknown action: ${action}`);
+  if (!["status", "check", "search", "verify-delivery", "get-bio", "update-bio", "send"].includes(action)) return toolError(`Unknown action: ${action}`);
   if (action === "send") {
     const username = usernameFrom(args.username || request.text || request.artifact?.text || "", args);
     if (!username) return toolError("A valid args.username, @handle, or X profile URL is required.");
@@ -1205,7 +1297,10 @@ if (isCli) await main();
 export {
   assessDeliveryEvidence,
   auditState,
+  bioWithAppend,
   campaignIdFrom,
+  checkedBio,
+  comparableBio,
   cooldownGuard,
   duplicateGuard,
   exactBoolean,
