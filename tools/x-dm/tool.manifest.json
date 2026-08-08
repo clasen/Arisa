@@ -1,0 +1,69 @@
+{
+  "name": "x-dm",
+  "description": "Audit X/Twitter outreach history, validate DM availability, and send one explicitly approved DM at a time with campaign tracking, deduplication, caps, locking, and hard browser timeouts.",
+  "entry": "index.js",
+  "input": [
+    "text/plain",
+    "application/json"
+  ],
+  "output": [
+    "text/plain",
+    "application/json"
+  ],
+  "configSchema": {
+    "X_COOKIES": {
+      "type": "string",
+      "required": false,
+      "secret": true,
+      "prompt": "Paste your X/Twitter cookies as a JSON array, Netscape cookies.txt, or raw Cookie header. If empty, the tool tries the chat's x-session-reader cookies."
+    },
+    "CHROME_EXECUTABLE_PATH": {
+      "type": "string",
+      "required": false,
+      "prompt": "Optional Chrome/Chromium executable path. Defaults to Playwright's cached Chromium."
+    },
+    "HEADLESS": {
+      "type": "string",
+      "required": false,
+      "prompt": "Run browser headless: true or false."
+    },
+    "MIN_SECONDS_BETWEEN_SENDS": {
+      "type": "string",
+      "required": false,
+      "prompt": "Minimum seconds between actual DM sends."
+    },
+    "EXPECTED_ACCOUNT_HANDLE": {
+      "type": "string",
+      "required": false,
+      "prompt": "Optional X handle guard. Sending is blocked if a different logged-in handle is detected."
+    },
+    "MAX_SENDS_PER_DAY": {
+      "type": "string",
+      "required": false,
+      "prompt": "Maximum confirmed X DMs per UTC day across all campaigns."
+    },
+    "OPERATION_TIMEOUT_MS": {
+      "type": "string",
+      "required": false,
+      "prompt": "Maximum browser operation time in milliseconds, clamped between 30000 and 180000."
+    },
+    "MAX_SENDS_PER_CAMPAIGN_PER_DAY": {
+      "type": "string",
+      "required": false,
+      "prompt": "Maximum confirmed X DMs per UTC day for one campaign."
+    }
+  },
+  "skillHints": [],
+  "category": "social",
+  "keywords": [
+    "x",
+    "twitter",
+    "dm",
+    "message",
+    "outreach",
+    "campaign",
+    "playwright",
+    "cookies",
+    "social"
+  ]
+}
