@@ -368,9 +368,10 @@ function personalOpening(candidate, profile) {
 function renderMessage(candidate, profile) {
   const greetingName = clean(candidate.displayName || candidate.username).split(/[|–—]/)[0].trim().slice(0, 50) || candidate.username;
   const body = String(profile.message?.body || "").trim();
-  const message = `Hi ${greetingName} — ${personalOpening(candidate, profile)}\n\n${body}`
+  const message = `Hi ${greetingName}, ${personalOpening(candidate, profile)}\n\n${body}`
     .replace(/{{\s*siteUrl\s*}}/g, clean(profile.siteUrl))
     .replace(/{{\s*username\s*}}/g, clean(candidate.username))
+    .replace(/\s*[—–]\s*/g, ", ")
     .trim();
   if (!message || message.length > 1000) throw new Error(`Rendered X DM is invalid (${message.length} characters).`);
   return message;

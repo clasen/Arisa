@@ -485,15 +485,26 @@ async function composeMessage(page, input, message) {
   if (composed.trim() !== message.trim()) throw new Error("DM composer content did not match the approved message.");
 }
 
+function sendResponseLooksSuccessful(response) {
+  const request = response.request();
+  if (request.method() !== "POST" || response.status() < 200 || response.status() >= 300) return false;
+  const url = response.url();
+  return /CreateDM|SendMessage|DirectMessage|\/dm\/|\/chat\/|messages/i.test(url);
+}
+
 async function verifyDelivery(page, input, message) {
   const deadline = Date.now() + 12000;
+  let composerCleared = false;
+  let bodyMatched = false;
   while (Date.now() < deadline) {
     const current = (await composerText(input)).trim();
     const body = await page.locator("body").innerText({ timeout: 3000 }).catch(() => "");
-    if (!current && body.includes(message)) return true;
+    composerCleared = composerCleared || !current;
+    bodyMatched = bodyMatched || normalizedConversationText(body).includes(normalizedConversationText(message));
+    if (composerCleared && bodyMatched) break;
     await page.waitForTimeout(750);
   }
-  return false;
+  return { composerCleared, bodyMatched };
 }
 
 async function sendDm(page, username, message) {
@@ -502,10 +513,15 @@ async function sendDm(page, username, message) {
   await composeMessage(page, composer.input, message);
   const sendButton = await findSendButton(page);
   if (!sendButton) return { ok: false, reason: "Explicit X DM send button was not found; nothing was sent.", target: composer.target };
+  const responsePromise = page.waitForResponse(sendResponseLooksSuccessful, { timeout: 15000 }).catch(() => null);
   await sendButton.click({ timeout: 10000 });
-  const verified = await verifyDelivery(page, composer.input, message);
+  const [verification, sendResponse] = await Promise.all([
+    verifyDelivery(page, composer.input, message),
+    responsePromise
+  ]);
+  const verified = verification.bodyMatched || (verification.composerCleared && Boolean(sendResponse));
   return verified
-    ? { ok: true, verified: true, target: composer.target }
+    ? { ok: true, verified: true, verificationMethod: verification.bodyMatched ? "conversation-readback" : "composer-clear-plus-send-response", target: composer.target }
     : { ok: false, uncertain: true, reason: "X accepted the send click, but delivery could not be verified. Check the conversation manually before retrying.", target: composer.target };
 }
 
@@ -819,6 +835,7 @@ async function sendAction(request, args, config, page, account) {
       messageHash: hash,
       sentAt: new Date().toISOString(),
       deliveryVerified: true,
+      verificationMethod: result.verificationMethod || "conversation-readback",
       profileUrl: result.target?.profileUrl || `https://x.com/${username}`
     };
     state.sends = [...state.sends, entry].slice(-5000);

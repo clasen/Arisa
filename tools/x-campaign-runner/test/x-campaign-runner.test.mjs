@@ -38,6 +38,7 @@ test("message rendering is deterministic and includes the official site", () => 
   assert.equal(first, renderMessage(candidate, profile));
   assert.match(first, /Sara Is Missing/);
   assert.match(first, /https:\/\/castlebravo\.org/);
+  assert.doesNotMatch(first, /[—–]/);
   assert.ok(first.length < 1000);
 });
 
