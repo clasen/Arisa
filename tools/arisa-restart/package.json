@@ -1,0 +1,11 @@
+{
+  "name": "arisa-restart-tool",
+  "version": "1.0.0",
+  "type": "module",
+  "private": true,
+  "description": "Safe detached restart supervisor for Arisa.",
+  "scripts": {
+    "check": "node --check index.js && node --check worker.js && node --check notifier.js && node --check lib.js",
+    "test": "node --test test/*.test.js"
+  }
+}

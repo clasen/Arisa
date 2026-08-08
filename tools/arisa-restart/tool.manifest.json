@@ -1,0 +1,54 @@
+{
+  "name": "arisa-restart",
+  "description": "Safely restart the active Arisa background service through an independent detached worker, with exact PID identity checks, stable IPC verification, and automatic start recovery.",
+  "entry": "index.js",
+  "input": [
+    "text/plain",
+    "application/json"
+  ],
+  "output": [
+    "application/json",
+    "text/plain"
+  ],
+  "configSchema": {
+    "handoffDelayMs": {
+      "type": "number",
+      "required": false,
+      "prompt": "Milliseconds the detached worker waits before stopping Arisa so the initiating reply can finish."
+    },
+    "stopTimeoutMs": {
+      "type": "number",
+      "required": false,
+      "prompt": "Maximum time to wait for the old Arisa service to stop."
+    },
+    "startTimeoutMs": {
+      "type": "number",
+      "required": false,
+      "prompt": "Maximum time allowed for the Arisa start command."
+    },
+    "verifyTimeoutMs": {
+      "type": "number",
+      "required": false,
+      "prompt": "Maximum time to wait for the restarted service to become healthy."
+    },
+    "stabilityWindowMs": {
+      "type": "number",
+      "required": false,
+      "prompt": "Continuous healthy time required before the restart is accepted."
+    },
+    "notifyOnCompletion": {
+      "type": "boolean",
+      "required": false,
+      "prompt": "Queue an agent event after restart completion or failure."
+    }
+  },
+  "category": "developer",
+  "keywords": [
+    "arisa",
+    "deployment",
+    "restart",
+    "service",
+    "supervisor"
+  ],
+  "skillHints": []
+}
