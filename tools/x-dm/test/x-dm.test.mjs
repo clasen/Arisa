@@ -1,6 +1,7 @@
 ﻿import test from "node:test";
 import assert from "node:assert/strict";
 import {
+  assessDeliveryEvidence,
   auditState,
   campaignIdFrom,
   cooldownGuard,
@@ -48,6 +49,50 @@ test("a later profile check cannot mask an uncertain send", () => {
     { attemptId: "check-b", action: "check", at: new Date().toISOString(), username: "Target", outcome: "dm-available" }
   ] });
   assert.match(duplicateGuard(state, "Target", "k"), /uncertain/);
+});
+
+test("delivery verification requires every concrete evidence signal", () => {
+  const complete = {
+    conversationBound: true,
+    composerCleared: true,
+    newScopedExactMessages: 1,
+    explicitError: false,
+    networkReceipt: { valid: true }
+  };
+  assert.deepEqual(assessDeliveryEvidence(complete), { verified: true, missing: [] });
+  for (const mutation of [
+    { conversationBound: false },
+    { composerCleared: false },
+    { newScopedExactMessages: 0 },
+    { explicitError: true },
+    { networkReceipt: null }
+  ]) {
+    assert.equal(assessDeliveryEvidence({ ...complete, ...mutation }).verified, false);
+  }
+});
+
+test("a draft or unrelated network response cannot prove delivery", () => {
+  const result = assessDeliveryEvidence({
+    conversationBound: true,
+    composerCleared: false,
+    newScopedExactMessages: 0,
+    explicitError: false,
+    networkReceipt: { valid: false }
+  });
+  assert.equal(result.verified, false);
+  assert.ok(result.missing.includes("composer-clear"));
+  assert.ok(result.missing.includes("new-exact-message-in-target-list"));
+  assert.ok(result.missing.includes("matching-x-send-receipt"));
+});
+
+test("human-confirmed not-sent resolves an uncertain block", () => {
+  const state = normalizeState({ attempts: [
+    { attemptId: "a", action: "send", at: new Date().toISOString(), username: "Target", idempotencyKey: "k", outcome: "uncertain" },
+    { attemptId: "a", action: "send", at: new Date().toISOString(), username: "Target", idempotencyKey: "k", outcome: "not-sent" }
+  ] });
+  assert.equal(duplicateGuard(state, "Target", "k"), "");
+  assert.equal(auditState(state).uncertainDeliveries.length, 0);
+  assert.equal(auditState(state).unresolvedAttempts.length, 0);
 });
 
 test("daily caps cannot be bypassed by changing campaign", () => {

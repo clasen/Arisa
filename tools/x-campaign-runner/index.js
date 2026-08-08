@@ -29,6 +29,7 @@ Actions:
   send-approved Send exactly the persisted approval. args: profile?, approvalId, messageHash, confirm=true, dryRun=false
   skip         Skip one pending approval. args: profile?, approvalId, reason?
   reconcile    Reconcile a manual-review approval from x-dm history without sending. args: profile?, approvalId
+  resolve-not-sent Reopen a candidate only after x-dm records human-confirmed non-delivery. args: profile?, approvalId
 
 Safety:
   - discovery and preparation never send
@@ -615,6 +616,38 @@ async function handleReconcile(request, args) {
   } finally { await release(); }
 }
 
+async function handleResolveNotSent(request, args) {
+  const release = await acquireRunLock(request.chatId);
+  try {
+    const name = profileName(args);
+    const { profile, stateDir } = await loadProfile(request.chatId, name);
+    const { file, state } = await loadState(stateDir, name);
+    const approval = state.approval;
+    if (!approval || approval.id !== clean(args.approvalId)) throw new Error("No matching approval exists for non-delivery reconciliation.");
+    const arisa = createArisaClient({ toolName, chatId: request.chatId });
+    const audit = await runTool(arisa, profile.dmTool || "x-dm", { action: "audit", includeHistory: "true" }, 30000);
+    const record = audit.history?.attemptRecords?.find((item) =>
+      item.idempotencyKey === approval.idempotencyKey &&
+      item.normalizedUsername === normalizedHandle(approval.username) &&
+      item.outcome === "not-sent"
+    );
+    if (!record) throw new Error("No matching human-confirmed not-sent x-dm record was found.");
+    approval.status = "not-sent";
+    approval.resolvedAt = new Date().toISOString();
+    approval.verificationMethod = "human-confirmed-not-sent";
+    const candidate = state.candidates.find((item) => normalizedHandle(item.username) === normalizedHandle(approval.username));
+    if (candidate) {
+      candidate.status = "discovered";
+      candidate.lastNonDeliveryAt = approval.resolvedAt;
+      delete candidate.deliveryVerified;
+    }
+    state.runs = [...state.runs, runRecord("resolve-not-sent", { approvalId: approval.id, username: approval.username })].slice(-200);
+    state.updatedAt = new Date().toISOString();
+    await writeJson(file, state);
+    return toolOk({ text: `Reconciled @${approval.username} as not sent; the candidate may be prepared again.`, json: { profile: name, approval, record } });
+  } finally { await release(); }
+}
+
 async function execute(requestFile) {
   const request = JSON.parse((await readFile(requestFile, "utf8")).replace(/^\uFEFF/, ""));
   if (request.chatId == null || request.chatId === "") return toolError("chatId is required.");
@@ -627,6 +660,7 @@ async function execute(requestFile) {
   if (action === "send-approved") return handleSendApproved(request, args);
   if (action === "skip") return handleSkip(request, args);
   if (action === "reconcile") return handleReconcile(request, args);
+  if (action === "resolve-not-sent") return handleResolveNotSent(request, args);
   return toolError(`Unknown action: ${action}`);
 }
 

@@ -42,21 +42,24 @@ Actions:
   status   Check the X session and include campaign/send health. args: campaignId?
   check    Validate a target profile and whether its DM button is visible. args: username
   search   Search visible X posts or people without sending. args: query, mode=posts|people, maxResults?
-  verify-delivery Read a target conversation and reconcile an uncertain approved message. args: username, message
-  resolve-uncertain Record explicit human confirmation of one uncertain attempt without opening X. args: attemptId, username, message, confirm=true
+  verify-delivery Read a bound target conversation and reconcile one unresolved uncertain attempt. args: attemptId, username, message
+  resolve-uncertain Record human confirmation of one uncertain attempt without opening X. args: attemptId, username, message, outcome=delivered|not-sent, confirm=true
   send     Send one approved DM. args: username, message, campaignId?, confirm=true, dryRun=false
 
 Safety and reliability:
   - send requires confirm=true and dryRun=false
   - one send runs at a time through a chat-scoped lock
   - duplicate recipients, cooldown, and daily cap are enforced
+  - target conversation must remain stable before the tool types or clicks send
+  - success requires composer clear, one new exact message in the bound message list, and a matching X send receipt
   - explicit send-button confirmation is required; keyboard fallback is never used
   - uncertain delivery is recorded and blocks an automatic retry
-  - every browser run has a hard timeout and ephemeral browser context
+  - every browser run has a hard timeout and uses a persistent chat-scoped browser profile
   - state writes are atomic and campaign-scoped metadata is retained
 
 Config:
   X_COOKIES                X/Twitter session cookies. Falls back to x-session-reader cookies.
+  X_CHAT_PASSCODE          Optional secret passcode for encrypted X Chat history.
   CHROME_EXECUTABLE_PATH   Optional Chrome/Chromium executable.
   HEADLESS                 true|false.
   EXPECTED_ACCOUNT_HANDLE  Optional sending-account guard.
@@ -193,8 +196,8 @@ async function writeState(statePath, state) {
   await rename(temporary, statePath);
 }
 
-async function acquireStateLock(stateDir) {
-  const lockPath = path.join(stateDir, "operation.lock");
+async function acquireStateLock(stateDir, lockName = "operation.lock") {
+  const lockPath = path.join(stateDir, lockName);
   try {
     const info = await stat(lockPath);
     if (Date.now() - info.mtimeMs > 5 * 60 * 1000) await rm(lockPath, { force: true });
@@ -234,9 +237,9 @@ function auditState(state, campaignId = "") {
     const id = sentCampaignId(entry);
     byCampaign[id] = (byCampaign[id] || 0) + 1;
   }
-  const uncertain = state.attempts.filter((attempt) => attempt.outcome === "uncertain" && (!campaignId || attempt.campaignId === campaignId));
-  const terminalAttemptIds = new Set(state.attempts.filter((attempt) => ["sent", "failed", "uncertain"].includes(attempt.outcome)).map((attempt) => attempt.attemptId));
-  const unresolved = state.attempts.filter((attempt) => attempt.outcome === "in-flight" && !terminalAttemptIds.has(attempt.attemptId) && (!campaignId || attempt.campaignId === campaignId));
+  const resolvedAttemptIds = new Set(state.attempts.filter((attempt) => ["sent", "failed", "not-sent"].includes(attempt.outcome)).map((attempt) => attempt.attemptId));
+  const uncertain = state.attempts.filter((attempt) => attempt.outcome === "uncertain" && !resolvedAttemptIds.has(attempt.attemptId) && (!campaignId || attempt.campaignId === campaignId));
+  const unresolved = state.attempts.filter((attempt) => attempt.outcome === "in-flight" && !resolvedAttemptIds.has(attempt.attemptId) && (!campaignId || attempt.campaignId === campaignId));
   return {
     stateVersion: state.version,
     campaignId: campaignId || null,
@@ -272,9 +275,11 @@ function duplicateGuard(state, username, idempotencyKey) {
   const sent = state.sends.find((entry) => String(entry.username || "").toLowerCase() === normalized || entry.idempotencyKey === idempotencyKey);
   if (sent) return `@${username} is already present in the X DM send log (${sentCampaignId(sent)}).`;
   const matchingSends = state.attempts.filter((attempt) => attempt.action === "send" && (String(attempt.username || "").toLowerCase() === normalized || attempt.idempotencyKey === idempotencyKey));
-  if (matchingSends.some((attempt) => attempt.outcome === "uncertain")) return `@${username} has an uncertain prior delivery. Check X manually before any retry.`;
-  const terminalAttemptIds = new Set(matchingSends.filter((attempt) => ["sent", "failed", "uncertain"].includes(attempt.outcome)).map((attempt) => attempt.attemptId));
-  if (matchingSends.some((attempt) => attempt.outcome === "in-flight" && !terminalAttemptIds.has(attempt.attemptId))) {
+  const resolvedAttemptIds = new Set(matchingSends.filter((attempt) => ["sent", "failed", "not-sent"].includes(attempt.outcome)).map((attempt) => attempt.attemptId));
+  if (matchingSends.some((attempt) => attempt.outcome === "uncertain" && !resolvedAttemptIds.has(attempt.attemptId))) {
+    return `@${username} has an uncertain prior delivery. Check X manually before any retry.`;
+  }
+  if (matchingSends.some((attempt) => attempt.outcome === "in-flight" && !resolvedAttemptIds.has(attempt.attemptId))) {
     return `@${username} has an unresolved in-flight attempt. Reconcile it manually before any retry.`;
   }
   return "";
@@ -307,22 +312,25 @@ async function withTimeout(promise, milliseconds, label) {
   }
 }
 
-async function launchSession(config) {
-  const browser = await chromium.launch({
+async function launchSession(config, profileDir) {
+  await mkdir(profileDir, { recursive: true });
+  const context = await chromium.launchPersistentContext(profileDir, {
     headless: boolArg(config.HEADLESS, true),
     executablePath: config.CHROME_EXECUTABLE_PATH || undefined,
+    viewport: { width: 1280, height: 900 },
+    ignoreHTTPSErrors: true,
     args: ["--no-sandbox", "--disable-setuid-sandbox", "--disable-dev-shm-usage"]
   });
-  activeBrowser = browser;
-  const context = await browser.newContext({ viewport: { width: 1280, height: 900 }, ignoreHTTPSErrors: true });
+  const browser = context.browser();
+  activeBrowser = context;
   return { browser, context };
 }
 
 async function closeSession(session) {
   if (!session) return;
-  await withTimeout(session.context.close().catch(() => {}), 4000, "X browser context close").catch(() => {});
-  await withTimeout(session.browser.close().catch(() => {}), 4000, "X browser close").catch(() => {});
-  if (activeBrowser === session.browser) activeBrowser = null;
+  await withTimeout(session.context.close().catch(() => {}), 6000, "X browser context close").catch(() => {});
+  if (session.browser) await withTimeout(session.browser.close().catch(() => {}), 4000, "X browser close").catch(() => {});
+  if (activeBrowser === session.context) activeBrowser = null;
 }
 
 async function detectAccount(page) {
@@ -419,12 +427,85 @@ async function inspectTarget(page, username) {
   return { username, canDm, profileUrl: profile.profileUrl, httpStatus: profile.status, profileHint: lines.join(" | ").slice(0, 500) };
 }
 
-async function openDmComposer(page, username) {
+function conversationIdFromUrl(value) {
+  const match = String(value || "").match(/^https:\/\/x\.com\/i\/chat\/([^/?#]+)$/i);
+  return match ? match[1] : "";
+}
+
+async function proveStableConversation(page, username, waitMs = 12000) {
+  const initialUrl = page.url();
+  const conversationId = conversationIdFromUrl(initialUrl);
+  if (!conversationId) return { ok: false, reason: `X did not open a concrete conversation for @${username}; current URL is ${initialUrl}.` };
+  const deadline = Date.now() + waitMs;
+  let stableTicks = 0;
+  let lastUrl = initialUrl;
+  let lastMissing = "";
+  while (Date.now() < deadline) {
+    await page.waitForTimeout(700);
+    const currentUrl = page.url();
+    lastUrl = currentUrl;
+    const body = await page.locator("body").innerText({ timeout: 2500 }).catch(() => "");
+    if (/\/i\/chat\/pin\//i.test(currentUrl) || /Enter Passcode|recover your encryption keys/i.test(body)) {
+      return { ok: false, reason: "X Chat requires its passcode before this browser can prove or verify delivery.", blockedBy: "x-chat-passcode", conversationId, conversationUrl: `https://x.com/i/chat/${conversationId}` };
+    }
+    const composerVisible = await page.locator('[data-testid="dm-composer-textarea"]').isVisible().catch(() => false);
+    const listVisible = await page.locator('[data-testid="dm-message-list"]').isVisible().catch(() => false);
+    const bound = conversationIdFromUrl(currentUrl) === conversationId;
+    if (bound && composerVisible && listVisible) {
+      stableTicks += 1;
+      if (stableTicks >= 5) {
+        const recipientLabel = await page.locator('[data-testid="dm-conversation-username"]').innerText({ timeout: 2000 }).catch(() => "");
+        return { ok: true, conversationId, conversationUrl: currentUrl, recipientLabel: recipientLabel.trim(), evidenceVersion: 2 };
+      }
+    } else {
+      stableTicks = 0;
+      lastMissing = !bound ? "conversation-navigation" : !composerVisible ? "composer" : "message-list";
+    }
+  }
+  return { ok: false, reason: `X did not keep the target conversation stable before send; current URL is ${lastUrl}.`, blockedBy: lastMissing || "unstable-conversation", conversationId, conversationUrl: `https://x.com/i/chat/${conversationId}` };
+}
+
+async function scopedExactMessageCount(page, message) {
+  return page.locator('[data-testid="dm-message-list"]').evaluate((list, expected) => {
+    const canonical = (value) => String(value || "").normalize("NFC").replace(/\r\n/g, "\n").replace(/\u00a0/g, " ").trim();
+    let count = 0;
+    for (const node of list.querySelectorAll("*")) {
+      const own = canonical(node.innerText || node.textContent);
+      if (own !== canonical(expected)) continue;
+      const childAlsoMatches = [...node.children].some((child) => canonical(child.innerText || child.textContent) === canonical(expected));
+      if (!childAlsoMatches) count += 1;
+    }
+    return count;
+  }, message).catch(() => 0);
+}
+
+async function unlockXChatPasscode(page, passcode, returnUrl) {
+  if (!passcode) return { ok: false, reason: "X Chat requires its passcode before this browser can prove or verify delivery.", blockedBy: "x-chat-passcode" };
+  const container = page.locator('[data-testid="pin-code-input-container"]');
+  await container.waitFor({ state: "visible", timeout: 10000 }).catch(() => {});
+  const inputs = container.locator("input");
+  const count = await inputs.count();
+  if (!count) return { ok: false, reason: "X Chat requested a passcode but its passcode input was not found.", blockedBy: "x-chat-passcode-ui" };
+  if (count === 1) await inputs.first().fill(String(passcode), { timeout: 10000 });
+  else {
+    const digits = [...String(passcode)];
+    if (digits.length !== count) return { ok: false, reason: `X Chat expects ${count} passcode characters.`, blockedBy: "x-chat-passcode-length" };
+    for (let index = 0; index < count; index += 1) await inputs.nth(index).fill(digits[index], { timeout: 5000 });
+  }
+  await page.keyboard.press("Enter").catch(() => {});
+  await page.waitForURL((url) => url.href === returnUrl, { timeout: 20000 }).catch(() => {});
+  if (page.url() !== returnUrl) return { ok: false, reason: "X Chat did not accept the configured passcode.", blockedBy: "x-chat-passcode-rejected" };
+  return { ok: true };
+}
+
+async function openDmComposer(page, username, config = {}) {
   const target = await inspectTarget(page, username);
   if (!target.canDm) return { ok: false, reason: `No visible DM button for @${username}. They may not accept DMs from this account.`, target };
   const button = await findDmButton(page);
-  await button.click({ timeout: 10000 });
+  let clickError = null;
+  await button.click({ timeout: 10000, noWaitAfter: true }).catch((error) => { clickError = error; });
   await page.waitForURL(/\/messages|\/i\/chat/, { timeout: 20000 }).catch(() => {});
+  if (clickError && !/\/messages|\/i\/chat/.test(page.url())) throw clickError;
   await page.waitForSelector([
     '[data-testid="dm-composer-textarea"]',
     '[data-testid="dmComposerTextInput"]',
@@ -434,7 +515,19 @@ async function openDmComposer(page, username) {
   ].join(","), { timeout: 20000 }).catch(() => {});
   await page.waitForTimeout(1200);
   const input = await findComposerInput(page);
-  if (input) return { ok: true, input, target };
+  if (input) {
+    let binding = await proveStableConversation(page, username);
+    if (!binding.ok && binding.blockedBy === "x-chat-passcode") {
+      const unlocked = await unlockXChatPasscode(page, config.X_CHAT_PASSCODE, binding.conversationUrl || `https://x.com/i/chat/${binding.conversationId}`);
+      if (!unlocked.ok) return { ok: false, reason: unlocked.reason, target: { ...target, ...binding, blockedBy: unlocked.blockedBy } };
+      await page.waitForSelector('[data-testid="dm-composer-textarea"]', { timeout: 15000 }).catch(() => {});
+      binding = await proveStableConversation(page, username, 4000);
+    }
+    if (!binding.ok) return { ok: false, reason: binding.reason, target: { ...target, ...binding } };
+    const reboundInput = await findComposerInput(page);
+    if (!reboundInput) return { ok: false, reason: "The X Chat composer was not available after conversation validation.", target: { ...target, ...binding } };
+    return { ok: true, input: reboundInput, target: { ...target, ...binding } };
+  }
   const body = await page.locator("body").innerText({ timeout: 5000 }).catch(() => "");
   return { ok: false, reason: `DM composer did not open at ${page.url()}.`, target: { ...target, composerPageHint: body.slice(0, 800).replace(/\s+/g, " ") } };
 }
@@ -485,44 +578,122 @@ async function composeMessage(page, input, message) {
   if (composed.trim() !== message.trim()) throw new Error("DM composer content did not match the approved message.");
 }
 
-function sendResponseLooksSuccessful(response) {
-  const request = response.request();
-  if (request.method() !== "POST" || response.status() < 200 || response.status() >= 300) return false;
-  const url = response.url();
-  return /CreateDM|SendMessage|DirectMessage|\/dm\/|\/chat\/|messages/i.test(url);
+function canonicalExactText(value) {
+  return String(value || "").normalize("NFC").replace(/\r\n/g, "\n").replace(/\u00a0/g, " ").trim();
 }
 
-async function verifyDelivery(page, input, message) {
-  const deadline = Date.now() + 12000;
-  let composerCleared = false;
-  let bodyMatched = false;
+function nestedValueMatches(value, expected) {
+  if (typeof value === "string") return canonicalExactText(value) === canonicalExactText(expected);
+  if (Array.isArray(value)) return value.some((item) => nestedValueMatches(item, expected));
+  if (value && typeof value === "object") return Object.values(value).some((item) => nestedValueMatches(item, expected));
+  return false;
+}
+
+function nestedValueContains(value, expected) {
+  if (typeof value === "string" || typeof value === "number") return String(value).includes(String(expected));
+  if (Array.isArray(value)) return value.some((item) => nestedValueContains(item, expected));
+  if (value && typeof value === "object") return Object.values(value).some((item) => nestedValueContains(item, expected));
+  return false;
+}
+
+function responseStableId(value, key = "") {
+  if (!value || typeof value !== "object") return "";
+  for (const [childKey, child] of Object.entries(value)) {
+    if (typeof child === "string" && /(?:message|event).*id|^(?:id|id_str)$/i.test(childKey) && /^[A-Za-z0-9_-]{6,}$/.test(child)) return child;
+    const nested = responseStableId(child, childKey);
+    if (nested) return nested;
+  }
+  return "";
+}
+
+function assessDeliveryEvidence(evidence) {
+  const missing = [];
+  if (!evidence.conversationBound) missing.push("target-conversation-binding");
+  if (!evidence.composerCleared) missing.push("composer-clear");
+  if (!(evidence.newScopedExactMessages > 0)) missing.push("new-exact-message-in-target-list");
+  if (evidence.explicitError) missing.push("x-reported-send-error");
+  if (!evidence.networkReceipt?.valid) missing.push("matching-x-send-receipt");
+  return { verified: missing.length === 0, missing };
+}
+
+function isCandidateSendResponse(response) {
+  const request = response.request();
+  if (request.method() !== "POST") return false;
+  try {
+    const url = new URL(response.url());
+    return /(^|\.)x\.com$/i.test(url.hostname) && /CreateDM|SendMessage|DirectMessage|\/dm\/|\/chat\/|messages/i.test(`${url.pathname}${url.search}`);
+  } catch { return false; }
+}
+
+async function buildNetworkReceipt(response, message, conversationId) {
+  const request = response.request();
+  let requestJson = null;
+  try { requestJson = JSON.parse(request.postData() || "null"); } catch {}
+  let responseJson = null;
+  try { responseJson = await response.json(); } catch {}
+  const requestTextMatches = nestedValueMatches(requestJson, message);
+  const requestConversationMatches = nestedValueContains(requestJson, conversationId);
+  const statusOk = response.status() >= 200 && response.status() < 300;
+  const noApplicationErrors = Boolean(responseJson) && !(Array.isArray(responseJson.errors) && responseJson.errors.length);
+  const messageId = responseStableId(responseJson);
+  return {
+    valid: Boolean(requestTextMatches && requestConversationMatches && statusOk && noApplicationErrors && messageId),
+    endpoint: (() => { try { return new URL(response.url()).pathname; } catch { return ""; } })(),
+    status: response.status(),
+    requestTextMatches,
+    requestConversationMatches,
+    noApplicationErrors,
+    messageId: messageId || null
+  };
+}
+
+async function verifyDelivery(page, input, message, binding, baselineCount) {
+  const deadline = Date.now() + 15000;
+  const evidence = {
+    conversationBound: true,
+    composerCleared: false,
+    newScopedExactMessages: 0,
+    explicitError: false
+  };
   while (Date.now() < deadline) {
-    const current = (await composerText(input)).trim();
-    const body = await page.locator("body").innerText({ timeout: 3000 }).catch(() => "");
-    composerCleared = composerCleared || !current;
-    bodyMatched = bodyMatched || normalizedConversationText(body).includes(normalizedConversationText(message));
-    if (composerCleared && bodyMatched) break;
+    const currentUrl = page.url();
+    evidence.conversationBound = conversationIdFromUrl(currentUrl) === binding.conversationId;
+    const body = await page.locator("body").innerText({ timeout: 2500 }).catch(() => "");
+    evidence.explicitError = /Failed to send|Message not sent|Couldn.t send|Try again/i.test(body);
+    evidence.composerCleared = (await composerText(input)).trim() === "";
+    const currentCount = await scopedExactMessageCount(page, message);
+    evidence.newScopedExactMessages = Math.max(0, currentCount - baselineCount);
+    if (!evidence.conversationBound || evidence.explicitError || (evidence.composerCleared && evidence.newScopedExactMessages > 0)) break;
     await page.waitForTimeout(750);
   }
-  return { composerCleared, bodyMatched };
+  return evidence;
 }
 
-async function sendDm(page, username, message) {
-  const composer = await openDmComposer(page, username);
+async function sendDm(page, username, message, config) {
+  const composer = await openDmComposer(page, username, config);
   if (!composer.ok) return composer;
+  const binding = composer.target;
+  const baselineCount = await scopedExactMessageCount(page, message);
   await composeMessage(page, composer.input, message);
+  if (conversationIdFromUrl(page.url()) !== binding.conversationId) return { ok: false, reason: "X left the bound target conversation before send; nothing was sent.", target: binding };
   const sendButton = await findSendButton(page);
-  if (!sendButton) return { ok: false, reason: "Explicit X DM send button was not found; nothing was sent.", target: composer.target };
-  const responsePromise = page.waitForResponse(sendResponseLooksSuccessful, { timeout: 15000 }).catch(() => null);
-  await sendButton.click({ timeout: 10000 });
-  const [verification, sendResponse] = await Promise.all([
-    verifyDelivery(page, composer.input, message),
-    responsePromise
-  ]);
-  const verified = verification.bodyMatched || (verification.composerCleared && Boolean(sendResponse));
-  return verified
-    ? { ok: true, verified: true, verificationMethod: verification.bodyMatched ? "conversation-readback" : "composer-clear-plus-send-response", target: composer.target }
-    : { ok: false, uncertain: true, reason: "X accepted the send click, but delivery could not be verified. Check the conversation manually before retrying.", target: composer.target };
+  if (!sendButton) return { ok: false, reason: "Explicit X DM send button was not found; nothing was sent.", target: binding };
+  const responsePromises = [];
+  const onResponse = (response) => {
+    if (isCandidateSendResponse(response)) responsePromises.push(buildNetworkReceipt(response, message, binding.conversationId).catch(() => null));
+  };
+  page.on("response", onResponse);
+  await sendButton.click({ timeout: 10000, noWaitAfter: true });
+  const evidence = await verifyDelivery(page, composer.input, message, binding, baselineCount);
+  await page.waitForTimeout(1200);
+  page.off("response", onResponse);
+  const receipts = (await Promise.all(responsePromises)).filter(Boolean);
+  evidence.networkReceipt = receipts.find((item) => item.valid) || receipts[0] || null;
+  evidence.receiptCandidates = receipts.length;
+  const assessment = assessDeliveryEvidence(evidence);
+  return assessment.verified
+    ? { ok: true, verified: true, verificationMethod: "bound-conversation-new-exact-message-plus-x-receipt-v2", evidence, target: binding }
+    : { ok: false, uncertain: true, reason: `X send could not be proven. Missing evidence: ${assessment.missing.join(", ")}. Do not retry until the conversation is checked.`, evidence, target: binding };
 }
 
 function handleFromStatusHref(value) {
@@ -584,57 +755,58 @@ async function searchX(page, args) {
 
 function normalizedConversationText(value) { return String(value || "").toLowerCase().replace(/https?:\/\/\S+/g, (url) => url.replace(/[),.!?]+$/, "")).replace(/[^\p{L}\p{N}:/.@_-]+/gu, " ").replace(/\s+/g, " ").trim(); }
 
-async function verifyDeliveryInConversation(page, username, message, conversationUrl = "") {
-  let target = { username, profileUrl: `https://x.com/${username}` };
-  if (/^https:\/\/x\.com\/i\/chat\/[A-Za-z0-9_-]+$/i.test(conversationUrl)) {
-    await page.goto(conversationUrl, { waitUntil: "domcontentloaded", timeout: 45000 });
-    await page.waitForSelector('div[role="textbox"][contenteditable="true"], textarea, [data-testid="dm-composer-textarea"]', { timeout: 20000 }).catch(() => {});
-    await page.waitForTimeout(2500);
-    target = { ...target, conversationUrl: page.url() };
-  } else {
-    const composer = await openDmComposer(page, username);
-    if (!composer.ok) return { verified: false, reason: composer.reason || "Could not open the target conversation.", target: composer.target };
-    target = composer.target;
-    await page.waitForTimeout(2500);
+async function verifyDeliveryInConversation(page, username, message, expectedConversationId, config) {
+  const composer = await openDmComposer(page, username, config);
+  if (!composer.ok) return { verified: false, reason: composer.reason || "Could not open the target conversation.", target: composer.target };
+  const target = composer.target;
+  if (!expectedConversationId || target.conversationId !== expectedConversationId) {
+    return { verified: false, reason: "The opened X conversation does not match the conversation bound to the uncertain attempt.", target };
   }
-  const body = await page.locator("body").innerText({ timeout: 5000 }).catch(() => "");
-  const normalizedBody = normalizedConversationText(body);
-  const normalizedMessage = normalizedConversationText(message);
-  const verified = Boolean(normalizedMessage && normalizedBody.includes(normalizedMessage));
-  return { verified, reason: verified ? "Approved message is visible in the target conversation." : "Approved message was not found in the target conversation.", target, bodyHint: body.slice(-1000).replace(/\s+/g, " ") };
+  const exactCount = await scopedExactMessageCount(page, message);
+  return {
+    verified: exactCount > 0,
+    reason: exactCount > 0 ? "The exact approved message is visible inside the bound target message list." : "The exact approved message was not found inside the bound target message list.",
+    target,
+    exactCount
+  };
 }
 
-async function reconcileVerifiedDelivery(request, args, stateDir, statePath, state, page) {
+async function reconcileVerifiedDelivery(request, args, stateDir, statePath, state, page, config) {
+  const attemptId = String(args.attemptId || "").trim();
   const username = usernameFrom(args.username || request.text || request.artifact?.text || "", args);
   const message = messageFrom(request, args);
-  if (!username || !message) return toolError("verify-delivery requires a valid username and exact approved message.");
-  const verification = await verifyDeliveryInConversation(page, username, message, String(args.conversationUrl || ""));
-  if (!verification.verified) return toolOk({ text: `${verification.reason} Nothing was sent or retried.`, json: { username, verified: false, verification } });
+  if (!attemptId || !username || !message) return toolError("verify-delivery requires attemptId, a valid username, and the exact approved message.");
   const hash = messageHash(message);
+  const records = state.attempts.filter((item) => item.attemptId === attemptId);
+  const uncertain = records.find((item) => item.action === "send" && item.outcome === "uncertain" && String(item.username || "").toLowerCase() === username.toLowerCase() && item.messageHash === hash);
+  const resolved = records.some((item) => ["sent", "failed", "not-sent"].includes(item.outcome));
+  if (!uncertain || resolved) return toolError("No currently unresolved matching uncertain attempt exists.");
+  if (!uncertain.conversationId) return toolError("The uncertain attempt predates conversation-bound evidence and cannot be reconciled automatically.");
+  const verification = await verifyDeliveryInConversation(page, username, message, uncertain.conversationId, config);
+  if (!verification.verified) return toolOk({ text: `${verification.reason} Nothing was sent or retried.`, json: { username, attemptId, verified: false, verification } });
   const release = await acquireStateLock(stateDir);
   try {
     const latest = await readState(statePath);
-    const uncertain = [...latest.attempts].reverse().find((attempt) => attempt.action === "send" && attempt.outcome === "uncertain" && String(attempt.username || "").toLowerCase() === username.toLowerCase() && attempt.messageHash === hash);
-    const existing = latest.sends.find((entry) => String(entry.username || "").toLowerCase() === username.toLowerCase() && entry.messageHash === hash);
-    let entry = existing;
-    if (!entry) {
-      entry = {
-        username,
-        campaignId: uncertain?.campaignId || campaignIdFrom(args),
-        idempotencyKey: uncertain?.idempotencyKey || String(args.idempotencyKey || "") || null,
-        message,
-        messageHash: hash,
-        sentAt: new Date().toISOString(),
-        deliveryVerified: true,
-        verificationMethod: "conversation-readback",
-        profileUrl: verification.target?.profileUrl || `https://x.com/${username}`
-      };
-      latest.sends = [...latest.sends, entry].slice(-5000);
-      latest.recipientIndex[username.toLowerCase()] = { username, firstSentAt: entry.sentAt, lastSentAt: entry.sentAt, campaignId: entry.campaignId };
-    }
-    appendAttempt(latest, { attemptId: uncertain?.attemptId, action: "send", username, campaignId: entry.campaignId, idempotencyKey: entry.idempotencyKey, messageHash: hash, outcome: "sent", verificationMethod: "conversation-readback" });
+    const latestRecords = latest.attempts.filter((item) => item.attemptId === attemptId);
+    if (latestRecords.some((item) => ["sent", "failed", "not-sent"].includes(item.outcome))) return toolError("The uncertain attempt was already resolved.");
+    const entry = {
+      username,
+      campaignId: uncertain.campaignId,
+      idempotencyKey: uncertain.idempotencyKey,
+      message,
+      messageHash: hash,
+      sentAt: uncertain.at,
+      deliveryVerified: true,
+      verificationMethod: "bound-conversation-scoped-readback-v2",
+      evidenceVersion: 2,
+      conversationId: uncertain.conversationId,
+      profileUrl: verification.target?.profileUrl || `https://x.com/${username}`
+    };
+    latest.sends = [...latest.sends, entry].slice(-5000);
+    latest.recipientIndex[username.toLowerCase()] = { username, firstSentAt: entry.sentAt, lastSentAt: entry.sentAt, campaignId: entry.campaignId };
+    appendAttempt(latest, { attemptId, action: "send", username, campaignId: entry.campaignId, idempotencyKey: entry.idempotencyKey, messageHash: hash, outcome: "sent", verificationMethod: entry.verificationMethod, conversationId: entry.conversationId, evidenceVersion: 2 });
     await writeState(statePath, latest);
-    return toolOk({ text: `Verified the approved X DM in @${username}'s conversation.`, json: entry });
+    return toolOk({ text: `Verified the exact approved X DM inside @${username}'s bound conversation.`, json: entry });
   } finally { await release(); }
 }
 
@@ -646,6 +818,8 @@ async function statePaths(request) {
 
 async function resolveUncertainAction(request, args) {
   if (!exactBoolean(args.confirm, true)) return toolError("resolve-uncertain requires exact confirm=true after human delivery confirmation.");
+  const attemptId = String(args.attemptId || "").trim();
+  if (!attemptId) return toolError("resolve-uncertain requires the exact uncertain attemptId.");
   const username = usernameFrom(args.username || request.text || request.artifact?.text || "", args);
   const message = messageFrom(request, args);
   if (!username || !message) return toolError("resolve-uncertain requires a valid username and exact approved message.");
@@ -654,13 +828,30 @@ async function resolveUncertainAction(request, args) {
   const release = await acquireStateLock(stateDir);
   try {
     const state = await readState(statePath);
-    const attempt = [...state.attempts].reverse().find((item) =>
+    const records = state.attempts.filter((item) => item.attemptId === attemptId);
+    const attempt = records.find((item) =>
       item.action === "send" && item.outcome === "uncertain" &&
-      (!args.attemptId || item.attemptId === String(args.attemptId)) &&
       String(item.username || "").toLowerCase() === username.toLowerCase() &&
       item.messageHash === hash
     );
     if (!attempt) return toolError("No matching uncertain X DM attempt was found.");
+    if (records.some((item) => ["sent", "failed", "not-sent"].includes(item.outcome))) return toolError("That uncertain X DM attempt was already resolved.");
+    const resolution = String(args.outcome || "delivered").toLowerCase();
+    if (!["delivered", "not-sent"].includes(resolution)) return toolError("outcome must be delivered or not-sent.");
+    if (resolution === "not-sent") {
+      appendAttempt(state, {
+        attemptId: attempt.attemptId,
+        action: "send",
+        username,
+        campaignId: attempt.campaignId,
+        idempotencyKey: attempt.idempotencyKey,
+        messageHash: hash,
+        outcome: "not-sent",
+        verificationMethod: "human-confirmed-not-sent"
+      });
+      await writeState(statePath, state);
+      return toolOk({ text: `Resolved the uncertain X DM to @${username} as human-confirmed not sent.`, json: { username, attemptId: attempt.attemptId, outcome: "not-sent", idempotencyKey: attempt.idempotencyKey } });
+    }
     let entry = state.sends.find((item) => item.idempotencyKey && item.idempotencyKey === attempt.idempotencyKey);
     if (!entry) {
       entry = {
@@ -716,6 +907,18 @@ async function auditAction(request, args) {
         sentAt: entry.sentAt || null,
         deliveryVerified: Boolean(entry.deliveryVerified)
       })),
+      attemptRecords: state.attempts.filter((attempt) => attempt.action === "send").map((attempt) => ({
+        attemptId: attempt.attemptId,
+        username: attempt.username,
+        normalizedUsername: String(attempt.username || "").toLowerCase(),
+        campaignId: attempt.campaignId,
+        idempotencyKey: attempt.idempotencyKey,
+        messageHash: attempt.messageHash,
+        outcome: attempt.outcome,
+        at: attempt.at,
+        reason: attempt.reason || null,
+        verificationMethod: attempt.verificationMethod || null
+      })),
       blockingAttempts: [...audit.uncertainDeliveries, ...audit.unresolvedAttempts].map((attempt) => ({
         attemptId: attempt.attemptId,
         username: attempt.username,
@@ -731,11 +934,56 @@ async function auditAction(request, args) {
   return toolOk({ text: `${audit.sent} X DM(s) recorded${campaignId ? ` for ${campaignId}` : ""}; ${audit.uncertainDeliveries.length} uncertain deliver${audit.uncertainDeliveries.length === 1 ? "y" : "ies"}.`, json: audit });
 }
 
+async function domDiagnostics(page, probeText = "") {
+  return page.evaluate((probe) => {
+    const compact = (value) => String(value || "").replace(/\s+/g, " ").trim().slice(0, 160);
+    const descriptors = [...document.querySelectorAll("[data-testid], [role], [aria-label]")].map((node) => ({
+      tag: node.tagName.toLowerCase(),
+      testid: node.getAttribute("data-testid") || "",
+      role: node.getAttribute("role") || "",
+      aria: compact(node.getAttribute("aria-label")),
+      contenteditable: node.getAttribute("contenteditable") || ""
+    }));
+    const counts = new Map();
+    for (const item of descriptors) {
+      const key = JSON.stringify(item);
+      counts.set(key, (counts.get(key) || 0) + 1);
+    }
+    const elements = [...counts.entries()].map(([key, count]) => ({ ...JSON.parse(key), count })).sort((a, b) => b.count - a.count).slice(0, 150);
+    const probeNormalized = compact(probe).toLowerCase();
+    const matches = [];
+    if (probeNormalized) {
+      for (const node of document.querySelectorAll("body *")) {
+        if (node.children.length > 0 || !compact(node.textContent).toLowerCase().includes(probeNormalized)) continue;
+        const ancestry = [];
+        let current = node;
+        for (let depth = 0; current && depth < 7; depth += 1, current = current.parentElement) {
+          ancestry.push({
+            tag: current.tagName.toLowerCase(),
+            testid: current.getAttribute("data-testid") || "",
+            role: current.getAttribute("role") || "",
+            aria: compact(current.getAttribute("aria-label")),
+            className: compact(current.className)
+          });
+        }
+        matches.push({ text: compact(node.textContent), ancestry });
+        if (matches.length >= 10) break;
+      }
+    }
+    const inputs = [...document.querySelectorAll("input")].map((node) => ({ type: node.type, name: node.name, placeholder: compact(node.placeholder), maxLength: node.maxLength, testid: node.getAttribute("data-testid") || "", aria: compact(node.getAttribute("aria-label")) }));
+    const buttons = [...document.querySelectorAll("button")].map((node) => ({ text: compact(node.innerText), testid: node.getAttribute("data-testid") || "", aria: compact(node.getAttribute("aria-label")), disabled: node.disabled })).filter((item) => item.text || item.testid || item.aria).slice(-30);
+    return { url: location.href, title: document.title, bodyHint: compact(document.body?.innerText).slice(0, 1000), inputs, buttons, elements, matches };
+  }, probeText).catch((error) => ({ url: page.url(), error: error.message, elements: [], matches: [] }));
+}
+
 async function browserAction(request, args, config) {
   const cookies = parseCookies(config.X_COOKIES);
   if (!cookies.length) return toolError("Could not parse X_COOKIES. Use JSON cookies, Netscape cookies.txt, or a raw Cookie header.");
-  const session = await launchSession(config);
+  const { stateDir } = await statePaths(request);
+  const releaseBrowserLock = await acquireStateLock(stateDir, "browser.lock");
+  let session;
   try {
+    session = await launchSession(config, path.join(stateDir, "browser-profile"));
     await session.context.addCookies(cookies);
     const page = await session.context.newPage();
     const account = await validateSession(page, config);
@@ -752,7 +1000,7 @@ async function browserAction(request, args, config) {
     }
     if (action === "verify-delivery") {
       const { stateDir } = await statePaths(request);
-      return reconcileVerifiedDelivery(request, args, stateDir, statePath, state, page);
+      return reconcileVerifiedDelivery(request, args, stateDir, statePath, state, page, config);
     }
     const username = usernameFrom(args.username || request.text || request.artifact?.text || "", args);
     if (!username) return toolError("A valid args.username, @handle, or X profile URL is required.");
@@ -761,8 +1009,20 @@ async function browserAction(request, args, config) {
       let checkError = null;
       try {
         if (exactBoolean(args.verifyComposer, true)) {
-          const composer = await openDmComposer(page, username);
-          target = { ...(composer.target || { username, profileUrl: `https://x.com/${username}` }), canDm: Boolean(composer.ok), composerVerified: Boolean(composer.ok), ...(composer.ok ? {} : { reason: composer.reason }) };
+          const composer = await openDmComposer(page, username, config);
+          if (!composer.ok && composer.target?.blockedBy === "x-chat-passcode" && !config.X_CHAT_PASSCODE) {
+            return toolNeedsConfig({
+              tool: toolName,
+              missingConfig: ["X_CHAT_PASSCODE"],
+              configPath: request.chatId != null ? getChatToolConfigPath(request.chatId, toolName) : getToolConfigPath(toolName),
+              message: "X Chat requires its passcode to bind the conversation and verify delivery."
+            });
+          }
+          target = { ...(composer.target || { username, profileUrl: `https://x.com/${username}` }), canDm: Boolean(composer.ok), composerVerified: Boolean(composer.ok), ...(composer.ok ? { conversationUrl: page.url() } : { reason: composer.reason }) };
+          if (composer.ok && exactBoolean(args.inspectDom, true)) {
+            await page.waitForTimeout(Math.max(0, Math.min(intArg(args.inspectWaitMs, 5000), 15000)));
+            target.domDiagnostics = await domDiagnostics(page, String(args.probeText || ""));
+          }
         } else {
           target = await inspectTarget(page, username);
         }
@@ -784,6 +1044,7 @@ async function browserAction(request, args, config) {
     return await sendAction(request, args, config, page, account);
   } finally {
     await closeSession(session);
+    await releaseBrowserLock();
   }
 }
 
@@ -821,9 +1082,19 @@ async function sendAction(request, args, config, page, account) {
 
     const reservation = appendAttempt(state, { action: "send", username, campaignId, idempotencyKey, messageHash: hash, outcome: "in-flight" });
     await writeState(statePath, state);
-    const result = await sendDm(page, username, message);
+    const result = await sendDm(page, username, message, config);
+    if (!result.ok && result.target?.blockedBy === "x-chat-passcode" && !config.X_CHAT_PASSCODE) {
+      appendAttempt(state, { attemptId: reservation.attemptId, action: "send", username, campaignId, idempotencyKey, messageHash: hash, outcome: "failed", reason: result.reason, conversationId: result.target.conversationId || null, evidenceVersion: 2 });
+      await writeState(statePath, state);
+      return toolNeedsConfig({
+        tool: toolName,
+        missingConfig: ["X_CHAT_PASSCODE"],
+        configPath: request.chatId != null ? getChatToolConfigPath(request.chatId, toolName) : getToolConfigPath(toolName),
+        message: "X Chat requires its passcode before this browser can send and verify delivery."
+      });
+    }
     if (!result.ok) {
-      appendAttempt(state, { attemptId: reservation.attemptId, action: "send", username, campaignId, idempotencyKey, messageHash: hash, outcome: result.uncertain ? "uncertain" : "failed", reason: result.reason });
+      appendAttempt(state, { attemptId: reservation.attemptId, action: "send", username, campaignId, idempotencyKey, messageHash: hash, outcome: result.uncertain ? "uncertain" : "failed", reason: result.reason, conversationId: result.target?.conversationId || null, evidenceVersion: result.target?.evidenceVersion || null, evidence: result.evidence || null });
       await writeState(statePath, state);
       return toolError(result.reason || "DM send failed.");
     }
@@ -836,11 +1107,16 @@ async function sendAction(request, args, config, page, account) {
       sentAt: new Date().toISOString(),
       deliveryVerified: true,
       verificationMethod: result.verificationMethod || "conversation-readback",
+      evidenceVersion: result.target?.evidenceVersion || 2,
+      conversationId: result.target?.conversationId || null,
+      messageId: result.evidence?.networkReceipt?.messageId || null,
+      receiptEndpoint: result.evidence?.networkReceipt?.endpoint || null,
+      receiptStatus: result.evidence?.networkReceipt?.status || null,
       profileUrl: result.target?.profileUrl || `https://x.com/${username}`
     };
     state.sends = [...state.sends, entry].slice(-5000);
     state.recipientIndex[username.toLowerCase()] = { username, firstSentAt: entry.sentAt, lastSentAt: entry.sentAt, campaignId };
-    appendAttempt(state, { attemptId: reservation.attemptId, action: "send", username, campaignId, idempotencyKey, messageHash: entry.messageHash, outcome: "sent" });
+    appendAttempt(state, { attemptId: reservation.attemptId, action: "send", username, campaignId, idempotencyKey, messageHash: entry.messageHash, outcome: "sent", conversationId: entry.conversationId, messageId: entry.messageId, verificationMethod: entry.verificationMethod, evidenceVersion: entry.evidenceVersion });
     await writeState(statePath, state);
     return toolOk({ text: `Sent and verified X DM to @${username}.`, json: entry });
   } finally {
@@ -912,6 +1188,7 @@ const isCli = process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath
 if (isCli) await main();
 
 export {
+  assessDeliveryEvidence,
   auditState,
   campaignIdFrom,
   cooldownGuard,

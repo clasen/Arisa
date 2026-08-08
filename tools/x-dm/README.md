@@ -39,7 +39,11 @@ Example dry run:
 - Confirmed sends reserve an idempotency key before clicking.
 - Duplicate recipients, unresolved attempts, cooldown, global and per-campaign daily caps, and a short failure circuit breaker block unsafe retries.
 - The tool clicks only an explicit DM send button. It does not use keyboard fallbacks.
-- Success is recorded only when the composer clears and the approved message appears in the conversation. Otherwise the attempt is marked uncertain and retries are blocked. `verify-delivery` may reconcile it later by readback, but never resends.
+- The browser profile persists per chat so X Chat encryption state survives between runs.
+- Before typing, the tool binds and observes one stable `/i/chat/<conversationId>` page. Passcode recovery, navigation, or a disappearing composer blocks the send before the click.
+- Success requires all concrete evidence: the composer clears, one new exact message appears inside that bound conversation's message list, X shows no send error, and a matching successful X send receipt contains the approved text, conversation id, and a stable message or event id.
+- A draft in the composer, an old matching message, global page text, an unrelated HTTP 200, or only a cleared composer can never count as delivered.
+- Otherwise the attempt is marked uncertain and retries are blocked. `verify-delivery` requires the exact unresolved attempt id and bound conversation; it never resends or manufactures a send record.
 - `EXPECTED_ACCOUNT_HANDLE` can pin the permitted sending account.
 
 Legacy entries created before state version 2 remain visible as campaign `legacy`; they are historical send claims rather than cryptographically verified X delivery receipts.

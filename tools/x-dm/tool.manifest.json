@@ -17,6 +17,12 @@
       "secret": true,
       "prompt": "Paste your X/Twitter cookies as a JSON array, Netscape cookies.txt, or raw Cookie header. If empty, the tool tries the chat's x-session-reader cookies."
     },
+    "X_CHAT_PASSCODE": {
+      "type": "string",
+      "required": false,
+      "secret": true,
+      "prompt": "Optional X Chat passcode used to unlock encrypted conversation history in the persistent chat-scoped browser session."
+    },
     "CHROME_EXECUTABLE_PATH": {
       "type": "string",
       "required": false,

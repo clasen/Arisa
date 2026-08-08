@@ -1,5 +1,6 @@
 export default {
   X_COOKIES: "",
+  X_CHAT_PASSCODE: "",
   CHROME_EXECUTABLE_PATH: "",
   HEADLESS: "true",
   EXPECTED_ACCOUNT_HANDLE: "",
