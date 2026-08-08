@@ -432,7 +432,7 @@ function conversationIdFromUrl(value) {
   return match ? match[1] : "";
 }
 
-async function proveStableConversation(page, username, waitMs = 12000) {
+async function proveStableConversation(page, username, waitMs = 12000, requiredStableTicks = 5) {
   const initialUrl = page.url();
   const conversationId = conversationIdFromUrl(initialUrl);
   if (!conversationId) return { ok: false, reason: `X did not open a concrete conversation for @${username}; current URL is ${initialUrl}.` };
@@ -453,7 +453,7 @@ async function proveStableConversation(page, username, waitMs = 12000) {
     const bound = conversationIdFromUrl(currentUrl) === conversationId;
     if (bound && composerVisible && listVisible) {
       stableTicks += 1;
-      if (stableTicks >= 5) {
+      if (stableTicks >= requiredStableTicks) {
         const recipientLabel = await page.locator('[data-testid="dm-conversation-username"]').innerText({ timeout: 2000 }).catch(() => "");
         return { ok: true, conversationId, conversationUrl: currentUrl, recipientLabel: recipientLabel.trim(), evidenceVersion: 2 };
       }
@@ -490,12 +490,24 @@ async function unlockXChatPasscode(page, passcode, returnUrl) {
   else {
     const digits = [...String(passcode)];
     if (digits.length !== count) return { ok: false, reason: `X Chat expects ${count} passcode characters.`, blockedBy: "x-chat-passcode-length" };
-    for (let index = 0; index < count; index += 1) await inputs.nth(index).fill(digits[index], { timeout: 5000 });
+    for (let index = 0; index < count; index += 1) {
+      const input = inputs.nth(index);
+      await input.focus();
+      await input.press(digits[index], { delay: 120 });
+    }
   }
-  await page.keyboard.press("Enter").catch(() => {});
-  await page.waitForURL((url) => url.href === returnUrl, { timeout: 20000 }).catch(() => {});
-  if (page.url() !== returnUrl) return { ok: false, reason: "X Chat did not accept the configured passcode.", blockedBy: "x-chat-passcode-rejected" };
-  return { ok: true };
+  await page.waitForURL((url) => !/\/i\/chat\/pin\//i.test(url.pathname), { timeout: 20000 }).catch(() => {});
+  const body = await page.locator("body").innerText({ timeout: 3000 }).catch(() => "");
+  if (/Incorrect passcode|Invalid passcode|Try again/i.test(body)) {
+    return { ok: false, reason: "X Chat explicitly rejected the configured passcode.", blockedBy: "x-chat-passcode-rejected" };
+  }
+  if (/\/i\/chat\/pin\//i.test(page.url())) {
+    return { ok: false, reason: "X Chat did not finish passcode recovery before the timeout.", blockedBy: "x-chat-passcode-timeout" };
+  }
+  if (page.url() !== returnUrl) await page.goto(returnUrl, { waitUntil: "domcontentloaded", timeout: 30000 }).catch(() => {});
+  return page.url() === returnUrl
+    ? { ok: true }
+    : { ok: false, reason: "X Chat accepted the passcode but did not return to the target conversation.", blockedBy: "x-chat-passcode-navigation" };
 }
 
 async function openDmComposer(page, username, config = {}) {
@@ -521,7 +533,7 @@ async function openDmComposer(page, username, config = {}) {
       const unlocked = await unlockXChatPasscode(page, config.X_CHAT_PASSCODE, binding.conversationUrl || `https://x.com/i/chat/${binding.conversationId}`);
       if (!unlocked.ok) return { ok: false, reason: unlocked.reason, target: { ...target, ...binding, blockedBy: unlocked.blockedBy } };
       await page.waitForSelector('[data-testid="dm-composer-textarea"]', { timeout: 15000 }).catch(() => {});
-      binding = await proveStableConversation(page, username, 4000);
+      binding = await proveStableConversation(page, username, 15000, 10);
     }
     if (!binding.ok) return { ok: false, reason: binding.reason, target: { ...target, ...binding } };
     const reboundInput = await findComposerInput(page);
@@ -1009,8 +1021,11 @@ async function browserAction(request, args, config) {
       let checkError = null;
       try {
         if (exactBoolean(args.verifyComposer, true)) {
-          const composer = await openDmComposer(page, username, config);
-          if (!composer.ok && composer.target?.blockedBy === "x-chat-passcode" && !config.X_CHAT_PASSCODE) {
+          const diagnosePasscodeUi = exactBoolean(args.diagnosePasscodeUi, true);
+          const composer = await openDmComposer(page, username, diagnosePasscodeUi ? { ...config, X_CHAT_PASSCODE: "" } : config);
+          if (!composer.ok && diagnosePasscodeUi && composer.target?.blockedBy === "x-chat-passcode") {
+            target = { ...composer.target, canDm: false, composerVerified: false, reason: composer.reason, domDiagnostics: await domDiagnostics(page, "") };
+          } else if (!composer.ok && composer.target?.blockedBy === "x-chat-passcode" && !config.X_CHAT_PASSCODE) {
             return toolNeedsConfig({
               tool: toolName,
               missingConfig: ["X_CHAT_PASSCODE"],
@@ -1018,7 +1033,7 @@ async function browserAction(request, args, config) {
               message: "X Chat requires its passcode to bind the conversation and verify delivery."
             });
           }
-          target = { ...(composer.target || { username, profileUrl: `https://x.com/${username}` }), canDm: Boolean(composer.ok), composerVerified: Boolean(composer.ok), ...(composer.ok ? { conversationUrl: page.url() } : { reason: composer.reason }) };
+          if (!target) target = { ...(composer.target || { username, profileUrl: `https://x.com/${username}` }), canDm: Boolean(composer.ok), composerVerified: Boolean(composer.ok), ...(composer.ok ? { conversationUrl: page.url() } : { reason: composer.reason }) };
           if (composer.ok && exactBoolean(args.inspectDom, true)) {
             await page.waitForTimeout(Math.max(0, Math.min(intArg(args.inspectWaitMs, 5000), 15000)));
             target.domDiagnostics = await domDiagnostics(page, String(args.probeText || ""));
