@@ -1,6 +1,6 @@
 {
   "name": "stop-slop-writer",
-  "description": "Prepare and audit prose requests using the stop-slop writing skill.",
+  "description": "Load the complete stop-slop writing skill as editorial context for drafting or review; it does not replace the skill with regex checks.",
   "entry": "index.js",
   "input": [
     "text/plain",

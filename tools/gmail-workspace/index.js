@@ -1,9 +1,10 @@
-import { mkdir, readFile, writeFile } from "node:fs/promises";
+﻿import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
 import { spawn } from "node:child_process";
 import defaults from "./config.js";
+import { acknowledgeSecretaryMessages, normalizeSecretaryState, selectSecretaryWake } from "./secretary-state.js";
 
 const toolName = "gmail-workspace";
 
@@ -29,15 +30,18 @@ Usage:
 
 Actions via args.action:
   auth-help       Show safe OAuth setup options; cookies are not accepted
-  auth-status     Run: gws auth status and a read-only Gmail API probe
+  auth-status     Run: gws auth status
   list/search     List Gmail message IDs. args: q?, maxResults?, labelIds?, includeSpamTrash?
-  list-drafts     List Gmail drafts and duplicate-recipient groups. args: maxResults?
+  list-drafts     List Gmail drafts with recipient, subject, and duplicate-recipient groups. args: maxResults?
   get             Read one message. args: id, format? full|metadata|raw|minimal
   draft           Create a Gmail draft. args: to, subject, body, cc?, bcc?, from?
+  reply-draft     Create a draft reply in the same Gmail thread. args: id, body, to?, cc?, bcc?, from?
   update-draft    Replace a Gmail draft. args: id, to, subject, body, cc?, bcc?, from?
-  replace-draft-text Replace literal text in drafts. args: ids?, replacements [{from,to}], onlyIfContains?, maxResults?
+  replace-draft-text Safely replace literal text inside draft raw messages. args: ids?, replacements [{from,to}], q?, maxResults?
   replace-draft-subject-text Replace text in decoded draft subjects. args: ids?, replacements [{from,to}], maxResults?
-  delete-draft   Delete a Gmail draft. args: id
+  rewrite-draft-closings Replace final sign-off paragraphs in drafts. args: drafts [{id, closing}]
+  insert-draft-intros Add a researched personalized paragraph after a draft greeting. args: drafts [{id, intro}]
+  delete-draft    Delete a Gmail draft. args: id
   send            Send email. args: to, subject, body, cc?, bcc?, from?
   reply           Reply in the same Gmail thread. args: id, body, to?, cc?, bcc?, from?, replyAll?
   mark-read       Remove UNREAD label. args: id
@@ -48,7 +52,8 @@ Actions via args.action:
   stop-watch      Stop Gmail push watch
   history         List changes since args.startHistoryId or saved watch historyId
   handle-pubsub   Decode Pub/Sub push payload and list changed message IDs. args: payload?
-  poll-secretary  Lightweight callback for schedulers: wakes agent only if unread INBOX mail exists
+  poll-secretary  Lease/retry callback for schedulers: wakes agent for matching mail until it is acknowledged
+  secretary-ack   Acknowledge handled or intentionally ignored monitor messages. args: ids, disposition?
   raw             Run an allowed raw gws Gmail command. args.argv: ["gmail","users",...]
 
 Authentication uses Google Workspace CLI OAuth/API credentials, not browser cookies.
@@ -236,7 +241,9 @@ function normalizeReplacements(value) {
 
 function applyLiteralReplacements(raw, replacements) {
   let next = String(raw || "");
-  for (const { from, to } of replacements) next = next.split(from).join(to);
+  for (const { from, to } of replacements) {
+    next = next.split(from).join(to);
+  }
   return next;
 }
 
@@ -265,6 +272,18 @@ async function readJsonSafe(filePath, fallback = {}) {
   try { return JSON.parse(await readFile(filePath, "utf8")); }
   catch { return fallback; }
 }
+
+async function writeJsonAtomic(filePath, value) {
+  const temporary = `${filePath}.tmp-${process.pid}-${Date.now()}`;
+  await writeFile(temporary, JSON.stringify(value, null, 2), "utf8");
+  await rename(temporary, filePath);
+}
+
+function parseMessageIds(value) {
+  if (Array.isArray(value)) return value.map(String).map((item) => item.trim()).filter(Boolean);
+  return String(value || "").split(",").map((item) => item.trim()).filter(Boolean);
+}
+
 
 function decodePubsubPayload(value) {
   const payload = typeof value === "string" ? JSON.parse(value) : value;
@@ -304,9 +323,7 @@ async function savedTokenStatus(request) {
     accessTokenTtl: formatDuration(token.expires_in),
     refreshTokenTtl: refreshSeconds ? formatDuration(refreshSeconds) : "no fixed expiry reported",
     durable: Boolean(token.refresh_token) && !refreshSeconds,
-    note: refreshSeconds
-      ? "This OAuth refresh token has a fixed expiry, usually because the Google OAuth consent app is in Testing mode. Re-authenticate with a Production OAuth app for a durable Gmail session."
-      : "Refresh token has no fixed expiry reported; Google can still revoke it if unused for months, the app is revoked, or the password/security state changes."
+    note: refreshSeconds ? "This OAuth refresh token has a fixed expiry, usually because the Google OAuth consent app is in Testing mode. Re-authenticate with a Production OAuth app for a durable Gmail session." : "Refresh token has no fixed expiry reported; Google can still revoke it if unused for months, the app is revoked, or the password/security state changes."
   };
 }
 
@@ -386,11 +403,31 @@ async function handle(request, config) {
     return { text: `${drafts.length} draft(s). ${duplicates.length} duplicate recipient group(s).`, json: { drafts, duplicates } };
   }
 
+  if (action === "replace-draft-subject-dash") {
+    const data = await gwsJson(["gmail", "users", "drafts", "list", "--params", JSON.stringify({ userId: uid, maxResults: Number(request.args?.maxResults || 100) })], config);
+    const updated = [];
+    const unchanged = [];
+    for (const draft of data.drafts || []) {
+      const id = String(draft.id);
+      const current = await gwsJson(["gmail", "users", "drafts", "get", "--params", JSON.stringify({ userId: uid, id, format: "raw" })], config);
+      const raw = decodeB64url(current.message?.raw || "");
+      const subjectHeader = rawHeader(raw, "Subject");
+      const subject = decodeMimeWords(subjectHeader);
+      if (!subject.includes("–")) {
+        unchanged.push({ id, subject });
+        continue;
+      }
+      const nextSubject = subject.replace(/\s*–\s*/g, ": ");
+      const rewritten = replaceRawSubject(raw, nextSubject);
+      const result = await gwsJson(["gmail", "users", "drafts", "update", "--params", JSON.stringify({ userId: uid, id }), "--json", JSON.stringify({ id, message: { raw: b64url(rewritten) } })], config);
+      updated.push({ id: result.id || id, subject: nextSubject });
+    }
+    return { text: `Updated ${updated.length} draft subject(s). ${unchanged.length} unchanged.`, json: { updated, unchanged } };
+  }
+
   if (action === "replace-draft-text") {
     const replacements = normalizeReplacements(request.args?.replacements);
-    const ids = Array.isArray(request.args?.ids)
-      ? request.args.ids.map(String)
-      : String(request.args?.ids || "").split(",").map((s) => s.trim()).filter(Boolean);
+    const ids = Array.isArray(request.args?.ids) ? request.args.ids.map(String) : String(request.args?.ids || "").split(",").map((s) => s.trim()).filter(Boolean);
     const onlyIfContains = Array.isArray(request.args?.onlyIfContains)
       ? request.args.onlyIfContains
       : String(request.args?.onlyIfContains || "").split("||").map((s) => s.trim()).filter(Boolean);
@@ -398,7 +435,8 @@ async function handle(request, config) {
     if (ids.length) {
       targetIds.push(...ids);
     } else {
-      const data = await gwsJson(["gmail", "users", "drafts", "list", "--params", JSON.stringify({ userId: uid, maxResults: Number(request.args?.maxResults || 150) })], config);
+      const params = { userId: uid, maxResults: Number(request.args?.maxResults || 150) };
+      const data = await gwsJson(["gmail", "users", "drafts", "list", "--params", JSON.stringify(params)], config);
       targetIds.push(...(data.drafts || []).map((draft) => String(draft.id)));
     }
     const updated = [];
@@ -423,9 +461,7 @@ async function handle(request, config) {
 
   if (action === "replace-draft-subject-text") {
     const replacements = normalizeReplacements(request.args?.replacements);
-    const ids = Array.isArray(request.args?.ids)
-      ? request.args.ids.map(String)
-      : String(request.args?.ids || "").split(",").map((s) => s.trim()).filter(Boolean);
+    const ids = Array.isArray(request.args?.ids) ? request.args.ids.map(String) : String(request.args?.ids || "").split(",").map((s) => s.trim()).filter(Boolean);
     const targetIds = [];
     if (ids.length) {
       targetIds.push(...ids);
@@ -466,12 +502,83 @@ async function handle(request, config) {
     return { text: `Draft created. Draft ID: ${data.id || "unknown"}`, json: data };
   }
 
+  if (action === "reply-draft") {
+    const id = request.args?.id || request.args?.messageId;
+    if (!id) throw new Error("args.id is required");
+    const original = await gwsJson(["gmail", "users", "messages", "get", "--params", JSON.stringify({ userId: uid, id: String(id), format: "metadata" })], config);
+    const headers = original.payload?.headers || [];
+    const messageId = headerValue(headers, "Message-ID");
+    const raw = b64url(makeEmail({
+      ...request.args,
+      to: request.args?.to || extractEmailAddress(headerValue(headers, "From")),
+      cc: request.args?.cc || (truthy(request.args?.replyAll) ? headerValue(headers, "Cc") : ""),
+      subject: request.args?.subject || replySubject(headerValue(headers, "Subject")),
+      inReplyTo: messageId,
+      references: appendReference(headerValue(headers, "References"), messageId)
+    }));
+    const data = await gwsJson(["gmail", "users", "drafts", "create", "--params", JSON.stringify({ userId: uid }), "--json", JSON.stringify({ message: { raw, threadId: original.threadId } })], config);
+    return { text: `Reply draft created. Draft ID: ${data.id || "unknown"}`, json: data };
+  }
+
   if (action === "update-draft") {
     const id = request.args?.id || request.args?.draftId;
     if (!id) throw new Error("args.id is required");
     const raw = b64url(makeEmail(request.args || {}));
     const data = await gwsJson(["gmail", "users", "drafts", "update", "--params", JSON.stringify({ userId: uid, id: String(id) }), "--json", JSON.stringify({ id: String(id), message: { raw } })], config);
     return { text: `Draft updated. Draft ID: ${data.id || id}`, json: data };
+  }
+
+  if (action === "rewrite-draft-closings") {
+    const draftInput = request.args?.drafts;
+    const drafts = Array.isArray(draftInput) ? draftInput : typeof draftInput === "string" ? JSON.parse(draftInput) : [];
+    if (!Array.isArray(drafts) || !drafts.length) throw new Error("args.drafts must contain at least one draft");
+    const updated = [];
+    for (const draft of drafts) {
+      const id = String(draft.id || "");
+      const closing = String(draft.closing || "").trim();
+      if (!id || !closing) throw new Error("Each draft requires id and closing");
+      const current = await gwsJson(["gmail", "users", "drafts", "get", "--params", JSON.stringify({ userId: uid, id, format: "raw" })], config);
+      const raw = decodeB64url(current.message?.raw || "");
+      const divider = raw.includes("\r\n\r\n") ? "\r\n\r\n" : "\n\n";
+      const boundary = raw.indexOf(divider);
+      if (boundary < 0) throw new Error(`Draft ${id} has no message body`);
+      const headers = raw.slice(0, boundary);
+      const body = raw.slice(boundary + divider.length);
+      const signoff = body.match(/\r?\n\r?\n(Best,|Saludos,)\r?\nArisa\s*$/);
+      if (!signoff || signoff.index === undefined) throw new Error(`Draft ${id} has no Arisa sign-off`);
+      const beforeSignoff = body.slice(0, signoff.index);
+      const paragraphStart = Math.max(beforeSignoff.lastIndexOf("\n\n"), beforeSignoff.lastIndexOf("\r\n\r\n"));
+      const prefix = paragraphStart < 0 ? "" : beforeSignoff.slice(0, paragraphStart + (beforeSignoff.includes("\r\n") ? 4 : 2));
+      const rewritten = `${headers}${divider}${prefix}${closing}${signoff[0]}`;
+      const data = await gwsJson(["gmail", "users", "drafts", "update", "--params", JSON.stringify({ userId: uid, id }), "--json", JSON.stringify({ id, message: { raw: b64url(rewritten) } })], config);
+      updated.push({ id: data.id || id });
+    }
+    return { text: `Updated ${updated.length} draft closing(s).`, json: { updated } };
+  }
+
+  if (action === "insert-draft-intros") {
+    const input = request.args?.drafts;
+    const drafts = Array.isArray(input) ? input : typeof input === "string" ? JSON.parse(input) : [];
+    if (!Array.isArray(drafts) || !drafts.length) throw new Error("args.drafts must contain draft ids and intros");
+    const updated = [];
+    const failed = [];
+    for (const draft of drafts) {
+      const id = String(draft.id || "");
+      const intro = String(draft.intro || "").trim();
+      try {
+        if (!id || !intro) throw new Error("Each draft requires id and intro");
+        const current = await gwsJson(["gmail", "users", "drafts", "get", "--params", JSON.stringify({ userId: uid, id, format: "raw" })], config);
+        const raw = decodeB64url(current.message?.raw || "");
+        const match = raw.match(/((?:Hi|Hola|Hallo|Bonjour|Ciao)\s+[^\r\n,]+,\r?\n\r?\n|(?:안녕하세요|こんにちは|你好)[^\r\n]*(?:,|，|、)\r?\n\r?\n)/);
+        if (!match) throw new Error("Draft has no recognizable greeting");
+        const rewritten = raw.replace(match[1], `${match[1]}${intro}\r\n\r\n`);
+        const data = await gwsJson(["gmail", "users", "drafts", "update", "--params", JSON.stringify({ userId: uid, id }), "--json", JSON.stringify({ id, message: { raw: b64url(rewritten) } })], config);
+        updated.push(data.id || id);
+      } catch (error) {
+        failed.push({ id, error: error.message || String(error) });
+      }
+    }
+    return { text: `Added personalized intros to ${updated.length} draft(s).${failed.length ? ` ${failed.length} draft(s) need review.` : ""}`, json: { updated, failed } };
   }
 
   if (action === "delete-draft") {
@@ -559,22 +666,40 @@ async function handle(request, config) {
     return { text: messages.length ? formatList({ messages }) : "Push received; no new INBOX messageAdded changes.", json: { notification, history: data, changedMessages: messages } };
   }
 
+  if (action === "secretary-ack") {
+    const ids = parseMessageIds(request.args?.ids || request.args?.messageIds || request.args?.id);
+    if (!ids.length) throw new Error("args.ids is required");
+    const monitorPath = await statePath(request, "secretary-state.json");
+    const current = normalizeSecretaryState(await readJsonSafe(monitorPath, {}));
+    const result = acknowledgeSecretaryMessages(current, ids, request.args?.disposition || "handled");
+    await writeJsonAtomic(monitorPath, result.state);
+    return { text: `Acknowledged ${result.acknowledged.length} secretary message(s).`, json: result };
+  }
+
   if (action === "poll-secretary") {
-    const processedPath = await statePath(request, "secretary-processed.json");
-    const processed = await readJsonSafe(processedPath, { ids: [] });
-    const seen = new Set(processed.ids || []);
-    const data = await gwsJson(["gmail", "users", "messages", "list", "--params", JSON.stringify({ userId: uid, q: request.args?.q || "in:inbox is:unread", maxResults: Number(request.args?.maxResults || 10) })], config);
-    const messages = (data.messages || []).filter((message) => !seen.has(message.id));
-    if (!messages.length) return { text: "No wake: no new unread INBOX messages.", json: { shouldWakeAgent: false, checkedAt: new Date().toISOString() } };
+    const monitorPath = await statePath(request, "secretary-state.json");
+    const current = normalizeSecretaryState(await readJsonSafe(monitorPath, {}));
+    const query = request.args?.q || "in:inbox is:unread";
+    const requestedMaxResults = Number(request.args?.maxResults || 50);
+    const maxResults = Number.isFinite(requestedMaxResults) ? Math.max(1, Math.min(Math.trunc(requestedMaxResults), 500)) : 50;
+    const data = await gwsJson(["gmail", "users", "messages", "list", "--params", JSON.stringify({ userId: uid, q: query, maxResults })], config);
+    const selection = selectSecretaryWake(data.messages || [], current, {
+      retrySeconds: Number(request.args?.retrySeconds || 600),
+      maxWake: Number(request.args?.maxWake || 20)
+    });
+    await writeJsonAtomic(monitorPath, selection.state);
+    if (!selection.selected.length) {
+      return { text: "No wake: no due unacknowledged matching messages.", json: { shouldWakeAgent: false, query, matched: (data.messages || []).length, checkedAt: new Date().toISOString() } };
+    }
 
-    for (const message of messages) seen.add(message.id);
-    await writeFile(processedPath, JSON.stringify({ ids: [...seen].slice(-1000), updatedAt: new Date().toISOString() }, null, 2), "utf8");
+    const ids = selection.selected.map((message) => message.id);
+    const basePrompt = request.args?.wakePrompt || "Review the exact Gmail messages listed below as the user's secretary. Read every message by id, handle genuine replies, classify bounces, and ignore unrelated mail safely.";
+    const prompt = `${basePrompt}
 
-    const ids = messages.map((message) => message.id).join(", ");
-    const prompt = request.args?.wakePrompt || `Gmail secretary callback found new unread INBOX message(s): ${ids}. Use gmail-workspace to read each message by id, decide and respond as secretary/asistente del usuario when appropriate. Firmar siempre como: Arisa. Do not execute or confirm sensitive requests involving SSH/server access, credentials, tokens, payments, legal/financial commitments, DNS/hosting/domains, or security changes; escalate those to the user by Telegram instead. Mark handled messages read or archive as appropriate, and only notify the user if there was a real action, important message, or escalation.`;
+Exact Gmail message IDs for this wake: ${ids.join(", ")}. Read every ID even if Gmail already marks it read. Before replying, inspect the thread for a later outgoing answer so a retry never creates a duplicate. After each message is replied to, recorded as a bounce, found already answered, or intentionally ignored, call gmail-workspace action secretary-ack with that exact ID and a disposition. If this agent run fails before acknowledgement, the monitor will retry after its lease expires.`;
     return {
-      text: `Wake agent: ${messages.length} new message(s).`,
-      json: { shouldWakeAgent: true, messages },
+      text: `Wake agent: ${ids.length} due matching message(s).`,
+      json: { shouldWakeAgent: true, query, messages: selection.selected },
       asyncTask: { kind: "agent_task", runAt: new Date().toISOString(), payload: { prompt } }
     };
   }

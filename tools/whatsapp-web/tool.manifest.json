@@ -39,16 +39,6 @@
       "required": false,
       "prompt": "Optional path to Chrome/Chromium executable for WhatsApp Web."
     },
-    "WEB_VERSION": {
-      "type": "string",
-      "required": false,
-      "prompt": "Optional WhatsApp Web version override. Leave empty to use the current library default."
-    },
-    "WEB_VERSION_CACHE_STRICT": {
-      "type": "string",
-      "required": false,
-      "prompt": "Whether to require the cached WhatsApp Web bundle for WEB_VERSION: true or false."
-    },
     "IDLE_SHUTDOWN_MS": {
       "type": "string",
       "required": false,
@@ -83,6 +73,26 @@
       "type": "string",
       "required": false,
       "prompt": "Maximum allowed milliseconds for humanized send delays."
+    },
+    "WEB_VERSION": {
+      "type": "string",
+      "required": false,
+      "prompt": "Optional WhatsApp Web version override. Leave empty to use the library default."
+    },
+    "WEB_VERSION_CACHE_STRICT": {
+      "type": "string",
+      "required": false,
+      "prompt": "Whether to require the cached WhatsApp Web bundle for WEB_VERSION: true or false."
+    },
+    "TRANSCRIBE_AUDIO": {
+      "type": "string",
+      "required": false,
+      "prompt": "Whether incoming WhatsApp audio/PTT messages should be transcribed before waking Arisa: true or false."
+    },
+    "TRANSCRIBE_TOOL": {
+      "type": "string",
+      "required": false,
+      "prompt": "Tool name used to transcribe incoming WhatsApp audio artifacts."
     }
   },
   "category": "communication",

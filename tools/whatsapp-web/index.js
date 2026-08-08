@@ -18,6 +18,7 @@ const { loadToolConfig } = await importCore("core/tools/tool-config.js");
 const { toolError, toolOk } = await importCore("core/tools/tool-result.js");
 const { ArtifactStore } = await importCore("core/artifacts/artifact-store.js");
 const { createDaemonRuntime } = await importCore("core/tools/daemon-runtime.js");
+const { createArisaClient } = await importCore("core/tools/ipc-client.js");
 const {
   daemonPaths,
   isProcessAlive,
@@ -476,7 +477,7 @@ function isTechnicalWhatsAppNotification(message) {
     && (technicalTypes.has(type) || type.includes("notification") || message.from === "status@broadcast");
 }
 
-function buildIncomingMessagePrompt(message, artifact) {
+function buildIncomingMessagePrompt(message, artifact, transcript = "") {
   return [
     "System event: Incoming WhatsApp message.",
     `from: ${message.fromName || message.from}`,
@@ -490,7 +491,8 @@ function buildIncomingMessagePrompt(message, artifact) {
     message.location?.mapsUrl ? `location: ${message.location.mapsUrl}` : null,
     message.location?.description ? `locationDescription: ${message.location.description}` : null,
     formatReactions(message.reactions) ? `reactions: ${formatReactions(message.reactions)}` : null,
-    `text: ${message.body || "[non-text message]"}`,
+    `text: ${transcript || message.body || "[non-text message]"}`,
+    transcript ? `transcript: ${transcript}` : null,
     artifact ? `artifactId: ${artifact.id}` : null,
     artifact ? `mimeType: ${artifact.mimeType}` : null,
     artifact ? `kind: ${artifact.kind}` : null,
@@ -548,7 +550,7 @@ async function captureReaction(ownerChatId, reaction) {
   await updateInboxMessageReactions(ownerChatId, messageId, reactions);
 }
 
-function incomingMessageTask(chatId, message, artifact = null) {
+function incomingMessageTask(chatId, message, artifact = null, transcript = "") {
   const now = new Date().toISOString();
   return {
     id: crypto.randomUUID(),
@@ -557,15 +559,15 @@ function incomingMessageTask(chatId, message, artifact = null) {
     updatedAt: now,
     kind: "agent_task",
     runAt: now,
-    payload: { chatId, prompt: buildIncomingMessagePrompt(message, artifact), artifactId: artifact?.id || "" },
+    payload: { chatId, prompt: buildIncomingMessagePrompt(message, artifact, transcript), artifactId: artifact?.id || "" },
     recurrence: null,
     source: { type: "tool", toolName, chatId, messageId: message.id }
   };
 }
 
-async function enqueueArisaTaskForIncomingMessage(chatId, message, artifact = null) {
+async function enqueueArisaTaskForIncomingMessage(chatId, message, artifact = null, transcript = "") {
   const numericChatId = Number(chatId);
-  const task = incomingMessageTask(numericChatId, message, artifact);
+  const task = incomingMessageTask(numericChatId, message, artifact, transcript);
   for (let attempt = 0; attempt < 3; attempt += 1) {
     const tasks = await readTasks();
     if (hasIncomingMessageTask(tasks, numericChatId, message.id)) return;
@@ -750,10 +752,20 @@ async function markStickerUsed(chatId, id) {
   }
 }
 
-async function storeIncomingMediaArtifact(message, chatId, context = {}) {
+async function downloadMessageMedia(message, attempts = 4) {
   if (!message.hasMedia) return null;
-  let media = null;
-  try { media = await message.downloadMedia(); } catch { return null; }
+  for (let attempt = 0; attempt < attempts; attempt += 1) {
+    try {
+      const media = await message.downloadMedia();
+      if (media?.data && media?.mimetype) return media;
+    } catch {}
+    await sleep(750 + attempt * 750);
+  }
+  return null;
+}
+
+async function storeIncomingMediaArtifact(message, chatId, context = {}) {
+  const media = await downloadMessageMedia(message);
   if (!media?.data || !media?.mimetype) return null;
 
   const paths = chatPaths(chatId);
@@ -789,6 +801,25 @@ function shortError(error) {
   return String(error?.message || error || "unknown error").split("\n")[0].slice(0, 300);
 }
 
+function isAudioArtifact(artifact, message = {}) {
+  return artifact?.kind === "audio" || String(artifact?.mimeType || "").startsWith("audio/") || ["ptt", "audio"].includes(String(message.type || "").toLowerCase());
+}
+
+async function transcribeIncomingAudio(chatId, message, artifact) {
+  if (!bool(config.TRANSCRIBE_AUDIO, true) || !artifact?.id || !isAudioArtifact(artifact, message)) return "";
+  try {
+    const arisa = createArisaClient({ toolName, chatId: normalizeChatId(chatId) });
+    const result = await arisa.tools.run({
+      name: config.TRANSCRIBE_TOOL || "openai-transcribe",
+      artifactId: artifact.id
+    }, { timeoutMs: 180_000 });
+    if (!result.ok) return "";
+    return compact(result.output?.text || result.output?.json?.text || "");
+  } catch {
+    return "";
+  }
+}
+
 async function captureIncomingMessage(ownerChatId, message) {
   if (message.fromMe) {
     await writeChatStatus(ownerChatId, { state: "ready", live: true, pid: process.pid, message: "WhatsApp is ready." });
@@ -807,8 +838,11 @@ async function captureIncomingMessage(ownerChatId, message) {
   const isGroup = Boolean(chat?.isGroup || /@g\.us$/.test(String(chatId)));
   const location = locationFromMessage(message);
   const reactions = await reactionsFromMessage(message);
+  const serializedId = serializedWhatsAppId(message.id);
   const inboxMessage = {
-    id: serializedWhatsAppId(message.id) || `${message.from}-${message.timestamp}-${Date.now()}`,
+    id: serializedId || `${message.from}-${message.timestamp}-${Date.now()}`,
+    whatsappMessageId: serializedId,
+    rawId: message.id || null,
     from: chatId,
     chatId,
     chatName: compact(chat?.name || ""),
@@ -832,7 +866,8 @@ async function captureIncomingMessage(ownerChatId, message) {
   if (!(await isWatchEnabled(ownerChatId))) return;
 
   const artifact = await storeIncomingMediaArtifact(message, ownerChatId, { senderId, fromName: inboxMessage.fromName, chatName: inboxMessage.chatName });
-  await enqueueArisaTaskForIncomingMessage(ownerChatId, inboxMessage, artifact);
+  const transcript = await transcribeIncomingAudio(ownerChatId, inboxMessage, artifact);
+  await enqueueArisaTaskForIncomingMessage(ownerChatId, inboxMessage, artifact, transcript);
 }
 
 class SessionManager {
@@ -1004,11 +1039,36 @@ class SessionManager {
     const messageId = String(job.messageId || "").trim();
     const emoji = String(job.emoji ?? job.reaction ?? "👀");
     if (!messageId) throw new Error("messageId is required for react");
-    const message = await record.client.getMessageById(messageId);
+    let message = await record.client.getMessageById(messageId).catch(() => null);
+    if (!message) message = await this.findRecentMessageBySyntheticId(record.client, messageId);
+    if (!message) message = await this.findRecentMessageByText(record.client, job);
     if (!message) throw new Error(`Message not found: ${messageId}`);
     await message.react(emoji);
     record.lastActivity = Date.now();
-    return { messageId, emoji, sessionChatId: normalizeChatId(chatId) };
+    return { messageId: serializedMessageId(message) || messageId, emoji, sessionChatId: normalizeChatId(chatId) };
+  }
+
+  async findRecentMessageBySyntheticId(client, messageId) {
+    const match = String(messageId).match(/^(.+@g\.us)-(\d{9,})-\d+$/);
+    if (!match) return null;
+    const [, chatId, timestampText] = match;
+    const expectedTimestamp = Number(timestampText);
+    if (!Number.isFinite(expectedTimestamp)) return null;
+    const chat = await client.getChatById(chatId).catch(() => null);
+    if (!chat?.fetchMessages) return null;
+    const messages = await chat.fetchMessages({ limit: 50 });
+    return messages.find((message) => Number(message.timestamp) === expectedTimestamp) || null;
+  }
+
+  async findRecentMessageByText(client, job) {
+    const chatId = String(job.chatId || job.whatsappId || job.to || "").trim();
+    const body = String(job.body || job.text || job.messageText || "").trim();
+    if (!chatId || (!body && !bool(job.latestFallback, false))) return null;
+    const chat = await client.getChatById(chatId).catch(() => null);
+    if (!chat?.fetchMessages) return null;
+    const messages = await chat.fetchMessages({ limit: 100 });
+    const newestFirst = [...messages].reverse();
+    return (body ? newestFirst.find((message) => String(message.body || "").trim() === body) : null) || (bool(job.latestFallback, false) ? newestFirst[0] : null);
   }
 
   async getMessageReactions(chatId, job) {
@@ -1032,7 +1092,13 @@ class SessionManager {
     const message = await findSentMessageToDelete(record.client, job);
     if (!message) throw new Error("No matching recent sent message found");
     const messageId = serializedWhatsAppId(message.id);
-    await message.delete(bool(job.everyone, true));
+    const everyone = bool(job.everyone, true);
+    try {
+      await message.delete(everyone, bool(job.clearMedia, true));
+    } catch (error) {
+      if (everyone) await message.delete(false, bool(job.clearMedia, false));
+      else throw error;
+    }
     record.lastActivity = Date.now();
     return { messageId, chatId: normalizeRecipient(job.to), sessionChatId: normalizeChatId(chatId), deleted: true };
   }
@@ -1170,6 +1236,32 @@ class SessionManager {
     return readChatStatus(normalizedChatId, {});
   }
 
+  async transcribeMessageMedia(chatId, job) {
+    const record = await this.ensureClient(chatId);
+    await this.waitReady(chatId, number(job.readyTimeoutMs, number(config.READY_TIMEOUT_MS, 120000)));
+    const messageId = String(job.messageId || "").trim();
+    if (!messageId) throw new Error("messageId is required");
+    let message = await record.client.getMessageById(messageId);
+    if (!message && job.remote) {
+      const chat = await record.client.getChatById(job.remote);
+      const messages = await chat.fetchMessages({ limit: number(job.limit, 50) });
+      message = messages.find((item) => serializedWhatsAppId(item.id) === messageId || serializedWhatsAppId(item.id).includes(messageId));
+    }
+    if (!message) throw new Error(`WhatsApp message not found: ${messageId}`);
+    let artifact = await storeIncomingMediaArtifact(message, chatId, { transcribedOnDemand: true });
+    if (!artifact?.id && job.remote) {
+      const chat = await record.client.getChatById(job.remote);
+      const messages = await chat.fetchMessages({ limit: number(job.limit, 50) });
+      const fetched = messages.find((item) => serializedWhatsAppId(item.id) === messageId || serializedWhatsAppId(item.id).includes(messageId));
+      if (fetched) artifact = await storeIncomingMediaArtifact(fetched, chatId, { transcribedOnDemand: true, fetchedFromChat: true });
+    }
+    if (!artifact?.id) throw new Error("Could not download media from WhatsApp message");
+    const transcript = await transcribeIncomingAudio(chatId, { type: message.type || job.messageType || "audio" }, artifact);
+    if (!transcript) throw new Error("Audio transcription failed or returned empty text");
+    record.lastActivity = Date.now();
+    return { messageId, artifactId: artifact.id, mimeType: artifact.mimeType, kind: artifact.kind, transcript };
+  }
+
   async shutdownIdleClients() {
     if (this.idleShutdownMs <= 0) return;
     for (const [chatId, record] of this.sessions) {
@@ -1216,6 +1308,18 @@ async function processJob(manager, job) {
   }
   if (job.payload.type === "sync") {
     return manager.syncRecentMessages(chatId, { limit: number(job.payload.limit, 20) });
+  }
+  if (job.payload.type === "transcribe") {
+    return manager.transcribeMessageMedia(chatId, job.payload);
+  }
+  if (job.payload.type === "debugChats") {
+    const record = await manager.ensureClient(chatId);
+    const chats = await record.client.getChats();
+    const query = String(job.payload.query || "").toLowerCase();
+    return chats
+      .filter((chat) => !query || String(chat.name || chat.id?._serialized || "").toLowerCase().includes(query))
+      .slice(0, number(job.payload.limit, 20))
+      .map((chat) => ({ id: chat.id?._serialized, name: chat.name, isGroup: chat.isGroup }));
   }
   if (job.payload.type === "logout") {
     return withChatLock(paths, () => manager.logout(chatId));
@@ -1540,6 +1644,12 @@ async function run(requestFile) {
       return;
     }
 
+    if (mode === "debug-chats") {
+      const result = await submitChatJob(chatId, { type: "debugChats", query: request.args?.query, limit: request.args?.limit }, { timeoutMs: number(config.JOB_TIMEOUT_MS, 120000) });
+      console.log(JSON.stringify(toolOk({ text: JSON.stringify(result, null, 2), json: { chats: result } })));
+      return;
+    }
+
     if (mode === "stickers") {
       const action = request.args?.action || "list";
       if (action === "list") {
@@ -1577,6 +1687,17 @@ async function run(requestFile) {
       return;
     }
 
+    if (mode === "transcribe") {
+      const inboxMessage = request.args?.messageId || request.args?.id
+        ? (await readInbox(chatId)).find((item) => item.id === (request.args?.messageId || request.args?.id) || item.whatsappMessageId === (request.args?.messageId || request.args?.id))
+        : (await selectInboxMessages({ chatId, from: request.args?.from, limit: 1, unreadOnly: false, after: request.args?.after || "" }))[0];
+      const messageId = request.args?.messageId || request.args?.id || inboxMessage?.id || "";
+      const serializedId = inboxMessage?.rawId?.$1 || inboxMessage?.whatsappMessageId || messageId;
+      const result = await submitChatJob(chatId, { type: "transcribe", messageId: serializedId, remote: inboxMessage?.from || request.args?.remote || "", readyTimeoutMs: number(config.READY_TIMEOUT_MS, 120000) }, { timeoutMs: 240000 });
+      console.log(JSON.stringify(toolOk({ text: result.transcript, json: result })));
+      return;
+    }
+
     if (mode === "inbox") {
       const messages = await selectInboxMessages({ chatId, from: request.args?.from, limit: number(request.args?.limit, 20), unreadOnly: bool(request.args?.unread ?? request.args?.unreadOnly, false), after: request.args?.after || "" });
       if (bool(request.args?.markRead, true)) await markMessagesRead(chatId, messages.map((item) => item.id));
@@ -1587,7 +1708,7 @@ async function run(requestFile) {
     if (mode === "react") {
       const messageId = request.args?.messageId || request.args?.id || await latestInboxMessageId({ chatId, from: request.args?.from, after: request.args?.after || "" });
       const emoji = request.args?.emoji ?? request.args?.reaction ?? request.text ?? "👀";
-      const result = await submitChatJob(chatId, { type: "react", messageId, emoji, readyTimeoutMs: number(config.READY_TIMEOUT_MS, 120000) }, { timeoutMs: number(config.JOB_TIMEOUT_MS, 120000) });
+      const result = await submitChatJob(chatId, { ...request.args, type: "react", messageId, emoji, readyTimeoutMs: number(config.READY_TIMEOUT_MS, 120000) }, { timeoutMs: number(config.JOB_TIMEOUT_MS, 120000) });
       console.log(JSON.stringify(toolOk({ text: `Reacted ${result.emoji} to ${result.messageId}.`, json: result })));
       return;
     }

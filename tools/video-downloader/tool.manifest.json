@@ -23,6 +23,18 @@
       "type": "string",
       "required": false,
       "prompt": "Optional Netscape cookies file for X/Twitter downloads that require login."
+    },
+    "YOUTUBE_COOKIES_PATH": {
+      "type": "string",
+      "required": false,
+      "secret": true,
+      "prompt": "Optional Netscape cookies file for YouTube downloads/transcription that require login."
+    },
+    "INSTAGRAM_COOKIES_PATH": {
+      "type": "string",
+      "required": false,
+      "secret": true,
+      "prompt": "Optional Netscape cookies file for Instagram downloads that require login."
     }
   },
   "category": "media",

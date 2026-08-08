@@ -1,5 +1,7 @@
 export default {
   YTDLP_COMMAND: "yt-dlp",
   FFPROBE_COMMAND: "ffprobe",
-  TWITTER_COOKIES_PATH: ""
+  TWITTER_COOKIES_PATH: "",
+  YOUTUBE_COOKIES_PATH: "",
+  INSTAGRAM_COOKIES_PATH: ""
 };

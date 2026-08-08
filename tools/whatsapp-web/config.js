@@ -15,5 +15,7 @@ export default {
   IDLE_SHUTDOWN_MS: "300000",
   CHROME_EXECUTABLE_PATH: "",
   WEB_VERSION: "",
-  WEB_VERSION_CACHE_STRICT: "false"
+  WEB_VERSION_CACHE_STRICT: "false",
+  TRANSCRIBE_AUDIO: "true",
+  TRANSCRIBE_TOOL: "openai-transcribe"
 };

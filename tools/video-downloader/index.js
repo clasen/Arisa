@@ -21,7 +21,7 @@ const { toolError, toolOk } = await importArisa("src/core/tools/tool-result.js")
 const { getChatToolTmpDir, getToolConfigPath, getToolTmpDir } = await importArisa("src/runtime/paths.js");
 
 function printHelp() {
-  console.log(`video-downloader\n\nUsage:\n  node index.js --help\n  node index.js run --request-file <json>\n\nExpected input:\n  {\n    "text": "https://www.youtube.com/watch?v=...",\n    "artifact": { "text": "https://x.com/..." },\n    "args": { "url": "...", "quality": "best|small" }\n  }\n\nOutput:\n  A generated video/mp4 artifact. Use a separate audio-extractor/media-converter tool when you need audio.\n\nSupported URLs:\n  YouTube, TikTok, Instagram, Facebook, X/Twitter, and other yt-dlp supported URLs.\n\nConfig at ${getToolConfigPath(toolName)}:\n  YTDLP_COMMAND (optional, default yt-dlp)\n  FFPROBE_COMMAND (optional, default ffprobe)\n  TWITTER_COOKIES_PATH (optional Netscape cookies file for X/Twitter)\n`);
+  console.log(`video-downloader\n\nUsage:\n  node index.js --help\n  node index.js run --request-file <json>\n\nExpected input:\n  {\n    "text": "https://www.youtube.com/watch?v=...",\n    "artifact": { "text": "https://x.com/..." },\n    "args": { "url": "...", "quality": "best|small" }\n  }\n\nOutput:\n  A generated video/mp4 artifact. Use a separate audio-extractor/media-converter tool when you need audio.\n\nSupported URLs:\n  YouTube, TikTok, Instagram, Facebook, X/Twitter, and other yt-dlp supported URLs.\n\nConfig at ${getToolConfigPath(toolName)}:\n  YTDLP_COMMAND (optional, default yt-dlp)\n  FFPROBE_COMMAND (optional, default ffprobe)\n  TWITTER_COOKIES_PATH (optional Netscape cookies file for X/Twitter)\n  YOUTUBE_COOKIES_PATH (optional Netscape cookies file for YouTube)\n  INSTAGRAM_COOKIES_PATH (optional Netscape cookies file for Instagram)\n`);
 }
 
 function runProcess(command, args, options = {}) {
@@ -91,8 +91,12 @@ async function validateMedia(command, filePath, kind) {
 
 function buildCookiesArgs(config, url) {
   const isTwitter = /\b(twitter\.com|x\.com)\b/i.test(url);
-  if (!isTwitter || !config.TWITTER_COOKIES_PATH) return [];
-  return ["--cookies", config.TWITTER_COOKIES_PATH];
+  if (isTwitter && config.TWITTER_COOKIES_PATH) return ["--cookies", config.TWITTER_COOKIES_PATH];
+  const isYoutube = /\b(youtube\.com|youtu\.be)\b/i.test(url);
+  if (isYoutube && config.YOUTUBE_COOKIES_PATH) return ["--cookies", config.YOUTUBE_COOKIES_PATH];
+  const isInstagram = /\binstagram\.com\b/i.test(url);
+  if (isInstagram && config.INSTAGRAM_COOKIES_PATH) return ["--cookies", config.INSTAGRAM_COOKIES_PATH];
+  return [];
 }
 
 async function download(request, config) {

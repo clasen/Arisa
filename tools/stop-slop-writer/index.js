@@ -16,18 +16,14 @@ Usage:
   node index.js run --request-file <json>
 
 Purpose:
-  Load and apply bundled stop-slop skill assets. Returns the skill instructions,
-  linked references, and deterministic slop flags for any supplied draft.
+  Load the complete stop-slop skill as writing context. The calling agent uses
+  the skill to draft or review prose; this tool does not substitute regexes for
+  editorial judgment.
 
 Input:
   request.text or artifact.text: brief or draft text
-  args.mode: "brief" | "audit" | "both" (default: both)
   args.skillDir: optional local stop-slop skill directory containing SKILL.md
 `);
-}
-
-function escapeRegex(value) {
-  return String(value).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
 async function readIfExists(filePath) {
@@ -36,15 +32,6 @@ async function readIfExists(filePath) {
   } catch {
     return "";
   }
-}
-
-function extractQuotedPhrases(markdown) {
-  const phrases = new Set();
-  for (const match of markdown.matchAll(/"([^"]{3,120})"/g)) {
-    const phrase = match[1].trim();
-    if (!phrase.includes("[") && !phrase.includes("...") && /[a-zA-Z]/.test(phrase)) phrases.add(phrase);
-  }
-  return [...phrases];
 }
 
 function stripFrontmatter(markdown) {
@@ -91,35 +78,8 @@ async function resolveSkillAssets(request) {
     source,
     referencesSource,
     skill,
-    references,
-    phraseList: extractQuotedPhrases(references.phrases)
+    references
   };
-}
-
-const structurePatterns = [
-  { name: "binary contrast", regex: /\b(not|isn't|wasn't|aren't|doesn't|don't)\b[^.?!]{0,100}\b(but|because|it's|actually)\b/i },
-  { name: "negative listing", regex: /\bnot\s+(a|an|the)?\s*\w+[^.?!]*\.\s+not\s+(a|an|the)?\s*\w+/i },
-  { name: "throat-clearing setup", regex: /\b(here's what|here's why|here's the|what if|think about it|this matters because|here's what i mean)\b/i },
-  { name: "em dash", regex: /—/ },
-  { name: "passive voice candidate", regex: /\b(was|were|is|are|be|been|being)\s+\w+ed\b/i },
-  { name: "Wh-word sentence opener", regex: /(^|[.!?]\s+)(what|when|where|which|who|why|how)\b/i },
-  { name: "vague importance", regex: /\b(significant|important|crucial|critical|fundamental|inherent|inevitable|structural)\b/i },
-  { name: "lazy extreme", regex: /\b(every|always|never|everyone|everybody|nobody)\b/i },
-  { name: "false agency candidate", regex: /\b(complaint|bet|decision|culture|conversation|data|market)\s+(becomes|emerges|shifts|moves|tells|rewards|lives|dies)\b/i }
-];
-
-function audit(text, phraseList) {
-  const findings = [];
-  for (const phrase of phraseList) {
-    const regex = new RegExp(escapeRegex(phrase), "i");
-    if (regex.test(text)) findings.push({ type: "phrase", item: phrase });
-  }
-  for (const pattern of structurePatterns) {
-    if (pattern.regex.test(text)) findings.push({ type: "structure", item: pattern.name });
-  }
-  const adverbs = [...text.matchAll(/\b\w+ly\b/gi)].map((match) => match[0]).slice(0, 30);
-  for (const word of [...new Set(adverbs)]) findings.push({ type: "adverb", item: word });
-  return findings;
 }
 
 function brief(text, loadedSkill) {
@@ -129,7 +89,7 @@ function brief(text, loadedSkill) {
     `Source: ${loadedSkill.source}`,
     `References: ${loadedSkill.referencesSource}`,
     "",
-    "The tool loaded self-contained stop-slop skill assets. Apply these instructions to the next draft/revision.",
+    "Use the complete skill below for editorial judgment. Do not reduce its rules to keyword or regex checks.",
     "",
     "## SKILL.md",
     "",
@@ -153,22 +113,10 @@ async function run(requestFile) {
     if (!requestFile) throw new Error("Missing --request-file value");
     const request = JSON.parse(await readFile(requestFile, "utf8"));
     const text = String(request.text || request.artifact?.text || "").trim();
-    const mode = String(request.args?.mode || "both");
     const loadedSkill = await resolveSkillAssets(request);
-    const findings = mode !== "brief" ? audit(text, loadedSkill.phraseList) : [];
-    const output = mode !== "audit" ? [brief(text, loadedSkill)] : [];
-
-    if (mode !== "brief") {
-      output.push(
-        "",
-        "## Deterministic flags",
-        "",
-        findings.length ? findings.map((f) => `- ${f.type}: ${f.item}`).join("\n") : "No obvious stop-slop flags found by deterministic scan."
-      );
-    }
 
     console.log(JSON.stringify(toolOk({
-      text: output.join("\n").trim(),
+      text: brief(text, loadedSkill),
       kind: "document",
       mimeType: "text/markdown",
       metadata: {

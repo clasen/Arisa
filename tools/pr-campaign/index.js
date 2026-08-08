@@ -1,4 +1,6 @@
 import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { resolve4, resolve6, resolveMx } from "node:dns/promises";
+import emailValidator from "email-validator";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import defaults from "./config.js";
@@ -19,8 +21,11 @@ Usage:
   node index.js run --request-file <json>
 
 Actions via args.action:
-  add-contact     Add a public business contact. args: name, email, outlet, angle?, referenceGame?, personalNote?, sourceUrl?
+  add-contact     Add a public business contact. args: name, email, outlet, angle?, referenceGame?, personalNote?, sourceUrl?, verify?
   list-contacts   List contacts. args: status?, limit?
+  verify-email    Check email syntax with npm email-validator and domain DNS deliverability. args: email
+  verify-emails   Check multiple email addresses. args: emails array or comma/newline-separated string
+  verify-contacts Verify stored contacts and persist emailCheck metadata. args: status?, limit?
   draft           Create a concise first-touch or follow-up email. args: email, game?, type? first|follow-up
   create-draft    Save an approved email in Gmail Drafts. args: email, subject, body, type? first|follow-up. Rejects duplicate drafts.
   send            Send one approved draft through gmail-workspace. args: email, subject, body
@@ -28,6 +33,7 @@ Actions via args.action:
   opt-out         Mark a contact as do-not-contact. args: email
   record-bounce   Record a permanent delivery failure. args: email, reason?, sourceMessageId?
   record-sent     Reconcile a message observed in Gmail Sent without sending. args: email, subject?, type?
+  record-offer    Save a commercial/rate-card response for future reference. args: email, provider?, offers JSON, sourceMessageId?, attachment?, notes?
   sync-bounces    Scan Gmail delivery failures for tracked contacts and block follow-ups.
   status          Show daily send count and campaign totals.
 
@@ -40,7 +46,7 @@ function stateFile(chatId) {
 }
 
 async function loadState(chatId) {
-  try { return JSON.parse(await readFile(stateFile(chatId), "utf8")); }
+  try { return JSON.parse((await readFile(stateFile(chatId), "utf8")).replace(/^\uFEFF/, "")); }
   catch { return { contacts: {}, sends: [] }; }
 }
 
@@ -57,6 +63,43 @@ function required(value, label) { if (!String(value || "").trim()) throw new Err
 function contactFor(state, email) { return state.contacts[normalizedEmail(email)]; }
 function firstName(name) { return String(name || "there").trim().split(/\s+/)[0] || "there"; }
 function campaignText(value) { return String(value || "").replace(/\u2014/g, ","); }
+function truthy(value) { return value === true || value === "true" || value === "1" || value === 1 || value === "yes"; }
+
+function emailDomain(email) {
+  return normalizedEmail(email).split("@").at(1) || "";
+}
+
+function hasValidEmailSyntax(email) {
+  return emailValidator.validate(normalizedEmail(email));
+}
+
+async function verifyEmailAddress(email) {
+  const normalized = normalizedEmail(email);
+  const checkedAt = now();
+  if (!hasValidEmailSyntax(normalized)) {
+    return { email: normalized, checkedAt, exists: false, deliverable: false, status: "invalid_syntax", reason: "Email address syntax is invalid" };
+  }
+  const domain = emailDomain(normalized);
+  try {
+    const mx = await resolveMx(domain);
+    if (mx.length) {
+      return { email: normalized, checkedAt, exists: "probable", deliverable: true, status: "mx_found", domain, mx: mx.sort((a, b) => a.priority - b.priority).slice(0, 5) };
+    }
+  } catch (error) {
+    if (!["ENODATA", "ENOTFOUND", "SERVFAIL", "ETIMEOUT"].includes(error.code)) {
+      return { email: normalized, checkedAt, exists: "unknown", deliverable: "unknown", status: "dns_error", domain, reason: error.message || String(error) };
+    }
+  }
+  const addresses = [];
+  for (const resolver of [resolve4, resolve6]) {
+    try { addresses.push(...await resolver(domain)); }
+    catch {}
+  }
+  if (addresses.length) {
+    return { email: normalized, checkedAt, exists: "unknown", deliverable: "unknown", status: "domain_found_no_mx", domain, reason: "Domain exists, but no MX record was found" };
+  }
+  return { email: normalized, checkedAt, exists: false, deliverable: false, status: "domain_not_found", domain, reason: "Domain has no MX, A, or AAAA DNS records" };
+}
 
 function sentToday(state) {
   return state.sends.filter((entry) => entry.sentAt?.slice(0, 10) === today()).length;
@@ -171,6 +214,7 @@ async function handleRun(request) {
   if (action === "add-contact") {
     const email = normalizedEmail(required(args.email, "email"));
     const existing = state.contacts[email];
+    const emailCheck = truthy(args.verify) ? await verifyEmailAddress(email) : existing?.emailCheck;
     state.contacts[email] = {
       email,
       name: required(args.name, "name"),
@@ -180,11 +224,52 @@ async function handleRun(request) {
       personalNote: String(args.personalNote || existing?.personalNote || "").trim(),
       sourceUrl: String(args.sourceUrl || "").trim(),
       status: existing?.status || "new",
+      ...(emailCheck ? { emailCheck } : {}),
       createdAt: existing?.createdAt || now(),
       updatedAt: now()
     };
     await saveState(request.chatId, state);
     return { action, contact: state.contacts[email] };
+  }
+
+  if (action === "verify-email") {
+    const email = required(args.email, "email");
+    const check = await verifyEmailAddress(email);
+    const contact = contactFor(state, email);
+    if (contact) {
+      contact.emailCheck = check;
+      contact.updatedAt = now();
+      await saveState(request.chatId, state);
+    }
+    return { action, check };
+  }
+
+  if (action === "verify-emails") {
+    const emails = Array.isArray(args.emails)
+      ? args.emails.map(normalizedEmail).filter(Boolean)
+      : String(args.emails || "").split(/[\n,;]+/).map(normalizedEmail).filter(Boolean);
+    const uniqueEmails = [...new Set(emails)];
+    const checked = [];
+    for (const email of uniqueEmails) checked.push(await verifyEmailAddress(email));
+    const failed = checked.filter((check) => check.deliverable === false || check.status === "invalid_syntax");
+    const unknown = checked.filter((check) => check.deliverable === "unknown");
+    return { action, total: checked.length, ok: checked.length - failed.length - unknown.length, unknown: unknown.length, failed: failed.length, checked };
+  }
+
+  if (action === "verify-contacts") {
+    const contacts = Object.values(state.contacts)
+      .filter((contact) => !args.status || contact.status === args.status)
+      .sort((a, b) => a.createdAt.localeCompare(b.createdAt))
+      .slice(0, Number(args.limit || 100));
+    const checked = [];
+    for (const contact of contacts) {
+      const emailCheck = await verifyEmailAddress(contact.email);
+      contact.emailCheck = emailCheck;
+      contact.updatedAt = now();
+      checked.push({ email: contact.email, status: emailCheck.status, deliverable: emailCheck.deliverable, exists: emailCheck.exists });
+    }
+    if (checked.length) await saveState(request.chatId, state);
+    return { action, checked };
   }
 
   if (action === "list-contacts") {
@@ -216,6 +301,37 @@ async function handleRun(request) {
     contact.updatedAt = now();
     await saveState(request.chatId, state);
     return { action, email, type, sentAt: state.sends.find((entry) => entry.email === email && entry.type === type)?.sentAt };
+  }
+
+  if (action === "record-offer") {
+    const email = normalizedEmail(required(args.email, "email"));
+    const contact = contactFor(state, email);
+    if (!contact) throw new Error("Contact not found");
+    let offers = args.offers;
+    if (typeof offers === "string") {
+      try { offers = JSON.parse(offers); }
+      catch { throw new Error("args.offers must be valid JSON"); }
+    }
+    if (!Array.isArray(offers) || !offers.length) throw new Error("args.offers must be a non-empty array");
+    const sourceMessageId = String(args.sourceMessageId || "").trim() || null;
+    const record = {
+      provider: String(args.provider || contact.name || contact.outlet || email).trim(),
+      offers,
+      sourceMessageId,
+      attachment: String(args.attachment || "").trim() || null,
+      notes: String(args.notes || "").trim(),
+      receivedAt: String(args.receivedAt || now()).trim()
+    };
+    const records = Array.isArray(contact.commercialOffers) ? contact.commercialOffers : [];
+    const existingIndex = sourceMessageId ? records.findIndex((item) => item.sourceMessageId === sourceMessageId) : -1;
+    if (existingIndex >= 0) records[existingIndex] = { ...records[existingIndex], ...record };
+    else records.push(record);
+    contact.commercialOffers = records;
+    contact.commercialStatus = "rate-card-received";
+    contact.tags = [...new Set([...(Array.isArray(contact.tags) ? contact.tags : []), "commercial-offer", "rate-card"])];
+    contact.updatedAt = now();
+    await saveState(request.chatId, state);
+    return { action, email, commercialStatus: contact.commercialStatus, offer: record, totalOffers: records.length };
   }
 
   if (action === "record-bounce") {
@@ -250,6 +366,7 @@ async function handleRun(request) {
     const type = args.type === "follow-up" ? "follow-up" : "first";
     if (contact.status === "opted-out") throw new Error("Contact opted out");
     if (contact.status === "bounced") throw new Error("Contact has a permanent delivery failure; verify a new address before drafting");
+    if (contact.emailCheck?.deliverable === false) throw new Error(`Contact email failed verification: ${contact.emailCheck.status}`);
     if (hasDraftOfType(contact, type)) throw new Error(`An open ${type} draft already exists for this contact`);
     const game = required(args.game, "game");
     return { action, type, email: contact.email, ...((type === "follow-up") ? draftFollowUp(contact, game, config.SENDER_NAME) : draftFirst(contact, game, config.SENDER_NAME, args.includeArisaNote !== false)) };
@@ -272,6 +389,7 @@ async function handleRun(request) {
     if (!contact) throw new Error("Contact not found");
     if (contact.status === "opted-out") throw new Error("Contact opted out");
     if (contact.status === "bounced") throw new Error("Contact has a permanent delivery failure; verify a new address before drafting");
+    if (contact.emailCheck?.deliverable === false) throw new Error(`Contact email failed verification: ${contact.emailCheck.status}`);
     const type = args.type === "follow-up" ? "follow-up" : "first";
     if (hasDraftOfType(contact, type)) throw new Error(`An open ${type} draft already exists for this contact`);
     if (type === "first") requirePersonalization(contact);
@@ -296,6 +414,7 @@ async function handleRun(request) {
     if (!contact) throw new Error("Contact not found");
     if (contact.status === "opted-out") throw new Error("Contact opted out");
     if (contact.status === "bounced") throw new Error("Contact has a permanent delivery failure; verify a new address before sending");
+    if (contact.emailCheck?.deliverable === false) throw new Error(`Contact email failed verification: ${contact.emailCheck.status}`);
     const type = args.type === "follow-up" ? "follow-up" : "first";
     if (type === "first" && hasFirstTouch(state, email)) throw new Error("A first-touch email was already sent to this contact");
     if (sentToday(state) >= Number(config.DAILY_SEND_LIMIT || 10)) throw new Error("Daily send limit reached");
