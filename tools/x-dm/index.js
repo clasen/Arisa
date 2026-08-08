@@ -31,6 +31,7 @@ Actions:
   audit    Read campaign/send health without opening X. args: campaignId?
   status   Check the X session and include campaign/send health. args: campaignId?
   check    Validate a target profile and whether its DM button is visible. args: username
+  search   Search visible X posts or people without sending. args: query, mode=posts|people, maxResults?
   send     Send one approved DM. args: username, message, campaignId?, confirm=true, dryRun=false
 
 Safety and reliability:
@@ -229,6 +230,7 @@ function auditState(state, campaignId = "") {
     campaignId: campaignId || null,
     sent: filtered.length,
     uniqueRecipients: new Set(handles).size,
+    recipients: [...new Set(filtered.map((entry) => String(entry.username || "")).filter(Boolean))],
     duplicateRecipients,
     byDay,
     byCampaign,
@@ -257,9 +259,12 @@ function duplicateGuard(state, username, idempotencyKey) {
   if (indexed) return `@${username} is already present in the X DM recipient index (${indexed.campaignId || "unknown campaign"}).`;
   const sent = state.sends.find((entry) => String(entry.username || "").toLowerCase() === normalized || entry.idempotencyKey === idempotencyKey);
   if (sent) return `@${username} is already present in the X DM send log (${sentCampaignId(sent)}).`;
-  const latest = [...state.attempts].reverse().find((attempt) => String(attempt.username || "").toLowerCase() === normalized || attempt.idempotencyKey === idempotencyKey);
-  if (latest?.outcome === "uncertain") return `@${username} has an uncertain prior delivery. Check X manually before any retry.`;
-  if (latest?.outcome === "in-flight") return `@${username} has an unresolved in-flight attempt. Reconcile it manually before any retry.`;
+  const matchingSends = state.attempts.filter((attempt) => attempt.action === "send" && (String(attempt.username || "").toLowerCase() === normalized || attempt.idempotencyKey === idempotencyKey));
+  if (matchingSends.some((attempt) => attempt.outcome === "uncertain")) return `@${username} has an uncertain prior delivery. Check X manually before any retry.`;
+  const terminalAttemptIds = new Set(matchingSends.filter((attempt) => ["sent", "failed", "uncertain"].includes(attempt.outcome)).map((attempt) => attempt.attemptId));
+  if (matchingSends.some((attempt) => attempt.outcome === "in-flight" && !terminalAttemptIds.has(attempt.attemptId))) {
+    return `@${username} has an unresolved in-flight attempt. Reconcile it manually before any retry.`;
+  }
   return "";
 }
 
@@ -472,6 +477,63 @@ async function sendDm(page, username, message) {
     : { ok: false, uncertain: true, reason: "X accepted the send click, but delivery could not be verified. Check the conversation manually before retrying.", target: composer.target };
 }
 
+function handleFromStatusHref(value) {
+  const match = String(value || "").match(/^\/([A-Za-z0-9_]{1,15})\/status\/(\d+)/);
+  return match ? { username: match[1], statusId: match[2] } : null;
+}
+
+async function searchX(page, args) {
+  const query = String(args.query || "").trim();
+  if (!query) throw new Error("args.query is required for action=search.");
+  const mode = String(args.mode || "posts").toLowerCase() === "people" ? "people" : "posts";
+  const maxResults = Math.max(1, Math.min(intArg(args.maxResults, 10), 25));
+  const filter = mode === "people" ? "user" : "live";
+  await page.goto(`https://x.com/search?q=${encodeURIComponent(query)}&src=typed_query&f=${filter}`, { waitUntil: "domcontentloaded", timeout: 45000 });
+  const selector = mode === "people" ? '[data-testid="UserCell"]' : '[data-testid="tweet"]';
+  await page.waitForSelector(selector, { timeout: 12000 }).catch(() => {});
+  await page.waitForTimeout(2200);
+  const body = await page.locator("body").innerText({ timeout: 5000 }).catch(() => "");
+  if (!body.trim()) throw new Error("X returned an empty or blocked search page.");
+  if (/Something went wrong|Try reloading|rate limit|Verify your identity/i.test(body) && !(await page.locator(selector).count().catch(() => 0))) {
+    throw new Error("X search is unavailable or requires verification.");
+  }
+  const items = [];
+  const seen = new Set();
+  const cells = page.locator(selector);
+  const count = Math.min(await cells.count().catch(() => 0), maxResults * 3);
+  for (let index = 0; index < count && items.length < maxResults; index += 1) {
+    const cell = cells.nth(index);
+    const text = (await cell.innerText().catch(() => "")).trim();
+    if (!text) continue;
+    let username = "";
+    let evidenceUrl = "";
+    if (mode === "posts") {
+      const links = await cell.locator('a[href*="/status/"]').evaluateAll((nodes) => nodes.map((node) => node.getAttribute("href") || "")).catch(() => []);
+      const status = links.map(handleFromStatusHref).find(Boolean);
+      if (status) {
+        username = status.username;
+        evidenceUrl = `https://x.com/${status.username}/status/${status.statusId}`;
+      }
+    } else {
+      const handleMatch = text.match(/@([A-Za-z0-9_]{1,15})(?![A-Za-z0-9_])/);
+      username = handleMatch ? handleMatch[1] : "";
+      if (username) evidenceUrl = `https://x.com/${username}`;
+    }
+    const key = username.toLowerCase();
+    if (!username || seen.has(key)) continue;
+    seen.add(key);
+    const lines = text.split("\n").map((line) => line.trim()).filter(Boolean);
+    items.push({
+      username,
+      displayName: lines.find((line) => !line.startsWith("@")) || username,
+      snippet: text.slice(0, 1000),
+      evidenceUrl,
+      mode
+    });
+  }
+  return { query, mode, items, ...(items.length ? {} : { pageHint: body.slice(0, 500).replace(/\s+/g, " ") }) };
+}
+
 async function statePaths(request) {
   const stateDir = request.chatId != null ? getChatToolStateDir(request.chatId, toolName) : getToolStateDir(toolName);
   await mkdir(stateDir, { recursive: true });
@@ -485,6 +547,29 @@ async function auditAction(request, args) {
   const entries = await readdir(stateDir, { withFileTypes: true }).catch(() => []);
   const staleProfileDirs = entries.filter((entry) => entry.isDirectory() && entry.name.startsWith("browser-profile-")).map((entry) => entry.name);
   const audit = { ...auditState(state, campaignId), staleBrowserProfiles: staleProfileDirs };
+  if (exactBoolean(args.includeHistory, true)) {
+    audit.history = {
+      sendRecords: state.sends.map((entry) => ({
+        username: entry.username,
+        normalizedUsername: String(entry.username || "").toLowerCase(),
+        campaignId: sentCampaignId(entry),
+        idempotencyKey: entry.idempotencyKey || null,
+        messageHash: entry.messageHash || null,
+        sentAt: entry.sentAt || null,
+        deliveryVerified: Boolean(entry.deliveryVerified)
+      })),
+      blockingAttempts: [...audit.uncertainDeliveries, ...audit.unresolvedAttempts].map((attempt) => ({
+        attemptId: attempt.attemptId,
+        username: attempt.username,
+        campaignId: attempt.campaignId,
+        idempotencyKey: attempt.idempotencyKey,
+        messageHash: attempt.messageHash,
+        outcome: attempt.outcome,
+        at: attempt.at,
+        reason: attempt.reason || null
+      }))
+    };
+  }
   return toolOk({ text: `${audit.sent} X DM(s) recorded${campaignId ? ` for ${campaignId}` : ""}; ${audit.uncertainDeliveries.length} uncertain deliver${audit.uncertainDeliveries.length === 1 ? "y" : "ies"}.`, json: audit });
 }
 
@@ -498,17 +583,28 @@ async function browserAction(request, args, config) {
     const account = await validateSession(page, config);
     const { statePath } = await statePaths(request);
     const state = await readState(statePath);
-    if (String(args.action || "status").toLowerCase() === "status") {
+    const action = String(args.action || "status").toLowerCase();
+    if (action === "status") {
       const campaignId = args.campaignId ? campaignIdFrom(args) : "";
       return toolOk({ text: `X session is logged in${account.handle ? ` as @${account.handle}` : ""}. ${auditState(state, campaignId).sent} DM(s) recorded.`, json: { account, campaign: auditState(state, campaignId) } });
+    }
+    if (action === "search") {
+      const search = await searchX(page, args);
+      return toolOk({ text: `Found ${search.items.length} X ${search.mode} result(s) for ${search.query}.`, json: { account, ...search } });
     }
     const username = usernameFrom(args.username || request.text || request.artifact?.text || "", args);
     if (!username) return toolError("A valid args.username, @handle, or X profile URL is required.");
     if (String(args.action).toLowerCase() === "check") {
       let target;
       let checkError = null;
-      try { target = await inspectTarget(page, username); }
-      catch (error) { checkError = error; }
+      try {
+        if (exactBoolean(args.verifyComposer, true)) {
+          const composer = await openDmComposer(page, username);
+          target = { ...(composer.target || { username, profileUrl: `https://x.com/${username}` }), canDm: Boolean(composer.ok), composerVerified: Boolean(composer.ok), ...(composer.ok ? {} : { reason: composer.reason }) };
+        } else {
+          target = await inspectTarget(page, username);
+        }
+      } catch (error) { checkError = error; }
       const release = await acquireStateLock((await statePaths(request)).stateDir);
       try {
         const latest = await readState(statePath);
@@ -594,7 +690,7 @@ async function execute(requestFile) {
   const args = request.args || {};
   const action = String(args.action || "status").toLowerCase();
   if (action === "audit") return auditAction(request, args);
-  if (!["status", "check", "send"].includes(action)) return toolError(`Unknown action: ${action}`);
+  if (!["status", "check", "search", "send"].includes(action)) return toolError(`Unknown action: ${action}`);
   if (action === "send") {
     const username = usernameFrom(args.username || request.text || request.artifact?.text || "", args);
     if (!username) return toolError("A valid args.username, @handle, or X profile URL is required.");

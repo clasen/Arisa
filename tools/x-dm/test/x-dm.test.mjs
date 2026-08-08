@@ -36,10 +36,18 @@ test("legacy sends derive a durable recipient index", () => {
 });
 
 test("an unresolved reservation and uncertain delivery block retries", () => {
-  const inFlight = normalizeState({ attempts: [{ attemptId: "a", at: new Date().toISOString(), username: "Target", idempotencyKey: "k", outcome: "in-flight" }] });
+  const inFlight = normalizeState({ attempts: [{ attemptId: "a", action: "send", at: new Date().toISOString(), username: "Target", idempotencyKey: "k", outcome: "in-flight" }] });
   assert.match(duplicateGuard(inFlight, "Target", "k"), /in-flight/);
-  const uncertain = normalizeState({ attempts: [{ attemptId: "a", at: new Date().toISOString(), username: "Target", idempotencyKey: "k", outcome: "uncertain" }] });
+  const uncertain = normalizeState({ attempts: [{ attemptId: "a", action: "send", at: new Date().toISOString(), username: "Target", idempotencyKey: "k", outcome: "uncertain" }] });
   assert.match(duplicateGuard(uncertain, "Target", "k"), /uncertain/);
+});
+
+test("a later profile check cannot mask an uncertain send", () => {
+  const state = normalizeState({ attempts: [
+    { attemptId: "send-a", action: "send", at: new Date().toISOString(), username: "Target", idempotencyKey: "k", outcome: "uncertain" },
+    { attemptId: "check-b", action: "check", at: new Date().toISOString(), username: "Target", outcome: "dm-available" }
+  ] });
+  assert.match(duplicateGuard(state, "Target", "k"), /uncertain/);
 });
 
 test("daily caps cannot be bypassed by changing campaign", () => {

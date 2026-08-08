@@ -1,0 +1,38 @@
+{
+  "name": "x-campaign-runner",
+  "description": "Run profile-driven organic X outreach: discover relevant public candidates with source evidence, exclude prior recipients, score and validate DM availability, personalize one message, and propose or send at most one DM per run through x-dm.",
+  "entry": "index.js",
+  "input": [
+    "text/plain",
+    "application/json"
+  ],
+  "output": [
+    "application/json",
+    "text/plain"
+  ],
+  "configSchema": {
+    "DEFAULT_PROFILE": {
+      "type": "string",
+      "required": false,
+      "prompt": "Default chat-scoped X campaign profile name."
+    }
+  },
+  "category": "social",
+  "keywords": [
+    "x",
+    "twitter",
+    "dm",
+    "campaign",
+    "discovery",
+    "outreach",
+    "personalization",
+    "dedupe",
+    "research"
+  ],
+  "skillHints": [
+    {
+      "name": "stop-slop",
+      "when": "drafting personalized X outreach"
+    }
+  ]
+}
