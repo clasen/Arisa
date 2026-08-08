@@ -9,6 +9,7 @@ Runs evidence-backed, profile-driven organic outreach on X while keeping `x-dm` 
 3. The user reviews the exact candidate and message.
 4. `send-approved` requires the persisted `approvalId`, exact `messageHash`, unchanged profile digest, `confirm=true`, and `dryRun=false`. It calls `x-dm` exactly once.
 5. `skip` rejects the pending approval so another candidate can be prepared.
+6. `reconcile` converts a manual-review approval to sent only when verified matching `x-dm` history exists; it never sends.
 
 There is no batch-send or autonomous scheduled-send action. `x-dm` independently enforces account pinning, locking, a durable recipient index, idempotency, cooldown, daily caps, delivery verification, and manual review for uncertain outcomes.
 

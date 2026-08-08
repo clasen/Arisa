@@ -11,6 +11,7 @@ It does not bypass login, CAPTCHAs, recipient restrictions, rate limits, or othe
 - `check`: open one profile and report whether the DM button is visible; `verifyComposer=true` confirms that the conversation composer actually opens without typing.
 - `search`: read a bounded set of visible X post or people results without sending.
 - `verify-delivery`: read back an approved message from a target conversation to reconcile an uncertain send without retrying it.
+- `resolve-uncertain`: record explicit human confirmation of one matching uncertain attempt without reopening or resending the conversation.
 - `send`: send exactly one message when both `confirm=true` and `dryRun=false` are explicit.
 
 Example dry run:

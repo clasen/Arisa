@@ -28,6 +28,7 @@ Actions:
   prepare-next Discover if needed, validate candidates through x-dm, personalize one message, and persist one approval. args: profile?, maxChecks?
   send-approved Send exactly the persisted approval. args: profile?, approvalId, messageHash, confirm=true, dryRun=false
   skip         Skip one pending approval. args: profile?, approvalId, reason?
+  reconcile    Reconcile a manual-review approval from x-dm history without sending. args: profile?, approvalId
 
 Safety:
   - discovery and preparation never send
@@ -578,6 +579,41 @@ async function handleSkip(request, args) {
   } finally { await release(); }
 }
 
+async function handleReconcile(request, args) {
+  const release = await acquireRunLock(request.chatId);
+  try {
+    const name = profileName(args);
+    const { profile, stateDir } = await loadProfile(request.chatId, name);
+    const { file, state } = await loadState(stateDir, name);
+    const approval = state.approval;
+    if (!approval || approval.id !== clean(args.approvalId)) throw new Error("No matching approval exists for reconciliation.");
+    const arisa = createArisaClient({ toolName, chatId: request.chatId });
+    const audit = await runTool(arisa, profile.dmTool || "x-dm", { action: "audit", includeHistory: "true" }, 30000);
+    const record = audit.history?.sendRecords?.find((item) =>
+      item.idempotencyKey === approval.idempotencyKey &&
+      item.normalizedUsername === normalizedHandle(approval.username) &&
+      item.deliveryVerified === true
+    );
+    if (!record) throw new Error("No verified matching x-dm history record was found; manual review remains active.");
+    approval.status = "sent";
+    approval.sentAt = record.sentAt || new Date().toISOString();
+    approval.deliveryVerified = true;
+    approval.verificationMethod = "x-dm-history-reconciliation";
+    if (approval.lastError) approval.priorUncertainError = approval.lastError;
+    delete approval.lastError;
+    const candidate = state.candidates.find((item) => normalizedHandle(item.username) === normalizedHandle(approval.username));
+    if (candidate) {
+      candidate.status = "sent";
+      candidate.sentAt = approval.sentAt;
+      candidate.deliveryVerified = true;
+    }
+    state.runs = [...state.runs, runRecord("reconcile", { approvalId: approval.id, username: approval.username, deliveryVerified: true })].slice(-200);
+    state.updatedAt = new Date().toISOString();
+    await writeJson(file, state);
+    return toolOk({ text: `Reconciled @${approval.username} as delivered from verified x-dm history.`, json: { profile: name, approval, record } });
+  } finally { await release(); }
+}
+
 async function execute(requestFile) {
   const request = JSON.parse((await readFile(requestFile, "utf8")).replace(/^\uFEFF/, ""));
   if (request.chatId == null || request.chatId === "") return toolError("chatId is required.");
@@ -589,6 +625,7 @@ async function execute(requestFile) {
   if (action === "prepare-next") return handlePrepareNext(request, args);
   if (action === "send-approved") return handleSendApproved(request, args);
   if (action === "skip") return handleSkip(request, args);
+  if (action === "reconcile") return handleReconcile(request, args);
   return toolError(`Unknown action: ${action}`);
 }
 

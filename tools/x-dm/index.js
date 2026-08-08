@@ -43,6 +43,7 @@ Actions:
   check    Validate a target profile and whether its DM button is visible. args: username
   search   Search visible X posts or people without sending. args: query, mode=posts|people, maxResults?
   verify-delivery Read a target conversation and reconcile an uncertain approved message. args: username, message
+  resolve-uncertain Record explicit human confirmation of one uncertain attempt without opening X. args: attemptId, username, message, confirm=true
   send     Send one approved DM. args: username, message, campaignId?, confirm=true, dryRun=false
 
 Safety and reliability:
@@ -627,6 +628,60 @@ async function statePaths(request) {
   return { stateDir, statePath: path.join(stateDir, "send-log.json") };
 }
 
+async function resolveUncertainAction(request, args) {
+  if (!exactBoolean(args.confirm, true)) return toolError("resolve-uncertain requires exact confirm=true after human delivery confirmation.");
+  const username = usernameFrom(args.username || request.text || request.artifact?.text || "", args);
+  const message = messageFrom(request, args);
+  if (!username || !message) return toolError("resolve-uncertain requires a valid username and exact approved message.");
+  const hash = messageHash(message);
+  const { stateDir, statePath } = await statePaths(request);
+  const release = await acquireStateLock(stateDir);
+  try {
+    const state = await readState(statePath);
+    const attempt = [...state.attempts].reverse().find((item) =>
+      item.action === "send" && item.outcome === "uncertain" &&
+      (!args.attemptId || item.attemptId === String(args.attemptId)) &&
+      String(item.username || "").toLowerCase() === username.toLowerCase() &&
+      item.messageHash === hash
+    );
+    if (!attempt) return toolError("No matching uncertain X DM attempt was found.");
+    let entry = state.sends.find((item) => item.idempotencyKey && item.idempotencyKey === attempt.idempotencyKey);
+    if (!entry) {
+      entry = {
+        username,
+        campaignId: attempt.campaignId || campaignIdFrom(args),
+        idempotencyKey: attempt.idempotencyKey || null,
+        message,
+        messageHash: hash,
+        sentAt: attempt.at,
+        deliveryVerified: true,
+        verificationMethod: "human-confirmed",
+        userConfirmedAt: new Date().toISOString(),
+        profileUrl: `https://x.com/${username}`
+      };
+      state.sends = [...state.sends, entry].slice(-5000);
+    }
+    state.recipientIndex[username.toLowerCase()] = {
+      username,
+      firstSentAt: entry.sentAt,
+      lastSentAt: entry.sentAt,
+      campaignId: entry.campaignId
+    };
+    appendAttempt(state, {
+      attemptId: attempt.attemptId,
+      action: "send",
+      username,
+      campaignId: entry.campaignId,
+      idempotencyKey: entry.idempotencyKey,
+      messageHash: hash,
+      outcome: "sent",
+      verificationMethod: "human-confirmed"
+    });
+    await writeState(statePath, state);
+    return toolOk({ text: `Resolved the uncertain X DM to @${username} as human-confirmed delivered.`, json: entry });
+  } finally { await release(); }
+}
+
 async function auditAction(request, args) {
   const { stateDir, statePath } = await statePaths(request);
   const state = await readState(statePath);
@@ -781,6 +836,7 @@ async function execute(requestFile) {
   const args = request.args || {};
   const action = String(args.action || "status").toLowerCase();
   if (action === "audit") return auditAction(request, args);
+  if (action === "resolve-uncertain") return resolveUncertainAction(request, args);
   if (!["status", "check", "search", "verify-delivery", "send"].includes(action)) return toolError(`Unknown action: ${action}`);
   if (action === "send") {
     const username = usernameFrom(args.username || request.text || request.artifact?.text || "", args);
