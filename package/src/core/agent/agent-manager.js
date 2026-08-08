@@ -54,6 +54,32 @@ function sanitizeHandoff(text) {
   return sanitized.length <= 4000 ? sanitized : `${sanitized.slice(0, 3997).trim()}...`;
 }
 
+function messageText(content) {
+  if (typeof content === "string") return content.trim();
+  if (!Array.isArray(content)) return "";
+  return content
+    .filter((item) => item?.type === "text" && typeof item.text === "string")
+    .map((item) => item.text.trim())
+    .filter(Boolean)
+    .join("\n");
+}
+
+export function formatPortableSessionHistory(messages = []) {
+  return messages
+    .map((message) => {
+      const text = messageText(message?.content);
+      if (!text) return "";
+      const role = message.role === "assistant"
+        ? "Assistant"
+        : message.role === "user"
+          ? "User"
+          : (message.customType ? `Session memory (${message.customType})` : "Session context");
+      return `${role}:\n${text}`;
+    })
+    .filter(Boolean)
+    .join("\n\n");
+}
+
 async function containsJsonl(dir) {
   try {
     return (await readdir(dir)).some((name) => name.endsWith(".jsonl"));
@@ -61,6 +87,12 @@ async function containsJsonl(dir) {
     if (error?.code === "ENOENT") return false;
     throw error;
   }
+}
+
+function closeAgentSession(session) {
+  if (session?.close) return session.close();
+  if (session?.dispose) return session.dispose();
+  return undefined;
 }
 
 export const defaultScheduledTaskListLimit = 50;
@@ -222,14 +254,17 @@ export class AgentManager {
     this.idleTimers.delete(key);
     this.primeCapabilities.delete(key);
     existing?.unsubscribe?.();
-    if (!existing?.session?.close) {
+    const closeSession = (existing?.session?.close || existing?.session?.dispose)
+      ? () => closeAgentSession(existing.session)
+      : null;
+    if (!closeSession) {
       return this.sessionClosePromises.get(key) || Promise.resolve();
     }
 
     const previousClose = this.sessionClosePromises.get(key);
     const closePromise = Promise.resolve(previousClose)
       .catch(() => {})
-      .then(() => existing.session.close())
+      .then(closeSession)
       .catch((error) => {
         this.logger?.error?.("agent", `session close failed for chat ${key}: ${error instanceof Error ? error.message : String(error)}`);
       })
@@ -349,18 +384,18 @@ export class AgentManager {
     return { sessionManager: SessionManager.continueRecent(workspaceDir, sessionDir), isNewSession: false };
   }
 
-  async validatePiAgent() {
+  async validatePiAgent(config = this.config) {
     this.logger?.log("agent", "validating Pi session");
     const { authStorage, modelRegistry } = createPiRuntime({
-      provider: this.config.pi.provider,
-      apiKey: this.config.pi.apiKey
+      provider: config.pi.provider,
+      apiKey: config.pi.apiKey
     });
-    const model = modelRegistry.find(this.config.pi.provider, this.config.pi.model);
+    const model = modelRegistry.find(config.pi.provider, config.pi.model);
     if (!model) {
-      throw new Error(`Model not found: ${this.config.pi.provider}/${this.config.pi.model}`);
+      throw new Error(`Model not found: ${config.pi.provider}/${config.pi.model}`);
     }
-    if (requiresProviderAuth(model) && !this.config.pi.apiKey && !hasProviderAuth(this.config.pi.provider, { authStorage, modelRegistry })) {
-      throw new Error(`No auth found for ${this.config.pi.provider}. Provide a Pi API key in bootstrap, or authenticate with Pi login for this provider during bootstrap.`);
+    if (requiresProviderAuth(model) && !config.pi.apiKey && !hasProviderAuth(config.pi.provider, { authStorage, modelRegistry })) {
+      throw new Error(`No auth found for ${config.pi.provider}. Provide a Pi API key in bootstrap, or authenticate with Pi login for this provider during bootstrap.`);
     }
 
     const { session } = await createAgentSession({
@@ -369,22 +404,26 @@ export class AgentManager {
       model,
       sessionManager: SessionManager.inMemory(),
     });
-    await withTimeout(promptAndThrowOnAssistantError(session, "Reply with exactly: OK"), {
-      timeoutMs: piValidationTimeoutMs,
-      label: "Pi validation prompt"
-    });
+    try {
+      await withTimeout(promptAndThrowOnAssistantError(session, "Reply with exactly: OK"), {
+        timeoutMs: piValidationTimeoutMs,
+        label: "Pi validation prompt"
+      });
+    } finally {
+      session.dispose();
+    }
   }
 
-  async syncPrimeCredentials() {
+  async syncPrimeCredentials(config = this.config) {
     return syncPrimeAuth({
-      provider: this.config.prime.provider,
-      apiKey: this.config.prime.apiKey
+      provider: config.prime.provider,
+      apiKey: config.prime.apiKey
     });
   }
 
-  async validatePrimeAgent() {
-    const prime = this.config.prime;
-    await this.syncPrimeCredentials();
+  async validatePrimeAgent(config = this.config) {
+    const prime = config.prime;
+    await this.syncPrimeCredentials(config);
     const workspaceDir = path.resolve(prime.workspaceDir || arisaInstallDir);
     await assertDirectory(workspaceDir, "prime.workspaceDir");
     this.logger?.log("agent", `validating Prime Agent ${prime.version} with ${prime.provider}/${prime.model}`);
@@ -413,8 +452,37 @@ export class AgentManager {
     }
   }
 
-  async validateAgent() {
-    return this.isPrimeRuntime() ? this.validatePrimeAgent() : this.validatePiAgent();
+  async validateAgent(config = this.config) {
+    return config.agent?.runtime === "prime"
+      ? this.validatePrimeAgent(config)
+      : this.validatePiAgent(config);
+  }
+
+  async switchRuntime(config, { handoffs = new Map(), onActivate } = {}) {
+    const normalizedHandoffs = handoffs instanceof Map
+      ? handoffs
+      : new Map(Object.entries(handoffs));
+    const sessionKeys = new Set([
+      ...this.sessions.keys(),
+      ...this.pendingPrimeSessions.keys(),
+      ...normalizedHandoffs.keys()
+    ].map(String));
+
+    for (const sessionKey of sessionKeys) this.invalidatePrimeSessionGeneration(sessionKey);
+    const closes = [...this.sessions.keys()].map((sessionKey) => this.closeCachedSession(sessionKey));
+    await Promise.allSettled([
+      ...closes,
+      ...[...this.pendingPrimeSessions.values()].map(({ promise }) => promise)
+    ]);
+    await Promise.allSettled([...this.sessionClosePromises.values()]);
+
+    this.config = onActivate ? onActivate(config) : config;
+    this.pendingNewSessions = new Set(sessionKeys);
+    this.pendingSessionHandoffs = new Map(
+      [...normalizedHandoffs.entries()]
+        .map(([chatId, text]) => [String(chatId), { text: String(text || "").trim(), parentSession: "" }])
+        .filter(([, handoff]) => handoff.text)
+    );
   }
 
   async summarizeLegacyPiSession(chatId, sessionRevision = 0) {
@@ -699,8 +767,8 @@ export class AgentManager {
     for (const context of createdContexts) context.unsubscribe?.();
     await Promise.allSettled([
       ...this.sessionClosePromises.values(),
-      ...contexts.map((context) => context.session?.close?.()),
-      ...createdContexts.map((context) => context.session?.close?.())
+      ...contexts.map((context) => closeAgentSession(context.session)),
+      ...createdContexts.map((context) => closeAgentSession(context.session))
     ]);
   }
 

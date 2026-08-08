@@ -1,6 +1,6 @@
 # Arisa
 
-[Arisa](https://arisa.sh) is a personal assistant you talk to through Telegram, powered by [Prime Agent](https://github.com/PrimeIntellect-ai/prime-agent).
+[Arisa](https://arisa.sh) is a personal assistant you talk to through Telegram, with hot-switchable Pi Agent and [Prime Agent](https://github.com/PrimeIntellect-ai/prime-agent) harnesses.
 
 ## Origin
 
@@ -10,12 +10,12 @@ The real heart of OpenClaw is Pi Agent: a [minimal terminal coding harness](http
 
 Telegram bots, on the other hand, work extremely well as a human interface. Simple, reliable, always in your pocket.
 
-Arisa now keeps Telegram as its interface and uses Prime Agent as its reasoning engine, while retaining Pi temporarily as a rollback runtime for existing installations.
+Arisa keeps Telegram as its interface and uses Pi Agent by default. Prime Agent can be selected in Telegram without restarting Arisa, while preserving the conversation and durable chat state.
 
 It is designed around a simple idea:
 
 - **Telegram is the human interface**
-- **Prime Agent is the reasoning engine**
+- **Pi Agent or Prime Agent is the reasoning engine**
 - **everything is an artifact**
 - **capabilities live in isolated CLI tools**
 - **tools can be chained through pipes**
@@ -134,14 +134,19 @@ Then run:
 arisa
 ```
 
-On first start, Arisa downloads the pinned Prime Agent release, verifies its
+Pi Agent is the internal default, so a standard first start does not download
+Prime Agent. Selecting Prime with `/harness` runs Arisa's managed installer on
+demand. If Prime is the internal default for a build, the same installation runs
+during its first start.
+
+The managed installer downloads the pinned Prime Agent release, verifies its
 official SHA-256 checksum, and installs it privately under
 `~/.arisa/runtimes/prime-agent/<version>/`. It never installs Prime globally and
 does not depend on a `prime-agent` command already being present on `PATH`.
-The same first start installs `uv`, prepares Prime's IPython environment under
+It also installs `uv`, prepares Prime's IPython environment under
 `~/.arisa/state/prime-agent/kernel-venv/`, and validates that kernel before
-marking the managed runtime as ready. Existing managed installs made before this
-bootstrap check are repaired automatically on their next start.
+marking the managed runtime as ready. A matching ready installation is reused
+without downloading it again.
 
 Arisa intentionally rejects other Prime versions until their RPC contract passes
 the Arisa test suite. Prime runs IPython kernels and recursive workers with the
@@ -179,18 +184,21 @@ Notes:
 - it only affects the current Arisa process and does not update `~/.arisa/state/config.json`
 - `--pi.*` remains a deprecated alias for `--prime.*` while the Prime runtime is active
 
-## Prime migration and rollback
+## Harness selection and continuity
 
-New installs use `agent.runtime: "prime"`. Existing installs remain on Pi until
-that setting is changed, so one pilot chat can be validated before changing the
-default service configuration. During this transition:
+New installs use the internal `agent.runtime: "pi"` default. Existing persisted
+runtime selections remain unchanged. Use `/harness` in Telegram to switch the
+whole Arisa instance between Pi Agent and Prime Agent. During a switch:
 
 - Prime configuration, auth, and kernels live in `~/.arisa/state/prime-agent/`
 - Prime chat sessions live in `state/prime-sessions/<revision>/`
-- existing `state/pi-sessions/` JSONL files remain untouched
-- the first Prime session creates a bounded, secret-sanitized handoff from the
-  latest Pi session when possible
-- setting `agent.runtime` back to `"pi"` rolls back to the preserved Pi runtime
+- Pi chat sessions remain in `state/pi-sessions/`
+- Arisa keeps a harness-independent conversation log in each chat's state and
+  supplies it to the newly selected harness
+- artifacts, tool state, scheduled tasks, and chat configuration remain shared
+- changing harness does not behave like `/new`; `/new` remains the explicit
+  boundary for starting a fresh chat context
+- selecting Prime installs or repairs the managed runtime only when necessary
 - Prime schedules and heartbeats are not exposed; Arisa remains the source of
   truth for Telegram, tools, artifacts, tasks, and polling
 

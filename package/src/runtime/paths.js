@@ -43,6 +43,10 @@ export function getChatArtifactsIndexFile(chatId) {
   return path.join(getChatDir(chatId), "state", "artifacts.json");
 }
 
+export function getChatConversationHistoryFile(chatId) {
+  return path.join(getChatDir(chatId), "state", "conversation.jsonl");
+}
+
 export function getChatToolStateDir(chatId, toolName) {
   return path.join(getChatDir(chatId), "state", "tools", toolName);
 }

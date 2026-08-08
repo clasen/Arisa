@@ -4,6 +4,7 @@ import { authorizeChat } from "./auth.js";
 import { captureIncomingArtifact, formatLocationText } from "./media.js";
 import { buildDeviceCodeTelegramMessage } from "./device-code-message.js";
 import { buildEffortPicker, buildModelPicker, parseEffortPickerAction, parseModelPickerAction, reverseModelOrder } from "./model-picker.js";
+import { buildHarnessPicker, harnessLabel, parseHarnessPickerAction } from "./harness-picker.js";
 import { renderTelegramHtml } from "./text-format.js";
 import { buildPiAuthRecoveryBlockedMessage, buildPiAuthTelegramMessage, getErrorMessage, getPiAuthIssue, getPiAuthStatus } from "../../core/agent/auth-flow.js";
 import { createPiOAuthLogin } from "../../core/agent/pi-auth-login.js";
@@ -11,6 +12,9 @@ import { getAgentConfig, resolveChatModel, resolveChatThinkingLevel, selectChatM
 import { clampModelThinkingLevel, createPiRuntime, listModelThinkingLevels, listProviderModels, modelSupportsThinking } from "../../core/agent/pi-runtime.js";
 import { normalizeArtifactForReasoning, shouldNormalizeArtifactToText } from "../../core/artifacts/normalize-for-reasoning.js";
 import { isPrimeRpcSessionClosedError } from "../../core/agent/prime-rpc-session.js";
+import { formatPortableSessionHistory } from "../../core/agent/agent-manager.js";
+import { ConversationHistoryStore } from "../../core/conversation/conversation-history-store.js";
+import { activateHarness } from "../../runtime/harness-switch.js";
 
 const slowPromptNoticeMs = 300_000;
 
@@ -278,7 +282,7 @@ export async function collectText(session, prompt, { logger, chatId, onSlowPromp
 }
 
 export function isSilentReply(text) {
-  return /^(?:NO_REPLY)(?:\s+NO_REPLY)*$/.test(String(text || "").trim());
+  return /^(?:NO_REPLY|No reply needed\.|No action needed\.)(?:\s+(?:NO_REPLY|No reply needed\.|No action needed\.))*$/.test(String(text || "").trim());
 }
 
 function buildSessionHandoffPrompt() {
@@ -320,7 +324,7 @@ export function createChatStateStore() {
   const states = new Map();
 
   function reset(chatId) {
-    const state = { processing: false, nextPrompt: "", continueAfterClose: false };
+    const state = { processing: false, nextPrompt: "", continueAfterClose: false, historyRevision: 0 };
     states.set(String(chatId), state);
     return state;
   }
@@ -330,7 +334,10 @@ export function createChatStateStore() {
       const key = String(chatId);
       return states.get(key) || reset(key);
     },
-    reset
+    reset,
+    anyProcessing() {
+      return [...states.values()].some((state) => state.processing);
+    }
   };
 }
 
@@ -382,14 +389,16 @@ export async function closeModelPicker(ctx, { messageText, callbackText }) {
   await ctx.answerCallbackQuery({ text: callbackText });
 }
 
-export async function createTelegramBot({ config, artifactStore, toolRegistry, taskStore, agentManager, saveConfig, updateConfig, logger }) {
+export async function createTelegramBot({ config, artifactStore, toolRegistry, taskStore, agentManager, saveConfig, updateConfig, prepareRuntime, logger }) {
   const bot = new Bot(config.telegram.token);
   const perChatState = createChatStateStore();
+  const conversationHistory = new ConversationHistoryStore();
   const notifiedPromptErrors = new WeakSet();
   const authRenewals = new Map();
   const pendingPrimeUi = new Map();
   let piAuthIssue = null;
   let taskTimer = null;
+  let harnessSwitchGate = null;
 
   function chatKey(chatId) {
     return String(chatId);
@@ -516,7 +525,49 @@ export async function createTelegramBot({ config, artifactStore, toolRegistry, t
     return perChatState.get(chatId);
   }
 
+  async function waitForHarnessSwitch() {
+    if (harnessSwitchGate) await harnessSwitchGate;
+  }
+
+  async function showHarnessPicker(ctx) {
+    const picker = buildHarnessPicker(config.agent?.runtime);
+    return ctx.reply(picker.text, { reply_markup: picker.replyMarkup });
+  }
+
+  async function ensureCanonicalHistory(chatId) {
+    if (await conversationHistory.hasEntries(chatId)) return;
+    const { session } = await agentManager.getSessionContext(chatId, createTelegramSessionBridge(chatId));
+    await conversationHistory.ensureSeed(chatId, {
+      runtime: config.agent?.runtime,
+      history: formatPortableSessionHistory(session.messages)
+    });
+  }
+
+  async function prepareHarnessContinuity() {
+    const chatIds = [...new Set((config.telegram.authorizedChatIds || []).map(chatKey))];
+    for (const chatId of chatIds) await ensureCanonicalHistory(chatId);
+    const handoffs = new Map();
+    for (const chatId of chatIds) {
+      const handoff = await conversationHistory.buildHandoff(chatId);
+      if (handoff) handoffs.set(chatId, handoff);
+    }
+    return handoffs;
+  }
+
+  async function switchHarness(targetRuntime) {
+    return activateHarness({
+      config,
+      targetRuntime,
+      prepareRuntime,
+      validateRuntime: (candidate) => agentManager.validateAgent(candidate),
+      prepareContinuity: prepareHarnessContinuity,
+      saveConfig,
+      switchRuntime: (candidate, options) => agentManager.switchRuntime(candidate, options)
+    });
+  }
+
   async function getProviderModels(chatId) {
+    await waitForHarnessSwitch();
     if (config.agent?.runtime === "prime") {
       return reverseModelOrder(await agentManager.getAvailableModels(chatId));
     }
@@ -734,6 +785,11 @@ export async function createTelegramBot({ config, artifactStore, toolRegistry, t
 
   agentManager.setPrimeUiHandler?.(handlePrimeUiRequest);
   agentManager.setPrimeOutputHandler?.(async (chatId, text) => {
+    await conversationHistory.appendTurn(chatId, {
+      runtime: "prime",
+      prompt: "",
+      response: text
+    });
     await sendTextReply({
       sendText: (message, extra) => bot.api.sendMessage(chatId, message, extra),
       sendDocument: (file, extra) => bot.api.sendDocument(chatId, file, extra),
@@ -760,6 +816,12 @@ export async function createTelegramBot({ config, artifactStore, toolRegistry, t
   async function processPromptForChat({ chatId, prompt, ctx = null }) {
     const work = async () => {
       const { session } = await agentManager.getSessionContext(chatId, createTelegramSessionBridge(chatId));
+      const activeRuntime = config.agent?.runtime;
+      const historyRevision = getChatState(chatId).historyRevision;
+      await conversationHistory.ensureSeed(chatId, {
+        runtime: activeRuntime,
+        history: formatPortableSessionHistory(session.messages)
+      });
       let text = "";
       try {
         text = await collectText(session, prompt, {
@@ -778,6 +840,13 @@ export async function createTelegramBot({ config, artifactStore, toolRegistry, t
         }
         throw error;
       }
+      if (getChatState(chatId).historyRevision === historyRevision) {
+        await conversationHistory.appendTurn(chatId, {
+          runtime: activeRuntime,
+          prompt,
+          response: text
+        });
+      }
       if (text) {
         await sendTextReply({
           sendText: (message, extra) => bot.api.sendMessage(chatId, message, extra),
@@ -793,6 +862,7 @@ export async function createTelegramBot({ config, artifactStore, toolRegistry, t
   }
 
   async function enqueuePrompt({ chatId, prompt, label, ctx = null, replaceQueued = false }) {
+    await waitForHarnessSwitch();
     const chatState = getChatState(chatId);
 
     if (chatState.processing) {
@@ -876,6 +946,7 @@ export async function createTelegramBot({ config, artifactStore, toolRegistry, t
   }
 
   async function dispatchTask(task) {
+    await waitForHarnessSwitch();
     const chatId = task.payload?.chatId;
     if (!chatId) {
       await taskStore.fail(task.id, `Task missing chatId: ${task.kind}`);
@@ -957,11 +1028,17 @@ export async function createTelegramBot({ config, artifactStore, toolRegistry, t
   }
 
   async function handleNewCommand(ctx) {
+    await waitForHarnessSwitch();
     const chatState = getChatState(ctx.chat.id);
     const wasProcessing = chatState.processing;
     const handoff = wasProcessing
       ? { handoff: "", parentSession: "" }
       : await withTyping(ctx, () => summarizeSessionBeforeReset(ctx.chat.id));
+    chatState.historyRevision += 1;
+    await conversationHistory.reset(ctx.chat.id, {
+      runtime: config.agent?.runtime,
+      history: handoff.handoff
+    });
     agentManager.resetSession(ctx.chat.id, handoff);
     await enqueuePrompt({
       chatId: ctx.chat.id,
@@ -1007,6 +1084,12 @@ export async function createTelegramBot({ config, artifactStore, toolRegistry, t
     const auth = await authorizeChat({ config, chatId: ctx.chat.id, saveConfig, chatMeta: getIncomingChatMeta(ctx) });
     if (!auth.ok) return;
     await showEffortPicker(ctx);
+  });
+
+  bot.command("harness", async (ctx) => {
+    const auth = await authorizeChat({ config, chatId: ctx.chat.id, saveConfig, chatMeta: getIncomingChatMeta(ctx) });
+    if (!auth.ok) return;
+    await showHarnessPicker(ctx);
   });
 
   bot.command("auth", async (ctx) => {
@@ -1089,10 +1172,73 @@ export async function createTelegramBot({ config, artifactStore, toolRegistry, t
       await ctx.editMessageReplyMarkup({ reply_markup: { inline_keyboard: [] } }).catch(() => {});
       return;
     }
+    const harnessAction = parseHarnessPickerAction(ctx.callbackQuery.data);
+    if (harnessAction) {
+      if (harnessSwitchGate) {
+        await ctx.answerCallbackQuery({ text: "A harness change is already in progress.", show_alert: true });
+        return;
+      }
+      let releaseHarnessSwitch;
+      harnessSwitchGate = new Promise((resolve) => { releaseHarnessSwitch = resolve; });
+      try {
+        const auth = await authorizeChat({ config, chatId: ctx.chat.id, saveConfig });
+        if (!auth.ok) {
+          await ctx.answerCallbackQuery({ text: "This chat is not authorized.", show_alert: true });
+          return;
+        }
+        if (harnessAction.runtime === config.agent?.runtime) {
+          await ctx.api.editMessageText(
+            ctx.chat.id,
+            ctx.callbackQuery.message.message_id,
+            `Already using ${harnessLabel(harnessAction.runtime)}.`
+          );
+          await ctx.answerCallbackQuery({ text: `Already using ${harnessLabel(harnessAction.runtime)}.` });
+          return;
+        }
+        if (perChatState.anyProcessing()) {
+          await ctx.answerCallbackQuery({
+            text: "Wait for all active responses before changing the harness.",
+            show_alert: true
+          });
+          return;
+        }
+
+        await ctx.answerCallbackQuery({ text: `Preparing ${harnessLabel(harnessAction.runtime)}...` });
+        await ctx.api.editMessageText(
+          ctx.chat.id,
+          ctx.callbackQuery.message.message_id,
+          harnessAction.runtime === "prime"
+            ? "Preparing Prime Agent. If it is not installed, Arisa will install and validate it now."
+            : "Validating Pi Agent before changing the harness."
+        );
+        await switchHarness(harnessAction.runtime);
+        piAuthIssue = null;
+        await ctx.api.editMessageText(
+          ctx.chat.id,
+          ctx.callbackQuery.message.message_id,
+          `Harness changed to ${harnessLabel(harnessAction.runtime)}. Conversation history and durable memory were preserved.`
+        );
+      } catch (error) {
+        logger?.error("telegram", `harness change failed: ${getErrorMessage(error)}`);
+        await ctx.api.editMessageText(
+          ctx.chat.id,
+          ctx.callbackQuery.message.message_id,
+          `Could not change the harness: ${getErrorMessage(error)}\nStill using ${harnessLabel(config.agent?.runtime)}.`
+        ).catch(() => {});
+      } finally {
+        releaseHarnessSwitch();
+        harnessSwitchGate = null;
+      }
+      return;
+    }
     const modelAction = parseModelPickerAction(ctx.callbackQuery.data);
     const effortAction = modelAction ? null : parseEffortPickerAction(ctx.callbackQuery.data);
     const action = modelAction || effortAction;
     if (!action) return next();
+    if (harnessSwitchGate) {
+      await ctx.answerCallbackQuery({ text: "Wait for the harness change to finish.", show_alert: true });
+      return;
+    }
     if (action.type === "noop") {
       await ctx.answerCallbackQuery();
       return;
@@ -1318,6 +1464,7 @@ export async function createTelegramBot({ config, artifactStore, toolRegistry, t
       config.telegram.chatMeta ||= {};
       await bot.api.setMyCommands([
         { command: "new", description: "Start a new chat context" },
+        { command: "harness", description: "Choose Pi Agent or Prime Agent" },
         { command: "model", description: "Choose the model for this chat" },
         { command: "effort", description: "Choose reasoning effort for this chat" },
         { command: "auth", description: "Show authentication status" },

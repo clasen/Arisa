@@ -10,12 +10,16 @@ const transientPrimeConfigKeys = [
   "kernelVenvDir"
 ];
 
-export function prepareConfigForSave(config) {
-  const prepared = applyConfigDefaults(config);
-  const prime = { ...prepared.prime };
+export function clearManagedPrimeRuntimeDetails(primeConfig) {
+  const prime = { ...primeConfig };
   if (prime.managedRuntime === true) prime.command = "";
   for (const key of transientPrimeConfigKeys) delete prime[key];
-  return { ...prepared, prime };
+  return prime;
+}
+
+export function prepareConfigForSave(config) {
+  const prepared = applyConfigDefaults(config);
+  return { ...prepared, prime: clearManagedPrimeRuntimeDetails(prepared.prime) };
 }
 
 export async function loadConfig() {

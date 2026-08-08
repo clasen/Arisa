@@ -23,6 +23,10 @@ export const cliLogConfig = Object.freeze({
   followPollIntervalMs: 250
 });
 
+export const agentConfigDefaults = Object.freeze({
+  runtime: "pi"
+});
+
 export const piConfigDefaults = Object.freeze({
   thinkingLevel: "medium"
 });
@@ -48,7 +52,7 @@ export function applyConfigDefaults(config) {
   return {
     ...config,
     agent: {
-      runtime: "pi",
+      ...agentConfigDefaults,
       ...(config.agent || {})
     },
     telegram: {

@@ -44,6 +44,58 @@ test("does not prepare Prime while the rollback Pi runtime is active", async () 
   assert.equal(prepared, config);
 });
 
+test("drops inactive managed runtime process details so Prime can be resolved again", async () => {
+  const config = {
+    agent: { runtime: "pi" },
+    pi: { provider: "test", model: "model" },
+    prime: {
+      command: process.execPath,
+      commandArgs: ["/managed/prime-agent/cli.js"],
+      managedRuntime: true,
+      runtimeDir: "/managed/prime-agent/0.7.0",
+      kernelVenvDir: "/managed/prime-kernel",
+      version: "0.7.0"
+    }
+  };
+  const prepared = await prepareAgentRuntime(config, {
+    resolvePrimeImpl: async () => { throw new Error("must not resolve inactive Prime"); }
+  });
+
+  assert.equal(prepared.prime.command, "");
+  assert.equal("commandArgs" in prepared.prime, false);
+  assert.equal("managedRuntime" in prepared.prime, false);
+  assert.equal("runtimeDir" in prepared.prime, false);
+  assert.equal("kernelVenvDir" in prepared.prime, false);
+});
+
+test("re-resolves a live managed Prime command instead of treating Node as external Prime", async () => {
+  const config = {
+    agent: { runtime: "prime" },
+    prime: {
+      command: process.execPath,
+      commandArgs: ["/old/managed/prime-agent/cli.js"],
+      managedRuntime: true,
+      version: "0.7.0"
+    }
+  };
+  let receivedCommand;
+  const prepared = await prepareAgentRuntime(config, {
+    resolvePrimeImpl: async ({ command }) => {
+      receivedCommand = command;
+      return {
+        command: process.execPath,
+        commandArgs: ["/current/managed/prime-agent/cli.js"],
+        managed: true,
+        runtimeDir: "/current/managed/prime-agent/0.7.0",
+        kernelVenvDir: "/managed/prime-kernel"
+      };
+    }
+  });
+
+  assert.equal(receivedCommand, "");
+  assert.deepEqual(prepared.prime.commandArgs, ["/current/managed/prime-agent/cli.js"]);
+});
+
 test("does not persist managed Prime process details", () => {
   const persisted = prepareConfigForSave({
     agent: { runtime: "prime" },

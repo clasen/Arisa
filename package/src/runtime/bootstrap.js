@@ -7,7 +7,7 @@ import { Bot } from "grammy";
 import { createPiOAuthLogin } from "../core/agent/pi-auth-login.js";
 import { syncPrimeAuth } from "../core/agent/prime-auth.js";
 import { createPiRuntime, formatPiModelOption, hasProviderAuth, listPiProviders, listProviderModels, supportsProviderOAuth } from "../core/agent/pi-runtime.js";
-import { applyConfigDefaults, telegramConfigDefaults } from "../core/config/config-defaults.js";
+import { agentConfigDefaults, applyConfigDefaults, telegramConfigDefaults } from "../core/config/config-defaults.js";
 import { buildDeviceCodeTelegramMessage } from "../transport/telegram/device-code-message.js";
 import { buildPagedInlineKeyboard } from "../transport/telegram/paged-inline-keyboard.js";
 import { configFile, ensureArisaHome } from "./paths.js";
@@ -30,10 +30,10 @@ async function exists(file) {
   }
 }
 
-function buildConfig({ telegramApiKey, telegramMaxChatIds, authorizedChatIds = [], chatMeta = {}, provider, model, piApiKey }) {
+export function buildConfig({ telegramApiKey, telegramMaxChatIds, authorizedChatIds = [], chatMeta = {}, provider, model, piApiKey }) {
   return applyConfigDefaults({
     agent: {
-      runtime: "prime"
+      runtime: agentConfigDefaults.runtime
     },
     telegram: {
       token: telegramApiKey,

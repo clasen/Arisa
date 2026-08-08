@@ -94,3 +94,43 @@ test("discards a Prime session that finishes starting after /new", async () => {
   assert.equal(staleCloseCount, 1);
   assert.equal(context.modelKey, "test/model@0");
 });
+
+test("closes active sessions and carries portable handoffs across a runtime switch", async () => {
+  const manager = createManager();
+  let closeCount = 0;
+  manager.sessions.set("42", {
+    session: { close: async () => { closeCount += 1; } }
+  });
+  const config = {
+    agent: { runtime: "pi" },
+    pi: { provider: "test", model: "model", thinkingLevel: "medium" }
+  };
+
+  await manager.switchRuntime(config, {
+    handoffs: new Map([["42", "Complete portable history"]])
+  });
+
+  assert.equal(closeCount, 1);
+  assert.equal(manager.config, config);
+  assert.equal(manager.sessions.size, 0);
+  assert.equal(manager.pendingNewSessions.has("42"), true);
+  assert.deepEqual(manager.pendingSessionHandoffs.get("42"), {
+    text: "Complete portable history",
+    parentSession: ""
+  });
+});
+
+test("disposes a cached Pi session during a runtime switch", async () => {
+  const manager = createManager();
+  let disposeCount = 0;
+  manager.sessions.set("42", {
+    session: { dispose: () => { disposeCount += 1; } }
+  });
+
+  await manager.switchRuntime({
+    agent: { runtime: "prime" },
+    prime: { provider: "test", model: "model", thinkingLevel: "medium" }
+  });
+
+  assert.equal(disposeCount, 1);
+});

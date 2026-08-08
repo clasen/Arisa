@@ -9,6 +9,7 @@ import {
   chatsDir,
   createIpcSocketPath,
   getChatArtifactsDir,
+  getChatConversationHistoryFile,
   getChatToolConfigPath,
   getChatToolStateDir,
   getToolStateDir,
@@ -23,6 +24,13 @@ test("keeps chat artifact paths scoped below the chat directory", () => {
   const artifactsDir = getChatArtifactsDir("chat-1");
 
   assert.equal(artifactsDir, path.join(chatsDir, "chat-1", "artifacts"));
+});
+
+test("keeps portable conversation history scoped below the chat state directory", () => {
+  assert.equal(
+    getChatConversationHistoryFile("chat-1"),
+    path.join(chatsDir, "chat-1", "state", "conversation.jsonl")
+  );
 });
 
 test("keeps chat tool state and config paths scoped below the chat directory for normal names", () => {

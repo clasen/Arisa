@@ -1,4 +1,4 @@
-import { loadConfig, saveConfig, updateConfig } from "../core/config/config-store.js";
+import { clearManagedPrimeRuntimeDetails, loadConfig, saveConfig, updateConfig } from "../core/config/config-store.js";
 import { ArtifactStore } from "../core/artifacts/artifact-store.js";
 import { ToolRegistry } from "../core/tools/tool-registry.js";
 import { TaskStore } from "../core/tasks/task-store.js";
@@ -126,9 +126,12 @@ export function applyRuntimeOverrides(config, runtimeOverrides) {
 }
 
 export async function prepareAgentRuntime(config, { logger, resolvePrimeImpl = resolvePrimeAgentRuntime } = {}) {
-  if (config.agent?.runtime !== "prime") return config;
+  if (config.agent?.runtime !== "prime") {
+    if (config.prime?.managedRuntime !== true) return config;
+    return { ...config, prime: clearManagedPrimeRuntimeDetails(config.prime) };
+  }
   const runtime = await resolvePrimeImpl({
-    command: config.prime.command,
+    command: config.prime.managedRuntime === true ? "" : config.prime.command,
     version: config.prime.version,
     logger
   });
@@ -169,7 +172,17 @@ export async function createApp({ logger, runtimeOverrides } = {}) {
   const agentManager = new AgentManager({ config, artifactStore, toolRegistry, taskStore, logger });
   const arisaCapabilities = createArisaCapabilities({ artifactStore, taskStore, toolRegistry, agentManager });
   const ipcServer = createIpcServer({ capabilities: arisaCapabilities, logger });
-  const bot = await createTelegramBot({ config, artifactStore, toolRegistry, taskStore, agentManager, saveConfig, updateConfig, logger });
+  const bot = await createTelegramBot({
+    config,
+    artifactStore,
+    toolRegistry,
+    taskStore,
+    agentManager,
+    saveConfig,
+    updateConfig,
+    prepareRuntime: (candidate) => prepareAgentRuntime(candidate, { logger }),
+    logger
+  });
 
   return {
     async start() {

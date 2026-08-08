@@ -51,14 +51,19 @@ test("collectText preserves the final assistant error", async () => {
   await assert.rejects(() => collectText(session, "hello"), /terminal failure/);
 });
 
-test("recognizes one or repeated NO_REPLY tokens as a silent reply", () => {
+test("recognizes standalone silent reply markers", () => {
   assert.equal(isSilentReply("NO_REPLY"), true);
+  assert.equal(isSilentReply("No reply needed."), true);
+  assert.equal(isSilentReply("No action needed."), true);
   assert.equal(isSilentReply("\nNO_REPLY\n\nNO_REPLY\n"), true);
+  assert.equal(isSilentReply("No reply needed.\n\nNo action needed."), true);
 });
 
-test("does not suppress real text that mentions NO_REPLY", () => {
+test("does not suppress real text that mentions a silent reply marker", () => {
   assert.equal(isSilentReply("NO_REPLY means no notification was needed."), false);
   assert.equal(isSilentReply("NO_REPLY\n\nThere is an important message."), false);
+  assert.equal(isSilentReply("No action needed unless the token expires."), false);
+  assert.equal(isSilentReply("No reply needed"), false);
   assert.equal(isSilentReply("no_reply"), false);
   assert.equal(isSilentReply(""), false);
 });
@@ -75,7 +80,12 @@ test("chat state uses one queue for numeric and string chat IDs", () => {
 
   const resetState = states.reset("879964957");
   assert.strictEqual(states.get(879964957), resetState);
-  assert.deepEqual(resetState, { processing: false, nextPrompt: "", continueAfterClose: false });
+  assert.deepEqual(resetState, {
+    processing: false,
+    nextPrompt: "",
+    continueAfterClose: false,
+    historyRevision: 0
+  });
 });
 
 test("a queued /new continues only after the active Prime session closes", async () => {
