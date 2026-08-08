@@ -3,6 +3,7 @@ import { EventEmitter } from "node:events";
 import { PassThrough } from "node:stream";
 import test from "node:test";
 import { PrimeRpcSession, validatePrimeBinary } from "../src/core/agent/prime-rpc-session.js";
+import { collectText } from "../src/transport/telegram/bot.js";
 
 function fakeChild() {
   const child = new EventEmitter();
@@ -31,7 +32,7 @@ function versionSpawner(version = "0.7.0") {
   };
 }
 
-function rpcSpawner({ onUnsolicitedText } = {}) {
+function rpcSpawner({ onUnsolicitedText, autoCompletePrompt = true } = {}) {
   let call = 0;
   let rpcChild;
   let rpcOptions;
@@ -72,7 +73,7 @@ function rpcSpawner({ onUnsolicitedText } = {}) {
         const line = `${JSON.stringify(response)}\n`;
         rpcChild.stdout.write(line.slice(0, 7));
         rpcChild.stdout.write(line.slice(7));
-        if (request.type === "prompt") {
+        if (request.type === "prompt" && autoCompletePrompt) {
           queueMicrotask(() => {
             rpcChild.stdout.write(`${JSON.stringify({ type: "agent_start" })}\n`);
             rpcChild.stdout.write(`${JSON.stringify({ type: "message_start", message: { role: "assistant" } })}\n`);
@@ -86,7 +87,21 @@ function rpcSpawner({ onUnsolicitedText } = {}) {
     });
     return rpcChild;
   };
-  return { spawnImpl, requests, get child() { return rpcChild; }, get options() { return rpcOptions; }, onUnsolicitedText };
+  return {
+    spawnImpl,
+    requests,
+    write(record) {
+      rpcChild.stdout.write(`${JSON.stringify(record)}\n`);
+    },
+    async waitForRequest(type) {
+      while (!requests.some((request) => request.type === type)) {
+        await new Promise((resolve) => setImmediate(resolve));
+      }
+    },
+    get child() { return rpcChild; },
+    get options() { return rpcOptions; },
+    onUnsolicitedText
+  };
 }
 
 test("requires the pinned Prime Agent version", async () => {
@@ -146,6 +161,84 @@ test("handles fragmented JSONL and waits for agent_end", async () => {
   assert.ok(fake.requests.some((request) => request.type === "set_thinking_level" && request.level === "high"));
   assert.ok(fake.requests.some((request) => request.type === "set_model" && request.modelId === "next-model"));
   unsubscribe();
+  await session.close();
+});
+
+test("keeps a prompt pending while Prime automatically retries", async () => {
+  const fake = rpcSpawner({ autoCompletePrompt: false });
+  const session = new PrimeRpcSession({
+    provider: "test",
+    model: "model",
+    cwd: process.cwd(),
+    agentDir: process.cwd(),
+    sessionDir: process.cwd(),
+    chatId: "42",
+    noSession: true,
+    spawnImpl: fake.spawnImpl,
+    promptSettleDelayMs: 1
+  });
+  await session.start();
+
+  let completed = false;
+  let reply = "";
+  const prompting = collectText(session, "hello").then((text) => {
+    reply = text;
+    completed = true;
+  });
+  await fake.waitForRequest("prompt");
+  fake.write({ type: "agent_start" });
+  fake.write({ type: "message_end", message: { role: "assistant", stopReason: "error", errorMessage: "WebSocket error" } });
+  fake.write({ type: "agent_end" });
+  fake.write({ type: "auto_retry_start", attempt: 1, maxAttempts: 3, delayMs: 1, errorMessage: "WebSocket error" });
+  await new Promise((resolve) => setImmediate(resolve));
+
+  assert.equal(completed, false);
+
+  fake.write({ type: "agent_start" });
+  fake.write({ type: "message_update", assistantMessageEvent: { type: "text_delta", delta: "recovered" } });
+  fake.write({ type: "message_end", message: { role: "assistant", stopReason: "stop" } });
+  fake.write({ type: "auto_retry_end", success: true, attempt: 1 });
+  fake.write({ type: "agent_end" });
+  await prompting;
+
+  assert.equal(completed, true);
+  assert.equal(reply, "recovered");
+  await session.close();
+});
+
+test("completes a prompt after Prime exhausts automatic retries", async () => {
+  const fake = rpcSpawner({ autoCompletePrompt: false });
+  const session = new PrimeRpcSession({
+    provider: "test",
+    model: "model",
+    cwd: process.cwd(),
+    agentDir: process.cwd(),
+    sessionDir: process.cwd(),
+    chatId: "42",
+    noSession: true,
+    spawnImpl: fake.spawnImpl,
+    promptSettleDelayMs: 1
+  });
+  await session.start();
+
+  let completed = false;
+  const prompting = collectText(session, "hello").finally(() => { completed = true; });
+  await fake.waitForRequest("prompt");
+  fake.write({ type: "agent_start" });
+  fake.write({ type: "message_end", message: { role: "assistant", stopReason: "error", errorMessage: "WebSocket error" } });
+  fake.write({ type: "agent_end" });
+  fake.write({ type: "auto_retry_start", attempt: 1, maxAttempts: 1, delayMs: 1, errorMessage: "WebSocket error" });
+  await new Promise((resolve) => setImmediate(resolve));
+
+  assert.equal(completed, false);
+
+  fake.write({ type: "agent_start" });
+  fake.write({ type: "message_end", message: { role: "assistant", stopReason: "error", errorMessage: "WebSocket error" } });
+  fake.write({ type: "agent_end" });
+  fake.write({ type: "auto_retry_end", success: false, attempt: 1, finalError: "WebSocket error" });
+  await assert.rejects(prompting, /WebSocket error/);
+
+  assert.equal(completed, true);
   await session.close();
 });
 

@@ -5,6 +5,7 @@ import { StringDecoder } from "node:string_decoder";
 
 const defaultRequestTimeoutMs = 30_000;
 const defaultPromptTimeoutMs = 24 * 60 * 60 * 1000;
+const defaultPromptSettleDelayMs = 25;
 const defaultCloseTimeoutMs = 5_000;
 const defaultTerminateTimeoutMs = 5_000;
 const primeRpcSessionClosedCode = "ARISA_PRIME_RPC_SESSION_CLOSED";
@@ -105,6 +106,7 @@ export class PrimeRpcSession {
     spawnImpl = spawn,
     requestTimeoutMs = defaultRequestTimeoutMs,
     promptTimeoutMs = defaultPromptTimeoutMs,
+    promptSettleDelayMs = defaultPromptSettleDelayMs,
     closeTimeoutMs = defaultCloseTimeoutMs,
     terminateTimeoutMs = defaultTerminateTimeoutMs
   } = {}) {
@@ -129,6 +131,7 @@ export class PrimeRpcSession {
     this.spawnImpl = spawnImpl;
     this.requestTimeoutMs = requestTimeoutMs;
     this.promptTimeoutMs = promptTimeoutMs;
+    this.promptSettleDelayMs = promptSettleDelayMs;
     this.closeTimeoutMs = closeTimeoutMs;
     this.terminateTimeoutMs = terminateTimeoutMs;
     this.listeners = new Set();
@@ -272,8 +275,23 @@ export class PrimeRpcSession {
     }
 
     if (record.type === "agent_start") {
+      if (this.promptCompletion?.settleTimer) {
+        clearTimeout(this.promptCompletion.settleTimer);
+        this.promptCompletion.settleTimer = null;
+      }
       this.currentAgentText = "";
       this.currentCyclePrompted = Boolean(this.promptCompletion);
+    }
+    if (record.type === "auto_retry_start" && this.promptCompletion) {
+      if (this.promptCompletion.settleTimer) {
+        clearTimeout(this.promptCompletion.settleTimer);
+        this.promptCompletion.settleTimer = null;
+      }
+      this.promptCompletion.retrying = true;
+    }
+    if (record.type === "auto_retry_end" && this.promptCompletion) {
+      this.promptCompletion.retrying = false;
+      if (!record.success) this.schedulePromptCompletion(record);
     }
     if (record.type === "message_update" && record.assistantMessageEvent?.type === "text_delta") {
       this.currentAgentText += record.assistantMessageEvent.delta || "";
@@ -284,10 +302,7 @@ export class PrimeRpcSession {
     if (record.type === "agent_end") {
       const text = this.currentAgentText.trim();
       if (this.promptCompletion) {
-        const completion = this.promptCompletion;
-        this.promptCompletion = null;
-        clearTimeout(completion.timer);
-        completion.resolve(record);
+        if (!this.promptCompletion.retrying) this.schedulePromptCompletion(record);
       } else if (!this.currentCyclePrompted && text) {
         Promise.resolve(this.onUnsolicitedText?.(text, record)).catch((error) => {
           this.logger?.error?.("prime", `unsolicited reply delivery failed: ${error instanceof Error ? error.message : String(error)}`);
@@ -297,6 +312,18 @@ export class PrimeRpcSession {
       this.currentCyclePrompted = false;
     }
     this.emit(record);
+  }
+
+  schedulePromptCompletion(record) {
+    const completion = this.promptCompletion;
+    if (!completion || completion.settleTimer) return;
+    completion.settleTimer = setTimeout(() => {
+      completion.settleTimer = null;
+      if (this.promptCompletion !== completion || completion.retrying) return;
+      this.promptCompletion = null;
+      clearTimeout(completion.timer);
+      completion.resolve(record);
+    }, this.promptSettleDelayMs);
   }
 
   async handleUiRequest(request) {
@@ -341,8 +368,13 @@ export class PrimeRpcSession {
     await this.start();
     if (this.promptCompletion) throw new Error("Prime RPC prompt already in progress");
     const completion = deferred();
+    completion.retrying = false;
+    completion.settleTimer = null;
     completion.timer = setTimeout(() => {
-      if (this.promptCompletion === completion) this.promptCompletion = null;
+      if (this.promptCompletion === completion) {
+        this.promptCompletion = null;
+        if (completion.settleTimer) clearTimeout(completion.settleTimer);
+      }
       completion.reject(new Error("Prime RPC prompt timed out"));
     }, this.promptTimeoutMs);
     completion.timer.unref?.();
@@ -355,6 +387,7 @@ export class PrimeRpcSession {
     } catch (error) {
       if (this.promptCompletion === completion) this.promptCompletion = null;
       clearTimeout(completion.timer);
+      if (completion.settleTimer) clearTimeout(completion.settleTimer);
       throw error;
     }
   }
@@ -390,6 +423,7 @@ export class PrimeRpcSession {
     }
     if (this.promptCompletion) {
       clearTimeout(this.promptCompletion.timer);
+      if (this.promptCompletion.settleTimer) clearTimeout(this.promptCompletion.settleTimer);
       this.promptCompletion.reject(error);
       this.promptCompletion = null;
     }
