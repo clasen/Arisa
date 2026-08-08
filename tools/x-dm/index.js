@@ -18,6 +18,16 @@ const { getChatToolConfigPath, getChatToolStateDir, getToolConfigPath, getToolSt
 let activeBrowser = null;
 let outputWritten = false;
 
+function emitFatal(error) {
+  if (!outputWritten) {
+    process.stdout.write(`${JSON.stringify(toolError(error?.message || String(error)))}\n`);
+    outputWritten = true;
+  }
+}
+
+process.on("unhandledRejection", (error) => { emitFatal(error); process.exit(1); });
+process.on("uncaughtException", (error) => { emitFatal(error); process.exit(1); });
+
 function printHelp() {
   console.log(`x-dm
 
@@ -32,6 +42,7 @@ Actions:
   status   Check the X session and include campaign/send health. args: campaignId?
   check    Validate a target profile and whether its DM button is visible. args: username
   search   Search visible X posts or people without sending. args: query, mode=posts|people, maxResults?
+  verify-delivery Read a target conversation and reconcile an uncertain approved message. args: username, message
   send     Send one approved DM. args: username, message, campaignId?, confirm=true, dryRun=false
 
 Safety and reliability:
@@ -283,9 +294,11 @@ function cooldownGuard(state, minSeconds) {
 
 async function withTimeout(promise, milliseconds, label) {
   let timer;
+  const operation = Promise.resolve(promise);
+  operation.catch(() => {});
   try {
     return await Promise.race([
-      promise,
+      operation,
       new Promise((_, reject) => { timer = setTimeout(() => reject(new Error(`${label} timed out after ${milliseconds} ms.`)), milliseconds); })
     ]);
   } finally {
@@ -351,14 +364,22 @@ async function validateSession(page, config) {
 async function openProfile(page, username) {
   let response = null;
   let body = "";
+  let navigationError = null;
   for (let attempt = 0; attempt < 2; attempt += 1) {
-    if (attempt === 0) response = await page.goto(`https://x.com/${encodeURIComponent(username)}`, { waitUntil: "domcontentloaded", timeout: 45000 });
-    else await page.reload({ waitUntil: "domcontentloaded", timeout: 45000 }).catch(() => {});
+    try {
+      if (attempt === 0) response = await page.goto(`https://x.com/${encodeURIComponent(username)}`, { waitUntil: "domcontentloaded", timeout: 45000 });
+      else response = await page.goto(`https://x.com/${encodeURIComponent(username)}`, { waitUntil: "domcontentloaded", timeout: 45000 });
+      navigationError = null;
+    } catch (error) {
+      navigationError = error;
+      if (attempt === 0) { await page.waitForTimeout(1500); continue; }
+    }
     await page.waitForSelector('main, [data-testid="primaryColumn"]', { timeout: 10000 }).catch(() => {});
     await page.waitForTimeout(1800);
     body = await page.locator("body").innerText({ timeout: 5000 }).catch(() => "");
     if (body.trim()) break;
   }
+  if (!body.trim() && navigationError) throw navigationError;
   if (!body.trim()) throw new Error(`X returned an empty or blocked profile page for @${username}; DM availability is unknown.`);
   if (/This account doesn.?t exist|Account suspended|Profile not found/i.test(body)) throw new Error(`@${username} profile is not available.`);
   if (/Continue with|Sign in to X|Log in/i.test(body)) throw new Error("X session is not logged in or requires verification.");
@@ -403,8 +424,18 @@ async function openDmComposer(page, username) {
   const button = await findDmButton(page);
   await button.click({ timeout: 10000 });
   await page.waitForURL(/\/messages|\/i\/chat/, { timeout: 20000 }).catch(() => {});
+  await page.waitForSelector([
+    '[data-testid="dm-composer-textarea"]',
+    '[data-testid="dmComposerTextInput"]',
+    '[aria-label="Start a new message"]',
+    'div[role="textbox"][contenteditable="true"]',
+    'textarea'
+  ].join(","), { timeout: 20000 }).catch(() => {});
+  await page.waitForTimeout(1200);
   const input = await findComposerInput(page);
-  return input ? { ok: true, input, target } : { ok: false, reason: "DM composer did not open.", target };
+  if (input) return { ok: true, input, target };
+  const body = await page.locator("body").innerText({ timeout: 5000 }).catch(() => "");
+  return { ok: false, reason: `DM composer did not open at ${page.url()}.`, target: { ...target, composerPageHint: body.slice(0, 800).replace(/\s+/g, " ") } };
 }
 
 async function findComposerInput(page) {
@@ -534,6 +565,62 @@ async function searchX(page, args) {
   return { query, mode, items, ...(items.length ? {} : { pageHint: body.slice(0, 500).replace(/\s+/g, " ") }) };
 }
 
+function normalizedConversationText(value) { return String(value || "").toLowerCase().replace(/https?:\/\/\S+/g, (url) => url.replace(/[),.!?]+$/, "")).replace(/[^\p{L}\p{N}:/.@_-]+/gu, " ").replace(/\s+/g, " ").trim(); }
+
+async function verifyDeliveryInConversation(page, username, message, conversationUrl = "") {
+  let target = { username, profileUrl: `https://x.com/${username}` };
+  if (/^https:\/\/x\.com\/i\/chat\/[A-Za-z0-9_-]+$/i.test(conversationUrl)) {
+    await page.goto(conversationUrl, { waitUntil: "domcontentloaded", timeout: 45000 });
+    await page.waitForSelector('div[role="textbox"][contenteditable="true"], textarea, [data-testid="dm-composer-textarea"]', { timeout: 20000 }).catch(() => {});
+    await page.waitForTimeout(2500);
+    target = { ...target, conversationUrl: page.url() };
+  } else {
+    const composer = await openDmComposer(page, username);
+    if (!composer.ok) return { verified: false, reason: composer.reason || "Could not open the target conversation.", target: composer.target };
+    target = composer.target;
+    await page.waitForTimeout(2500);
+  }
+  const body = await page.locator("body").innerText({ timeout: 5000 }).catch(() => "");
+  const normalizedBody = normalizedConversationText(body);
+  const normalizedMessage = normalizedConversationText(message);
+  const verified = Boolean(normalizedMessage && normalizedBody.includes(normalizedMessage));
+  return { verified, reason: verified ? "Approved message is visible in the target conversation." : "Approved message was not found in the target conversation.", target, bodyHint: body.slice(-1000).replace(/\s+/g, " ") };
+}
+
+async function reconcileVerifiedDelivery(request, args, stateDir, statePath, state, page) {
+  const username = usernameFrom(args.username || request.text || request.artifact?.text || "", args);
+  const message = messageFrom(request, args);
+  if (!username || !message) return toolError("verify-delivery requires a valid username and exact approved message.");
+  const verification = await verifyDeliveryInConversation(page, username, message, String(args.conversationUrl || ""));
+  if (!verification.verified) return toolOk({ text: `${verification.reason} Nothing was sent or retried.`, json: { username, verified: false, verification } });
+  const hash = messageHash(message);
+  const release = await acquireStateLock(stateDir);
+  try {
+    const latest = await readState(statePath);
+    const uncertain = [...latest.attempts].reverse().find((attempt) => attempt.action === "send" && attempt.outcome === "uncertain" && String(attempt.username || "").toLowerCase() === username.toLowerCase() && attempt.messageHash === hash);
+    const existing = latest.sends.find((entry) => String(entry.username || "").toLowerCase() === username.toLowerCase() && entry.messageHash === hash);
+    let entry = existing;
+    if (!entry) {
+      entry = {
+        username,
+        campaignId: uncertain?.campaignId || campaignIdFrom(args),
+        idempotencyKey: uncertain?.idempotencyKey || String(args.idempotencyKey || "") || null,
+        message,
+        messageHash: hash,
+        sentAt: new Date().toISOString(),
+        deliveryVerified: true,
+        verificationMethod: "conversation-readback",
+        profileUrl: verification.target?.profileUrl || `https://x.com/${username}`
+      };
+      latest.sends = [...latest.sends, entry].slice(-5000);
+      latest.recipientIndex[username.toLowerCase()] = { username, firstSentAt: entry.sentAt, lastSentAt: entry.sentAt, campaignId: entry.campaignId };
+    }
+    appendAttempt(latest, { attemptId: uncertain?.attemptId, action: "send", username, campaignId: entry.campaignId, idempotencyKey: entry.idempotencyKey, messageHash: hash, outcome: "sent", verificationMethod: "conversation-readback" });
+    await writeState(statePath, latest);
+    return toolOk({ text: `Verified the approved X DM in @${username}'s conversation.`, json: entry });
+  } finally { await release(); }
+}
+
 async function statePaths(request) {
   const stateDir = request.chatId != null ? getChatToolStateDir(request.chatId, toolName) : getToolStateDir(toolName);
   await mkdir(stateDir, { recursive: true });
@@ -591,6 +678,10 @@ async function browserAction(request, args, config) {
     if (action === "search") {
       const search = await searchX(page, args);
       return toolOk({ text: `Found ${search.items.length} X ${search.mode} result(s) for ${search.query}.`, json: { account, ...search } });
+    }
+    if (action === "verify-delivery") {
+      const { stateDir } = await statePaths(request);
+      return reconcileVerifiedDelivery(request, args, stateDir, statePath, state, page);
     }
     const username = usernameFrom(args.username || request.text || request.artifact?.text || "", args);
     if (!username) return toolError("A valid args.username, @handle, or X profile URL is required.");
@@ -690,7 +781,7 @@ async function execute(requestFile) {
   const args = request.args || {};
   const action = String(args.action || "status").toLowerCase();
   if (action === "audit") return auditAction(request, args);
-  if (!["status", "check", "search", "send"].includes(action)) return toolError(`Unknown action: ${action}`);
+  if (!["status", "check", "search", "verify-delivery", "send"].includes(action)) return toolError(`Unknown action: ${action}`);
   if (action === "send") {
     const username = usernameFrom(args.username || request.text || request.artifact?.text || "", args);
     if (!username) return toolError("A valid args.username, @handle, or X profile URL is required.");
@@ -708,7 +799,7 @@ async function execute(requestFile) {
 
 async function emergencyExit(message) {
   if (!outputWritten) {
-    console.log(JSON.stringify(toolError(message)));
+    process.stdout.write(`${JSON.stringify(toolError(message))}\n`);
     outputWritten = true;
   }
   if (activeBrowser) await withTimeout(activeBrowser.close().catch(() => {}), 3000, "Emergency browser close").catch(() => {});

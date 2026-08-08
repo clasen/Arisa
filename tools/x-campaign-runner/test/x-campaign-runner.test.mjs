@@ -1,6 +1,6 @@
 ﻿import test from "node:test";
 import assert from "node:assert/strict";
-import { candidateScore, handleFromXUrl, parseSearchResults, pendingApproval, renderMessage, sha256 } from "../index.js";
+import { availableCandidates, candidateScore, handleFromXUrl, parseSearchResults, pendingApproval, renderMessage, sha256 } from "../index.js";
 
 test("extracts only real X profile handles", () => {
   assert.equal(handleFromXUrl("https://x.com/Good_Handle/status/123"), "Good_Handle");
@@ -39,6 +39,15 @@ test("message rendering is deterministic and includes the official site", () => 
   assert.match(first, /Sara Is Missing/);
   assert.match(first, /https:\/\/castlebravo\.org/);
   assert.ok(first.length < 1000);
+});
+
+test("only fresh discovered candidates are eligible", () => {
+  const state = { candidates: [
+    { username: "fresh", status: "discovered", score: 1 },
+    { username: "uncertain", status: "manual-review", score: 99 },
+    { username: "waiting", status: "awaiting-approval", score: 99 }
+  ] };
+  assert.deepEqual(availableCandidates(state, new Set()).map((item) => item.username), ["fresh"]);
 });
 
 test("pending approvals expire fail-closed", () => {

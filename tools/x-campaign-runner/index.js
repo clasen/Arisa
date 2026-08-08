@@ -354,7 +354,7 @@ async function discoverCandidates(arisa, profile, state, excluded, needed, creat
 function availableCandidates(state, excluded) {
   return state.candidates.filter((candidate) =>
     !excluded.has(normalizedHandle(candidate.username)) &&
-    !["sent", "unavailable", "excluded"].includes(candidate.status)
+    candidate.status === "discovered"
   ).sort((a, b) => Number(b.score || 0) - Number(a.score || 0) || String(a.discoveredAt).localeCompare(String(b.discoveredAt)));
 }
 
@@ -604,4 +604,4 @@ async function main(cliArgs = process.argv.slice(2)) {
 const isCli = process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url);
 if (isCli) await main();
 
-export { candidateScore, handleFromXUrl, parseSearchResults, pendingApproval, renderMessage, sha256 };
+export { availableCandidates, candidateScore, handleFromXUrl, parseSearchResults, pendingApproval, renderMessage, sha256 };
