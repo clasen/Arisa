@@ -164,8 +164,8 @@ export async function createApp({ logger, runtimeOverrides } = {}) {
   }
 
   const artifactStore = new ArtifactStore();
-  const toolProcessSupervisor = createToolProcessSupervisor({ logger, policy: config.daemons });
   const toolRegistry = new ToolRegistry({ logger });
+  const toolProcessSupervisor = createToolProcessSupervisor({ logger, policy: config.daemons, toolRegistry });
   const taskStore = new TaskStore();
   await toolRegistry.load();
   logger?.log("app", `loaded ${toolRegistry.list().length} tools`);

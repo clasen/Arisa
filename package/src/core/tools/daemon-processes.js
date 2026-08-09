@@ -221,6 +221,22 @@ async function acquireStartLock(paths, policy) {
   throw new Error(`Timed out acquiring daemon start lock for ${paths.toolName} (${paths.instanceId})`);
 }
 
+export async function unregisterManagedDaemon(toolNameOrOptions, { scope } = {}) {
+  const paths = daemonPaths(toolNameOrOptions, scope);
+  const { pid } = await readJson(paths.pidFile, {});
+  if (isProcessAlive(pid)) {
+    throw new Error(`Refusing to unregister a live daemon: ${paths.toolName} (${paths.instanceId})`);
+  }
+  await Promise.all([
+    rm(paths.metaFile, { force: true }),
+    rm(paths.pidFile, { force: true }),
+    rm(paths.statusFile, { force: true }),
+    rm(paths.startLockFile, { force: true }),
+    rm(paths.commandsDir, { recursive: true, force: true })
+  ]);
+  return { toolName: paths.toolName, scope: paths.scope, instanceId: paths.instanceId };
+}
+
 export async function stopManagedDaemon(toolNameOrOptions, {
   scope,
   signal = "SIGTERM",

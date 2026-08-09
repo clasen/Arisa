@@ -1,4 +1,5 @@
 import { access } from "node:fs/promises";
+import path from "node:path";
 import { superviseDaemon } from "../core/tools/daemon-health.js";
 import {
   daemonPaths,
@@ -39,7 +40,25 @@ export function formatDaemonOutcome(record, outcome, diagnostic, policy) {
   return details.join(" | ");
 }
 
-export function createToolProcessSupervisor({ logger, policy } = {}) {
+function validateRegistration(record, toolRegistry) {
+  if (!toolRegistry) return { valid: true, record };
+  const tool = toolRegistry.get(record.toolName);
+  if (!tool) return { valid: false, reason: "tool is no longer installed" };
+  if (!tool.daemon) return { valid: false, reason: "tool no longer declares a daemon" };
+  const expectedScope = tool.daemon.scope === "chat" ? "chat" : "global";
+  if (record.scope?.type !== expectedScope) {
+    return { valid: false, reason: `registered ${record.scope?.type || "unknown"} scope does not match manifest ${expectedScope} scope` };
+  }
+  if (path.resolve(record.entryPath) !== path.resolve(tool.entry)) {
+    return { valid: false, reason: "registered entry does not match the installed tool" };
+  }
+  return {
+    valid: true,
+    record: { ...record, autoStart: Boolean(tool.daemon.autoStart) }
+  };
+}
+
+export function createToolProcessSupervisor({ logger, policy, toolRegistry } = {}) {
   let running = false;
   let timer = null;
   let reconciliation = null;
@@ -53,7 +72,19 @@ export function createToolProcessSupervisor({ logger, policy } = {}) {
   async function reconcileDaemons({ repairFailed = false } = {}) {
     await ensureArisaHome();
     const results = [];
-    for (const record of await listRegisteredDaemons()) {
+    for (const registeredRecord of await listRegisteredDaemons()) {
+      const validation = validateRegistration(registeredRecord, toolRegistry);
+      if (!validation.valid) {
+        logger?.log("tools", `skipping stale daemon registration ${registeredRecord.toolName} (${registeredRecord.instanceId || "global"}): ${validation.reason}`);
+        results.push({
+          record: registeredRecord,
+          outcome: "stale-registration",
+          reason: validation.reason,
+          diagnostic: await readDaemonDiagnostic(registeredRecord)
+        });
+        continue;
+      }
+      const record = validation.record;
       if (!(await fileExists(record.entryPath))) {
         logger?.log("tools", `skipping daemon ${record.toolName}: missing entry ${record.entryPath}`);
         results.push({ record, outcome: "missing-entry", diagnostic: await readDaemonDiagnostic(record) });

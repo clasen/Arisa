@@ -37,6 +37,7 @@ const {
   readDaemonDiagnostic,
   readJson,
   stopManagedDaemon,
+  unregisterManagedDaemon,
   writeDaemonStatus
 } = await import("../src/core/tools/daemon-processes.js");
 const {
@@ -150,6 +151,37 @@ test("supervisor ignores invalid chat directories and recovers valid daemons", a
     await runtime.stop().catch(() => {});
     await rm(invalidChatDir, { recursive: true, force: true });
   }
+});
+
+test("does not restart registrations whose scope no longer matches the tool manifest", async () => {
+  const runtime = runtimeFor({ type: "global" }, { autoStart: true });
+  const registry = new ToolRegistry();
+  registry.tools.set("fake-daemon", {
+    name: "fake-daemon",
+    entry: fixtureEntry,
+    daemon: { scope: "chat", autoStart: false, health: "internal" }
+  });
+
+  await runtime.start();
+  await runtime.stop();
+  await writeDaemonStatus(runtime.paths, {
+    state: "failed",
+    pid: null,
+    restartAttempts: policy.restartLimit + 1,
+    restartRequested: false,
+    message: "Legacy global registration"
+  });
+
+  const supervisor = createToolProcessSupervisor({ policy, toolRegistry: registry });
+  const results = await supervisor.repair();
+  const result = results.find((item) => item.record.toolName === "fake-daemon" && item.record.instanceId === "global");
+
+  assert.equal(result.outcome, "stale-registration");
+  assert.match(result.reason, /global scope does not match manifest chat scope/);
+  assert.equal(isProcessAlive(await runtime.getPid()), false);
+
+  await unregisterManagedDaemon({ toolName: "fake-daemon", scope: { type: "global" } });
+  assert.deepEqual(await readJson(runtime.paths.metaFile, null), null);
 });
 
 test("rejects stale readiness even when the pid is alive", async () => {

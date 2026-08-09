@@ -1,7 +1,7 @@
 import { execFile } from "node:child_process";
 import process from "node:process";
 import { promisify } from "node:util";
-import { stopManagedDaemon } from "../core/tools/daemon-processes.js";
+import { stopManagedDaemon, unregisterManagedDaemon } from "../core/tools/daemon-processes.js";
 import { chatsDir } from "./paths.js";
 import { getServiceStatus, serviceEntryFile } from "./service-manager.js";
 
@@ -136,7 +136,8 @@ export async function runDoctor({
   listProcesses = listSystemProcesses,
   stopProcess = terminateProcess,
   serviceStatus = getServiceStatus,
-  stopDaemon = stopManagedDaemon
+  stopDaemon = stopManagedDaemon,
+  unregisterDaemon = unregisterManagedDaemon
 }) {
   const runtime = agentManager.getRuntimeDiagnostic();
   const report = { runtime, daemons: [], repairs: [], attention: [] };
@@ -185,6 +186,28 @@ export async function runDoctor({
   }
   for (const result of report.daemons) {
     const label = daemonLabel(result.record);
+    if (result.outcome === "stale-registration") {
+      const pid = result.diagnostic?.pid;
+      const registered = pid ? processByPid.get(pid) : null;
+      if (pid && (!registered || !isDaemonProcess(registered, result.record))) {
+        report.attention.push(`${label} has a stale registration, but its live process identity could not be verified.`);
+        continue;
+      }
+      try {
+        if (pid) {
+          await stopProcess(pid, { forceAfterMs: daemonPolicy.stopTimeoutMs });
+          await stopDaemon(
+            { toolName: result.record.toolName, scope: result.record.scope },
+            { state: null }
+          );
+        }
+        await unregisterDaemon({ toolName: result.record.toolName, scope: result.record.scope });
+        report.repairs.push(`Removed stale daemon registration ${label}: ${result.reason}.`);
+      } catch (error) {
+        report.attention.push(`${label} stale registration could not be removed: ${error?.message || error}`);
+      }
+      continue;
+    }
     if (result.outcome === "missing-entry") {
       const pid = result.diagnostic?.pid;
       const registered = pid ? processByPid.get(pid) : null;

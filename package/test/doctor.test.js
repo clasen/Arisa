@@ -25,9 +25,11 @@ function agentDiagnostic(overrides = {}) {
 function createDoctorDependencies({ runtime, processes = [], daemons = [], service = { running: false, pid: null } } = {}) {
   const stoppedProcesses = [];
   const stoppedDaemons = [];
+  const unregisteredDaemons = [];
   return {
     stoppedProcesses,
     stoppedDaemons,
+    unregisteredDaemons,
     input: {
       agentManager: { getRuntimeDiagnostic: () => runtime || agentDiagnostic() },
       toolProcessSupervisor: { repair: async () => daemons },
@@ -35,7 +37,8 @@ function createDoctorDependencies({ runtime, processes = [], daemons = [], servi
       listProcesses: async () => processes,
       stopProcess: async (pid) => { stoppedProcesses.push(pid); },
       serviceStatus: async () => service,
-      stopDaemon: async (identity) => { stoppedDaemons.push(identity); }
+      stopDaemon: async (identity) => { stoppedDaemons.push(identity); },
+      unregisterDaemon: async (identity) => { unregisteredDaemons.push(identity); }
     }
   };
 }
@@ -102,6 +105,31 @@ test("stops a registered daemon only when its missing entry matches the process 
   assert.deepEqual(dependencies.stoppedProcesses, [555]);
   assert.deepEqual(dependencies.stoppedDaemons, [{ toolName: "removed-tool", scope: { type: "global" } }]);
   assert.deepEqual(report.repairs, ["Stopped orphaned daemon removed-tool (global)."]);
+});
+
+test("removes a stale daemon registration without restarting it", async () => {
+  const record = {
+    toolName: "whatsapp-web",
+    instanceId: "global",
+    scope: { type: "global" },
+    entryPath: "/tmp/whatsapp-web/index.js"
+  };
+  const dependencies = createDoctorDependencies({
+    daemons: [{
+      record,
+      outcome: "stale-registration",
+      reason: "registered global scope does not match manifest chat scope",
+      diagnostic: { state: "failed", alive: false, pid: null }
+    }]
+  });
+
+  const report = await runDoctor(dependencies.input);
+
+  assert.deepEqual(dependencies.stoppedProcesses, []);
+  assert.deepEqual(dependencies.unregisteredDaemons, [{ toolName: "whatsapp-web", scope: { type: "global" } }]);
+  assert.deepEqual(report.repairs, [
+    "Removed stale daemon registration whatsapp-web (global): registered global scope does not match manifest chat scope."
+  ]);
 });
 
 test("leaves an unverifiable registered PID untouched", async () => {
