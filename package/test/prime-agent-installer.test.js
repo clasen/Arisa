@@ -5,6 +5,7 @@ import { access, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promise
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
+import { defaultPrimeVersion } from "../src/core/config/config-defaults.js";
 import {
   getManagedPrimePaths,
   installManagedPrimeAgent,
@@ -39,7 +40,7 @@ test("parses only the checksum for the exact Prime tarball", () => {
   assert.throws(() => getManagedPrimePaths("../0.7.0"), /Invalid Prime Agent version/);
 });
 
-test("installs a verified Prime release privately and reuses it", async (t) => {
+test("installs the current Prime release beside the previous managed version and reuses it", async (t) => {
   const runtimesRoot = await mkdtemp(path.join(os.tmpdir(), "arisa-prime-runtimes-"));
   t.after(() => rm(runtimesRoot, { recursive: true, force: true }));
   const tarball = Buffer.from("verified Prime Agent tarball");
@@ -48,11 +49,19 @@ test("installs a verified Prime release privately and reuses it", async (t) => {
   let installCount = 0;
   let kernelValidationCount = 0;
   const kernelVenvDir = path.join(runtimesRoot, "kernel-venv");
+  const previousPaths = getManagedPrimePaths("0.7.0", { runtimesRoot });
+  await mkdir(path.dirname(previousPaths.cliPath), { recursive: true });
+  await writeFile(previousPaths.cliPath, "#!/usr/bin/env node\n", "utf8");
+  await writeFile(previousPaths.markerFile, `${JSON.stringify({
+    version: "0.7.0",
+    installerSchema: 2,
+    kernelVenvDir
+  })}\n`, "utf8");
 
   const fetchImpl = async (url) => {
     fetched.push(url);
     if (url.endsWith("/SHA256SUMS")) {
-      return new Response(`${checksum}  prime-agent-0.7.0.tgz\n`);
+      return new Response(`${checksum}  prime-agent-${defaultPrimeVersion}.tgz\n`);
     }
     return new Response(tarball);
   };
@@ -71,7 +80,7 @@ test("installs a verified Prime release privately and reuses it", async (t) => {
   });
   const validateImpl = async ({ command, commandArgs, expectedVersion }) => {
     assert.equal(command, process.execPath);
-    assert.equal(expectedVersion, "0.7.0");
+    assert.equal(expectedVersion, defaultPrimeVersion);
     await access(commandArgs[0]);
     return { command, version: expectedVersion };
   };
@@ -81,7 +90,7 @@ test("installs a verified Prime release privately and reuses it", async (t) => {
   };
 
   const installed = await installManagedPrimeAgent({
-    version: "0.7.0",
+    version: defaultPrimeVersion,
     baseUrl: "https://releases.example.test",
     runtimesRoot,
     kernelVenvDir,
@@ -90,7 +99,7 @@ test("installs a verified Prime release privately and reuses it", async (t) => {
     validateImpl,
     validateKernelImpl
   });
-  const paths = getManagedPrimePaths("0.7.0", { runtimesRoot });
+  const paths = getManagedPrimePaths(defaultPrimeVersion, { runtimesRoot });
   assert.equal(installed.command, process.execPath);
   assert.deepEqual(installed.commandArgs, [paths.cliPath]);
   assert.equal(installed.managed, true);
@@ -98,19 +107,20 @@ test("installs a verified Prime release privately and reuses it", async (t) => {
   assert.equal(installCount, 1);
   assert.equal(kernelValidationCount, 1);
   assert.deepEqual(fetched, [
-    "https://releases.example.test/releases/v0.7.0/SHA256SUMS",
-    "https://releases.example.test/releases/v0.7.0/prime-agent-0.7.0.tgz"
+    `https://releases.example.test/releases/v${defaultPrimeVersion}/SHA256SUMS`,
+    `https://releases.example.test/releases/v${defaultPrimeVersion}/prime-agent-${defaultPrimeVersion}.tgz`
   ]);
   const marker = JSON.parse(await readFile(paths.markerFile, "utf8"));
-  assert.equal(marker.version, "0.7.0");
+  assert.equal(marker.version, defaultPrimeVersion);
   assert.equal(marker.installerSchema, 2);
   assert.equal(marker.kernelVenvDir, kernelVenvDir);
   assert.equal(marker.sha256, checksum);
   await access(paths.cliPath);
-  await access(path.join(paths.runtimeDir, "prime-agent-0.7.0.tgz"));
+  await access(path.join(paths.runtimeDir, `prime-agent-${defaultPrimeVersion}.tgz`));
+  await access(previousPaths.cliPath);
 
   const reused = await installManagedPrimeAgent({
-    version: "0.7.0",
+    version: defaultPrimeVersion,
     baseUrl: "https://releases.example.test",
     runtimesRoot,
     kernelVenvDir,
@@ -125,7 +135,7 @@ test("installs a verified Prime release privately and reuses it", async (t) => {
   delete marker.installerSchema;
   await writeFile(paths.markerFile, `${JSON.stringify(marker)}\n`, "utf8");
   await installManagedPrimeAgent({
-    version: "0.7.0",
+    version: defaultPrimeVersion,
     baseUrl: "https://releases.example.test",
     runtimesRoot,
     kernelVenvDir,

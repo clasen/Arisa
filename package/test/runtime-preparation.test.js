@@ -1,7 +1,26 @@
 ﻿import assert from "node:assert/strict";
 import test from "node:test";
 import { prepareConfigForSave } from "../src/core/config/config-store.js";
+import { applyConfigDefaults, defaultPrimeVersion } from "../src/core/config/config-defaults.js";
 import { prepareAgentRuntime } from "../src/runtime/create-app.js";
+
+test("keeps managed Prime on Arisa's current default without pinning it in config", () => {
+  const managed = applyConfigDefaults({
+    agent: { runtime: "prime" },
+    prime: { command: "", version: "0.7.0" }
+  });
+
+  assert.equal(defaultPrimeVersion, "0.7.1");
+  assert.equal(managed.prime.version, defaultPrimeVersion);
+  assert.equal("version" in prepareConfigForSave(managed).prime, false);
+
+  const external = applyConfigDefaults({
+    agent: { runtime: "prime" },
+    prime: { command: "/opt/prime/bin/prime-agent", version: "0.7.0" }
+  });
+  assert.equal(external.prime.version, "0.7.0");
+  assert.equal(prepareConfigForSave(external).prime.version, "0.7.0");
+});
 
 test("prepares the pinned managed runtime for an active Prime configuration", async () => {
   const config = {

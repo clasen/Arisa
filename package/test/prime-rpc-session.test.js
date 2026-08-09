@@ -3,6 +3,7 @@ import { EventEmitter } from "node:events";
 import { PassThrough } from "node:stream";
 import test from "node:test";
 import { PrimeRpcSession, validatePrimeBinary } from "../src/core/agent/prime-rpc-session.js";
+import { defaultPrimeVersion } from "../src/core/config/config-defaults.js";
 import { collectText } from "../src/transport/telegram/bot.js";
 
 function fakeChild() {
@@ -19,7 +20,7 @@ function fakeChild() {
   return child;
 }
 
-function versionSpawner(version = "0.7.0") {
+function versionSpawner(version = defaultPrimeVersion) {
   return (_command, args) => {
     assert.deepEqual(args, ["--version"]);
     const child = fakeChild();
@@ -106,8 +107,8 @@ function rpcSpawner({ onUnsolicitedText, autoCompletePrompt = true } = {}) {
 
 test("requires the pinned Prime Agent version", async () => {
   await assert.rejects(
-    validatePrimeBinary({ expectedVersion: "0.7.0", spawnImpl: versionSpawner("0.8.0") }),
-    /requires exactly 0\.7\.0/
+    validatePrimeBinary({ spawnImpl: versionSpawner("0.8.0") }),
+    /requires exactly 0\.7\.1/
   );
 });
 
@@ -116,12 +117,12 @@ test("validates a managed Prime CLI through the current Node executable", async 
   const result = await validatePrimeBinary({
     command: process.execPath,
     commandArgs: [cliPath],
-    expectedVersion: "0.7.0",
+    expectedVersion: defaultPrimeVersion,
     spawnImpl: (_command, args) => {
       assert.deepEqual(args, [cliPath, "--version"]);
       const child = fakeChild();
       queueMicrotask(() => {
-        child.stdout.end("prime-agent v0.7.0\n");
+        child.stdout.end(`prime-agent v${defaultPrimeVersion}\n`);
         child.exitCode = 0;
         child.emit("close", 0, null);
       });
@@ -129,14 +130,14 @@ test("validates a managed Prime CLI through the current Node executable", async 
     }
   });
 
-  assert.equal(result.version, "0.7.0");
+  assert.equal(result.version, defaultPrimeVersion);
 });
 
 test("handles fragmented JSONL and waits for agent_end", async () => {
   const fake = rpcSpawner();
   const session = new PrimeRpcSession({
     command: "prime-agent",
-    expectedVersion: "0.7.0",
+    expectedVersion: defaultPrimeVersion,
     provider: "test",
     model: "model",
     cwd: process.cwd(),

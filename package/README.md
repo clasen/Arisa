@@ -139,14 +139,16 @@ Prime Agent. Selecting Prime with `/harness` runs Arisa's managed installer on
 demand. If Prime is the internal default for a build, the same installation runs
 during its first start.
 
-The managed installer downloads the pinned Prime Agent release, verifies its
-official SHA-256 checksum, and installs it privately under
+The managed installer downloads the Prime Agent release selected by this Arisa
+version, verifies its official SHA-256 checksum, and installs it privately under
 `~/.arisa/runtimes/prime-agent/<version>/`. It never installs Prime globally and
 does not depend on a `prime-agent` command already being present on `PATH`.
 It also installs `uv`, prepares Prime's IPython environment under
 `~/.arisa/state/prime-agent/kernel-venv/`, and validates that kernel before
 marking the managed runtime as ready. A matching ready installation is reused
-without downloading it again.
+without downloading it again. When an Arisa update selects a newer Prime
+release, the managed runtime installs that version alongside the previous one;
+an explicit external `prime.command` remains pinned to its configured version.
 
 Arisa intentionally rejects other Prime versions until their RPC contract passes
 the Arisa test suite. Prime runs IPython kernels and recursive workers with the
@@ -280,7 +282,7 @@ No "I can't do that" when the thing is realistically buildable.
 This is currently a functional V1. The core provides:
 
 - Telegram transport
-- Prime Agent v0.7.0 RPC integration, with temporary Pi rollback support
+- Prime Agent v0.7.1 RPC integration, with temporary Pi rollback support
 - artifact-based message handling
 - the isolated CLI tool registry (starts empty)
 - pre-reasoning and post-reasoning pipes

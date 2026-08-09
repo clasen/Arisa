@@ -2,6 +2,7 @@
 import { spawn } from "node:child_process";
 import { mkdir, readdir } from "node:fs/promises";
 import { StringDecoder } from "node:string_decoder";
+import { defaultPrimeVersion } from "../config/config-defaults.js";
 
 const defaultRequestTimeoutMs = 30_000;
 const defaultPromptTimeoutMs = 24 * 60 * 60 * 1000;
@@ -48,7 +49,7 @@ export function isPrimeRpcSessionClosedError(error) {
   return error?.code === primeRpcSessionClosedCode;
 }
 
-export async function validatePrimeBinary({ command = "prime-agent", commandArgs = [], expectedVersion = "0.7.0", spawnImpl = spawn } = {}) {
+export async function validatePrimeBinary({ command = "prime-agent", commandArgs = [], expectedVersion = defaultPrimeVersion, spawnImpl = spawn } = {}) {
   const result = await new Promise((resolve, reject) => {
     const child = spawnImpl(command, [...commandArgs, "--version"], { stdio: ["ignore", "pipe", "pipe"], windowsHide: true });
     let stdout = "";
@@ -87,7 +88,7 @@ export class PrimeRpcSession {
   constructor({
     command = "prime-agent",
     commandArgs = [],
-    expectedVersion = "0.7.0",
+    expectedVersion = defaultPrimeVersion,
     provider,
     model,
     thinkingLevel = "medium",

@@ -8,6 +8,7 @@ import { createPiOAuthLogin } from "../core/agent/pi-auth-login.js";
 import { syncPrimeAuth } from "../core/agent/prime-auth.js";
 import { createPiRuntime, formatPiModelOption, hasProviderAuth, listPiProviders, listProviderModels, supportsProviderOAuth } from "../core/agent/pi-runtime.js";
 import { agentConfigDefaults, applyConfigDefaults, telegramConfigDefaults } from "../core/config/config-defaults.js";
+import { prepareConfigForSave } from "../core/config/config-store.js";
 import { buildDeviceCodeTelegramMessage } from "../transport/telegram/device-code-message.js";
 import { buildPagedInlineKeyboard } from "../transport/telegram/paged-inline-keyboard.js";
 import { configFile, ensureArisaHome } from "./paths.js";
@@ -611,7 +612,7 @@ export async function bootstrapIfNeeded({ force = false } = {}) {
       result = await collectCliBootstrapChoices({ telegramApiKey, rl, ask });
     }
 
-    await writeFile(configFile, `${JSON.stringify(result.config, null, 2)}\n`, "utf8");
+    await writeFile(configFile, `${JSON.stringify(prepareConfigForSave(result.config), null, 2)}\n`, "utf8");
     await syncPrimeAuth({
       provider: result.config.prime.provider,
       apiKey: result.config.prime.apiKey

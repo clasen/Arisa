@@ -19,7 +19,9 @@ export function clearManagedPrimeRuntimeDetails(primeConfig) {
 
 export function prepareConfigForSave(config) {
   const prepared = applyConfigDefaults(config);
-  return { ...prepared, prime: clearManagedPrimeRuntimeDetails(prepared.prime) };
+  const prime = clearManagedPrimeRuntimeDetails(prepared.prime);
+  if (!String(prime.command || "").trim()) delete prime.version;
+  return { ...prepared, prime };
 }
 
 export async function loadConfig() {

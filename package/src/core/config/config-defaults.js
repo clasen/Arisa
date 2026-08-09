@@ -31,9 +31,11 @@ export const piConfigDefaults = Object.freeze({
   thinkingLevel: "medium"
 });
 
+export const defaultPrimeVersion = "0.7.1";
+
 export const primeConfigDefaults = Object.freeze({
   command: "",
-  version: "0.7.0",
+  version: defaultPrimeVersion,
   thinkingLevel: "medium",
   idleMinutes: 90
 });
@@ -49,6 +51,17 @@ function cloneChatModels(chatModels) {
 export function applyConfigDefaults(config) {
   const legacyPi = config.pi || {};
   const configuredPrime = config.prime || {};
+  const prime = {
+    ...primeConfigDefaults,
+    provider: configuredPrime.provider ?? legacyPi.provider,
+    model: configuredPrime.model ?? legacyPi.model,
+    apiKey: configuredPrime.apiKey ?? legacyPi.apiKey,
+    workspaceDir: configuredPrime.workspaceDir ?? legacyPi.workspaceDir,
+    chatModels: cloneChatModels(configuredPrime.chatModels ?? legacyPi.chatModels),
+    ...configuredPrime
+  };
+  if (!String(prime.command || "").trim()) prime.version = defaultPrimeVersion;
+
   return {
     ...config,
     agent: {
@@ -63,15 +76,7 @@ export function applyConfigDefaults(config) {
       ...piConfigDefaults,
       ...legacyPi
     },
-    prime: {
-      ...primeConfigDefaults,
-      provider: configuredPrime.provider ?? legacyPi.provider,
-      model: configuredPrime.model ?? legacyPi.model,
-      apiKey: configuredPrime.apiKey ?? legacyPi.apiKey,
-      workspaceDir: configuredPrime.workspaceDir ?? legacyPi.workspaceDir,
-      chatModels: cloneChatModels(configuredPrime.chatModels ?? legacyPi.chatModels),
-      ...configuredPrime
-    },
+    prime,
     daemons: {
       ...daemonConfigDefaults,
       ...(config.daemons || {})
