@@ -48,6 +48,7 @@ Safety:
   - uses a token-owned lock and worker handshake to prevent concurrent restarts
   - the detached worker survives shutdown of the active Arisa service
   - verifies the replacement repeatedly through PID identity and Arisa IPC
+  - safely escalates a hung verified service from SIGTERM to SIGKILL
   - retries a failed start only after proving the old process is gone
 `);
 }
@@ -78,7 +79,7 @@ async function currentJob(paths, jobId = "") {
 function publicStatus(status) {
   const fields = [
     "id", "createdAt", "updatedAt", "completedAt", "state", "phase", "failurePhase",
-    "workerPid", "oldPid", "newPid", "recoveryPid", "recovered", "error", "recoveryError",
+    "workerPid", "oldPid", "newPid", "recoveryPid", "recovered", "stopEscalated", "error", "recoveryError",
     "notificationQueued", "notificationPending", "notificationError"
   ];
   return Object.fromEntries(fields.filter((field) => status[field] !== undefined).map((field) => [field, status[field]]));
@@ -101,6 +102,7 @@ function normalizedConfig(config) {
   return {
     handoffDelayMs: clampNumber(config.handoffDelayMs, defaults.handoffDelayMs, 1000, 30000),
     stopTimeoutMs: clampNumber(config.stopTimeoutMs, defaults.stopTimeoutMs, 5000, 180000),
+    killTimeoutMs: clampNumber(config.killTimeoutMs, defaults.killTimeoutMs, 1000, 60000),
     startTimeoutMs: clampNumber(config.startTimeoutMs, defaults.startTimeoutMs, 10000, 300000),
     verifyTimeoutMs: clampNumber(config.verifyTimeoutMs, defaults.verifyTimeoutMs, 10000, 180000),
     stabilityWindowMs: clampNumber(config.stabilityWindowMs, defaults.stabilityWindowMs, 2000, 30000),

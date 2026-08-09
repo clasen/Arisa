@@ -138,18 +138,31 @@ async function waitForStableService(job, logOffset) {
   throw new Error(`Arisa did not remain healthy: ${lastError?.message || "stability window timed out"}`);
 }
 
+export async function terminateVerifiedService(job, identity, label = "Arisa") {
+  await assertServiceIdentity(identity.pid, job.entryFile, identity.startTime);
+  process.kill(identity.pid, "SIGTERM");
+  const stoppedGracefully = await waitFor(() => !isProcessAlive(identity.pid), {
+    timeoutMs: job.config.stopTimeoutMs,
+    intervalMs: 250
+  });
+  if (stoppedGracefully) return { forced: false };
+
+  await assertServiceIdentity(identity.pid, job.entryFile, identity.startTime);
+  process.kill(identity.pid, "SIGKILL");
+  const stoppedForcefully = await waitFor(() => !isProcessAlive(identity.pid), {
+    timeoutMs: job.config.killTimeoutMs,
+    intervalMs: 100
+  });
+  if (!stoppedForcefully) throw new Error(`${label} PID ${identity.pid} survived verified SIGKILL escalation`);
+  return { forced: true };
+}
+
 async function stopService(job, expectedIdentity) {
   const pidFromFile = await readPidFile(job.pidFile);
   if (pidFromFile !== expectedIdentity.pid) {
     throw new Error(`Arisa PID changed from ${expectedIdentity.pid} to ${pidFromFile || "missing"}; refusing to signal it`);
   }
-  await assertServiceIdentity(expectedIdentity.pid, job.entryFile, expectedIdentity.startTime);
-  process.kill(expectedIdentity.pid, "SIGTERM");
-  const stopped = await waitFor(() => !isProcessAlive(expectedIdentity.pid), {
-    timeoutMs: job.config.stopTimeoutMs,
-    intervalMs: 250
-  });
-  if (!stopped) throw new Error(`Arisa PID ${expectedIdentity.pid} did not stop within the safety timeout`);
+  return terminateVerifiedService(job, expectedIdentity);
 }
 
 async function startService(job) {
@@ -174,12 +187,7 @@ async function stopReplacement(job) {
   const pid = await readPidFile(job.pidFile);
   if (!isProcessAlive(pid)) return;
   const identity = await assertServiceIdentity(pid, job.entryFile);
-  process.kill(pid, "SIGTERM");
-  const stopped = await waitFor(() => !isProcessAlive(pid), {
-    timeoutMs: job.config.stopTimeoutMs,
-    intervalMs: 250
-  });
-  if (!stopped) throw new Error(`Replacement Arisa PID ${pid} could not be stopped safely`);
+  await terminateVerifiedService(job, identity, "Replacement Arisa");
   return identity;
 }
 
@@ -276,10 +284,10 @@ export async function executeJob(job) {
     phase = "stop";
     await updateStatus(job, { state: "stopping", phase });
     oldWasSignalled = true;
-    await stopService(job, oldIdentity);
+    const stopResult = await stopService(job, oldIdentity);
 
     phase = "start";
-    await updateStatus(job, { state: "starting", phase });
+    await updateStatus(job, { state: "starting", phase, stopEscalated: stopResult.forced });
     const logOffset = await startService(job);
 
     phase = "verify";

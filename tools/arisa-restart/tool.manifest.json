@@ -19,7 +19,12 @@
     "stopTimeoutMs": {
       "type": "number",
       "required": false,
-      "prompt": "Maximum time to wait for the old Arisa service to stop."
+      "prompt": "Maximum time to wait for the old Arisa service to stop gracefully."
+    },
+    "killTimeoutMs": {
+      "type": "number",
+      "required": false,
+      "prompt": "Maximum time to wait after safely escalating a verified hung service to SIGKILL."
     },
     "startTimeoutMs": {
       "type": "number",

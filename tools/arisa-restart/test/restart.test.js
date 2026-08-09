@@ -17,7 +17,7 @@ import {
   waitFor,
   writeUtf8Json
 } from "../lib.js";
-import { queueNotification, requestIpc } from "../worker.js";
+import { queueNotification, requestIpc, terminateVerifiedService } from "../worker.js";
 import { retryPendingNotification } from "../notifier.js";
 
 test("normalizes booleans and bounded restart timeouts", () => {
@@ -66,6 +66,31 @@ test("requires exact Arisa argv and process start time before signalling", async
     await assert.rejects(assertServiceIdentity(child.pid, entryFile, `${identity.startTime}9`), /reused/);
   } finally {
     child.kill("SIGTERM");
+    await waitFor(() => !isProcessAlive(child.pid), { timeoutMs: 2000 });
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("escalates a verified service that ignores SIGTERM", { timeout: 5000 }, async () => {
+  if (process.platform !== "linux") return;
+  const root = await mkdtemp(path.join(os.tmpdir(), "arisa-restart-kill-"));
+  const entryFile = path.join(root, "hung-service.js");
+  const readyFile = path.join(root, "ready");
+  await writeFile(entryFile, "import { writeFileSync } from 'node:fs'; process.on('SIGTERM', () => {}); writeFileSync(process.argv[3], 'ready'); setInterval(() => {}, 1000);\n");
+  const child = spawn(process.execPath, [entryFile, "--service-runner", readyFile], { stdio: "ignore" });
+  try {
+    assert.equal(await waitFor(async () => {
+      try { return (await readFile(readyFile, "utf8")) === "ready"; } catch { return false; }
+    }, { timeoutMs: 2000 }), true);
+    const identity = await assertServiceIdentity(child.pid, entryFile);
+    const result = await terminateVerifiedService({
+      entryFile,
+      config: { stopTimeoutMs: 300, killTimeoutMs: 2000 }
+    }, identity);
+    assert.equal(result.forced, true);
+    assert.equal(isProcessAlive(child.pid), false);
+  } finally {
+    if (isProcessAlive(child.pid)) process.kill(child.pid, "SIGKILL");
     await waitFor(() => !isProcessAlive(child.pid), { timeoutMs: 2000 });
     await rm(root, { recursive: true, force: true });
   }
@@ -195,6 +220,7 @@ if (process.argv.includes("--service-runner")) {
       config: {
         handoffDelayMs: 500,
         stopTimeoutMs: 3000,
+        killTimeoutMs: 2000,
         startTimeoutMs: 3000,
         verifyTimeoutMs: 5000,
         stabilityWindowMs: 500,
