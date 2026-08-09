@@ -18,6 +18,16 @@ export const telegramConfigDefaults = Object.freeze({
   modelPickerPageSize: 8
 });
 
+export const doctorConfigDefaults = Object.freeze({
+  contextInspectionTimeoutMs: 5_000,
+  primeShutdownTimeoutMs: 15_000,
+  contextWarningPercent: 70,
+  contextCriticalPercent: 90,
+  contextInefficientMinTokens: 32_000,
+  contextToolResultWarningPercent: 60,
+  contextSingleMessageWarningPercent: 50
+});
+
 export const cliLogConfig = Object.freeze({
   recentLines: 100,
   followPollIntervalMs: 250
@@ -71,6 +81,10 @@ export function applyConfigDefaults(config) {
     telegram: {
       ...telegramConfigDefaults,
       ...(config.telegram || {})
+    },
+    doctor: {
+      ...doctorConfigDefaults,
+      ...(config.doctor || {})
     },
     pi: {
       ...piConfigDefaults,

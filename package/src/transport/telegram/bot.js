@@ -420,7 +420,7 @@ export async function closeModelPicker(ctx, { messageText, callbackText }) {
   await ctx.answerCallbackQuery({ text: callbackText });
 }
 
-export async function createTelegramBot({ config, artifactStore, toolRegistry, taskStore, agentManager, saveConfig, updateConfig, prepareRuntime, doctor, logger }) {
+export async function createTelegramBot({ config, artifactStore, toolRegistry, taskStore, agentManager, saveConfig, updateConfig, prepareRuntime, traceHarnessTransition, doctor, logger }) {
   const bot = new Bot(config.telegram.token);
   const perChatState = createChatStateStore();
   const conversationHistory = new ConversationHistoryStore();
@@ -593,7 +593,8 @@ export async function createTelegramBot({ config, artifactStore, toolRegistry, t
       validateRuntime: (candidate) => agentManager.validateAgent(candidate),
       prepareContinuity: prepareHarnessContinuity,
       saveConfig,
-      switchRuntime: (candidate, options) => agentManager.switchRuntime(candidate, options)
+      switchRuntime: (candidate, options) => agentManager.switchRuntime(candidate, options),
+      traceTransition: traceHarnessTransition
     });
   }
 

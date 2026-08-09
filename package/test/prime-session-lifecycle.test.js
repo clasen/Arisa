@@ -135,22 +135,98 @@ test("disposes a cached Pi session during a runtime switch", async () => {
   assert.equal(disposeCount, 1);
 });
 
-test("reports only live Prime child processes as managed", () => {
+test("reports live Prime processes and current context composition", async () => {
   const manager = createManager();
   manager.sessions.set("active", {
-    session: { child: { pid: 101, exitCode: null, signalCode: null } }
+    session: {
+      child: { pid: 101, exitCode: null, signalCode: null },
+      messages: [
+        { role: "user", content: "short question" },
+        { role: "toolResult", content: [{ type: "text", text: "x".repeat(400) }] }
+      ],
+      getSessionStats: async () => ({
+        contextUsage: { tokens: 40_000, contextWindow: 100_000, percent: 40 }
+      })
+    }
   });
   manager.sessions.set("closed", {
-    session: { child: { pid: 202, exitCode: 0, signalCode: null } }
+    session: {
+      child: { pid: 202, exitCode: 0, signalCode: null },
+      messages: [],
+      getSessionStats: async () => ({
+        contextUsage: { tokens: 0, contextWindow: 100_000, percent: 0 }
+      })
+    }
   });
   manager.pendingPrimeSessions.set("starting", { promise: new Promise(() => {}) });
   manager.sessionClosePromises.set("closing", new Promise(() => {}));
 
-  assert.deepEqual(manager.getRuntimeDiagnostic(), {
-    runtime: "prime",
-    sessions: 2,
-    startingSessions: 1,
-    closingSessions: 1,
-    managedProcessIds: [101]
+  const diagnostic = await manager.getRuntimeDiagnostic({ contextInspectionTimeoutMs: 500 });
+
+  assert.equal(diagnostic.runtime, "prime");
+  assert.equal(diagnostic.sessions, 2);
+  assert.equal(diagnostic.startingSessions, 1);
+  assert.equal(diagnostic.closingSessions, 1);
+  assert.deepEqual(diagnostic.managedProcessIds, [101]);
+  assert.equal(diagnostic.contexts[0].chatId, "active");
+  assert.equal(diagnostic.contexts[0].tokens, 40_000);
+  assert.equal(diagnostic.contexts[0].messages, 2);
+  assert.ok(diagnostic.contexts[0].toolResultPercent > 90);
+  assert.deepEqual(diagnostic.contexts[1], {
+    chatId: "closed",
+    messages: 0,
+    estimatedTokens: 0,
+    toolResultPercent: 0,
+    largestMessagePercent: 0,
+    tokens: 0,
+    contextWindow: 100_000,
+    percent: 0
   });
+});
+
+test("reads Pi context usage without an RPC request", async () => {
+  const manager = createManager();
+  manager.config.agent.runtime = "pi";
+  let statsCalls = 0;
+  manager.sessions.set("42", {
+    session: {
+      messages: [{ role: "user", content: "hello" }],
+      getSessionStats: () => {
+        statsCalls += 1;
+        return { contextUsage: { tokens: 2_000, contextWindow: 32_000, percent: 6.25 } };
+      }
+    }
+  });
+
+  const diagnostic = await manager.getRuntimeDiagnostic({ contextInspectionTimeoutMs: 500 });
+
+  assert.equal(statsCalls, 1);
+  assert.deepEqual(diagnostic.contexts[0], {
+    chatId: "42",
+    messages: 1,
+    estimatedTokens: 2,
+    toolResultPercent: 0,
+    largestMessagePercent: 100,
+    tokens: 2_000,
+    contextWindow: 32_000,
+    percent: 6.25
+  });
+});
+
+test("isolates a failed context inspection from the runtime diagnostic", async () => {
+  const manager = createManager();
+  manager.sessions.set("42", {
+    session: {
+      messages: [],
+      getSessionStats: async () => { throw new Error("RPC timed out"); }
+    }
+  });
+
+  const diagnostic = await manager.getRuntimeDiagnostic({ contextInspectionTimeoutMs: 500 });
+
+  assert.deepEqual(diagnostic.contexts, [{
+    chatId: "42",
+    error: "RPC timed out"
+  }]);
+  assert.deepEqual(diagnostic.managedProcessIds, []);
 });

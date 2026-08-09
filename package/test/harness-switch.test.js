@@ -4,16 +4,18 @@ import os from "node:os";
 import path from "node:path";
 import test from "node:test";
 import { formatPortableSessionHistory } from "../src/core/agent/agent-manager.js";
-import { agentConfigDefaults, applyConfigDefaults } from "../src/core/config/config-defaults.js";
+import { agentConfigDefaults, applyConfigDefaults, doctorConfigDefaults } from "../src/core/config/config-defaults.js";
 import { ConversationHistoryStore, formatPortableConversation } from "../src/core/conversation/conversation-history-store.js";
 import { buildConfig } from "../src/runtime/bootstrap.js";
 import { activateHarness } from "../src/runtime/harness-switch.js";
+import { listHarnessTransitionPrimeOwners, recordHarnessTransition } from "../src/runtime/harness-transition-journal.js";
 import { createChatStateStore } from "../src/transport/telegram/bot.js";
 import { buildHarnessPicker, parseHarnessPickerAction } from "../src/transport/telegram/harness-picker.js";
 
 test("uses Pi as the authoritative default for new installations", () => {
   assert.equal(agentConfigDefaults.runtime, "pi");
   assert.equal(applyConfigDefaults({ telegram: {}, pi: {} }).agent.runtime, "pi");
+  assert.deepEqual(applyConfigDefaults({ telegram: {}, pi: {} }).doctor, doctorConfigDefaults);
   assert.equal(buildConfig({
     telegramApiKey: "telegram-token",
     telegramMaxChatIds: 1,
@@ -30,6 +32,7 @@ test("prepares, validates, persists, and activates a harness in order", async ()
     prime: { command: "", version: "0.7.0", provider: "test", model: "prime-model" }
   };
   const calls = [];
+  const traces = [];
   const handoffs = new Map([["42", "portable history"]]);
 
   const result = await activateHarness({
@@ -63,11 +66,27 @@ test("prepares, validates, persists, and activates a harness in order", async ()
       assert.equal(config.agent.runtime, "pi");
       assert.equal(options.onActivate(candidate), config);
       assert.equal(config.agent.runtime, "prime");
+    },
+    traceTransition: async (event) => {
+      calls.push(`trace:${event.phase}`);
+      traces.push(event);
     }
   });
 
-  assert.deepEqual(calls, ["prepare", "validate", "continuity", "save", "switch"]);
-  assert.deepEqual(result, { changed: true, runtime: "prime" });
+  assert.deepEqual(calls, ["trace:started", "prepare", "validate", "continuity", "save", "switch", "trace:completed"]);
+  assert.equal(result.changed, true);
+  assert.equal(result.runtime, "prime");
+  assert.equal(result.transitionId, traces[0].transitionId);
+  assert.equal(traces[1].transitionId, traces[0].transitionId);
+  assert.deepEqual(traces.map(({ phase, fromRuntime, toRuntime }) => ({ phase, fromRuntime, toRuntime })), [{
+    phase: "started",
+    fromRuntime: "pi",
+    toRuntime: "prime"
+  }, {
+    phase: "completed",
+    fromRuntime: "pi",
+    toRuntime: "prime"
+  }]);
   assert.equal(config.agent.runtime, "prime");
   assert.deepEqual(config.prime.commandArgs, ["/managed/prime.js"]);
 });
@@ -76,6 +95,7 @@ test("keeps the active harness unchanged when preparation fails", async () => {
   const config = { agent: { runtime: "pi" }, pi: {}, prime: {} };
   let persisted = false;
   let switched = false;
+  const phases = [];
 
   await assert.rejects(activateHarness({
     config,
@@ -84,17 +104,20 @@ test("keeps the active harness unchanged when preparation fails", async () => {
     validateRuntime: async () => {},
     prepareContinuity: async () => new Map(),
     saveConfig: async () => { persisted = true; },
-    switchRuntime: async () => { switched = true; }
+    switchRuntime: async () => { switched = true; },
+    traceTransition: async ({ phase }) => { phases.push(phase); }
   }), /install failed/);
 
   assert.equal(config.agent.runtime, "pi");
   assert.equal(persisted, false);
   assert.equal(switched, false);
+  assert.deepEqual(phases, ["started", "failed"]);
 });
 
 test("restores the persisted harness if live activation fails", async () => {
   const config = { agent: { runtime: "pi" }, pi: {}, prime: {} };
   const persistedRuntimes = [];
+  const phases = [];
 
   await assert.rejects(activateHarness({
     config,
@@ -103,11 +126,85 @@ test("restores the persisted harness if live activation fails", async () => {
     validateRuntime: async () => {},
     prepareContinuity: async () => new Map(),
     saveConfig: async (candidate) => { persistedRuntimes.push(candidate.agent.runtime); },
-    switchRuntime: async () => { throw new Error("activation failed"); }
+    switchRuntime: async () => { throw new Error("activation failed"); },
+    traceTransition: async ({ phase }) => { phases.push(phase); }
   }), /activation failed/);
 
   assert.deepEqual(persistedRuntimes, ["prime", "pi"]);
+  assert.deepEqual(phases, ["started", "rolled_back"]);
   assert.equal(config.agent.runtime, "pi");
+});
+
+test("rolls back the harness if the completed transition cannot be traced", async () => {
+  const config = { agent: { runtime: "pi" }, pi: {}, prime: {} };
+  const persistedRuntimes = [];
+  const phases = [];
+
+  await assert.rejects(activateHarness({
+    config,
+    targetRuntime: "prime",
+    prepareRuntime: async (candidate) => candidate,
+    validateRuntime: async () => {},
+    prepareContinuity: async () => new Map(),
+    saveConfig: async (candidate) => { persistedRuntimes.push(candidate.agent.runtime); },
+    switchRuntime: async (candidate, { onActivate }) => { onActivate(candidate); },
+    traceTransition: async ({ phase }) => {
+      phases.push(phase);
+      if (phase === "completed") throw new Error("trace unavailable");
+    }
+  }), /trace unavailable/);
+
+  assert.deepEqual(persistedRuntimes, ["prime", "pi"]);
+  assert.deepEqual(phases, ["started", "completed", "rolled_back"]);
+  assert.equal(config.agent.runtime, "pi");
+});
+
+test("persists Prime ownership in the harness transition journal", async (t) => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "arisa-harness-transition-"));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  const file = path.join(root, "harness-transitions.jsonl");
+  const transitionId = "prime-to-pi-1";
+  const owner = {
+    registryDir: "/tmp/arisa-prime/supervisor-owners",
+    pid: 555,
+    processStartId: "ps:expected-start",
+    socketPath: "/tmp/arisa-prime/daemon.sock",
+    descriptorDir: "/tmp/arisa-prime/daemon-workers/worker",
+    agentDir: "/tmp/arisa-prime",
+    appVersion: "0.7.1"
+  };
+  await recordHarnessTransition({
+    transitionId,
+    phase: "started",
+    fromRuntime: "prime",
+    toRuntime: "pi",
+    primeDaemons: [owner]
+  }, { file, recordedAt: "2026-08-09T12:00:00.000Z" });
+  await recordHarnessTransition({
+    transitionId,
+    phase: "completed",
+    fromRuntime: "prime",
+    toRuntime: "pi"
+  }, { file, recordedAt: "2026-08-09T12:00:01.000Z" });
+  const failedTransitionId = "pi-to-prime-failed-1";
+  const failedOwner = {
+    ...owner,
+    pid: 556,
+    processStartId: "ps:failed-start"
+  };
+  await recordHarnessTransition({
+    transitionId: failedTransitionId,
+    phase: "failed",
+    fromRuntime: "pi",
+    toRuntime: "prime",
+    primeDaemons: [failedOwner]
+  }, { file, recordedAt: "2026-08-09T12:00:02.000Z" });
+
+  assert.equal((await readFile(file, "utf8")).startsWith("\uFEFF"), true);
+  assert.deepEqual(await listHarnessTransitionPrimeOwners({ file }), [
+    { ...owner, transitionId },
+    { ...failedOwner, transitionId: failedTransitionId }
+  ]);
 });
 
 test("builds and parses the Telegram harness picker", () => {

@@ -1,6 +1,7 @@
 ﻿import crypto from "node:crypto";
 import { spawn } from "node:child_process";
 import { mkdir, readdir } from "node:fs/promises";
+import { createConnection } from "node:net";
 import { StringDecoder } from "node:string_decoder";
 import { defaultPrimeVersion } from "../config/config-defaults.js";
 
@@ -9,6 +10,8 @@ const defaultPromptTimeoutMs = 24 * 60 * 60 * 1000;
 const defaultCloseTimeoutMs = 5_000;
 const defaultTerminateTimeoutMs = 5_000;
 const primeRpcSessionClosedCode = "ARISA_PRIME_RPC_SESSION_CLOSED";
+const primeDaemonProtocolName = "prime-agent.daemon";
+const primeDaemonProtocolVersion = 7;
 
 function deferred() {
   let resolve;
@@ -63,6 +66,103 @@ export function isPrimeRpcSessionClosedError(error) {
   return error?.code === primeRpcSessionClosedCode;
 }
 
+export async function shutdownPrimeDaemon({
+  socketPath,
+  pid,
+  processStartId,
+  timeoutMs,
+  connectImpl = createConnection
+}) {
+  if (!String(socketPath || "").trim()) throw new Error("Prime daemon shutdown requires a socketPath");
+  if (!Number.isSafeInteger(pid) || pid <= 0) throw new Error("Prime daemon shutdown requires a positive PID");
+  if (!String(processStartId || "").trim()) {
+    throw new Error("Prime daemon shutdown requires a processStartId");
+  }
+  if (!Number.isFinite(timeoutMs) || timeoutMs <= 0) {
+    throw new Error("Prime daemon shutdown requires a positive timeoutMs");
+  }
+  await new Promise((resolve, reject) => {
+    const requestId = `arisa_doctor_${crypto.randomUUID()}`;
+    const clientId = `arisa-doctor:${crypto.randomUUID()}`;
+    const socket = connectImpl(socketPath);
+    let buffer = "";
+    let shutdownAccepted = false;
+    let daemonClosing = false;
+    let requestSent = false;
+    let settled = false;
+    const finish = (error) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      socket.destroy?.();
+      if (error) reject(error);
+      else resolve();
+    };
+    const timer = setTimeout(() => {
+      finish(new Error(`Timed out stopping Prime daemon ${pid} on ${socketPath}`));
+    }, timeoutMs);
+    const handleRecord = (record) => {
+      if (record?.type === "daemon_hello" && !requestSent) {
+        if (record.supervisorPid !== pid || record.supervisorProcessStartId !== processStartId) {
+          finish(new Error(`Prime daemon identity on ${socketPath} did not match PID ${pid}`));
+          return;
+        }
+        if (
+          record.protocol?.name !== primeDaemonProtocolName
+          || record.protocol?.version !== primeDaemonProtocolVersion
+        ) {
+          finish(new Error(`Prime daemon on ${socketPath} uses an unsupported control protocol`));
+          return;
+        }
+        requestSent = true;
+        socket.write(`${JSON.stringify({
+          type: "command",
+          id: requestId,
+          protocol: { name: primeDaemonProtocolName, version: primeDaemonProtocolVersion },
+          clientId,
+          command: { type: "shutdown", id: requestId, force: true }
+        })}\n`);
+        return;
+      }
+      if (record?.type === "daemon_closing" && record.reason === "shutdown") {
+        daemonClosing = true;
+        return;
+      }
+      if (record?.type === "response" && record.id === requestId) {
+        if (!record.success) {
+          finish(new Error(record.error || `Prime daemon ${pid} rejected shutdown`));
+          return;
+        }
+        shutdownAccepted = true;
+      }
+    };
+    socket.on("data", (chunk) => {
+      buffer += chunk.toString("utf8");
+      let newline = buffer.indexOf("\n");
+      while (newline !== -1) {
+        const line = buffer.slice(0, newline).replace(/\r$/, "");
+        buffer = buffer.slice(newline + 1);
+        if (line) {
+          try {
+            handleRecord(JSON.parse(line));
+          } catch (error) {
+            finish(new Error(`Prime daemon on ${socketPath} emitted invalid JSON: ${error.message}`));
+          }
+        }
+        newline = buffer.indexOf("\n");
+      }
+    });
+    socket.once("error", (error) => {
+      if (shutdownAccepted || daemonClosing) finish();
+      else finish(new Error(`Prime daemon shutdown connection failed: ${error.message}`));
+    });
+    socket.once("close", () => {
+      if (shutdownAccepted || daemonClosing) finish();
+      else finish(new Error(`Prime daemon ${pid} closed before accepting shutdown`));
+    });
+  });
+}
+
 export async function validatePrimeBinary({ command = "prime-agent", commandArgs = [], expectedVersion = defaultPrimeVersion, spawnImpl = spawn } = {}) {
   const result = await new Promise((resolve, reject) => {
     const child = spawnImpl(command, [...commandArgs, "--version"], { stdio: ["ignore", "pipe", "pipe"], windowsHide: true });
@@ -110,6 +210,8 @@ export class PrimeRpcSession {
     agentDir,
     sessionDir,
     kernelVenvDir,
+    daemonSocketPath,
+    supervisorRegistryDir,
     extensionPath,
     chatId,
     continueSession = true,
@@ -134,6 +236,14 @@ export class PrimeRpcSession {
     this.agentDir = agentDir;
     this.sessionDir = sessionDir;
     this.kernelVenvDir = kernelVenvDir;
+    if (!String(daemonSocketPath || "").trim()) {
+      throw new Error("Prime RPC session requires a daemonSocketPath");
+    }
+    if (!String(supervisorRegistryDir || "").trim()) {
+      throw new Error("Prime RPC session requires a supervisorRegistryDir");
+    }
+    this.daemonSocketPath = daemonSocketPath;
+    this.supervisorRegistryDir = supervisorRegistryDir;
     this.extensionPath = extensionPath;
     this.chatId = String(chatId ?? "");
     this.continueSession = continueSession;
@@ -174,6 +284,7 @@ export class PrimeRpcSession {
 
   buildArgs(shouldContinue) {
     const args = [
+      "--daemon-socket", this.daemonSocketPath,
       "--mode", "rpc",
       "--provider", this.provider,
       "--model", this.model.id,
@@ -218,6 +329,7 @@ export class PrimeRpcSession {
       PRIME_AGENT_CODING_AGENT_DIR: this.agentDir,
       PRIME_AGENT_SESSION_DIR: this.sessionDir,
       ...(this.kernelVenvDir ? { PRIME_AGENT_KERNEL_VENV: this.kernelVenvDir } : {}),
+      PRIME_AGENT_INTERNAL_DAEMON_SUPERVISOR_REGISTRY_DIR: this.supervisorRegistryDir,
       ARISA_CHAT_ID: this.chatId,
       PI_OFFLINE: "1",
       PI_SKIP_VERSION_CHECK: "1"
@@ -349,6 +461,10 @@ export class PrimeRpcSession {
     this.pending.set(id, pending);
     this.write({ id, type, ...fields });
     return pending.promise;
+  }
+
+  async getSessionStats({ timeoutMs } = {}) {
+    return this.request("get_session_stats", {}, { timeoutMs });
   }
 
   applyState(state) {

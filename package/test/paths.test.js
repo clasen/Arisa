@@ -8,11 +8,13 @@ import { promisify } from "node:util";
 import {
   chatsDir,
   createIpcSocketPath,
+  createPrimeDaemonSocketPath,
   getChatArtifactsDir,
   getChatConversationHistoryFile,
   getChatToolConfigPath,
   getChatToolStateDir,
   getToolStateDir,
+  harnessTransitionsFile,
   primeRuntimesDir,
   runtimesDir,
   stateDir
@@ -69,9 +71,21 @@ test("creates POSIX IPC socket paths under the state directory", () => {
   assert.equal(socketPath, path.join("/tmp/arisa-home", "state", "arisa.sock"));
 });
 
+test("isolates the Prime daemon socket by Arisa home", () => {
+  assert.equal(
+    createPrimeDaemonSocketPath({ homeDir: "/tmp/arisa-home", platform: "darwin" }),
+    path.join("/tmp/arisa-home", "state", "prime-agent", "daemon.sock")
+  );
+  assert.match(
+    createPrimeDaemonSocketPath({ homeDir: "C:\\arisa-home", platform: "win32" }),
+    /^\\\\\.\\pipe\\arisa-prime-[a-f0-9]{16}$/
+  );
+});
+
 test("keeps managed agent runtimes separate from mutable agent state", () => {
   assert.equal(primeRuntimesDir, path.join(runtimesDir, "prime-agent"));
   assert.equal(runtimesDir, path.join(path.dirname(stateDir), "runtimes"));
+  assert.equal(harnessTransitionsFile, path.join(stateDir, "harness-transitions.jsonl"));
 });
 
 test("uses ARISA_HOME for instance-scoped paths", async (t) => {
@@ -83,7 +97,10 @@ const paths = await import(${JSON.stringify(new URL("../src/runtime/paths.js", i
 process.stdout.write(JSON.stringify({
   arisaHomeDir: paths.arisaHomeDir,
   configFile: paths.configFile,
-  piAuthFile: paths.piAuthFile
+  piAuthFile: paths.piAuthFile,
+  harnessTransitionsFile: paths.harnessTransitionsFile,
+  primeDaemonSocketFile: paths.primeDaemonSocketFile,
+  primeSupervisorRegistryDir: paths.primeSupervisorRegistryDir
 }));
 `;
   const { stdout } = await execFileAsync(process.execPath, ["--input-type=module", "--eval", script], {
@@ -94,4 +111,7 @@ process.stdout.write(JSON.stringify({
   assert.equal(paths.arisaHomeDir, path.resolve(customHome));
   assert.equal(paths.configFile, path.join(customHome, "state", "config.json"));
   assert.equal(paths.piAuthFile, path.join(customHome, "state", "pi-auth.json"));
+  assert.equal(paths.harnessTransitionsFile, path.join(customHome, "state", "harness-transitions.jsonl"));
+  assert.equal(paths.primeDaemonSocketFile, path.join(customHome, "state", "prime-agent", "daemon.sock"));
+  assert.equal(paths.primeSupervisorRegistryDir, path.join(customHome, "state", "prime-agent", "supervisor-owners"));
 });

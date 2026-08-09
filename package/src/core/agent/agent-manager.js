@@ -19,6 +19,8 @@ import {
   getChatPiSessionsDir,
   getChatPrimeHandoffFile,
   getChatPrimeSessionsDir,
+  primeDaemonSocketFile,
+  primeSupervisorRegistryDir,
   primeStateDir
 } from "../../runtime/paths.js";
 
@@ -62,6 +64,54 @@ function messageText(content) {
     .map((item) => item.text.trim())
     .filter(Boolean)
     .join("\n");
+}
+
+const estimatedImageTokens = 1_200;
+
+function estimateContentTokens(content) {
+  if (typeof content === "string") return Math.ceil(content.length / 4);
+  if (!Array.isArray(content)) return 0;
+  const chars = content.reduce((total, item) => {
+    if (item?.type === "image") return total + estimatedImageTokens * 4;
+    if (typeof item?.text === "string") return total + item.text.length;
+    if (typeof item?.thinking === "string") return total + item.thinking.length;
+    if (item?.type === "toolCall") {
+      return total + String(item.name || "").length + JSON.stringify(item.arguments || {}).length;
+    }
+    return total;
+  }, 0);
+  return Math.ceil(chars / 4);
+}
+
+function estimateMessageTokens(message) {
+  if (["user", "assistant", "custom", "toolResult"].includes(message?.role)) {
+    return estimateContentTokens(message.content);
+  }
+  if (message?.role === "bashExecution") {
+    return Math.ceil((String(message.command || "").length + String(message.output || "").length) / 4);
+  }
+  if (["branchSummary", "compactionSummary"].includes(message?.role)) {
+    return Math.ceil(String(message.summary || "").length / 4);
+  }
+  return 0;
+}
+
+function summarizeRetainedContext(messages = []) {
+  const sizes = messages.map((message) => ({
+    role: message?.role,
+    tokens: estimateMessageTokens(message)
+  }));
+  const estimatedTokens = sizes.reduce((total, item) => total + item.tokens, 0);
+  const toolResultTokens = sizes
+    .filter((item) => item.role === "toolResult")
+    .reduce((total, item) => total + item.tokens, 0);
+  const largestMessageTokens = sizes.reduce((largest, item) => Math.max(largest, item.tokens), 0);
+  return {
+    messages: messages.length,
+    estimatedTokens,
+    toolResultPercent: estimatedTokens ? toolResultTokens / estimatedTokens * 100 : 0,
+    largestMessagePercent: estimatedTokens ? largestMessageTokens / estimatedTokens * 100 : 0
+  };
 }
 
 export function formatPortableSessionHistory(messages = []) {
@@ -359,17 +409,36 @@ export class AgentManager {
     this.closeCachedSession(String(chatId));
   }
 
-  getRuntimeDiagnostic() {
+  async getRuntimeDiagnostic({ contextInspectionTimeoutMs } = {}) {
     const managedProcessIds = [...this.sessions.values()]
       .map((context) => context?.session?.child)
       .filter((child) => child?.pid && child.exitCode == null && child.signalCode == null)
       .map((child) => child.pid);
+    const contexts = await Promise.all([...this.sessions.entries()].map(async ([chatId, context]) => {
+      const base = { chatId };
+      try {
+        const stats = this.isPrimeRuntime()
+          ? await context.session.getSessionStats({ timeoutMs: contextInspectionTimeoutMs })
+          : context.session.getSessionStats();
+        const retained = summarizeRetainedContext(context.session.messages);
+        return {
+          ...base,
+          ...retained,
+          tokens: stats.contextUsage?.tokens ?? null,
+          contextWindow: stats.contextUsage?.contextWindow ?? null,
+          percent: stats.contextUsage?.percent ?? null
+        };
+      } catch (error) {
+        return { ...base, error: error instanceof Error ? error.message : String(error) };
+      }
+    }));
     return {
       runtime: this.config.agent?.runtime,
       sessions: this.sessions.size,
       startingSessions: this.pendingPrimeSessions.size,
       closingSessions: this.sessionClosePromises.size,
-      managedProcessIds
+      managedProcessIds,
+      contexts
     };
   }
 
@@ -452,6 +521,8 @@ export class AgentManager {
       agentDir: primeStateDir,
       sessionDir: primeStateDir,
       kernelVenvDir: prime.kernelVenvDir,
+      daemonSocketPath: primeDaemonSocketFile,
+      supervisorRegistryDir: primeSupervisorRegistryDir,
       chatId: "validation",
       noSession: true,
       logger: this.logger
@@ -616,6 +687,8 @@ export class AgentManager {
       agentDir: primeStateDir,
       sessionDir,
       kernelVenvDir: prime.kernelVenvDir,
+      daemonSocketPath: primeDaemonSocketFile,
+      supervisorRegistryDir: primeSupervisorRegistryDir,
       extensionPath: path.join(arisaPackageDir, "src", "core", "agent", "prime-arisa-extension.js"),
       chatId: sessionKey,
       continueSession: !this.pendingNewSessions.has(sessionKey),

@@ -3,6 +3,7 @@ import { ArtifactStore } from "../core/artifacts/artifact-store.js";
 import { ToolRegistry } from "../core/tools/tool-registry.js";
 import { TaskStore } from "../core/tasks/task-store.js";
 import { AgentManager } from "../core/agent/agent-manager.js";
+import { shutdownPrimeDaemon } from "../core/agent/prime-rpc-session.js";
 import { getErrorMessage, getPiAuthIssue } from "../core/agent/auth-flow.js";
 import { createTelegramBot } from "../transport/telegram/bot.js";
 import { createToolProcessSupervisor } from "./tool-process-supervisor.js";
@@ -10,7 +11,8 @@ import { createArisaCapabilities } from "./arisa-capabilities.js";
 import { createIpcServer } from "./ipc/ipc-server.js";
 import { getAgentConfig } from "../core/agent/model-selection.js";
 import { resolvePrimeAgentRuntime } from "./prime-agent-installer.js";
-import { runDoctor } from "./doctor.js";
+import { isOwnedPrimeDaemon, listPrimeDaemonOwners, runDoctor } from "./doctor.js";
+import { recordHarnessTransition } from "./harness-transition-journal.js";
 
 function normalizeString(value) {
   const text = String(value ?? "").trim();
@@ -182,10 +184,21 @@ export async function createApp({ logger, runtimeOverrides } = {}) {
     saveConfig,
     updateConfig,
     prepareRuntime: (candidate) => prepareAgentRuntime(candidate, { logger }),
+    traceHarnessTransition: async (event) => recordHarnessTransition({
+      ...event,
+      primeDaemons: (await listPrimeDaemonOwners()).filter(isOwnedPrimeDaemon)
+    }),
     doctor: () => runDoctor({
       agentManager,
       toolProcessSupervisor,
       daemonPolicy: config.daemons,
+      doctorPolicy: config.doctor,
+      stopPrimeDaemon: (owner, { timeoutMs }) => shutdownPrimeDaemon({
+        socketPath: owner.socketPath,
+        pid: owner.pid,
+        processStartId: owner.processStartId,
+        timeoutMs
+      }),
       logger
     }),
     logger

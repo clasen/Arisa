@@ -13,8 +13,28 @@ export const configFile = path.join(stateDir, "config.json");
 export const piAuthFile = path.join(stateDir, "pi-auth.json");
 export const primeStateDir = path.join(stateDir, "prime-agent");
 export const primeAuthFile = path.join(primeStateDir, "auth.json");
+export function createPrimeDaemonSocketPath({ homeDir = arisaHomeDir, platform = process.platform } = {}) {
+  if (platform === "win32") {
+    const suffix = crypto.createHash("sha256").update(homeDir).digest("hex").slice(0, 16);
+    return `\\\\.\\pipe\\arisa-prime-${suffix}`;
+  }
+  return path.join(homeDir, "state", "prime-agent", "daemon.sock");
+}
+
+export const primeDaemonSocketFile = createPrimeDaemonSocketPath();
+export const primeSupervisorRegistryDir = path.join(primeStateDir, "supervisor-owners");
+const primeDaemonUserSuffix = typeof process.getuid === "function" ? String(process.getuid()) : "user";
+const legacyPrimeDaemonDir = path.join(os.tmpdir(), `prime-agent-${primeDaemonUserSuffix}`);
+export const legacyPrimeDaemonSocketFile = process.platform === "win32"
+  ? "\\\\.\\pipe\\prime-agent-daemon"
+  : path.join(legacyPrimeDaemonDir, "daemon.sock");
+export const legacyPrimeSupervisorRegistryDir = path.join(
+  legacyPrimeDaemonDir,
+  "supervisor-owners"
+);
 export const servicePidFile = path.join(stateDir, "arisa.pid");
 export const serviceLogFile = path.join(stateDir, "arisa.log");
+export const harnessTransitionsFile = path.join(stateDir, "harness-transitions.jsonl");
 export function createIpcSocketPath({ homeDir = arisaHomeDir, platform = process.platform } = {}) {
   if (platform === "win32") {
     const suffix = crypto.createHash("sha256").update(homeDir).digest("hex").slice(0, 16);
