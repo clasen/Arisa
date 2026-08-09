@@ -247,6 +247,7 @@ export async function collectText(session, prompt, { logger, chatId, onSlowPromp
   let shouldSeparateAssistantMessage = false;
   let slowPromptTimer = null;
   const unsubscribe = session.subscribe((event) => {
+    if (event.arisaPromptScoped === false) return;
     if (event.type === "message_start" && event.message.role === "assistant") {
       shouldSeparateAssistantMessage = text.trim().length > 0;
     }
@@ -335,7 +336,13 @@ export function createChatStateStore() {
   const states = new Map();
 
   function reset(chatId) {
-    const state = { processing: false, nextPrompt: "", continueAfterClose: false, historyRevision: 0 };
+    const state = {
+      processing: false,
+      nextPrompt: "",
+      continueAfterClose: false,
+      historyRevision: 0,
+      beforeNextPrompt: null
+    };
     states.set(String(chatId), state);
     return state;
   }
@@ -358,13 +365,26 @@ export async function drainChatPromptQueue({
   initialCtx = null,
   processPrompt,
   onPromptFailure,
-  onPromptInterrupted
+  onPromptInterrupted,
+  beforeInitialPrompt
 }) {
   let currentPrompt = initialPrompt;
   let currentCtx = initialCtx;
 
   try {
+    await beforeInitialPrompt?.();
     while (currentPrompt) {
+      while (chatState.beforeNextPrompt) {
+        const gate = chatState.beforeNextPrompt;
+        await gate;
+        if (chatState.beforeNextPrompt === gate) chatState.beforeNextPrompt = null;
+      }
+      if (chatState.continueAfterClose && chatState.nextPrompt) {
+        currentPrompt = chatState.nextPrompt;
+        chatState.nextPrompt = "";
+        chatState.continueAfterClose = false;
+        currentCtx = null;
+      }
       try {
         await processPrompt({ prompt: currentPrompt, ctx: currentCtx });
       } catch (error) {
@@ -891,10 +911,16 @@ export async function createTelegramBot({ config, artifactStore, toolRegistry, t
 
     chatState.processing = true;
     logger?.log("telegram", `processing ${label} in chat ${chatId}`);
+    return processChatPromptQueue({ chatId, prompt, label, ctx });
+  }
+
+  function processChatPromptQueue({ chatId, prompt, label, ctx = null, beforeInitialPrompt }) {
+    const chatState = getChatState(chatId);
     return drainChatPromptQueue({
       chatState,
       initialPrompt: prompt,
       initialCtx: ctx,
+      beforeInitialPrompt,
       processPrompt: ({ prompt: currentPrompt, ctx: currentCtx }) => {
         logger?.log("telegram", `prompt dispatch for chat ${chatId}`);
         return processPromptForChat({ chatId, prompt: currentPrompt, ctx: currentCtx });
@@ -1042,21 +1068,44 @@ export async function createTelegramBot({ config, artifactStore, toolRegistry, t
     await waitForHarnessSwitch();
     const chatState = getChatState(ctx.chat.id);
     const wasProcessing = chatState.processing;
-    const handoff = wasProcessing
-      ? { handoff: "", parentSession: "" }
-      : await withTyping(ctx, () => summarizeSessionBeforeReset(ctx.chat.id));
     chatState.historyRevision += 1;
-    await conversationHistory.reset(ctx.chat.id, {
-      runtime: config.agent?.runtime,
-      history: handoff.handoff
-    });
-    agentManager.resetSession(ctx.chat.id, handoff);
-    await enqueuePrompt({
+    const commandRevision = chatState.historyRevision;
+    const prompt = buildNewSessionPrompt(ctx);
+
+    if (wasProcessing) {
+      logger?.log("telegram", `chat ${ctx.chat.id} busy, queueing new-session command`);
+      chatState.nextPrompt = prompt;
+      chatState.continueAfterClose = true;
+      const reset = (async () => {
+        await conversationHistory.reset(ctx.chat.id, { runtime: config.agent?.runtime });
+        agentManager.resetSession(ctx.chat.id);
+      })();
+      chatState.beforeNextPrompt = reset;
+      try {
+        await reset;
+      } finally {
+        if (chatState.beforeNextPrompt === reset) chatState.beforeNextPrompt = null;
+      }
+      return;
+    }
+
+    chatState.processing = true;
+    logger?.log("telegram", `processing new-session command in chat ${ctx.chat.id}`);
+    await processChatPromptQueue({
       chatId: ctx.chat.id,
-      prompt: buildNewSessionPrompt(ctx),
+      prompt,
       label: "new-session command",
       ctx,
-      replaceQueued: wasProcessing
+      beforeInitialPrompt: async () => {
+        const handoff = await withTyping(ctx, () => summarizeSessionBeforeReset(ctx.chat.id));
+        if (chatState.historyRevision !== commandRevision) return;
+        await conversationHistory.reset(ctx.chat.id, {
+          runtime: config.agent?.runtime,
+          history: handoff.handoff
+        });
+        if (chatState.historyRevision !== commandRevision) return;
+        agentManager.resetSession(ctx.chat.id, handoff);
+      }
     });
   }
 

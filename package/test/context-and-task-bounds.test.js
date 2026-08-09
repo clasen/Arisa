@@ -84,7 +84,8 @@ test("chat state uses one queue for numeric and string chat IDs", () => {
     processing: false,
     nextPrompt: "",
     continueAfterClose: false,
-    historyRevision: 0
+    historyRevision: 0,
+    beforeNextPrompt: null
   });
 });
 
@@ -109,6 +110,49 @@ test("a queued /new continues only after the active Prime session closes", async
 
   assert.deepEqual(processed, ["old request", "new session confirmation"]);
   assert.deepEqual(chatState, { processing: false, nextPrompt: "", continueAfterClose: false });
+});
+
+test("exclusive pre-prompt work keeps concurrent messages queued", async () => {
+  const chatState = { processing: true, nextPrompt: "", continueAfterClose: false, beforeNextPrompt: null };
+  const processed = [];
+  let releasePreparation;
+  const preparation = new Promise((resolve) => { releasePreparation = resolve; });
+
+  const draining = drainChatPromptQueue({
+    chatState,
+    initialPrompt: "new session confirmation",
+    beforeInitialPrompt: () => preparation,
+    processPrompt: async ({ prompt }) => processed.push(prompt)
+  });
+  await new Promise((resolve) => setImmediate(resolve));
+  chatState.nextPrompt = "message received during handoff";
+  releasePreparation();
+  await draining;
+
+  assert.deepEqual(processed, ["new session confirmation", "message received during handoff"]);
+  assert.equal(chatState.processing, false);
+});
+
+test("a queued /new supersedes the initial prompt after exclusive preparation", async () => {
+  const chatState = { processing: true, nextPrompt: "", continueAfterClose: false, beforeNextPrompt: null };
+  const processed = [];
+  let releasePreparation;
+  const preparation = new Promise((resolve) => { releasePreparation = resolve; });
+
+  const draining = drainChatPromptQueue({
+    chatState,
+    initialPrompt: "first new session confirmation",
+    beforeInitialPrompt: () => preparation,
+    processPrompt: async ({ prompt }) => processed.push(prompt)
+  });
+  await new Promise((resolve) => setImmediate(resolve));
+  chatState.nextPrompt = "latest new session confirmation";
+  chatState.continueAfterClose = true;
+  releasePreparation();
+  await draining;
+
+  assert.deepEqual(processed, ["latest new session confirmation"]);
+  assert.equal(chatState.processing, false);
 });
 
 test("selectScheduledTasks bounds history while keeping active tasks", () => {

@@ -38,6 +38,22 @@ function rpcSpawner({ onUnsolicitedText, autoCompletePrompt = true } = {}) {
   let rpcChild;
   let rpcOptions;
   const requests = [];
+  const rpcState = {
+    model: { provider: "test", id: "model", reasoning: true },
+    thinkingLevel: "medium",
+    sessionFile: "/session.jsonl",
+    isStreaming: false,
+    isCompacting: false,
+    sessionActions: { queuedCount: 0, steering: [], followUps: [] }
+  };
+  const writeRecord = (record) => {
+    if (record.type === "agent_start") rpcState.isStreaming = true;
+    if (record.type === "agent_end") rpcState.isStreaming = false;
+    if (record.type === "compaction_start") rpcState.isCompacting = true;
+    if (record.type === "compaction_end") rpcState.isCompacting = false;
+    if (record.type === "session_action_update") rpcState.sessionActions = record.actions;
+    rpcChild.stdout.write(`${JSON.stringify(record)}\n`);
+  };
   const spawnImpl = (_command, args, options) => {
     call += 1;
     if (call % 2 === 1) return versionSpawner()(_command, ["--version"]);
@@ -61,9 +77,12 @@ function rpcSpawner({ onUnsolicitedText, autoCompletePrompt = true } = {}) {
           newline = input.indexOf("\n");
           continue;
         }
+        if (request.type === "prompt") {
+          rpcState.sessionActions = { queuedCount: 0, steering: [], followUps: [], active: { kind: "turn", phase: "running" } };
+        }
         const response = { type: "response", id: request.id, success: true, data: {} };
         if (request.type === "get_state") {
-          response.data = { model: { provider: "test", id: "model", reasoning: true }, thinkingLevel: "medium", sessionFile: "/session.jsonl" };
+          response.data = { ...rpcState, sessionActions: { ...rpcState.sessionActions } };
         } else if (request.type === "get_messages") {
           response.data = { messages: [] };
         } else if (request.type === "get_available_models") {
@@ -76,11 +95,13 @@ function rpcSpawner({ onUnsolicitedText, autoCompletePrompt = true } = {}) {
         rpcChild.stdout.write(line.slice(7));
         if (request.type === "prompt" && autoCompletePrompt) {
           queueMicrotask(() => {
-            rpcChild.stdout.write(`${JSON.stringify({ type: "agent_start" })}\n`);
-            rpcChild.stdout.write(`${JSON.stringify({ type: "message_start", message: { role: "assistant" } })}\n`);
-            rpcChild.stdout.write(`${JSON.stringify({ type: "message_update", assistantMessageEvent: { type: "text_delta", delta: "OK" } })}\n`);
-            rpcChild.stdout.write(`${JSON.stringify({ type: "message_end", message: { role: "assistant", stopReason: "stop" } })}\n`);
-            rpcChild.stdout.write(`${JSON.stringify({ type: "agent_end" })}\n`);
+            writeRecord({ type: "session_action_update", actions: { queuedCount: 0, steering: [], followUps: [], active: { kind: "turn", phase: "running" } } });
+            writeRecord({ type: "agent_start" });
+            writeRecord({ type: "message_start", message: { role: "assistant" } });
+            writeRecord({ type: "message_update", assistantMessageEvent: { type: "text_delta", delta: "OK" } });
+            writeRecord({ type: "message_end", message: { role: "assistant", stopReason: "stop" } });
+            writeRecord({ type: "agent_end" });
+            writeRecord({ type: "session_action_update", actions: { queuedCount: 0, steering: [], followUps: [] } });
           });
         }
         newline = input.indexOf("\n");
@@ -92,7 +113,7 @@ function rpcSpawner({ onUnsolicitedText, autoCompletePrompt = true } = {}) {
     spawnImpl,
     requests,
     write(record) {
-      rpcChild.stdout.write(`${JSON.stringify(record)}\n`);
+      writeRecord(record);
     },
     async waitForRequest(type) {
       while (!requests.some((request) => request.type === type)) {
@@ -133,7 +154,7 @@ test("validates a managed Prime CLI through the current Node executable", async 
   assert.equal(result.version, defaultPrimeVersion);
 });
 
-test("handles fragmented JSONL and waits for agent_end", async () => {
+test("handles fragmented JSONL and waits for the Prime session action to settle", async () => {
   const fake = rpcSpawner();
   const session = new PrimeRpcSession({
     command: "prime-agent",
@@ -156,6 +177,7 @@ test("handles fragmented JSONL and waits for agent_end", async () => {
   assert.equal(fake.options.env.PRIME_AGENT_KERNEL_VENV, "/managed/prime-kernel");
   assert.equal(text, "OK");
   assert.equal(session.sessionFile, "/session.jsonl");
+  assert.ok(fake.requests.some((request) => request.type === "prompt" && request.streamingBehavior === "followUp"));
   assert.deepEqual(await session.getAvailableModels(), [{ provider: "test", id: "model", reasoning: true }]);
   await session.setThinkingLevel("high");
   await session.setModel("test", "next-model");
@@ -175,35 +197,147 @@ test("keeps a prompt pending while Prime automatically retries", async () => {
     sessionDir: process.cwd(),
     chatId: "42",
     noSession: true,
-    spawnImpl: fake.spawnImpl,
-    promptSettleDelayMs: 1
+    spawnImpl: fake.spawnImpl
   });
   await session.start();
 
   let completed = false;
   let reply = "";
+  let settledEvents = 0;
+  const unsubscribe = session.subscribe((event) => {
+    if (event.type === "agent_settled") settledEvents += 1;
+  });
   const prompting = collectText(session, "hello").then((text) => {
     reply = text;
     completed = true;
   });
   await fake.waitForRequest("prompt");
+  fake.write({ type: "session_action_update", actions: { queuedCount: 0, steering: [], followUps: [], active: { kind: "turn", phase: "running" } } });
   fake.write({ type: "agent_start" });
   fake.write({ type: "message_end", message: { role: "assistant", stopReason: "error", errorMessage: "WebSocket error" } });
   fake.write({ type: "agent_end" });
+  await new Promise((resolve) => setTimeout(resolve, 40));
   fake.write({ type: "auto_retry_start", attempt: 1, maxAttempts: 3, delayMs: 1, errorMessage: "WebSocket error" });
   await new Promise((resolve) => setImmediate(resolve));
 
   assert.equal(completed, false);
+  assert.equal(settledEvents, 0);
 
   fake.write({ type: "agent_start" });
   fake.write({ type: "message_update", assistantMessageEvent: { type: "text_delta", delta: "recovered" } });
   fake.write({ type: "message_end", message: { role: "assistant", stopReason: "stop" } });
   fake.write({ type: "auto_retry_end", success: true, attempt: 1 });
   fake.write({ type: "agent_end" });
+  assert.equal(completed, false);
+  assert.equal(settledEvents, 0);
+  fake.write({ type: "session_action_update", actions: { queuedCount: 0, steering: [], followUps: [] } });
   await prompting;
 
   assert.equal(completed, true);
   assert.equal(reply, "recovered");
+  assert.equal(settledEvents, 1);
+  unsubscribe();
+  await session.close();
+});
+
+test("does not dispatch a prompt while Prime still owns a session action", async () => {
+  const fake = rpcSpawner();
+  const session = new PrimeRpcSession({
+    provider: "test",
+    model: "model",
+    cwd: process.cwd(),
+    agentDir: process.cwd(),
+    sessionDir: process.cwd(),
+    chatId: "42",
+    noSession: true,
+    spawnImpl: fake.spawnImpl
+  });
+  await session.start();
+  fake.write({ type: "session_action_update", actions: { queuedCount: 0, steering: [], followUps: [], active: { kind: "turn", phase: "running" } } });
+
+  const prompting = session.prompt("wait for the existing turn");
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(fake.requests.some((request) => request.type === "prompt"), false);
+
+  fake.write({ type: "session_action_update", actions: { queuedCount: 0, steering: [], followUps: [] } });
+  await prompting;
+  assert.equal(fake.requests.filter((request) => request.type === "prompt").length, 1);
+  await session.close();
+});
+
+test("does not mix an existing Prime action into the next collected reply", async () => {
+  const delivered = [];
+  const fake = rpcSpawner({ autoCompletePrompt: false });
+  const session = new PrimeRpcSession({
+    provider: "test",
+    model: "model",
+    cwd: process.cwd(),
+    agentDir: process.cwd(),
+    sessionDir: process.cwd(),
+    chatId: "42",
+    noSession: true,
+    spawnImpl: fake.spawnImpl,
+    onUnsolicitedText: (text) => delivered.push(text)
+  });
+  await session.start();
+  fake.write({ type: "session_action_update", actions: { queuedCount: 0, steering: [], followUps: [], active: { kind: "turn", phase: "running" } } });
+  fake.write({ type: "agent_start" });
+
+  const prompting = collectText(session, "new request");
+  fake.write({ type: "message_update", assistantMessageEvent: { type: "text_delta", delta: "old" } });
+  fake.write({ type: "message_end", message: { role: "assistant", stopReason: "stop" } });
+  fake.write({ type: "agent_end" });
+  fake.write({ type: "session_action_update", actions: { queuedCount: 0, steering: [], followUps: [] } });
+  await fake.waitForRequest("prompt");
+
+  fake.write({ type: "agent_start" });
+  fake.write({ type: "message_update", assistantMessageEvent: { type: "text_delta", delta: "new" } });
+  fake.write({ type: "message_end", message: { role: "assistant", stopReason: "stop" } });
+  fake.write({ type: "agent_end" });
+  fake.write({ type: "session_action_update", actions: { queuedCount: 0, steering: [], followUps: [] } });
+
+  assert.equal(await prompting, "new");
+  assert.deepEqual(delivered, ["old"]);
+  await session.close();
+});
+
+test("keeps a prompt pending through Prime compaction and continuation", async () => {
+  const fake = rpcSpawner({ autoCompletePrompt: false });
+  const session = new PrimeRpcSession({
+    provider: "test",
+    model: "model",
+    cwd: process.cwd(),
+    agentDir: process.cwd(),
+    sessionDir: process.cwd(),
+    chatId: "42",
+    noSession: true,
+    spawnImpl: fake.spawnImpl
+  });
+  await session.start();
+
+  let completed = false;
+  const prompting = collectText(session, "hello").then((text) => {
+    completed = true;
+    return text;
+  });
+  await fake.waitForRequest("prompt");
+  fake.write({ type: "agent_start" });
+  fake.write({ type: "agent_end" });
+  fake.write({ type: "compaction_start", reason: "auto" });
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(completed, false);
+
+  fake.write({ type: "compaction_end", reason: "auto", aborted: false });
+  fake.write({ type: "agent_start" });
+  fake.write({ type: "message_update", assistantMessageEvent: { type: "text_delta", delta: "continued" } });
+  fake.write({ type: "message_end", message: { role: "assistant", stopReason: "stop" } });
+  fake.write({ type: "agent_end" });
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(completed, false);
+
+  fake.write({ type: "session_action_update", actions: { queuedCount: 0, steering: [], followUps: [] } });
+  assert.equal(await prompting, "continued");
+  assert.equal(completed, true);
   await session.close();
 });
 
@@ -217,14 +351,14 @@ test("completes a prompt after Prime exhausts automatic retries", async () => {
     sessionDir: process.cwd(),
     chatId: "42",
     noSession: true,
-    spawnImpl: fake.spawnImpl,
-    promptSettleDelayMs: 1
+    spawnImpl: fake.spawnImpl
   });
   await session.start();
 
   let completed = false;
   const prompting = collectText(session, "hello").finally(() => { completed = true; });
   await fake.waitForRequest("prompt");
+  fake.write({ type: "session_action_update", actions: { queuedCount: 0, steering: [], followUps: [], active: { kind: "turn", phase: "running" } } });
   fake.write({ type: "agent_start" });
   fake.write({ type: "message_end", message: { role: "assistant", stopReason: "error", errorMessage: "WebSocket error" } });
   fake.write({ type: "agent_end" });
@@ -237,6 +371,9 @@ test("completes a prompt after Prime exhausts automatic retries", async () => {
   fake.write({ type: "message_end", message: { role: "assistant", stopReason: "error", errorMessage: "WebSocket error" } });
   fake.write({ type: "agent_end" });
   fake.write({ type: "auto_retry_end", success: false, attempt: 1, finalError: "WebSocket error" });
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(completed, false);
+  fake.write({ type: "session_action_update", actions: { queuedCount: 0, steering: [], followUps: [] } });
   await assert.rejects(prompting, /WebSocket error/);
 
   assert.equal(completed, true);

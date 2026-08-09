@@ -638,7 +638,7 @@ export class AgentManager {
         const timer = this.idleTimers.get(sessionKey);
         if (timer) clearTimeout(timer);
         this.idleTimers.delete(sessionKey);
-      } else if (event.type === "agent_end") {
+      } else if (event.type === "agent_settled") {
         this.schedulePrimeIdleClose(sessionKey, session);
       }
     });
