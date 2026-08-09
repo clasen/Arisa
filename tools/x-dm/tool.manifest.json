@@ -1,6 +1,6 @@
 {
   "name": "x-dm",
-  "description": "Safely manage X/Twitter outreach and the logged-in account bio with account pinning, explicit confirmations, delivery safeguards, and post-change verification.",
+  "description": "Safely manage X/Twitter outreach, follows, the logged-in account bio, and explicitly confirmed posts with account pinning and post-change verification.",
   "entry": "index.js",
   "input": [
     "text/plain",
@@ -48,6 +48,16 @@
       "required": false,
       "prompt": "Maximum confirmed X DMs per UTC day across all campaigns."
     },
+    "MIN_SECONDS_BETWEEN_FOLLOWS": {
+      "type": "string",
+      "required": false,
+      "prompt": "Minimum seconds between verified follow actions."
+    },
+    "MAX_FOLLOWS_PER_DAY": {
+      "type": "string",
+      "required": false,
+      "prompt": "Maximum tool-created follows per UTC day."
+    },
     "OPERATION_TIMEOUT_MS": {
       "type": "string",
       "required": false,
@@ -72,6 +82,7 @@
     "cookies",
     "social",
     "profile",
-    "bio"
+    "bio",
+    "post"
   ]
 }

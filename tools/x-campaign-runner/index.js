@@ -366,8 +366,19 @@ function personalOpening(candidate, profile) {
   return template.replace(/{{\s*reference\s*}}/g, reference).replace(/{{\s*name\s*}}/g, clean(candidate.displayName || candidate.username));
 }
 
+function greetingNameFor(candidate, profile) {
+  const explicit = clean(candidate.greetingName || "");
+  if (explicit) return explicit.slice(0, 50);
+  const displayName = clean(candidate.displayName || candidate.username).split(/[|–—]/)[0].trim();
+  if (profile.message?.greetingMode !== "first-name") return displayName.slice(0, 50) || candidate.username;
+  const words = displayName.split(/\s+/).filter(Boolean);
+  const brandWords = new Set(["app", "games", "gamer", "gaming", "media", "news", "official", "players", "reviews", "studio", "studios"]);
+  const looksPersonal = words.length >= 2 && words.length <= 3 && words.every((word) => /^[\p{L}.'-]+$/u.test(word)) && !words.some((word) => brandWords.has(word.toLowerCase()));
+  return (looksPersonal ? words[0] : displayName).slice(0, 50) || candidate.username;
+}
+
 function renderMessage(candidate, profile) {
-  const greetingName = clean(candidate.displayName || candidate.username).split(/[|–—]/)[0].trim().slice(0, 50) || candidate.username;
+  const greetingName = greetingNameFor(candidate, profile);
   const body = String(profile.message?.body || "").trim();
   const message = `Hi ${greetingName}, ${personalOpening(candidate, profile)}\n\n${body}`
     .replace(/{{\s*siteUrl\s*}}/g, clean(profile.siteUrl))
@@ -476,6 +487,7 @@ async function handlePrepareNext(request, args) {
           profileDigest: sha256(JSON.stringify(profile)),
           username: candidate.username,
           displayName: candidate.displayName,
+          greetingName: greetingNameFor(candidate, profile),
           message,
           messageHash: sha256(message),
           idempotencyKey: `${profile.campaignId || name}:${normalizedHandle(candidate.username)}:${sha256(message).slice(0, 16)}`,
@@ -528,6 +540,25 @@ async function handleSendApproved(request, args) {
       throw new Error(`@${approval.username} is already present in X DM history.`);
     }
     try {
+      let follow = approval.follow || null;
+      if (profile.follow?.enabled === true && follow?.status !== "following") {
+        const followResult = await runTool(arisa, profile.dmTool || "x-dm", {
+          action: "follow",
+          username: approval.username,
+          campaignId: approval.campaignId,
+          unfollowIfNoResponse: profile.follow?.unfollowIfNoResponse === true ? "true" : "false",
+          confirm: "true"
+        }, intArg(profile.follow?.timeoutMs, 150000));
+        follow = followResult.follow;
+        if (!follow || follow.status !== "following") throw new Error(`Follow verification failed for @${approval.username}; DM was not attempted.`);
+        approval.follow = follow;
+        approval.followVerifiedAt = new Date().toISOString();
+        const followedCandidate = state.candidates.find((item) => normalizedHandle(item.username) === normalizedHandle(approval.username));
+        if (followedCandidate) followedCandidate.follow = follow;
+        state.runs = [...state.runs, runRecord("follow-before-send", { approvalId: approval.id, username: approval.username, followedByTool: Boolean(follow.followedByTool) })].slice(-200);
+        state.updatedAt = new Date().toISOString();
+        await writeJson(file, state);
+      }
       const sent = await runTool(arisa, profile.dmTool || "x-dm", {
         action: "send",
         username: approval.username,
@@ -545,7 +576,7 @@ async function handleSendApproved(request, args) {
       state.runs = [...state.runs, runRecord("send-approved", { approvalId: approval.id, username: approval.username, deliveryVerified: approval.deliveryVerified })].slice(-200);
       state.updatedAt = new Date().toISOString();
       await writeJson(file, state);
-      return toolOk({ text: `Sent approved X campaign DM to @${approval.username}.`, json: { profile: name, approval, sent } });
+      return toolOk({ text: `Sent approved X campaign DM to @${approval.username}${follow ? " after verifying the follow state" : ""}.`, json: { profile: name, approval, follow, sent } });
     } catch (error) {
       const reason = clean(error.message || error).slice(0, 500);
       if (/uncertain|in-flight|delivery could not be verified/i.test(reason)) approval.status = "manual-review";
@@ -676,4 +707,4 @@ async function main(cliArgs = process.argv.slice(2)) {
 const isCli = process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url);
 if (isCli) await main();
 
-export { availableCandidates, candidateScore, handleFromXUrl, parseSearchResults, pendingApproval, renderMessage, sha256 };
+export { availableCandidates, candidateScore, greetingNameFor, handleFromXUrl, parseSearchResults, pendingApproval, renderMessage, sha256 };

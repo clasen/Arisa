@@ -1,6 +1,6 @@
 ﻿# x-dm
 
-Audits X/Twitter outreach history, validates whether a target accepts DMs, sends one explicitly approved DM at a time, and safely reads or updates the logged-in account bio through a user-provided X web session.
+Audits X/Twitter outreach history, validates whether a target accepts DMs, safely records verified follow changes, sends one explicitly approved DM at a time, reads or updates the logged-in account bio, and publishes explicitly confirmed posts through a user-provided X web session.
 
 It does not bypass login, CAPTCHAs, recipient restrictions, rate limits, or other X safeguards. Because browser automation can put an account at risk, use conservative caps and review every message before sending.
 
@@ -14,6 +14,10 @@ It does not bypass login, CAPTCHAs, recipient restrictions, rate limits, or othe
 - `resolve-uncertain`: record explicit human confirmation of one matching uncertain attempt without reopening or resending the conversation.
 - `get-bio`: read the logged-in account bio without changing it.
 - `update-bio`: replace the bio or append text with `appendText`; requires `confirm=true`, changes only the bio field, and verifies it after saving.
+- `create-post`: publish one exact post from the logged-in account; requires `confirm=true`, blocks exact duplicates, and verifies the CreateTweet receipt.
+- `relationship-status`: read the target-bound Follow/Following state without changing it.
+- `follow`: follow one profile with `confirm=true`; records whether the follow was tool-created or preexisting and verifies both the target DOM transition and a matching X receipt.
+- `unfollow`: unfollow only a tool-created follow marked for later cleanup; requires `confirm=true` and `noResponseConfirmed=true` after checking for a reply.
 - `send`: send exactly one message when both `confirm=true` and `dryRun=false` are explicit.
 
 Example dry run:
@@ -47,6 +51,8 @@ Example dry run:
 - A draft in the composer, an old matching message, global page text, an unrelated HTTP 200, or only a cleared composer can never count as delivered.
 - Otherwise the attempt is marked uncertain and retries are blocked. `verify-delivery` requires the exact unresolved attempt id and bound conversation; it never resends or manufactures a send record.
 - `EXPECTED_ACCOUNT_HANDLE` can pin the permitted sending account.
+- Tool-created follows have their own cooldown and daily cap. Preexisting follows are never eligible for tool-managed unfollow.
+- Missing follow/unfollow proof records a manual-review state and blocks automatic retries.
 - Bio updates require explicit confirmation, modify only the bio field, and reopen the editor to verify X retained the requested content.
 
 Legacy entries created before state version 2 remain visible as campaign `legacy`; they are historical send claims rather than cryptographically verified X delivery receipts.

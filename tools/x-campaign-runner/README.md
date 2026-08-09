@@ -7,7 +7,7 @@ Runs evidence-backed, profile-driven organic outreach on X while keeping `x-dm` 
 1. `discover` rotates standard queries, then creative queries when necessary. It can use authenticated X search, the registered `web-browser`, and a bounded DuckDuckGo HTML fallback. Every prospect retains its public source, query, snippet, score, and discovery time.
 2. `prepare-next` excludes all prior X DM recipients, ranks candidates, verifies that the profile exposes a real DM composer, renders deterministic copy from evidence, and persists one expiring approval. It never sends.
 3. The user reviews the exact candidate and message.
-4. `send-approved` requires the persisted `approvalId`, exact `messageHash`, unchanged profile digest, `confirm=true`, and `dryRun=false`. It calls `x-dm` exactly once.
+4. `send-approved` requires the persisted `approvalId`, exact `messageHash`, unchanged profile digest, `confirm=true`, and `dryRun=false`. When `follow.enabled` is true, it first asks `x-dm` to verify or create the target follow and persists that result before attempting the DM. A failed or uncertain follow blocks the DM.
 5. `skip` rejects the pending approval so another candidate can be prepared.
 6. `reconcile` converts a manual-review approval to sent only when verified matching `x-dm` history exists; it never sends.
 
@@ -19,7 +19,7 @@ There is no batch-send or autonomous scheduled-send action. `x-dm` independently
 <chatToolStateDir>/profiles/<profile>.json
 ```
 
-Profiles contain campaign-specific queries, creative queries, selection rules, optional evidence-backed seed prospects, templates, budgets, and approval TTL. Credentials stay in `x-dm` or other transport tools.
+Profiles contain campaign-specific queries, creative queries, selection rules, optional evidence-backed seed prospects, templates, budgets, approval TTL, `message.greetingMode`, and optional follow-before-send policy. Credentials stay in `x-dm` or other transport tools.
 
 ## Examples
 

@@ -1,6 +1,6 @@
 ﻿import test from "node:test";
 import assert from "node:assert/strict";
-import { availableCandidates, candidateScore, handleFromXUrl, parseSearchResults, pendingApproval, renderMessage, sha256 } from "../index.js";
+import { availableCandidates, candidateScore, greetingNameFor, handleFromXUrl, parseSearchResults, pendingApproval, renderMessage, sha256 } from "../index.js";
 
 test("extracts only real X profile handles", () => {
   assert.equal(handleFromXUrl("https://x.com/Good_Handle/status/123"), "Good_Handle");
@@ -62,4 +62,12 @@ test("pending approvals expire fail-closed", () => {
 test("approval hashes detect message tampering", () => {
   assert.equal(sha256("approved"), sha256("approved"));
   assert.notEqual(sha256("approved"), sha256("changed"));
+});
+
+
+test("first-name greetings preserve brand names and allow explicit overrides", () => {
+  const profile = { message: { greetingMode: "first-name" } };
+  assert.equal(greetingNameFor({ username: "JohnWolfeYT", displayName: "John Wolfe" }, profile), "John");
+  assert.equal(greetingNameFor({ username: "HandheldPlayers", displayName: "Handheld Players" }, profile), "Handheld Players");
+  assert.equal(greetingNameFor({ username: "Creator", displayName: "Public Name", greetingName: "Sam" }, profile), "Sam");
 });

@@ -11,9 +11,12 @@ import {
   duplicateGuard,
   exactBoolean,
   failureCircuitGuard,
+  followSafetyGuard,
+  isCandidateRelationshipResponse,
   messageHash,
   normalizeState,
   parseCookies,
+  requestTargetsUser,
   usernameFrom,
   withinDailyCap
 } from "../index.js";
@@ -149,4 +152,22 @@ test("bio helpers enforce length, avoid duplicate appends, and tolerate X URL no
   assert.equal(bioWithAppend("Arisa | PR for Example Studio", "PR for Example Studio"), "Arisa | PR for Example Studio");
   assert.equal(comparableBio("example.org"), comparableBio("http://example.org"));
   assert.equal(comparableBio("https://example.org"), comparableBio("http://example.org"));
+});
+
+
+test("state migration preserves follow records and follow safety caps verified changes", () => {
+  const state = normalizeState({ follows: { creator: { username: "Creator", status: "following" } }, attempts: [] });
+  assert.equal(state.version, 3);
+  assert.equal(state.follows.creator.status, "following");
+  state.attempts = Array.from({ length: 2 }, (_, index) => ({ action: "follow", outcome: "following", at: new Date().toISOString(), attemptId: String(index) }));
+  assert.match(followSafetyGuard(state, 2, 0), /Daily follow cap/);
+});
+
+test("relationship receipts must name the exact target and expected action", () => {
+  const request = { postData: () => JSON.stringify({ variables: { target_user_id: "12345" } }), method: () => "POST" };
+  assert.equal(requestTargetsUser(request, "12345"), true);
+  assert.equal(requestTargetsUser(request, "99999"), false);
+  const followResponse = { request: () => request, url: () => "https://x.com/i/api/graphql/hash/CreateFriendship" };
+  assert.equal(isCandidateRelationshipResponse(followResponse, true), true);
+  assert.equal(isCandidateRelationshipResponse(followResponse, false), false);
 });
