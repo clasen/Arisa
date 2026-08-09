@@ -84,7 +84,7 @@ async function probeService(job, expected = null) {
   if (!isProcessAlive(pid)) throw new Error("Arisa PID file does not point to a live service");
   if (expected?.pid && pid !== expected.pid) throw new Error(`Arisa PID changed during verification from ${expected.pid} to ${pid}`);
   const identity = await assertServiceIdentity(pid, job.entryFile, expected?.startTime || null);
-  const tools = await requestIpc({ socketPath: job.ipcSocketFile, timeoutMs: 5000 });
+  const tools = await requestIpc({ socketPath: job.ipcSocketFile, chatId: job.chatId, timeoutMs: 5000 });
   if (!Array.isArray(tools)) throw new Error("Arisa IPC health check returned an unexpected response");
   return identity;
 }

@@ -117,9 +117,10 @@ test("uses the explicit Arisa IPC capability envelope", async () => {
       server.once("error", reject);
       server.listen(socketPath, resolve);
     });
-    assert.deepEqual(await requestIpc({ socketPath }), []);
+    assert.deepEqual(await requestIpc({ socketPath, chatId: "123" }), []);
     assert.equal(observed.method, "tools.list");
     assert.equal(observed.toolName, "arisa-restart");
+    assert.equal(observed.chatId, "123");
     assert.equal(observed.capabilityToken, "");
   } finally {
     await new Promise((resolve) => server.close(resolve));
