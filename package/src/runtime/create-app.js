@@ -211,6 +211,10 @@ export async function createApp({ logger, runtimeOverrides } = {}) {
       try {
         await ipcServer.start();
         ipcStarted = true;
+        const recoveredTasks = await taskStore.recoverInterrupted();
+        if (recoveredTasks.length) {
+          logger?.log("tasks", `recovered ${recoveredTasks.length} interrupted task(s)`);
+        }
         await toolProcessSupervisor.start();
         supervisorStarted = true;
         logger?.log("app", "starting Telegram bot");

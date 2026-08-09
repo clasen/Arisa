@@ -59,6 +59,37 @@ test("claims only due pending tasks and marks them running", async () => {
   assert.equal((await store.get("done")).status, "done");
 });
 
+test("recovers interrupted running tasks for retry after restart", async () => {
+  await resetHome();
+  const store = new TaskStore();
+  const runAt = new Date(Date.now() - 1000).toISOString();
+
+  await store.add({ id: "interrupted-once", kind: "agent_task", runAt, status: "running" });
+  await store.add({
+    id: "interrupted-recurring",
+    kind: "poll_tool",
+    runAt,
+    status: "running",
+    recurrence: { type: "interval", everySeconds: 60 }
+  });
+  await store.add({ id: "still-pending", kind: "agent_task", runAt });
+  await store.add({ id: "already-done", kind: "agent_task", runAt, status: "done" });
+
+  const recovered = await store.recoverInterrupted();
+
+  assert.deepEqual(recovered.map((task) => task.id), ["interrupted-once", "interrupted-recurring"]);
+  assert.ok(recovered.every((task) => task.status === "pending"));
+  assert.ok(recovered.every((task) => task.runAt === runAt));
+  assert.equal((await store.get("still-pending")).status, "pending");
+  assert.equal((await store.get("already-done")).status, "done");
+
+  const restartedStore = new TaskStore();
+  assert.deepEqual(
+    (await restartedStore.claimDue()).map((task) => task.id),
+    ["interrupted-once", "interrupted-recurring", "still-pending"]
+  );
+});
+
 test("completes one-off tasks and re-schedules recurring interval tasks", async () => {
   await resetHome();
   const store = new TaskStore();

@@ -99,6 +99,22 @@ export class TaskStore {
     return due;
   }
 
+  async recoverInterrupted() {
+    await this.reload();
+    const recovered = [];
+    const updatedAt = new Date().toISOString();
+
+    for (const task of this.tasks) {
+      if (task.status !== "running") continue;
+      task.status = "pending";
+      task.updatedAt = updatedAt;
+      recovered.push({ ...task });
+    }
+
+    if (recovered.length) await this.save();
+    return recovered;
+  }
+
   async complete(taskId) {
     await this.init();
     const task = this.tasks.find((item) => item.id === taskId);
