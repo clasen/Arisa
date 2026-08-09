@@ -216,6 +216,28 @@ test("keeps a terminal daemon failure stable until it receives explicit attentio
   );
 });
 
+test("doctor repair gives a terminal daemon one explicit restart attempt", async () => {
+  const runtime = runtimeFor({ type: "global" }, { autoStart: true });
+  await writeDaemonStatus(runtime.paths, {
+    state: "failed",
+    pid: null,
+    message: "Daemon restart limit reached",
+    restartAttempts: policy.restartLimit + 1,
+    restartRequested: false
+  });
+  const supervisor = createToolProcessSupervisor({ policy });
+
+  try {
+    const results = await supervisor.repair();
+    const result = results.find((item) => item.record.toolName === "fake-daemon" && item.record.instanceId === "global");
+    assert.equal(result.outcome, "started");
+    assert.equal((await readJson(runtime.paths.statusFile, {})).restartAttempts, 0);
+    assert.equal(isProcessAlive(await runtime.getPid()), true);
+  } finally {
+    await runtime.stop().catch(() => {});
+  }
+});
+
 test("includes scoped daemon diagnostics when Arisa lists tools", async () => {
   const runtime = runtimeFor({ type: "chat", chatId: "101" }, { autoStart: false });
   await writeDaemonStatus(runtime.paths, {

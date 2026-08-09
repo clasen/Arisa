@@ -15,8 +15,19 @@ import { isPrimeRpcSessionClosedError } from "../../core/agent/prime-rpc-session
 import { formatPortableSessionHistory } from "../../core/agent/agent-manager.js";
 import { ConversationHistoryStore } from "../../core/conversation/conversation-history-store.js";
 import { activateHarness } from "../../runtime/harness-switch.js";
+import { formatDoctorReport } from "../../runtime/doctor.js";
 
 const slowPromptNoticeMs = 300_000;
+
+export const telegramCommands = Object.freeze([
+  { command: "new", description: "Start a new chat context" },
+  { command: "doctor", description: "Check and repair Arisa runtime health" },
+  { command: "harness", description: "Choose Pi Agent or Prime Agent" },
+  { command: "model", description: "Choose the model for this chat" },
+  { command: "effort", description: "Choose reasoning effort for this chat" },
+  { command: "auth", description: "Show authentication status" },
+  { command: "login", description: "Open Prime Agent login" }
+]);
 
 function quotedMessageSummary(message) {
   if (!message) return [];
@@ -389,7 +400,7 @@ export async function closeModelPicker(ctx, { messageText, callbackText }) {
   await ctx.answerCallbackQuery({ text: callbackText });
 }
 
-export async function createTelegramBot({ config, artifactStore, toolRegistry, taskStore, agentManager, saveConfig, updateConfig, prepareRuntime, logger }) {
+export async function createTelegramBot({ config, artifactStore, toolRegistry, taskStore, agentManager, saveConfig, updateConfig, prepareRuntime, doctor, logger }) {
   const bot = new Bot(config.telegram.token);
   const perChatState = createChatStateStore();
   const conversationHistory = new ConversationHistoryStore();
@@ -1074,6 +1085,19 @@ export async function createTelegramBot({ config, artifactStore, toolRegistry, t
     await handleNewCommand(ctx);
   });
 
+  bot.command("doctor", async (ctx) => {
+    const auth = await authorizeChat({ config, chatId: ctx.chat.id, saveConfig, chatMeta: getIncomingChatMeta(ctx) });
+    if (!auth.ok) return;
+    await withTyping(ctx, async () => {
+      try {
+        await ctx.reply(formatDoctorReport(await doctor()));
+      } catch (error) {
+        logger?.error("doctor", `doctor command failed: ${getErrorMessage(error)}`);
+        await ctx.reply(`Arisa Doctor failed: ${getErrorMessage(error)}`);
+      }
+    });
+  });
+
   bot.command("model", async (ctx) => {
     const auth = await authorizeChat({ config, chatId: ctx.chat.id, saveConfig, chatMeta: getIncomingChatMeta(ctx) });
     if (!auth.ok) return;
@@ -1462,14 +1486,7 @@ export async function createTelegramBot({ config, artifactStore, toolRegistry, t
   return {
     async start({ skipAgentStartupPrompts = false } = {}) {
       config.telegram.chatMeta ||= {};
-      await bot.api.setMyCommands([
-        { command: "new", description: "Start a new chat context" },
-        { command: "harness", description: "Choose Pi Agent or Prime Agent" },
-        { command: "model", description: "Choose the model for this chat" },
-        { command: "effort", description: "Choose reasoning effort for this chat" },
-        { command: "auth", description: "Show authentication status" },
-        { command: "login", description: "Open Prime Agent login" }
-      ]);
+      await bot.api.setMyCommands(telegramCommands);
       if (!taskTimer) {
         taskTimer = setInterval(() => {
           dispatchDueTasks().catch((error) => {

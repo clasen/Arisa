@@ -1,6 +1,11 @@
 import { access } from "node:fs/promises";
 import { superviseDaemon } from "../core/tools/daemon-health.js";
-import { listRegisteredDaemons, readDaemonDiagnostic } from "../core/tools/daemon-processes.js";
+import {
+  daemonPaths,
+  listRegisteredDaemons,
+  readDaemonDiagnostic,
+  writeDaemonStatus
+} from "../core/tools/daemon-processes.js";
 import { loadDaemonPolicy } from "../core/tools/daemon-policy.js";
 import { ensureArisaHome } from "./paths.js";
 
@@ -45,38 +50,65 @@ export function createToolProcessSupervisor({ logger, policy } = {}) {
     logger?.error?.("tools", `daemon supervisor loop failed: ${error?.message || error}`);
   }
 
-  async function reconcileDaemons() {
+  async function reconcileDaemons({ repairFailed = false } = {}) {
     await ensureArisaHome();
+    const results = [];
     for (const record of await listRegisteredDaemons()) {
       if (!(await fileExists(record.entryPath))) {
         logger?.log("tools", `skipping daemon ${record.toolName}: missing entry ${record.entryPath}`);
+        results.push({ record, outcome: "missing-entry", diagnostic: await readDaemonDiagnostic(record) });
         continue;
       }
       try {
+        const current = await readDaemonDiagnostic(record);
+        if (repairFailed && current.state === "failed") {
+          await writeDaemonStatus(daemonPaths(record), {
+            state: "restarting",
+            pid: null,
+            heartbeatAt: null,
+            restartAttempts: 0,
+            restartRequested: true,
+            nextRestartAt: null,
+            message: "Manual repair requested by /doctor"
+          });
+        }
         const outcome = await superviseDaemon(record, daemonPolicy);
         const key = `${record.toolName}:${record.instanceId || "global"}`;
         if (outcome === "healthy") {
           reportedDiagnostics.delete(key);
+          results.push({ record, outcome, diagnostic: await readDaemonDiagnostic(record) });
           continue;
         }
         const diagnostic = await readDaemonDiagnostic(record);
+        results.push({ record, outcome, diagnostic });
         const message = formatDaemonOutcome(record, outcome, diagnostic, daemonPolicy);
         if (reportedDiagnostics.get(key) === message) continue;
         reportedDiagnostics.set(key, message);
         logger?.log("tools", message);
       } catch (error) {
         logger?.error?.("tools", `daemon supervision failed for ${record.toolName}: ${error?.message || error}`);
+        results.push({ record, outcome: "error", error: error?.message || String(error) });
       }
+    }
+    return results;
+  }
+
+  async function runReconciliation(options) {
+    while (reconciliation) await reconciliation.catch(() => {});
+    const current = reconcileDaemons(options);
+    reconciliation = current;
+    try {
+      return await current;
+    } finally {
+      if (reconciliation === current) reconciliation = null;
     }
   }
 
   async function runLoop() {
-    if (!running || reconciliation) return;
-    reconciliation = reconcileDaemons();
+    if (!running) return;
     try {
-      await reconciliation;
+      await runReconciliation();
     } finally {
-      reconciliation = null;
       if (running) {
         timer = setTimeout(() => {
           runLoop().catch(reportLoopError);
@@ -99,6 +131,11 @@ export function createToolProcessSupervisor({ logger, policy } = {}) {
       clearTimeout(timer);
       timer = null;
       await reconciliation?.catch(() => {});
+    },
+
+    async repair() {
+      daemonPolicy ||= await loadDaemonPolicy();
+      return runReconciliation({ repairFailed: true });
     }
   };
 }

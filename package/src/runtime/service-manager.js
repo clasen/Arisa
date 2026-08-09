@@ -4,7 +4,7 @@ import process from "node:process";
 import { fileURLToPath } from "node:url";
 import { ensureArisaHome, serviceLogFile, servicePidFile } from "./paths.js";
 
-const entryFile = fileURLToPath(new URL("../index.js", import.meta.url));
+export const serviceEntryFile = fileURLToPath(new URL("../index.js", import.meta.url));
 
 function isProcessRunning(pid) {
   try {
@@ -44,7 +44,7 @@ export async function startService({ verbose = true, cliArgs = [] } = {}) {
   }
 
   const logHandle = await open(serviceLogFile, "a");
-  const args = [entryFile, "--service-runner", ...cliArgs];
+  const args = [serviceEntryFile, "--service-runner", ...cliArgs];
   if (!verbose) args.push("--silent");
 
   const child = spawn(process.execPath, args, {

@@ -359,6 +359,20 @@ export class AgentManager {
     this.closeCachedSession(String(chatId));
   }
 
+  getRuntimeDiagnostic() {
+    const managedProcessIds = [...this.sessions.values()]
+      .map((context) => context?.session?.child)
+      .filter((child) => child?.pid && child.exitCode == null && child.signalCode == null)
+      .map((child) => child.pid);
+    return {
+      runtime: this.config.agent?.runtime,
+      sessions: this.sessions.size,
+      startingSessions: this.pendingPrimeSessions.size,
+      closingSessions: this.sessionClosePromises.size,
+      managedProcessIds
+    };
+  }
+
   createSessionManager(chatId, workspaceDir = arisaInstallDir, sessionRevision = 0) {
     const sessionKey = String(chatId);
     const sessionDir = getChatPiSessionsDir(sessionKey, sessionRevision);

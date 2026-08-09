@@ -10,6 +10,7 @@ import { createArisaCapabilities } from "./arisa-capabilities.js";
 import { createIpcServer } from "./ipc/ipc-server.js";
 import { getAgentConfig } from "../core/agent/model-selection.js";
 import { resolvePrimeAgentRuntime } from "./prime-agent-installer.js";
+import { runDoctor } from "./doctor.js";
 
 function normalizeString(value) {
   const text = String(value ?? "").trim();
@@ -181,6 +182,12 @@ export async function createApp({ logger, runtimeOverrides } = {}) {
     saveConfig,
     updateConfig,
     prepareRuntime: (candidate) => prepareAgentRuntime(candidate, { logger }),
+    doctor: () => runDoctor({
+      agentManager,
+      toolProcessSupervisor,
+      daemonPolicy: config.daemons,
+      logger
+    }),
     logger
   });
 

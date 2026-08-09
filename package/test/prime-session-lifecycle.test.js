@@ -134,3 +134,23 @@ test("disposes a cached Pi session during a runtime switch", async () => {
 
   assert.equal(disposeCount, 1);
 });
+
+test("reports only live Prime child processes as managed", () => {
+  const manager = createManager();
+  manager.sessions.set("active", {
+    session: { child: { pid: 101, exitCode: null, signalCode: null } }
+  });
+  manager.sessions.set("closed", {
+    session: { child: { pid: 202, exitCode: 0, signalCode: null } }
+  });
+  manager.pendingPrimeSessions.set("starting", { promise: new Promise(() => {}) });
+  manager.sessionClosePromises.set("closing", new Promise(() => {}));
+
+  assert.deepEqual(manager.getRuntimeDiagnostic(), {
+    runtime: "prime",
+    sessions: 2,
+    startingSessions: 1,
+    closingSessions: 1,
+    managedProcessIds: [101]
+  });
+});
