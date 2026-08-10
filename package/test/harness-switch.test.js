@@ -4,7 +4,7 @@ import os from "node:os";
 import path from "node:path";
 import test from "node:test";
 import { formatPortableSessionHistory } from "../src/core/agent/agent-manager.js";
-import { agentConfigDefaults, applyConfigDefaults, doctorConfigDefaults } from "../src/core/config/config-defaults.js";
+import { agentConfigDefaults, applyConfigDefaults, doctorConfigDefaults, serviceConfigDefaults } from "../src/core/config/config-defaults.js";
 import { ConversationHistoryStore, formatPortableConversation } from "../src/core/conversation/conversation-history-store.js";
 import { buildConfig } from "../src/runtime/bootstrap.js";
 import { activateHarness } from "../src/runtime/harness-switch.js";
@@ -16,6 +16,7 @@ test("uses Pi as the authoritative default for new installations", () => {
   assert.equal(agentConfigDefaults.runtime, "pi");
   assert.equal(applyConfigDefaults({ telegram: {}, pi: {} }).agent.runtime, "pi");
   assert.deepEqual(applyConfigDefaults({ telegram: {}, pi: {} }).doctor, doctorConfigDefaults);
+  assert.deepEqual(applyConfigDefaults({ telegram: {}, pi: {} }).service, serviceConfigDefaults);
   assert.equal(buildConfig({
     telegramApiKey: "telegram-token",
     telegramMaxChatIds: 1,

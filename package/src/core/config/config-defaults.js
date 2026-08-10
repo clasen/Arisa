@@ -33,6 +33,11 @@ export const cliLogConfig = Object.freeze({
   followPollIntervalMs: 250
 });
 
+export const serviceConfigDefaults = Object.freeze({
+  shutdownTimeoutMs: 15_000,
+  shutdownPollIntervalMs: 100
+});
+
 export const agentConfigDefaults = Object.freeze({
   runtime: "pi"
 });
@@ -85,6 +90,10 @@ export function applyConfigDefaults(config) {
     doctor: {
       ...doctorConfigDefaults,
       ...(config.doctor || {})
+    },
+    service: {
+      ...serviceConfigDefaults,
+      ...(config.service || {})
     },
     pi: {
       ...piConfigDefaults,

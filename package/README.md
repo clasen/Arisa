@@ -170,6 +170,7 @@ Command modes:
 arisa                    # foreground, blocking
 arisa start              # start in background
 arisa stop               # stop background service
+arisa restart            # restart background service, or start it if stopped
 arisa status             # show background service status
 arisa flush              # remove ~/.arisa
 arisa --silent           # run without verbose logs

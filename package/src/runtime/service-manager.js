@@ -10,8 +10,18 @@ function isProcessRunning(pid) {
   try {
     process.kill(pid, 0);
     return true;
-  } catch {
-    return false;
+  } catch (error) {
+    return error?.code !== "ESRCH";
+  }
+}
+
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function requirePositiveTiming(value, name) {
+  if (!Number.isFinite(value) || value <= 0) {
+    throw new Error(`Service restart requires a positive ${name}`);
   }
 }
 
@@ -19,7 +29,7 @@ async function readPid() {
   try {
     const raw = await readFile(servicePidFile, "utf8");
     const pid = Number.parseInt(raw.trim(), 10);
-    return Number.isFinite(pid) ? pid : null;
+    return Number.isSafeInteger(pid) && pid > 0 ? pid : null;
   } catch {
     return null;
   }
@@ -66,12 +76,70 @@ export async function stopService() {
 
   try {
     process.kill(status.pid, "SIGTERM");
-  } catch {
-    await rm(servicePidFile, { force: true }).catch(() => {});
-    return { ok: false, reason: "not-running", pid: status.pid };
+  } catch (error) {
+    if (error?.code === "ESRCH") {
+      await rm(servicePidFile, { force: true }).catch(() => {});
+      return { ok: false, reason: "not-running", pid: status.pid };
+    }
+    throw error;
   }
 
   return { ok: true, pid: status.pid };
+}
+
+export async function waitForServiceStop({
+  pid,
+  timeoutMs,
+  pollIntervalMs,
+  getStatus = getServiceStatus,
+  wait = sleep
+}) {
+  requirePositiveTiming(timeoutMs, "shutdownTimeoutMs");
+  requirePositiveTiming(pollIntervalMs, "shutdownPollIntervalMs");
+
+  const startedAt = Date.now();
+  while (Date.now() - startedAt < timeoutMs) {
+    const status = await getStatus();
+    if (!status.running || status.pid !== pid) return;
+    await wait(pollIntervalMs);
+  }
+
+  throw new Error(`Arisa process ${pid} did not stop within ${timeoutMs}ms`);
+}
+
+export async function restartService({
+  verbose = true,
+  cliArgs = [],
+  shutdownTimeoutMs,
+  shutdownPollIntervalMs
+} = {}, {
+  stop = stopService,
+  getStatus = getServiceStatus,
+  start = startService,
+  sleep: wait = sleep
+} = {}) {
+  requirePositiveTiming(shutdownTimeoutMs, "shutdownTimeoutMs");
+  requirePositiveTiming(shutdownPollIntervalMs, "shutdownPollIntervalMs");
+
+  const stopped = await stop();
+  if (!stopped.ok && stopped.reason !== "not-running") return stopped;
+
+  if (stopped.ok) {
+    await waitForServiceStop({
+      pid: stopped.pid,
+      timeoutMs: shutdownTimeoutMs,
+      pollIntervalMs: shutdownPollIntervalMs,
+      getStatus,
+      wait
+    });
+  }
+
+  const started = await start({ verbose, cliArgs });
+  return {
+    ...started,
+    previousPid: stopped.ok ? stopped.pid : null,
+    wasRunning: stopped.ok
+  };
 }
 
 export async function unregisterServiceProcess() {

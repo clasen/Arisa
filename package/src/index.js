@@ -4,7 +4,7 @@ import { bootstrapIfNeeded } from "./runtime/bootstrap.js";
 import { applyRuntimeOverrides, createApp, prepareAgentRuntime } from "./runtime/create-app.js";
 import { loadConfig } from "./core/config/config-store.js";
 import { createLogger } from "./runtime/logger.js";
-import { getServiceStatus, registerServiceProcess, startService, stopService, unregisterServiceProcess } from "./runtime/service-manager.js";
+import { getServiceStatus, registerServiceProcess, restartService, startService, stopService, unregisterServiceProcess } from "./runtime/service-manager.js";
 import { flushArisaHome } from "./runtime/flush.js";
 import { readPackageVersion, showServiceLogs } from "./runtime/log-viewer.js";
 import { arisaPackageDir } from "./runtime/paths.js";
@@ -139,6 +139,31 @@ async function startBackgroundService() {
   return result;
 }
 
+async function restartBackgroundService() {
+  const persistedConfig = await loadConfig();
+  await prepareAgentRuntime(applyRuntimeOverrides(persistedConfig, runtimeOverrides), { logger });
+  const result = await restartService({
+    verbose,
+    cliArgs: toServiceRunnerArgs(cli.nestedFlags),
+    shutdownTimeoutMs: persistedConfig.service.shutdownTimeoutMs,
+    shutdownPollIntervalMs: persistedConfig.service.shutdownPollIntervalMs
+  });
+  if (!result.ok) {
+    if (result.reason === "already-running") {
+      console.log(`Arisa could not be restarted because another instance is running (pid ${result.pid}).`);
+      return result;
+    }
+    throw new Error(`Arisa could not be restarted: ${result.reason || "unknown service error"}`);
+  }
+  if (result.wasRunning) {
+    console.log(`Arisa restarted in background (pid ${result.pid}; previous pid ${result.previousPid}).`);
+  } else {
+    console.log(`Arisa started in background (pid ${result.pid}); it was not running.`);
+  }
+  console.log(`Log file: ${result.logFile}`);
+  return result;
+}
+
 async function runForeground() {
   const hasRuntimePiOverrides = Boolean(
     runtimeOverrides?.prime?.model
@@ -212,6 +237,16 @@ async function main() {
       return;
     }
     console.log(`Arisa stopped (pid ${result.pid}).`);
+    return;
+  }
+
+  if (command === "restart") {
+    const bootstrapResult = await bootstrapIfNeeded({ force: forceBootstrap });
+    if (bootstrapResult.configCreated && bootstrapResult.viaTelegram && !bootstrapResult.startInBackground) {
+      console.log("Config saved. Arisa was not started in background.");
+      return;
+    }
+    await restartBackgroundService();
     return;
   }
 
