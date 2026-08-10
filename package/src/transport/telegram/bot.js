@@ -21,6 +21,7 @@ const slowPromptNoticeMs = 300_000;
 
 export const telegramCommands = Object.freeze([
   { command: "new", description: "Start a new chat context" },
+  { command: "restart", description: "Restart the Arisa service" },
   { command: "doctor", description: "Check and repair Arisa runtime health" },
   { command: "harness", description: "Choose Pi Agent or Prime Agent" },
   { command: "model", description: "Choose the model for this chat" },
@@ -28,6 +29,34 @@ export const telegramCommands = Object.freeze([
   { command: "auth", description: "Show authentication status" },
   { command: "login", description: "Open Prime Agent login" }
 ]);
+
+export function createTelegramRestartHandler({ authorize, requestRestart, logger }) {
+  if (typeof authorize !== "function" || typeof requestRestart !== "function") {
+    throw new Error("Telegram restart requires authorization and restart handoff functions");
+  }
+
+  let restartRequested = false;
+  return async (ctx) => {
+    const auth = await authorize(ctx);
+    if (!auth.ok) return;
+
+    if (restartRequested) {
+      await ctx.reply("An Arisa restart is already in progress.");
+      return;
+    }
+
+    restartRequested = true;
+    try {
+      await ctx.reply("Arisa is restarting. I'll be back shortly.");
+      const handoff = await requestRestart();
+      logger?.log("telegram", `restart handed off to process ${handoff.pid}`);
+    } catch (error) {
+      restartRequested = false;
+      logger?.error("telegram", `restart handoff failed: ${getErrorMessage(error)}`);
+      await ctx.reply(`Arisa could not be restarted: ${getErrorMessage(error)}`);
+    }
+  };
+}
 
 function quotedMessageSummary(message) {
   if (!message) return [];
@@ -420,7 +449,7 @@ export async function closeModelPicker(ctx, { messageText, callbackText }) {
   await ctx.answerCallbackQuery({ text: callbackText });
 }
 
-export async function createTelegramBot({ config, artifactStore, toolRegistry, taskStore, agentManager, saveConfig, updateConfig, prepareRuntime, traceHarnessTransition, doctor, logger }) {
+export async function createTelegramBot({ config, artifactStore, toolRegistry, taskStore, agentManager, saveConfig, updateConfig, prepareRuntime, traceHarnessTransition, doctor, requestRestart, logger }) {
   const bot = new Bot(config.telegram.token);
   const perChatState = createChatStateStore();
   const conversationHistory = new ConversationHistoryStore();
@@ -430,6 +459,17 @@ export async function createTelegramBot({ config, artifactStore, toolRegistry, t
   let piAuthIssue = null;
   let taskTimer = null;
   let harnessSwitchGate = null;
+
+  const handleRestartCommand = createTelegramRestartHandler({
+    authorize: (ctx) => authorizeChat({
+      config,
+      chatId: ctx.chat.id,
+      saveConfig,
+      chatMeta: getIncomingChatMeta(ctx)
+    }),
+    requestRestart,
+    logger
+  });
 
   function chatKey(chatId) {
     return String(chatId);
@@ -1134,6 +1174,8 @@ export async function createTelegramBot({ config, artifactStore, toolRegistry, t
     }
     await handleNewCommand(ctx);
   });
+
+  bot.command("restart", handleRestartCommand);
 
   bot.command("doctor", async (ctx) => {
     const auth = await authorizeChat({ config, chatId: ctx.chat.id, saveConfig, chatMeta: getIncomingChatMeta(ctx) });

@@ -10,6 +10,7 @@ Arisa core owns transport, sessions, artifacts, and tool orchestration:
 - No tools ship with the core; installed tools live under `~/.arisa/tools/<toolName>`.
 - The Arisa install directory (your working directory) contains only the core. Never create or install tools inside it.
 - The pinned Prime runtime is installed and checksum-verified by Arisa under `~/.arisa/runtimes/prime-agent/<version>`; it is separate from mutable Prime state.
+- Restart requests use `system_shell` to run `arisa restart`; do not install or create a restart tool.
 
 New capabilities belong in tools by default. Solve requests by creating or editing a tool under `~/.arisa/tools/<toolName>`. Modifying core is the last resort: do it only after confirming the capability cannot be delivered through the tool architecture, explaining why the core change is unavoidable, and receiving explicit user approval.
 

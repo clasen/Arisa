@@ -6,7 +6,6 @@ This is the official Arisa tool catalog. Each subdirectory is a self-contained t
 
 | Tool | Function | Input | Output | Requires | Install footprint |
 |------|----------|-------|--------|----------|-------------------|
-| [`arisa-restart`](./arisa-restart/) | Safely restarts the active Arisa service through an independent detached supervisor with PID and IPC verification | `text/plain`, `application/json` | `application/json`, `text/plain` | Linux `/proc` + background Arisa service | Low — 0 npm deps |
 | [`audio-extractor`](./audio-extractor/) | Extracts and normalizes audio from video or audio media via ffmpeg | audio + video | `audio/wav`, `audio/mpeg` | ffmpeg + ffprobe | Medium — 0 npm deps + external binaries |
 | [`campaign-draft-runner`](./campaign-draft-runner/) | Discovers and verifies public editorial contacts, filters prior recipients, researches coverage, and creates profile-driven Gmail drafts without sending | `text/plain`, `application/json` | `application/json`, `text/plain` | `pr-campaign`, `gmail-workspace`, and optionally `web-browser` | Medium — 0 npm deps + Gmail setup |
 | [`context-vault`](./context-vault/) | Stores, searches, updates, and forgets chat-scoped user context and preferences | `text/plain`, `application/json` | `text/plain`, `application/json` | - | Low — 1 npm dep |

@@ -151,7 +151,10 @@ export async function prepareAgentRuntime(config, { logger, resolvePrimeImpl = r
   };
 }
 
-export async function createApp({ logger, runtimeOverrides } = {}) {
+export async function createApp({ logger, runtimeOverrides, requestRestart } = {}) {
+  if (typeof requestRestart !== "function") {
+    throw new Error("createApp requires a service restart handoff");
+  }
   logger?.log("app", "loading config");
   const persistedConfig = await loadConfig();
   const overriddenConfig = applyRuntimeOverrides(persistedConfig, runtimeOverrides);
@@ -201,6 +204,7 @@ export async function createApp({ logger, runtimeOverrides } = {}) {
       }),
       logger
     }),
+    requestRestart,
     logger
   });
 

@@ -1,6 +1,133 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { restartService, waitForServiceStop } from "../src/runtime/service-manager.js";
+import { createTelegramRestartHandler, telegramCommands } from "../src/transport/telegram/bot.js";
+import { handoffServiceRestart, restartService, serviceEntryFile, waitForServiceStop } from "../src/runtime/service-manager.js";
+
+test("registers /restart as a native Telegram command", () => {
+  assert.equal(
+    telegramCommands.some((command) => command.command === "restart"),
+    true
+  );
+});
+
+test("replies before handing restart to a detached CLI process", async () => {
+  const calls = [];
+  let unreferenced = false;
+  let logClosed = false;
+  const environment = { ARISA_TEST: "restart" };
+
+  const result = await handoffServiceRestart({
+    verbose: false,
+    cliArgs: ["--agent.runtime", "prime"]
+  }, {
+    ensureHome: async () => { calls.push("ensure-home"); },
+    getStatus: async () => {
+      calls.push("get-status");
+      return { running: true, pid: 41 };
+    },
+    openLog: async (file, mode) => {
+      calls.push(["open-log", file, mode]);
+      return {
+        fd: 17,
+        close: async () => { logClosed = true; }
+      };
+    },
+    spawnProcess: (command, args, options) => {
+      calls.push(["spawn", command, args, options]);
+      return {
+        pid: 84,
+        unref: () => { unreferenced = true; }
+      };
+    },
+    environment,
+    currentPid: 41
+  });
+
+  assert.equal(calls[0], "ensure-home");
+  assert.equal(calls[1], "get-status");
+  assert.equal(calls[2][0], "open-log");
+  assert.equal(calls[2][2], "a");
+  assert.equal(calls[3][0], "spawn");
+  assert.equal(calls[3][1], process.execPath);
+  assert.deepEqual(calls[3][2], [
+    serviceEntryFile,
+    "restart",
+    "--agent.runtime",
+    "prime",
+    "--silent"
+  ]);
+  assert.deepEqual(calls[3][3], {
+    detached: true,
+    stdio: ["ignore", 17, 17],
+    env: environment
+  });
+  assert.equal(unreferenced, true);
+  assert.equal(logClosed, true);
+  assert.equal(result.pid, 84);
+
+  const handlerCalls = [];
+  const handler = createTelegramRestartHandler({
+    authorize: async () => ({ ok: true }),
+    requestRestart: async () => {
+      handlerCalls.push("handoff");
+      return result;
+    }
+  });
+  const ctx = {
+    reply: async (text) => { handlerCalls.push(["reply", text]); }
+  };
+
+  await handler(ctx);
+  await handler(ctx);
+
+  assert.deepEqual(handlerCalls, [
+    ["reply", "Arisa is restarting. I'll be back shortly."],
+    "handoff",
+    ["reply", "An Arisa restart is already in progress."]
+  ]);
+});
+
+test("refuses Telegram restart handoff outside the active background service", async () => {
+  let spawned = false;
+
+  await assert.rejects(
+    handoffServiceRestart({}, {
+      ensureHome: async () => {},
+      getStatus: async () => ({ running: true, pid: 99 }),
+      spawnProcess: () => {
+        spawned = true;
+      },
+      currentPid: 41
+    }),
+    /requires the active background service process/
+  );
+
+  assert.equal(spawned, false);
+});
+
+test("reports a failed Telegram restart handoff and permits retry", async () => {
+  const replies = [];
+  let attempts = 0;
+  const handler = createTelegramRestartHandler({
+    authorize: async () => ({ ok: true }),
+    requestRestart: async () => {
+      attempts += 1;
+      if (attempts === 1) throw new Error("synthetic handoff failure");
+      return { pid: 84 };
+    }
+  });
+  const ctx = { reply: async (text) => { replies.push(text); } };
+
+  await handler(ctx);
+  await handler(ctx);
+
+  assert.equal(attempts, 2);
+  assert.deepEqual(replies, [
+    "Arisa is restarting. I'll be back shortly.",
+    "Arisa could not be restarted: synthetic handoff failure",
+    "Arisa is restarting. I'll be back shortly."
+  ]);
+});
 
 test("waits until the stopped service releases its PID before restarting", async () => {
   const calls = [];

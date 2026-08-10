@@ -68,6 +68,36 @@ export async function startService({ verbose = true, cliArgs = [] } = {}) {
   return { ok: true, pid: child.pid, logFile: serviceLogFile };
 }
 
+export async function handoffServiceRestart({ verbose = true, cliArgs = [] } = {}, {
+  ensureHome = ensureArisaHome,
+  getStatus = getServiceStatus,
+  openLog = open,
+  spawnProcess = spawn,
+  environment = process.env,
+  currentPid = process.pid
+} = {}) {
+  await ensureHome();
+  const status = await getStatus();
+  if (!status.running || status.pid !== currentPid) {
+    throw new Error("Service restart handoff requires the active background service process");
+  }
+  const logHandle = await openLog(serviceLogFile, "a");
+  const args = [serviceEntryFile, "restart", ...cliArgs];
+  if (!verbose) args.push("--silent");
+
+  try {
+    const child = spawnProcess(process.execPath, args, {
+      detached: true,
+      stdio: ["ignore", logHandle.fd, logHandle.fd],
+      env: environment
+    });
+    child.unref();
+    return { ok: true, pid: child.pid, logFile: serviceLogFile };
+  } finally {
+    await logHandle.close();
+  }
+}
+
 export async function stopService() {
   const status = await getServiceStatus();
   if (!status.running) {

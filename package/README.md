@@ -176,6 +176,8 @@ arisa flush              # remove ~/.arisa
 arisa --silent           # run without verbose logs
 ```
 
+Authorized Telegram chats can run the same safe service lifecycle with `/restart`.
+
 Runtime model override (current process only):
 
 ```bash

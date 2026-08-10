@@ -4,7 +4,7 @@ import { bootstrapIfNeeded } from "./runtime/bootstrap.js";
 import { applyRuntimeOverrides, createApp, prepareAgentRuntime } from "./runtime/create-app.js";
 import { loadConfig } from "./core/config/config-store.js";
 import { createLogger } from "./runtime/logger.js";
-import { getServiceStatus, registerServiceProcess, restartService, startService, stopService, unregisterServiceProcess } from "./runtime/service-manager.js";
+import { getServiceStatus, handoffServiceRestart, registerServiceProcess, restartService, startService, stopService, unregisterServiceProcess } from "./runtime/service-manager.js";
 import { flushArisaHome } from "./runtime/flush.js";
 import { readPackageVersion, showServiceLogs } from "./runtime/log-viewer.js";
 import { arisaPackageDir } from "./runtime/paths.js";
@@ -121,7 +121,14 @@ process.once("SIGINT", () => {
 });
 
 async function startRuntimeApp() {
-  const app = await createApp({ logger, runtimeOverrides });
+  const app = await createApp({
+    logger,
+    runtimeOverrides,
+    requestRestart: () => handoffServiceRestart({
+      verbose,
+      cliArgs: toServiceRunnerArgs(cli.nestedFlags)
+    })
+  });
   activeApp = app;
   await app.start();
 }
