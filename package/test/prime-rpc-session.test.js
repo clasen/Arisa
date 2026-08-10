@@ -339,6 +339,29 @@ test("keeps a prompt pending while Prime automatically retries", async () => {
   await session.close();
 });
 
+test("marks a Prime prompt active before session startup can yield", async () => {
+  const fake = rpcSpawner();
+  const session = new PrimeRpcSession({
+    provider: "test",
+    model: "model",
+    cwd: process.cwd(),
+    agentDir: process.cwd(),
+    sessionDir: process.cwd(),
+    daemonSocketPath,
+    supervisorRegistryDir,
+    chatId: "42",
+    noSession: true,
+    spawnImpl: fake.spawnImpl
+  });
+
+  const prompting = session.prompt("hello");
+  assert.equal(session.hasActiveWork(), true);
+
+  await prompting;
+  assert.equal(session.hasActiveWork(), false);
+  await session.close();
+});
+
 test("does not dispatch a prompt while Prime still owns a session action", async () => {
   const fake = rpcSpawner();
   const session = new PrimeRpcSession({

@@ -377,6 +377,10 @@ export class AgentManager {
     const idleMinutes = Number(this.config.prime?.idleMinutes || 90);
     const timer = setTimeout(() => {
       if (this.sessions.get(key)?.session !== session) return;
+      if (session.hasActiveWork()) {
+        this.schedulePrimeIdleClose(key, session);
+        return;
+      }
       this.logger?.log("agent", `closing idle Prime RPC session for chat ${key}`);
       this.closeCachedSession(key);
     }, Math.max(idleMinutes, 1) * 60_000);

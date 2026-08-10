@@ -282,6 +282,10 @@ export class PrimeRpcSession {
     for (const listener of this.listeners) listener(event);
   }
 
+  hasActiveWork() {
+    return this.promptInProgress || this.pending.size > 0 || this.settlementWaiters.size > 0;
+  }
+
   buildArgs(shouldContinue) {
     const args = [
       "--daemon-socket", this.daemonSocketPath,
@@ -533,12 +537,12 @@ export class PrimeRpcSession {
   }
 
   async prompt(message) {
-    await this.start();
     if (this.promptInProgress) throw new Error("Prime RPC prompt already in progress");
     this.promptInProgress = true;
     const deadline = Date.now() + this.promptTimeoutMs;
     const completion = {};
     try {
+      await this.start();
       await this.waitForSessionSettlement(deadline);
       this.promptCompletion = completion;
       await this.request("prompt", { message, streamingBehavior: "followUp" });

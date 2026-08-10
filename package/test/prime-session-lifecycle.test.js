@@ -67,6 +67,34 @@ test("waits for a cached Prime session to close before reopening", async () => {
   assert.equal(waitFinished, true);
 });
 
+test("does not close a busy Prime session when its idle timer expires", async (t) => {
+  t.mock.timers.enable({ apis: ["setTimeout"] });
+  const manager = createManager();
+  manager.config.prime.idleMinutes = 1;
+  let busy = true;
+  let closeCount = 0;
+  const session = {
+    hasActiveWork: () => busy,
+    close: async () => { closeCount += 1; }
+  };
+  manager.sessions.set("42", { session });
+
+  manager.schedulePrimeIdleClose("42", session);
+  t.mock.timers.tick(60_000);
+  await Promise.resolve();
+
+  assert.equal(closeCount, 0);
+  assert.equal(manager.sessions.has("42"), true);
+
+  busy = false;
+  t.mock.timers.tick(60_000);
+  await Promise.resolve();
+  await Promise.resolve();
+
+  assert.equal(closeCount, 1);
+  assert.equal(manager.sessions.has("42"), false);
+});
+
 test("discards a Prime session that finishes starting after /new", async () => {
   const manager = createManager();
   let releaseCreation;
