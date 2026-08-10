@@ -10,6 +10,7 @@ import { withTimeout } from "./prompt-timeout.js";
 import { buildPiToolPolicy, getCoreCodingTools } from "./core-tools.js";
 import { createSystemShellTool } from "./system-shell-tool.js";
 import { clampModelThinkingLevel } from "./pi-runtime.js";
+import { speedToServiceTier } from "./model-speed.js";
 import { PrimeRpcSession, PrimeRpcSessionClosedError } from "./prime-rpc-session.js";
 import { syncPrimeAuth } from "./prime-auth.js";
 import {
@@ -521,6 +522,7 @@ export class AgentManager {
       provider: prime.provider,
       model: prime.model,
       thinkingLevel: prime.thinkingLevel,
+      serviceTier: speedToServiceTier(prime.speed),
       cwd: workspaceDir,
       agentDir: primeStateDir,
       sessionDir: primeStateDir,
@@ -633,6 +635,10 @@ export class AgentManager {
       if (existing.session.thinkingLevel !== modelSelection.thinkingLevel) {
         await existing.session.setThinkingLevel(modelSelection.thinkingLevel);
       }
+      const serviceTier = speedToServiceTier(modelSelection.speed);
+      if (existing.session.serviceTier !== serviceTier) {
+        await existing.session.setServiceTier(serviceTier);
+      }
       this.schedulePrimeIdleClose(sessionKey, existing.session);
       return existing;
     }
@@ -687,6 +693,7 @@ export class AgentManager {
       provider: modelSelection.provider,
       model: modelSelection.model,
       thinkingLevel: modelSelection.thinkingLevel,
+      serviceTier: speedToServiceTier(modelSelection.speed),
       cwd: workspaceDir,
       agentDir: primeStateDir,
       sessionDir,
@@ -841,6 +848,13 @@ export class AgentManager {
     const { session } = await this.getPrimeSessionContext(chatId);
     await session.setThinkingLevel(thinkingLevel);
     return thinkingLevel;
+  }
+
+  async setPrimeSpeed(chatId, speed) {
+    if (!this.isPrimeRuntime()) return speed;
+    const { session } = await this.getPrimeSessionContext(chatId);
+    await session.setServiceTier(speedToServiceTier(speed));
+    return speed;
   }
 
   async close() {

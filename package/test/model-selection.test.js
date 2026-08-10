@@ -4,22 +4,27 @@ import test from "node:test";
 import {
   resolveChatModel,
   resolveChatModelSelection,
+  resolveChatSpeed,
   resolveChatThinkingLevel,
   selectChatModel,
+  selectChatSpeed,
   selectChatThinkingLevel
 } from "../src/core/agent/model-selection.js";
-import { applyConfigDefaults, piConfigDefaults, telegramConfigDefaults } from "../src/core/config/config-defaults.js";
+import { applyConfigDefaults, piConfigDefaults, primeConfigDefaults, telegramConfigDefaults } from "../src/core/config/config-defaults.js";
 import {
   clampModelThinkingLevel,
   listModelThinkingLevels,
   modelSupportsThinking
 } from "../src/core/agent/pi-runtime.js";
+import { clampModelSpeed, modelSupportsSpeed, normalizeModelSpeed, speedToServiceTier } from "../src/core/agent/model-speed.js";
 import { getChatPiSessionsDir, getChatPrimeSessionsDir } from "../src/runtime/paths.js";
 import {
   buildEffortPicker,
   buildModelPicker,
+  buildSpeedPicker,
   parseEffortPickerAction,
   parseModelPickerAction,
+  parseSpeedPickerAction,
   reverseModelOrder
 } from "../src/transport/telegram/model-picker.js";
 import { closeModelPicker } from "../src/transport/telegram/bot.js";
@@ -81,6 +86,7 @@ test("uses isolated Prime selections and session revisions", () => {
   assert.equal(config.prime.chatModels["123"].sessionRevision, 3);
   assert.equal(config.pi.chatModels["123"].model, "pi-chat");
   assert.equal(getChatPrimeSessionsDir(123, 3), path.join(path.dirname(getChatPrimeSessionsDir(123)), "3"));
+  assert.equal(resolveChatSpeed(config, 123), 1);
 });
 
 test("updates effort without bumping the session revision", () => {
@@ -95,6 +101,21 @@ test("updates effort without bumping the session revision", () => {
     thinkingLevel: "high",
     sessionRevision: 1
   });
+});
+
+test("updates Prime speed without bumping the session revision", () => {
+  const config = applyConfigDefaults({
+    agent: { runtime: "prime" },
+    telegram: {},
+    pi: { provider: "openai-codex", model: "gpt-5.6-sol" }
+  });
+
+  selectChatModel(config, 123, { provider: "openai-codex", id: "gpt-5.6-sol" }, { thinkingLevel: "high" });
+  selectChatSpeed(config, 123, 1.5);
+
+  assert.equal(resolveChatSpeed(config, 123), 1.5);
+  assert.equal(config.prime.chatModels["123"].sessionRevision, 1);
+  assert.equal(config.prime.chatModels["123"].thinkingLevel, "high");
 });
 
 test("ignores a chat selection from a different active provider", () => {
@@ -180,6 +201,20 @@ test("builds an effort picker for the current model or pending model choice", ()
   assert.equal(pending.replyMarkup.inline_keyboard[1][0].callback_data, "model-effort:4:high");
 });
 
+test("builds and parses the speed picker", () => {
+  const picker = buildSpeedPicker({
+    provider: "openai-codex",
+    modelId: "gpt-5.6-sol",
+    speeds: [1, 1.5],
+    selectedSpeed: 1.5
+  });
+  assert.equal(picker.replyMarkup.inline_keyboard[0][0].callback_data, "speed:1");
+  assert.match(picker.replyMarkup.inline_keyboard[1][0].text, /^✓ 1\.5x$/);
+  assert.deepEqual(parseSpeedPickerAction("speed:1.5"), { type: "speed", speed: 1.5 });
+  assert.deepEqual(parseSpeedPickerAction("speed:1"), { type: "speed", speed: 1 });
+  assert.equal(parseSpeedPickerAction("speed:2"), null);
+});
+
 test("closes the picker after selecting the already active model and effort", async () => {
   const calls = [];
   const ctx = {
@@ -234,6 +269,7 @@ test("centralizes picker defaults in config", () => {
 
   assert.equal(config.telegram.modelPickerPageSize, telegramConfigDefaults.modelPickerPageSize);
   assert.equal(config.pi.thinkingLevel, piConfigDefaults.thinkingLevel);
+  assert.equal(config.prime.speed, primeConfigDefaults.speed);
 });
 
 test("lists and clamps thinking levels from model capabilities", () => {
@@ -256,4 +292,18 @@ test("lists and clamps thinking levels from model capabilities", () => {
   assert.deepEqual(listModelThinkingLevels(plain), ["off"]);
   assert.equal(clampModelThinkingLevel(plain, "high"), "off");
   assert.equal(modelSupportsThinking(plain), false);
+});
+
+test("maps supported model speeds to Prime service tiers", () => {
+  const fastModel = {
+    provider: "openai-codex",
+    api: "openai-codex-responses",
+    id: "gpt-5.6-sol"
+  };
+  assert.equal(modelSupportsSpeed(fastModel), true);
+  assert.equal(clampModelSpeed(fastModel, 1.5), 1.5);
+  assert.equal(clampModelSpeed({ ...fastModel, id: "gpt-5.3" }, 1.5), 1);
+  assert.equal(speedToServiceTier(1), "default");
+  assert.equal(speedToServiceTier(1.5), "priority");
+  assert.throws(() => normalizeModelSpeed(2), /Invalid model speed/);
 });

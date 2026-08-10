@@ -80,16 +80,22 @@ test("applies Prime overrides and accepts deprecated Pi aliases without coupling
     prime: { provider: "openai-codex", model: "current", apiKey: "prime-key", idleMinutes: 90 }
   };
   const explicit = applyRuntimeOverrides(config, {
-    prime: { model: "anthropic/claude", idleMinutes: "45" }
+    prime: { model: "anthropic/claude", idleMinutes: "45", speed: "1.5" }
   });
   assert.equal(explicit.prime.provider, "anthropic");
   assert.equal(explicit.prime.model, "claude");
   assert.equal(explicit.prime.idleMinutes, 45);
+  assert.equal(explicit.prime.speed, 1.5);
   assert.equal(explicit.pi.model, "old");
 
   const aliased = applyRuntimeOverrides(config, { pi: { model: "openai-codex/new" } });
   assert.equal(aliased.prime.model, "new");
   assert.equal(aliased.pi.model, "old");
+
+  assert.throws(
+    () => applyRuntimeOverrides(config, { prime: { speed: "2" } }),
+    /Invalid model speed/
+  );
 });
 
 test("system_shell runs commands from the configured workspace", async () => {

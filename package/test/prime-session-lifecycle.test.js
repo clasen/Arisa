@@ -9,7 +9,8 @@ function createManager() {
       prime: {
         provider: "test",
         model: "model",
-        thinkingLevel: "medium"
+        thinkingLevel: "medium",
+        speed: 1
       }
     }
   });
@@ -157,7 +158,7 @@ test("disposes a cached Pi session during a runtime switch", async () => {
 
   await manager.switchRuntime({
     agent: { runtime: "prime" },
-    prime: { provider: "test", model: "model", thinkingLevel: "medium" }
+    prime: { provider: "test", model: "model", thinkingLevel: "medium", speed: 1 }
   });
 
   assert.equal(disposeCount, 1);

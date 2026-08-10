@@ -4,6 +4,7 @@ import { PassThrough } from "node:stream";
 import test from "node:test";
 import {
   PrimeRpcSession,
+  setPrimeDaemonServiceTier,
   shutdownPrimeDaemon,
   validatePrimeBinary
 } from "../src/core/agent/prime-rpc-session.js";
@@ -237,6 +238,78 @@ test("refuses a Prime daemon socket whose handshake has a different PID", async 
     }
   }), /did not match PID 555/);
   assert.equal(writes, 0);
+});
+
+test("sets the service tier on the daemon session matching the RPC session file", async () => {
+  const commands = [];
+  const socket = new EventEmitter();
+  socket.end = () => {};
+  socket.destroy = () => {};
+  socket.write = (line) => {
+    const envelope = JSON.parse(line);
+    commands.push(envelope.command);
+    if (envelope.command.type === "list") {
+      queueMicrotask(() => socket.emit("data", `${JSON.stringify({
+        type: "response",
+        id: envelope.id,
+        command: "list",
+        success: true,
+        data: {
+          sessions: [
+            { activeSessionId: "other", sessionFile: "/other.jsonl" },
+            { activeSessionId: "target", sessionFile: "/sessions/chat.jsonl" }
+          ]
+        }
+      })}\n`));
+    } else if (envelope.command.type === "set_service_tier") {
+      queueMicrotask(() => socket.emit("data", `${JSON.stringify({
+        type: "response",
+        id: envelope.id,
+        command: "set_service_tier",
+        success: true
+      })}\n`));
+    } else if (envelope.command.type === "get_connection_state") {
+      queueMicrotask(() => socket.emit("data", `${JSON.stringify({
+        type: "response",
+        id: envelope.id,
+        command: "get_connection_state",
+        success: true,
+        data: { serviceTier: "priority" }
+      })}\n`));
+    }
+  };
+
+  const serviceTier = await setPrimeDaemonServiceTier({
+    socketPath: daemonSocketPath,
+    sessionFile: "/sessions/chat.jsonl",
+    serviceTier: "priority",
+    timeoutMs: 1_000,
+    connectImpl: () => {
+      queueMicrotask(() => socket.emit("data", `${JSON.stringify({
+        type: "daemon_hello",
+        protocol: { name: "prime-agent.daemon", version: 7 }
+      })}\n`));
+      return socket;
+    }
+  });
+
+  assert.deepEqual(commands.slice(0, 2), [
+    { type: "list", includeClientOwned: true, id: commands[0].id },
+    {
+      type: "set_service_tier",
+      activeSessionId: "target",
+      serviceTier: "priority",
+      id: commands[1].id
+    }
+  ]);
+  assert.equal(commands[2].type, "ack_result");
+  assert.equal(commands[2].commandId, commands[1].id);
+  assert.deepEqual(commands[3], {
+    type: "get_connection_state",
+    activeSessionId: "target",
+    id: commands[3].id
+  });
+  assert.equal(serviceTier, "priority");
 });
 
 test("handles fragmented JSONL and waits for the Prime session action to settle", async () => {

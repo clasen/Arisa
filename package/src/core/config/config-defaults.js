@@ -52,6 +52,7 @@ export const primeConfigDefaults = Object.freeze({
   command: "",
   version: defaultPrimeVersion,
   thinkingLevel: "medium",
+  speed: 1,
   idleMinutes: 90
 });
 

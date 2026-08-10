@@ -86,6 +86,7 @@ function toServiceRunnerArgs(nestedFlags) {
     "prime.command",
     "prime.version",
     "prime.thinkingLevel",
+    "prime.speed",
     "prime.idleMinutes"
   ];
 

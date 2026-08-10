@@ -35,7 +35,13 @@ export function parseEffortPickerAction(data) {
   return null;
 }
 
-export function buildModelPicker({ provider, models, selectedModelId, selectedThinkingLevel, page, pageSize }) {
+export function parseSpeedPickerAction(data) {
+  if (data === "noop:page") return { type: "noop", value: null };
+  const speed = /^speed:(1(?:\.5)?)$/.exec(String(data || ""));
+  return speed ? { type: "speed", speed: Number(speed[1]) } : null;
+}
+
+export function buildModelPicker({ provider, models, selectedModelId, selectedThinkingLevel, selectedSpeed, page, pageSize }) {
   if (!models.length) {
     throw new Error(`No models available for provider ${provider}`);
   }
@@ -43,9 +49,25 @@ export function buildModelPicker({ provider, models, selectedModelId, selectedTh
     text: `${model.id === selectedModelId ? "✓ " : ""}${formatPiModelOption(model)}`
   }));
   const effortLine = selectedThinkingLevel ? `\nEffort: ${selectedThinkingLevel}` : "";
+  const speedLine = selectedSpeed ? `\nSpeed: ${selectedSpeed.toFixed(1)}x` : "";
   return {
-    text: `Current model: ${provider}/${selectedModelId}${effortLine}\nSelect a model for this chat:`,
+    text: `Current model: ${provider}/${selectedModelId}${effortLine}${speedLine}\nSelect a model for this chat:`,
     replyMarkup: buildPagedInlineKeyboard("model", items, { page, pageSize })
+  };
+}
+
+export function buildSpeedPicker({ provider, modelId, speeds, selectedSpeed }) {
+  if (!speeds.length) {
+    throw new Error(`No speed levels available for ${provider}/${modelId}`);
+  }
+  return {
+    text: `Current model: ${provider}/${modelId}\nSelect speed for this chat:`,
+    replyMarkup: {
+      inline_keyboard: speeds.map((speed) => ([{
+        text: `${speed === selectedSpeed ? "✓ " : ""}${speed.toFixed(1)}x`,
+        callback_data: `speed:${speed}`
+      }]))
+    }
   };
 }
 

@@ -1,3 +1,5 @@
+import { normalizeModelSpeed } from "./model-speed.js";
+
 function chatKey(chatId) {
   return String(chatId);
 }
@@ -22,6 +24,7 @@ export function resolveChatModelSelection(config, chatId) {
       provider: agentConfig.provider,
       model: agentConfig.model,
       thinkingLevel: agentConfig.thinkingLevel,
+      ...(agentConfig.speed !== undefined ? { speed: normalizeModelSpeed(agentConfig.speed) } : {}),
       sessionRevision: 0
     };
   }
@@ -30,6 +33,9 @@ export function resolveChatModelSelection(config, chatId) {
     provider: selection.provider,
     model: selection.model,
     thinkingLevel: selection.thinkingLevel ?? agentConfig.thinkingLevel,
+    ...(agentConfig.speed !== undefined
+      ? { speed: normalizeModelSpeed(selection.speed ?? agentConfig.speed) }
+      : {}),
     sessionRevision
   };
 }
@@ -42,7 +48,13 @@ export function resolveChatThinkingLevel(config, chatId) {
   return resolveChatModelSelection(config, chatId).thinkingLevel;
 }
 
-export function selectChatModel(config, chatId, model, { thinkingLevel } = {}) {
+export function resolveChatSpeed(config, chatId) {
+  const speed = resolveChatModelSelection(config, chatId).speed;
+  if (speed === undefined) throw new Error("Model speed is only available with the Prime runtime");
+  return speed;
+}
+
+export function selectChatModel(config, chatId, model, { thinkingLevel, speed } = {}) {
   const agentConfig = getAgentConfig(config);
   if (model.provider !== agentConfig.provider) {
     throw new Error(`Cannot select model from provider ${model.provider}; active provider is ${agentConfig.provider}`);
@@ -54,6 +66,9 @@ export function selectChatModel(config, chatId, model, { thinkingLevel } = {}) {
     provider: model.provider,
     model: model.id,
     thinkingLevel,
+    ...(agentConfig.speed !== undefined
+      ? { speed: normalizeModelSpeed(speed ?? resolveChatModelSelection(config, chatId).speed) }
+      : {}),
     sessionRevision
   };
 }
@@ -67,6 +82,24 @@ export function selectChatThinkingLevel(config, chatId, thinkingLevel) {
     provider: current.provider,
     model: current.model,
     thinkingLevel,
+    ...(current.speed !== undefined ? { speed: current.speed } : {}),
+    sessionRevision: current.sessionRevision
+  };
+}
+
+export function selectChatSpeed(config, chatId, speed) {
+  const agentConfig = getAgentConfig(config);
+  if (agentConfig.speed === undefined) {
+    throw new Error("Model speed is only available with the Prime runtime");
+  }
+  agentConfig.chatModels ||= {};
+  const key = chatKey(chatId);
+  const current = resolveChatModelSelection(config, chatId);
+  agentConfig.chatModels[key] = {
+    provider: current.provider,
+    model: current.model,
+    thinkingLevel: current.thinkingLevel,
+    speed: normalizeModelSpeed(speed),
     sessionRevision: current.sessionRevision
   };
 }

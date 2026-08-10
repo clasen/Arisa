@@ -2,6 +2,7 @@
 import { spawn } from "node:child_process";
 import { mkdir, readdir } from "node:fs/promises";
 import { createConnection } from "node:net";
+import path from "node:path";
 import { StringDecoder } from "node:string_decoder";
 import { defaultPrimeVersion } from "../config/config-defaults.js";
 
@@ -66,6 +67,151 @@ export function isPrimeRpcSessionClosedError(error) {
   return error?.code === primeRpcSessionClosedCode;
 }
 
+function daemonEnvelope({ id, clientId, command }) {
+  return {
+    type: "command",
+    id,
+    protocol: { name: primeDaemonProtocolName, version: primeDaemonProtocolVersion },
+    clientId,
+    command: { ...command, id }
+  };
+}
+
+export async function setPrimeDaemonServiceTier({
+  socketPath,
+  sessionFile,
+  serviceTier,
+  timeoutMs = defaultRequestTimeoutMs,
+  connectImpl = createConnection
+}) {
+  if (!String(socketPath || "").trim()) throw new Error("Prime service tier requires a daemon socket");
+  if (!String(sessionFile || "").trim()) throw new Error("Prime service tier requires a session file");
+  if (!["default", "priority"].includes(serviceTier)) {
+    throw new Error(`Invalid Prime service tier: ${serviceTier}`);
+  }
+
+  return new Promise((resolve, reject) => {
+    const clientId = `arisa-speed:${crypto.randomUUID()}`;
+    const listId = `arisa_speed_list_${crypto.randomUUID()}`;
+    const setId = `arisa_speed_set_${crypto.randomUUID()}`;
+    const stateId = `arisa_speed_state_${crypto.randomUUID()}`;
+    const socket = connectImpl(socketPath);
+    const resolvedSessionFile = path.resolve(sessionFile);
+    let buffer = "";
+    let requestSent = false;
+    let targetActiveSessionId = "";
+    let settled = false;
+    const finish = (error, value) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      socket.end?.();
+      socket.destroy?.();
+      if (error) reject(error);
+      else resolve(value);
+    };
+    const timer = setTimeout(() => {
+      finish(new Error(`Timed out setting Prime service tier for ${sessionFile}`));
+    }, timeoutMs);
+    const writeCommand = (id, command) => {
+      socket.write(`${JSON.stringify(daemonEnvelope({ id, clientId, command }))}\n`);
+    };
+    const handleRecord = (record) => {
+      if (record?.type === "daemon_hello" && !requestSent) {
+        if (
+          record.protocol?.name !== primeDaemonProtocolName
+          || record.protocol?.version !== primeDaemonProtocolVersion
+        ) {
+          finish(new Error(`Prime daemon on ${socketPath} uses an unsupported control protocol`));
+          return;
+        }
+        requestSent = true;
+        writeCommand(listId, { type: "list", includeClientOwned: true });
+        return;
+      }
+      if (record?.type !== "response") return;
+      if (record.id === listId) {
+        if (!record.success) {
+          finish(new Error(record.error || "Prime daemon rejected session lookup"));
+          return;
+        }
+        const sessions = record.data?.sessions;
+        if (!Array.isArray(sessions)) {
+          finish(new Error("Prime daemon returned an invalid session list"));
+          return;
+        }
+        const session = sessions.find((item) => (
+          item?.activeSessionId
+          && item.sessionFile
+          && path.resolve(item.sessionFile) === resolvedSessionFile
+        ));
+        if (!session) {
+          finish(new Error(`Prime daemon session not found for ${sessionFile}`));
+          return;
+        }
+        targetActiveSessionId = session.activeSessionId;
+        writeCommand(setId, {
+          type: "set_service_tier",
+          activeSessionId: targetActiveSessionId,
+          serviceTier
+        });
+        return;
+      }
+      if (record.id === setId) {
+        if (!record.success) {
+          finish(new Error(record.error || "Prime daemon rejected service tier change"));
+          return;
+        }
+        const ackId = `arisa_speed_ack_${crypto.randomUUID()}`;
+        writeCommand(ackId, { type: "ack_result", commandId: setId });
+        writeCommand(stateId, {
+          type: "get_connection_state",
+          activeSessionId: targetActiveSessionId
+        });
+        return;
+      }
+      if (record.id === stateId) {
+        if (!record.success) {
+          finish(new Error(record.error || "Prime daemon rejected service tier verification"));
+          return;
+        }
+        const effectiveTier = record.data?.serviceTier;
+        if (!["default", "priority"].includes(effectiveTier)) {
+          finish(new Error("Prime daemon returned an invalid service tier"));
+          return;
+        }
+        if (effectiveTier !== serviceTier) {
+          finish(new Error(serviceTier === "priority"
+            ? "Prime model does not support speed 1.5x"
+            : `Prime model does not support service tier ${serviceTier}`));
+          return;
+        }
+        finish(null, effectiveTier);
+      }
+    };
+    socket.on("data", (chunk) => {
+      buffer += chunk.toString("utf8");
+      let newline = buffer.indexOf("\n");
+      while (newline !== -1) {
+        const line = buffer.slice(0, newline).replace(/\r$/, "");
+        buffer = buffer.slice(newline + 1);
+        if (line) {
+          try {
+            handleRecord(JSON.parse(line));
+          } catch (error) {
+            finish(new Error(`Prime daemon on ${socketPath} emitted invalid JSON: ${error.message}`));
+          }
+        }
+        newline = buffer.indexOf("\n");
+      }
+    });
+    socket.once("error", (error) => finish(new Error(`Prime daemon service tier connection failed: ${error.message}`)));
+    socket.once("close", () => {
+      if (!settled) finish(new Error("Prime daemon closed before applying the service tier"));
+    });
+  });
+}
+
 export async function shutdownPrimeDaemon({
   socketPath,
   pid,
@@ -115,13 +261,11 @@ export async function shutdownPrimeDaemon({
           return;
         }
         requestSent = true;
-        socket.write(`${JSON.stringify({
-          type: "command",
+        socket.write(`${JSON.stringify(daemonEnvelope({
           id: requestId,
-          protocol: { name: primeDaemonProtocolName, version: primeDaemonProtocolVersion },
           clientId,
-          command: { type: "shutdown", id: requestId, force: true }
-        })}\n`);
+          command: { type: "shutdown", force: true }
+        }))}\n`);
         return;
       }
       if (record?.type === "daemon_closing" && record.reason === "shutdown") {
@@ -206,6 +350,7 @@ export class PrimeRpcSession {
     provider,
     model,
     thinkingLevel = "medium",
+    serviceTier = "default",
     cwd,
     agentDir,
     sessionDir,
@@ -232,6 +377,7 @@ export class PrimeRpcSession {
     this.provider = provider;
     this.model = { provider, id: model, reasoning: true };
     this.thinkingLevel = thinkingLevel;
+    this.serviceTier = serviceTier;
     this.cwd = cwd;
     this.agentDir = agentDir;
     this.sessionDir = sessionDir;
@@ -360,6 +506,9 @@ export class PrimeRpcSession {
     this.applyState(state);
     const history = await this.request("get_messages").catch(() => null);
     if (history?.messages) this.messages = history.messages;
+    if (!this.noSession) {
+      await this.setServiceTier(this.serviceTier);
+    }
   }
 
   attachReader(stream) {
@@ -558,6 +707,20 @@ export class PrimeRpcSession {
     if (this.child) {
       await this.request("set_thinking_level", { level });
     }
+  }
+
+  async setServiceTier(serviceTier) {
+    if (!["default", "priority"].includes(serviceTier)) {
+      throw new Error(`Invalid Prime service tier: ${serviceTier}`);
+    }
+    if (this.child) {
+      await setPrimeDaemonServiceTier({
+        socketPath: this.daemonSocketPath,
+        sessionFile: this.sessionFile,
+        serviceTier
+      });
+    }
+    this.serviceTier = serviceTier;
   }
 
   async getAvailableModels() {

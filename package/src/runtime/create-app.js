@@ -10,6 +10,7 @@ import { createToolProcessSupervisor } from "./tool-process-supervisor.js";
 import { createArisaCapabilities } from "./arisa-capabilities.js";
 import { createIpcServer } from "./ipc/ipc-server.js";
 import { getAgentConfig } from "../core/agent/model-selection.js";
+import { normalizeModelSpeed } from "../core/agent/model-speed.js";
 import { resolvePrimeAgentRuntime } from "./prime-agent-installer.js";
 import { isOwnedPrimeDaemon, listPrimeDaemonOwners, runDoctor } from "./doctor.js";
 import { recordHarnessTransition } from "./harness-transition-journal.js";
@@ -106,6 +107,7 @@ export function applyRuntimeOverrides(config, runtimeOverrides) {
     const value = normalizeString(primeSource[key]);
     if (value) prime[key] = value;
   }
+  if (primeSource.speed !== undefined) prime.speed = normalizeModelSpeed(primeSource.speed);
   const idleMinutes = normalizePositiveInteger(primeSource.idleMinutes);
   if (idleMinutes) prime.idleMinutes = idleMinutes;
 
