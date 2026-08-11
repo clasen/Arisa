@@ -248,7 +248,7 @@ test("centralizes Telegram and Pi defaults in config", () => {
   });
 
   assert.equal(config.telegram.modelPickerPageSize, telegramConfigDefaults.modelPickerPageSize);
-  assert.equal(config.telegram.busyMessageMode, "queue");
+  assert.equal(config.telegram.busyMessageMode, "steer");
   assert.equal(config.pi.thinkingLevel, piConfigDefaults.thinkingLevel);
   assert.equal(config.pi.speed, piConfigDefaults.speed);
 });
