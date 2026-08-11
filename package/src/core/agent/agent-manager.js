@@ -1,6 +1,6 @@
 import path from "node:path";
 import { readFile, stat, unlink } from "node:fs/promises";
-import { createAgentSession, DefaultResourceLoader, SessionManager, defineTool } from "@earendil-works/pi-coding-agent";
+import { createAgentSession, DefaultResourceLoader, SessionManager, SettingsManager, defineTool } from "@earendil-works/pi-coding-agent";
 import { Type } from "@sinclair/typebox";
 import { createPiRuntime, hasProviderAuth } from "./pi-runtime.js";
 import { resolveChatModelSelection } from "./model-selection.js";
@@ -198,11 +198,16 @@ async function assertDirectory(dir, label) {
   }
 }
 
-async function createArisaResourceLoader({ cwd, agentDir }) {
+export function createPiSettingsManager(config) {
+  return SettingsManager.inMemory({ compaction: { ...config.pi.compaction } });
+}
+
+async function createArisaResourceLoader({ cwd, agentDir, settingsManager }) {
   const arisaAgentsContent = await readFile(arisaAgentsFile, "utf8");
   const resourceLoader = new DefaultResourceLoader({
     cwd,
     agentDir,
+    settingsManager,
     agentsFilesOverride: (current) => appendArisaAgentsFile(current, arisaAgentsContent)
   });
   await resourceLoader.reload();
@@ -357,11 +362,13 @@ export class AgentManager {
       throw new Error(`No auth found for ${config.pi.provider}. Provide a Pi API key in bootstrap, or authenticate with Pi login for this provider during bootstrap.`);
     }
 
+    const settingsManager = createPiSettingsManager(config);
     const { session } = await createAgentSession({
       authStorage,
       modelRegistry,
       model,
-      sessionManager: SessionManager.inMemory(),
+      settingsManager,
+      sessionManager: SessionManager.inMemory()
     });
     try {
       await withTimeout(promptAndThrowOnAssistantError(session, "Reply with exactly: OK"), {
@@ -431,9 +438,11 @@ export class AgentManager {
       ...this.createTools(telegram, chatId, policy),
       createSystemShellTool({ workspaceDir: policy.workspaceDir, shell: policy.shell })
     ];
+    const settingsManager = createPiSettingsManager(this.config);
     const resourceLoader = await createArisaResourceLoader({
       cwd: policy.workspaceDir,
-      agentDir: arisaHomeDir
+      agentDir: arisaHomeDir,
+      settingsManager
     });
     const { session } = await createAgentSession({
       cwd: policy.workspaceDir,
@@ -446,6 +455,7 @@ export class AgentManager {
       tools: policy.tools,
       excludeTools: policy.excludeTools,
       customTools,
+      settingsManager,
       sessionManager
     });
     const speedController = createModelSpeedController(session.agent.streamFn, speed);

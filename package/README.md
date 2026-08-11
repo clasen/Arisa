@@ -110,6 +110,22 @@ Pi authentication can use either:
 - an API key entered during bootstrap
 - or Pi's existing OAuth login when supported, such as `openai-codex`
 
+Automatic context compaction uses Pi's native implementation and can be tuned in `~/.arisa/state/config.json`:
+
+```json
+{
+  "pi": {
+    "compaction": {
+      "enabled": true,
+      "reserveTokens": 16384,
+      "keepRecentTokens": 20000
+    }
+  }
+}
+```
+
+Pi compacts when the context exceeds the model's context window minus `reserveTokens`. Arisa does not add Telegram commands or compaction notifications.
+
 ## Install globally
 
 ```bash

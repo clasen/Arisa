@@ -40,7 +40,12 @@ export const serviceConfigDefaults = Object.freeze({
 
 export const piConfigDefaults = Object.freeze({
   thinkingLevel: "medium",
-  speed: 1
+  speed: 1,
+  compaction: Object.freeze({
+    enabled: true,
+    reserveTokens: 16_384,
+    keepRecentTokens: 20_000
+  })
 });
 
 function cloneChatModels(chatModels) {
@@ -74,6 +79,10 @@ export function applyConfigDefaults(config) {
     pi: {
       ...piConfigDefaults,
       ...configuredPi,
+      compaction: {
+        ...piConfigDefaults.compaction,
+        ...(configuredPi.compaction || {})
+      },
       chatModels: cloneChatModels(configuredPi.chatModels)
     },
     daemons: {
