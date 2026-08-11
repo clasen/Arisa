@@ -77,3 +77,8 @@ test("first-name greetings require verified identity or profile-seed overrides",
     "Sam"
   );
 });
+
+test("display-name greetings do not require a verified personal first name", () => {
+  const profile = { message: { greetingMode: "display-name" } };
+  assert.equal(greetingNameFor({ username: "Studio", displayName: "Studio Account" }, profile), "Studio Account");
+});

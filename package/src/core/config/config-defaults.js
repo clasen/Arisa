@@ -43,7 +43,7 @@ export const piConfigDefaults = Object.freeze({
   speed: 1,
   compaction: Object.freeze({
     enabled: true,
-    reserveTokens: 16_384,
+    reserveTokens: 120_000,
     keepRecentTokens: 20_000
   })
 });

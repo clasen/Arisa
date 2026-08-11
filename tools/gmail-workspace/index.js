@@ -52,7 +52,7 @@ Actions via args.action:
   stop-watch      Stop Gmail push watch
   history         List changes since args.startHistoryId or saved watch historyId
   handle-pubsub   Decode Pub/Sub push payload and list changed message IDs. args: payload?
-  poll-secretary  Lease/retry callback for schedulers: wakes agent for matching mail until it is acknowledged
+  poll-secretary  Lease/retry callback for schedulers: wakes agent for matching mail until it is acknowledged, independent of read state
   secretary-ack   Acknowledge handled or intentionally ignored monitor messages. args: ids, disposition?
   raw             Run an allowed raw gws Gmail command. args.argv: ["gmail","users",...]
 
@@ -679,9 +679,9 @@ async function handle(request, config) {
   if (action === "poll-secretary") {
     const monitorPath = await statePath(request, "secretary-state.json");
     const current = normalizeSecretaryState(await readJsonSafe(monitorPath, {}));
-    const query = request.args?.q || "in:inbox is:unread";
-    const requestedMaxResults = Number(request.args?.maxResults || 50);
-    const maxResults = Number.isFinite(requestedMaxResults) ? Math.max(1, Math.min(Math.trunc(requestedMaxResults), 500)) : 50;
+    const query = request.args?.q || "in:inbox newer_than:7d";
+    const requestedMaxResults = Number(request.args?.maxResults || 500);
+    const maxResults = Number.isFinite(requestedMaxResults) ? Math.max(1, Math.min(Math.trunc(requestedMaxResults), 500)) : 500;
     const data = await gwsJson(["gmail", "users", "messages", "list", "--params", JSON.stringify({ userId: uid, q: query, maxResults })], config);
     const selection = selectSecretaryWake(data.messages || [], current, {
       retrySeconds: Number(request.args?.retrySeconds || 600),

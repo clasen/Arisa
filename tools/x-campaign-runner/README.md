@@ -19,7 +19,7 @@ There is no batch-send or autonomous scheduled-send action. `x-dm` independently
 <chatToolStateDir>/profiles/<profile>.json
 ```
 
-Profiles contain campaign-specific queries, creative queries, selection rules, optional evidence-backed seed prospects, templates, budgets, approval TTL, `message.greetingMode`, and optional follow-before-send policy. Credentials stay in `x-dm` or other transport tools.
+Profiles contain campaign-specific queries, creative queries, selection rules, optional evidence-backed seed prospects, templates, budgets, approval TTL, `message.greetingMode`, and optional follow-before-send policy. Use `first-name` when the campaign requires a verified personal first name; use `display-name` to accept the target-bound X display identity without that restriction. Credentials stay in `x-dm` or other transport tools.
 
 ## Examples
 

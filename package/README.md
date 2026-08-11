@@ -114,14 +114,14 @@ Automatic context compaction uses Pi's native implementation and can be tuned in
   "pi": {
     "compaction": {
       "enabled": true,
-      "reserveTokens": 16384,
+      "reserveTokens": 120000,
       "keepRecentTokens": 20000
     }
   }
 }
 ```
 
-Pi compacts when the context exceeds the model's context window minus `reserveTokens`. Arisa does not add Telegram commands or compaction notifications.
+Pi compacts when the context exceeds the model's context window minus `reserveTokens`. The default keeps a large reserve so compaction occurs before Arisa Doctor's context warning on the default model. Set a smaller reserve when using models with substantially smaller context windows. Arisa does not add Telegram commands or compaction notifications.
 
 ## Install globally
 

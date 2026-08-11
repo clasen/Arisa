@@ -8,7 +8,7 @@ test("provides Pi compaction defaults through Arisa config", () => {
 
   assert.deepEqual(config.pi.compaction, {
     enabled: true,
-    reserveTokens: 16_384,
+    reserveTokens: 120_000,
     keepRecentTokens: 20_000
   });
   assert.deepEqual(config.pi.compaction, piConfigDefaults.compaction);
