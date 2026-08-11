@@ -1449,9 +1449,9 @@ export async function createTelegramBot({ config, artifactStore, toolRegistry, t
       return;
     }
 
-    try {
-      await enqueueOrProcess(ctx);
-    } catch (error) {
+    // grammY long polling awaits each middleware. Keep prompt execution in the background so
+    // the next Telegram update can reach the active session as a steer or queued message.
+    enqueueOrProcess(ctx).catch(async (error) => {
       const chatState = getChatState(ctx.chat.id);
       chatState.processing = false;
       if (wasPromptErrorNotified(error)) return;
@@ -1459,7 +1459,7 @@ export async function createTelegramBot({ config, artifactStore, toolRegistry, t
       await ctx.reply(issue
         ? buildPiAuthTelegramMessage({ config, chatId: ctx.chat.id, issue })
         : getErrorMessage(error));
-    }
+    });
   });
 
   return {
