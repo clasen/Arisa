@@ -3,13 +3,12 @@
 ## Core boundaries
 Arisa core owns transport, sessions, artifacts, and tool orchestration:
 - Telegram transport handles inbound and outbound messaging.
-- The active agent runtime keeps one session per authorized chat; Prime is the default for new installs and Pi is temporary rollback support.
+- Pi Agent keeps one session per authorized chat and is the only active harness.
 - Incoming messages and files (text, voice, photo, document) and generated files become artifacts.
 - The tool registry handles tool discovery, help lookup, config writes, and execution.
 - Tools are isolated packages with their own manifest, entrypoint, and config defaults.
 - No tools ship with the core; installed tools live under `~/.arisa/tools/<toolName>`.
 - The Arisa install directory (your working directory) contains only the core. Never create or install tools inside it.
-- The pinned Prime runtime is installed and checksum-verified by Arisa under `~/.arisa/runtimes/prime-agent/<version>`; it is separate from mutable Prime state.
 - Restart requests use `system_shell` to run `arisa restart`; do not install or create a restart tool.
 
 New capabilities belong in tools by default. Solve requests by creating or editing a tool under `~/.arisa/tools/<toolName>`. Modifying core is the last resort: do it only after confirming the capability cannot be delivered through the tool architecture, explaining why the core change is unavoidable, and receiving explicit user approval.
@@ -22,7 +21,6 @@ Do not build runtime paths by hand. Use `src/runtime/paths.js`:
 - `getChatArtifactsDir(chatId)` / `getChatArtifactsIndexFile(chatId)`: chat artifacts and artifact index. Artifacts are never global.
 - `getChatToolConfigPath(chatId, toolName)`: chat-scoped config overrides.
 - `getToolTmpDir(toolName)` / `getChatToolTmpDir(chatId, toolName)`: ephemeral scratch. Create only while a request runs; remove when empty.
-- `primeRuntimesDir`: root for immutable, versioned Prime Agent installs managed by Arisa. Prime auth, sessions, kernels, and other mutable state do not belong there.
 
 Tools receive `chatId` from the registry. Any persisted or indexed user content must be scoped by chat. Avoid ad hoc roots like `~/.arisa/state/<toolName>`, `~/.arisa/state/chats`, or runtime data inside `~/.arisa/tools/<toolName>`.
 
@@ -77,7 +75,7 @@ const result = await arisa.tools.run({
 }, { timeoutMs: 120_000 });
 ```
 
-The IPC channel is a local socket under `~/.arisa/state`. Every request must include `toolName`; chat-scoped capabilities also require `chatId`. Prime bridge requests additionally carry a random capability token bound to that chat. Exposed capabilities are explicit: tools (`list`, `help`, `skills`, `setConfig`, `run`), artifacts (`createText`, `listRecent`, `get`, `deliver`), tasks (`add`, `list`, `cancel`, `cancelAll`), agent events (`enqueueEvent`), and runtime paths (`getChatToolStateDir`, `getToolStateDir`, `getChatToolTmpDir`, `getToolTmpDir`, `getChatArtifactsDir`). Do not expose raw `agentManager`, `taskStore`, `artifactStore`, or `toolRegistry` access.
+The IPC channel is a local socket under `~/.arisa/state`. Every request must include `toolName`; chat-scoped capabilities also require `chatId`. Exposed capabilities are explicit: tools (`list`, `help`, `skills`, `setConfig`, `run`), artifacts (`createText`, `listRecent`, `get`, `deliver`), tasks (`add`, `list`, `cancel`, `cancelAll`), agent events (`enqueueEvent`), and runtime paths (`getChatToolStateDir`, `getToolStateDir`, `getChatToolTmpDir`, `getToolTmpDir`, `getChatArtifactsDir`). Do not expose raw `agentManager`, `taskStore`, `artifactStore`, or `toolRegistry` access.
 
 ## Conceptual pipe model
 There are two different moments where pipes can happen:

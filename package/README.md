@@ -1,6 +1,6 @@
 # Arisa
 
-[Arisa](https://arisa.sh) is a personal assistant you talk to through Telegram, with hot-switchable Pi Agent and [Prime Agent](https://github.com/PrimeIntellect-ai/prime-agent) harnesses.
+[Arisa](https://arisa.sh) is a personal assistant you talk to through Telegram, powered by Pi Agent and isolated CLI tools.
 
 ## Origin
 
@@ -10,45 +10,29 @@ The real heart of OpenClaw is Pi Agent: a [minimal terminal coding harness](http
 
 Telegram bots, on the other hand, work extremely well as a human interface. Simple, reliable, always in your pocket.
 
-Arisa keeps Telegram as its interface and uses Pi Agent by default. Prime Agent can be selected in Telegram without restarting Arisa, while preserving the conversation and durable chat state.
+Arisa keeps Telegram as its interface and Pi Agent as its single reasoning harness.
 
 It is designed around a simple idea:
 
 - **Telegram is the human interface**
-- **Pi Agent or Prime Agent is the reasoning engine**
+- **Pi Agent is the reasoning engine**
 - **everything is an artifact**
 - **capabilities live in isolated CLI tools**
 - **tools can be chained through pipes**
 
 If a capability does not exist yet, the system adds a new tool for it. The agent grows from real use, not from assumptions.
 
-## Why Prime Agent changes the equation
-
-Prime Agent is more than a model backend. Its [RLM and Continual Harness architecture](https://www.primeintellect.ai/blog/prime-agent) puts context, delegation, and adaptation inside the reasoning loop:
-
-- **Programmatic context:** persistent IPython keeps history, tools, and working data addressable as variables.
-- **Recursive workers:** sub-agents are asynchronous function calls with their own session, history, and kernel. They can run in parallel, stay in the background, and be resumed later.
-- **Evidence-backed improvement:** `/refine` turns actual outcomes into small, durable updates to prompts, memories, skills, or sub-agent specifications.
-
-That is Arisa's architectural differential from [OpenClaw](https://github.com/openclaw/openclaw): OpenClaw offers a broad Gateway for channels, devices, apps, and plugins; Arisa keeps a focused Telegram, artifact, and CLI-tool shell while Prime supplies recursive, long-horizon reasoning.
-
-On EmulatorBench, it built SEGA Genesis and Game Boy Color emulators from scratch in Rust, reproducing target hardware behavior against diagnostic tests.
-
-Prime Intellect also reports **95.5% Best@1 on ARC-AGI-3 with Opus 5**, just above the reported 95.4% human-expert baseline. These are Prime Agent results, not Arisa benchmarks.
-
-![Prime Agent ARC-AGI-3 test-time compute scaling](./package/docs/images/prime-agent-arc-agi-3.jpeg)
-
 ## Core concept
 
 Arisa separates two different kinds of pipes:
 
 1. **Pre-reasoning normalization pipes**
-   - These happen before Prime Agent reasons.
+   - These happen before Pi Agent reasons.
    - Example: a Telegram voice message is transcribed first.
-   - Prime Agent then reasons over the transcript, not over the raw audio.
+   - Pi Agent then reasons over the transcript, not over the raw audio.
 
 2. **Reasoned action pipes**
-   - These happen after Prime Agent starts reasoning.
+   - These happen after Pi Agent starts reasoning.
    - Example: text -> TTS audio.
    - Future tools can form larger chains.
 
@@ -56,7 +40,7 @@ This distinction is important. Some transformations belong to the transport/inpu
 
 ## Zero tools, assembled on demand
 
-A fresh install ships with **zero Arisa modular tools**. The core is Telegram transport, the Prime Agent reasoning loop with its native IPython tool, the artifact store, and the tool registry. Out of the box Arisa cannot transcribe audio, browse the web, or speak; it gains each capability only once a tool that provides it is installed.
+A fresh install ships with **zero Arisa modular tools**. The core is Telegram transport, the Pi Agent reasoning loop, the artifact store, and the tool registry. Out of the box Arisa cannot transcribe audio, browse the web, or speak; it gains each capability only once a tool that provides it is installed.
 
 Arisa assembles its own toolset from real use:
 
@@ -71,8 +55,8 @@ The result is a toolset shaped by how you actually use the assistant, not by def
 ## Current behavior
 
 ### Telegram input
-- text messages go directly to Prime Agent
-- audio/voice messages are transcribed first when a transcription tool is installed, then passed to Prime Agent as text; otherwise the agent is told transcription failed and can offer to install one
+- text messages go directly to Pi Agent
+- audio/voice messages are transcribed first when a transcription tool is installed, then passed to Pi Agent as text; otherwise the agent is told transcription failed and can offer to install one
 - media is stored as artifacts
 
 ### Tool model
@@ -102,8 +86,6 @@ All runtime state lives under `~/.arisa/`, split between global state and per-ch
 
 Global:
 - runtime config is stored in `~/.arisa/state/config.json`
-- Prime auth is stored in `~/.arisa/state/prime-agent/auth.json`; compatible Pi OAuth credentials are copied there with `0600` permissions
-- managed Prime releases live under `~/.arisa/runtimes/prime-agent/<version>/`
 - the scheduled-task queue is stored in `~/.arisa/state/tasks.json`
 - installed tools live under `~/.arisa/tools/<tool>/`, each with a default `config.js` template
 - global tool runtime state (daemons, caches, temp) lives under `~/.arisa/state/tools/<tool>/`
@@ -111,7 +93,7 @@ Global:
 Per chat (`~/.arisa/chats/<chatId>/`):
 - artifact files are stored under `artifacts/`
 - the artifact index is stored in `state/artifacts.json`
-- Prime sessions live under `state/prime-sessions/<revision>/`; legacy Pi sessions remain under `state/pi-sessions/`
+- Pi sessions live under `state/pi-sessions/<revision>/`
 - chat-scoped tool config overrides live in `config/tools/<tool>/config.js`
 - chat-scoped daemon infrastructure lives in `state/tools/<tool>/daemon/`; persistent tool data stays beside it
 - ephemeral scratch lives under `tmp/`
@@ -134,36 +116,6 @@ Then run:
 arisa
 ```
 
-Pi Agent is the internal default, so a standard first start does not download
-Prime Agent. Selecting Prime with `/harness` runs Arisa's managed installer on
-demand. If Prime is the internal default for a build, the same installation runs
-during its first start.
-
-The managed installer downloads the Prime Agent release selected by this Arisa
-version, verifies its official SHA-256 checksum, and installs it privately under
-`~/.arisa/runtimes/prime-agent/<version>/`. It never installs Prime globally and
-does not depend on a `prime-agent` command already being present on `PATH`.
-It also installs `uv`, prepares Prime's IPython environment under
-`~/.arisa/state/prime-agent/kernel-venv/`, and validates that kernel before
-marking the managed runtime as ready. A matching ready installation is reused
-without downloading it again. When an Arisa update selects a newer Prime
-release, the managed runtime installs that version alongside the previous one;
-an explicit external `prime.command` remains pinned to its configured version.
-
-Arisa intentionally rejects other Prime versions until their RPC contract passes
-the Arisa test suite. Prime runs IPython kernels and recursive workers with the
-permissions of your user account; it is not a sandbox.
-
-To use an externally managed Prime installation instead, configure an explicit
-command:
-
-```bash
-arisa --agent.runtime prime --prime.command /absolute/path/to/prime-agent
-```
-
-`PRIME_AGENT_DOWNLOAD_BASE_URL` may point managed installs at a trusted HTTPS
-mirror with the same versioned tarball and `SHA256SUMS` layout.
-
 Command modes:
 
 ```bash
@@ -181,35 +133,12 @@ Authorized Telegram chats can run the same safe service lifecycle with `/restart
 Runtime model override (current process only):
 
 ```bash
-arisa --agent.runtime prime --prime.model lmstudio/google/gemma-4-26b-a4b
+arisa --pi.model openai-codex/gpt-5.6
 ```
 
 Notes:
 
 - it only affects the current Arisa process and does not update `~/.arisa/state/config.json`
-- `--pi.*` remains a deprecated alias for `--prime.*` while the Prime runtime is active
-
-## Harness selection and continuity
-
-New installs use the internal `agent.runtime: "pi"` default. Existing persisted
-runtime selections remain unchanged. Use `/harness` in Telegram to switch the
-whole Arisa instance between Pi Agent and Prime Agent. During a switch:
-
-- Prime configuration, auth, and kernels live in `~/.arisa/state/prime-agent/`
-- Prime chat sessions live in `state/prime-sessions/<revision>/`
-- Pi chat sessions remain in `state/pi-sessions/`
-- Arisa keeps a harness-independent conversation log in each chat's state and
-  supplies it to the newly selected harness
-- artifacts, tool state, scheduled tasks, and chat configuration remain shared
-- changing harness does not behave like `/new`; `/new` remains the explicit
-  boundary for starting a fresh chat context
-- selecting Prime installs or repairs the managed runtime only when necessary
-- Prime schedules and heartbeats are not exposed; Arisa remains the source of
-  truth for Telegram, tools, artifacts, tasks, and polling
-
-Prime stays alive per active chat and closes after 90 idle minutes by default.
-An RPC crash during a turn is reported as an interruption; Arisa does not claim
-that work continued after the process was lost.
 
 ## Multiple instances
 
@@ -247,8 +176,6 @@ src/
     pi-auth.json
     tasks.json
     tools/<tool>/     global tool state (daemons, caches, tmp)
-  runtimes/
-    prime-agent/<version>/  verified managed Prime release
   tools/<tool>/       installed tools (catalog, user-chosen, or agent-created)
   chats/<chatId>/
     artifacts/        per-chat artifact files
@@ -285,7 +212,7 @@ No "I can't do that" when the thing is realistically buildable.
 This is currently a functional V1. The core provides:
 
 - Telegram transport
-- Prime Agent v0.7.1 RPC integration, with temporary Pi rollback support
+- Pi Agent session and model integration
 - artifact-based message handling
 - the isolated CLI tool registry (starts empty)
 - pre-reasoning and post-reasoning pipes

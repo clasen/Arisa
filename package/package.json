@@ -1,7 +1,7 @@
 {
   "name": "arisa",
   "version": "5.0.2",
-  "description": "Telegram + Prime Agent modular assistant",
+  "description": "Telegram + Pi Agent modular assistant",
   "type": "module",
   "main": "src/index.js",
   "bin": {
@@ -15,7 +15,6 @@
   "keywords": [
     "telegram",
     "pi-agent",
-    "prime-agent",
     "assistant",
     "cli",
     "openclaw",

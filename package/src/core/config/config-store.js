@@ -3,25 +3,8 @@ import path from "node:path";
 import { configFile } from "../../runtime/paths.js";
 import { applyConfigDefaults } from "./config-defaults.js";
 
-const transientPrimeConfigKeys = [
-  "commandArgs",
-  "managedRuntime",
-  "runtimeDir",
-  "kernelVenvDir"
-];
-
-export function clearManagedPrimeRuntimeDetails(primeConfig) {
-  const prime = { ...primeConfig };
-  if (prime.managedRuntime === true) prime.command = "";
-  for (const key of transientPrimeConfigKeys) delete prime[key];
-  return prime;
-}
-
 export function prepareConfigForSave(config) {
-  const prepared = applyConfigDefaults(config);
-  const prime = clearManagedPrimeRuntimeDetails(prepared.prime);
-  if (!String(prime.command || "").trim()) delete prime.version;
-  return { ...prepared, prime };
+  return applyConfigDefaults(config);
 }
 
 export async function loadConfig() {

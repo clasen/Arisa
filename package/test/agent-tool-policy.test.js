@@ -4,6 +4,7 @@ import os from "node:os";
 import path from "node:path";
 import test from "node:test";
 import { buildPiToolPolicy } from "../src/core/agent/core-tools.js";
+import { applyConfigDefaults } from "../src/core/config/config-defaults.js";
 import { appendArisaAgentsFile, arisaAgentsFile } from "../src/core/agent/runtime-context.js";
 import { createSystemShellTool } from "../src/core/agent/system-shell-tool.js";
 import { applyRuntimeOverrides } from "../src/runtime/create-app.js";
@@ -75,29 +76,26 @@ test("applies runtime overrides without dropping persisted Pi config", () => {
   assert.equal(next.pi.speed, 1.5);
 });
 
-test("applies Prime overrides and accepts deprecated Pi aliases without coupling configs", () => {
+test("rejects attempts to select another harness", () => {
   const config = {
-    agent: { runtime: "prime" },
-    pi: { provider: "openai-codex", model: "old", apiKey: "pi-key" },
-    prime: { provider: "openai-codex", model: "current", apiKey: "prime-key", idleMinutes: 90 }
+    pi: { provider: "openai-codex", model: "current", apiKey: "pi-key" }
   };
-  const explicit = applyRuntimeOverrides(config, {
-    prime: { model: "anthropic/claude", idleMinutes: "45", speed: "1.5" }
-  });
-  assert.equal(explicit.prime.provider, "anthropic");
-  assert.equal(explicit.prime.model, "claude");
-  assert.equal(explicit.prime.idleMinutes, 45);
-  assert.equal(explicit.prime.speed, 1.5);
-  assert.equal(explicit.pi.model, "old");
-
-  const aliased = applyRuntimeOverrides(config, { pi: { model: "openai-codex/new" } });
-  assert.equal(aliased.prime.model, "new");
-  assert.equal(aliased.pi.model, "old");
-
   assert.throws(
-    () => applyRuntimeOverrides(config, { prime: { speed: "2" } }),
-    /Invalid model speed/
+    () => applyRuntimeOverrides(config, { agent: { runtime: "another" } }),
+    /Unsupported runtime override namespace: agent/
   );
+});
+
+test("migrates persisted config to Pi-only state", () => {
+  const config = applyConfigDefaults({
+    agent: { runtime: "legacy" },
+    prime: { provider: "legacy-provider", model: "legacy-model" },
+    pi: { provider: "openai-codex", model: "gpt-5.6" }
+  });
+
+  assert.equal(config.pi.model, "gpt-5.6");
+  assert.equal("agent" in config, false);
+  assert.equal("prime" in config, false);
 });
 
 test("system_shell runs commands from the configured workspace", async () => {

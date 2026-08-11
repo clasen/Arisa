@@ -1,6 +1,5 @@
 import path from "node:path";
-import crypto from "node:crypto";
-import { mkdir, readFile, readdir, stat, unlink, writeFile } from "node:fs/promises";
+import { readFile, stat, unlink } from "node:fs/promises";
 import { createAgentSession, DefaultResourceLoader, SessionManager, defineTool } from "@earendil-works/pi-coding-agent";
 import { Type } from "@sinclair/typebox";
 import { createPiRuntime, hasProviderAuth } from "./pi-runtime.js";
@@ -10,20 +9,8 @@ import { withTimeout } from "./prompt-timeout.js";
 import { buildPiToolPolicy, getCoreCodingTools } from "./core-tools.js";
 import { createSystemShellTool } from "./system-shell-tool.js";
 import { clampModelThinkingLevel } from "./pi-runtime.js";
-import { clampModelSpeed, createModelSpeedController, speedToServiceTier } from "./model-speed.js";
-import { PrimeRpcSession, PrimeRpcSessionClosedError } from "./prime-rpc-session.js";
-import { syncPrimeAuth } from "./prime-auth.js";
-import {
-  arisaHomeDir,
-  arisaIpcSocketFile,
-  arisaPackageDir,
-  getChatPiSessionsDir,
-  getChatPrimeHandoffFile,
-  getChatPrimeSessionsDir,
-  primeDaemonSocketFile,
-  primeSupervisorRegistryDir,
-  primeStateDir
-} from "../../runtime/paths.js";
+import { clampModelSpeed, createModelSpeedController } from "./model-speed.js";
+import { arisaHomeDir, getChatPiSessionsDir } from "../../runtime/paths.js";
 
 const piValidationTimeoutMs = 60_000;
 const arisaToolNames = [
@@ -38,25 +25,6 @@ const arisaToolNames = [
   "send_artifact"
 ];
 
-const legacyHandoffPrompt = [
-  "Prepare a concise handoff for the next Arisa session.",
-  "Review the entire active session, including compaction summaries and the latest messages.",
-  "Keep only durable context: goals, decisions, preferences, unresolved tasks, and important continuation facts.",
-  "Use at most 8 short bullets and at most 1600 characters.",
-  "Exclude secrets, tokens, passwords, cookies, API keys, private file paths, transcripts, and stale chatter.",
-  "Do not take actions, call tools, send messages, or explain the process.",
-  "Return only the handoff."
-].join("\n");
-
-function sanitizeHandoff(text) {
-  const sanitized = String(text || "")
-    .replace(/-----BEGIN [^-]*PRIVATE KEY-----[\s\S]*?-----END [^-]*PRIVATE KEY-----/gi, "[redacted private key]")
-    .replace(/\b(?:sk-[A-Za-z0-9_-]{12,}|gh[opsu]_[A-Za-z0-9_-]{12,}|Bearer\s+[A-Za-z0-9._-]+)\b/gi, "[redacted credential]")
-    .replace(/(?:api[_ -]?key|access[_ -]?token|refresh[_ -]?token|client[_ -]?secret|password|cookie|secret)\s*[:=]\s*[^\s,;]+/gi, "[redacted credential]")
-    .trim();
-  return sanitized.length <= 4000 ? sanitized : `${sanitized.slice(0, 3997).trim()}...`;
-}
-
 function messageText(content) {
   if (typeof content === "string") return content.trim();
   if (!Array.isArray(content)) return "";
@@ -65,6 +33,22 @@ function messageText(content) {
     .map((item) => item.text.trim())
     .filter(Boolean)
     .join("\n");
+}
+
+export function formatPortableSessionHistory(messages = []) {
+  return messages
+    .map((message) => {
+      const text = messageText(message?.content);
+      if (!text) return "";
+      const role = message.role === "assistant"
+        ? "Assistant"
+        : message.role === "user"
+          ? "User"
+          : (message.customType ? `Session memory (${message.customType})` : "Session context");
+      return `${role}:\n${text}`;
+    })
+    .filter(Boolean)
+    .join("\n\n");
 }
 
 const estimatedImageTokens = 1_200;
@@ -113,31 +97,6 @@ function summarizeRetainedContext(messages = []) {
     toolResultPercent: estimatedTokens ? toolResultTokens / estimatedTokens * 100 : 0,
     largestMessagePercent: estimatedTokens ? largestMessageTokens / estimatedTokens * 100 : 0
   };
-}
-
-export function formatPortableSessionHistory(messages = []) {
-  return messages
-    .map((message) => {
-      const text = messageText(message?.content);
-      if (!text) return "";
-      const role = message.role === "assistant"
-        ? "Assistant"
-        : message.role === "user"
-          ? "User"
-          : (message.customType ? `Session memory (${message.customType})` : "Session context");
-      return `${role}:\n${text}`;
-    })
-    .filter(Boolean)
-    .join("\n\n");
-}
-
-async function containsJsonl(dir) {
-  try {
-    return (await readdir(dir)).some((name) => name.endsWith(".jsonl"));
-  } catch (error) {
-    if (error?.code === "ENOENT") return false;
-    throw error;
-  }
 }
 
 function closeAgentSession(session) {
@@ -260,26 +219,8 @@ export class AgentManager {
     this.sessions = new Map();
     this.pendingNewSessions = new Set();
     this.pendingSessionHandoffs = new Map();
-    this.primeUiHandler = null;
-    this.primeOutputHandler = null;
     this.artifactDeliveryHandler = null;
-    this.idleTimers = new Map();
-    this.primeCapabilities = new Map();
-    this.pendingPrimeSessions = new Map();
     this.sessionClosePromises = new Map();
-    this.primeSessionGenerations = new Map();
-  }
-
-  isPrimeRuntime() {
-    return this.config.agent?.runtime === "prime";
-  }
-
-  setPrimeUiHandler(handler) {
-    this.primeUiHandler = handler;
-  }
-
-  setPrimeOutputHandler(handler) {
-    this.primeOutputHandler = handler;
   }
 
   setArtifactDeliveryHandler(handler) {
@@ -291,20 +232,10 @@ export class AgentManager {
     return this.artifactDeliveryHandler(payload);
   }
 
-  authorizePrimeCapability(chatId, capabilityToken) {
-    if (chatId == null || !capabilityToken) return false;
-    return this.primeCapabilities.get(String(chatId)) === capabilityToken;
-  }
-
   closeCachedSession(sessionKey) {
     const key = String(sessionKey);
     const existing = this.sessions.get(key);
     this.sessions.delete(key);
-    const timer = this.idleTimers.get(key);
-    if (timer) clearTimeout(timer);
-    this.idleTimers.delete(key);
-    this.primeCapabilities.delete(key);
-    existing?.unsubscribe?.();
     const closeSession = (existing?.session?.close || existing?.session?.dispose)
       ? () => closeAgentSession(existing.session)
       : null;
@@ -337,58 +268,6 @@ export class AgentManager {
     }
   }
 
-  trackPendingPrimeSession(sessionKey, modelKey, generation, promise) {
-    const key = String(sessionKey);
-    this.pendingPrimeSessions.set(key, { modelKey, generation, promise });
-    void promise.finally(() => {
-      if (this.pendingPrimeSessions.get(key)?.promise === promise) {
-        this.pendingPrimeSessions.delete(key);
-      }
-    }).catch(() => {});
-  }
-
-  getPrimeSessionGeneration(sessionKey) {
-    return this.primeSessionGenerations.get(String(sessionKey)) || 0;
-  }
-
-  invalidatePrimeSessionGeneration(sessionKey) {
-    const key = String(sessionKey);
-    this.primeSessionGenerations.set(key, this.getPrimeSessionGeneration(key) + 1);
-  }
-
-  async acceptPrimeSessionGeneration(sessionKey, generation, context) {
-    const key = String(sessionKey);
-    if (this.getPrimeSessionGeneration(key) === generation) return context;
-
-    if (this.sessions.get(key) === context) this.sessions.delete(key);
-    const idleTimer = this.idleTimers.get(key);
-    if (idleTimer) clearTimeout(idleTimer);
-    this.idleTimers.delete(key);
-    this.primeCapabilities.delete(key);
-    context?.unsubscribe?.();
-    this.pendingNewSessions.add(key);
-    await context?.session?.close?.();
-    throw new PrimeRpcSessionClosedError("Prime RPC session reset during startup");
-  }
-
-  schedulePrimeIdleClose(sessionKey, session) {
-    const key = String(sessionKey);
-    const previous = this.idleTimers.get(key);
-    if (previous) clearTimeout(previous);
-    const idleMinutes = Number(this.config.prime?.idleMinutes || 90);
-    const timer = setTimeout(() => {
-      if (this.sessions.get(key)?.session !== session) return;
-      if (session.hasActiveWork()) {
-        this.schedulePrimeIdleClose(key, session);
-        return;
-      }
-      this.logger?.log("agent", `closing idle Prime RPC session for chat ${key}`);
-      this.closeCachedSession(key);
-    }, Math.max(idleMinutes, 1) * 60_000);
-    timer.unref?.();
-    this.idleTimers.set(key, timer);
-  }
-
   setConfig(config) {
     for (const key of this.sessions.keys()) this.closeCachedSession(key);
     this.config = config;
@@ -398,7 +277,6 @@ export class AgentManager {
 
   resetSession(chatId, { handoff = "", parentSession = "" } = {}) {
     const sessionKey = String(chatId);
-    this.invalidatePrimeSessionGeneration(sessionKey);
     this.closeCachedSession(sessionKey);
     this.pendingNewSessions.add(sessionKey);
     const text = String(handoff || "").trim();
@@ -415,16 +293,10 @@ export class AgentManager {
   }
 
   async getRuntimeDiagnostic({ contextInspectionTimeoutMs } = {}) {
-    const managedProcessIds = [...this.sessions.values()]
-      .map((context) => context?.session?.child)
-      .filter((child) => child?.pid && child.exitCode == null && child.signalCode == null)
-      .map((child) => child.pid);
     const contexts = await Promise.all([...this.sessions.entries()].map(async ([chatId, context]) => {
       const base = { chatId };
       try {
-        const stats = this.isPrimeRuntime()
-          ? await context.session.getSessionStats({ timeoutMs: contextInspectionTimeoutMs })
-          : context.session.getSessionStats();
+        const stats = context.session.getSessionStats();
         const retained = summarizeRetainedContext(context.session.messages);
         return {
           ...base,
@@ -438,11 +310,10 @@ export class AgentManager {
       }
     }));
     return {
-      runtime: this.config.agent?.runtime,
+      harness: "pi",
       sessions: this.sessions.size,
-      startingSessions: this.pendingPrimeSessions.size,
       closingSessions: this.sessionClosePromises.size,
-      managedProcessIds,
+      managedProcessIds: [],
       contexts
     };
   }
@@ -502,248 +373,11 @@ export class AgentManager {
     }
   }
 
-  async syncPrimeCredentials(config = this.config) {
-    return syncPrimeAuth({
-      provider: config.prime.provider,
-      apiKey: config.prime.apiKey
-    });
-  }
-
-  async validatePrimeAgent(config = this.config) {
-    const prime = config.prime;
-    await this.syncPrimeCredentials(config);
-    const workspaceDir = path.resolve(prime.workspaceDir || arisaInstallDir);
-    await assertDirectory(workspaceDir, "prime.workspaceDir");
-    this.logger?.log("agent", `validating Prime Agent ${prime.version} with ${prime.provider}/${prime.model}`);
-    const session = new PrimeRpcSession({
-      command: prime.command,
-      commandArgs: prime.commandArgs,
-      expectedVersion: prime.version,
-      provider: prime.provider,
-      model: prime.model,
-      thinkingLevel: prime.thinkingLevel,
-      serviceTier: speedToServiceTier(prime.speed),
-      cwd: workspaceDir,
-      agentDir: primeStateDir,
-      sessionDir: primeStateDir,
-      kernelVenvDir: prime.kernelVenvDir,
-      daemonSocketPath: primeDaemonSocketFile,
-      supervisorRegistryDir: primeSupervisorRegistryDir,
-      chatId: "validation",
-      noSession: true,
-      logger: this.logger
-    });
-    try {
-      await withTimeout(promptAndThrowOnAssistantError(session, "Reply with exactly: OK"), {
-        timeoutMs: piValidationTimeoutMs,
-        label: "Prime Agent validation prompt"
-      });
-    } finally {
-      await session.close();
-    }
-  }
-
   async validateAgent(config = this.config) {
-    return config.agent?.runtime === "prime"
-      ? this.validatePrimeAgent(config)
-      : this.validatePiAgent(config);
-  }
-
-  async switchRuntime(config, { handoffs = new Map(), onActivate } = {}) {
-    const normalizedHandoffs = handoffs instanceof Map
-      ? handoffs
-      : new Map(Object.entries(handoffs));
-    const sessionKeys = new Set([
-      ...this.sessions.keys(),
-      ...this.pendingPrimeSessions.keys(),
-      ...normalizedHandoffs.keys()
-    ].map(String));
-
-    for (const sessionKey of sessionKeys) this.invalidatePrimeSessionGeneration(sessionKey);
-    const closes = [...this.sessions.keys()].map((sessionKey) => this.closeCachedSession(sessionKey));
-    await Promise.allSettled([
-      ...closes,
-      ...[...this.pendingPrimeSessions.values()].map(({ promise }) => promise)
-    ]);
-    await Promise.allSettled([...this.sessionClosePromises.values()]);
-
-    this.config = onActivate ? onActivate(config) : config;
-    this.pendingNewSessions = new Set(sessionKeys);
-    this.pendingSessionHandoffs = new Map(
-      [...normalizedHandoffs.entries()]
-        .map(([chatId, text]) => [String(chatId), { text: String(text || "").trim(), parentSession: "" }])
-        .filter(([, handoff]) => handoff.text)
-    );
-  }
-
-  async summarizeLegacyPiSession(chatId, sessionRevision = 0) {
-    const pi = this.config.pi;
-    const selection = pi.chatModels?.[String(chatId)];
-    const provider = selection?.provider === pi.provider ? selection.provider : pi.provider;
-    const modelId = selection?.provider === pi.provider ? selection.model : pi.model;
-    const workspaceDir = path.resolve(pi.workspaceDir || arisaInstallDir);
-    const sessionDir = getChatPiSessionsDir(chatId, selection?.sessionRevision ?? sessionRevision);
-    if (!await containsJsonl(sessionDir)) return "";
-    const sessionManager = SessionManager.continueRecent(workspaceDir, sessionDir);
-    if (!sessionManager.buildSessionContext().messages.length) return "";
-    const { authStorage, modelRegistry } = createPiRuntime({ provider, apiKey: pi.apiKey });
-    const model = modelRegistry.find(provider, modelId);
-    if (!model) throw new Error(`Legacy Pi model not found: ${provider}/${modelId}`);
-    const resourceLoader = await createArisaResourceLoader({ cwd: workspaceDir, agentDir: arisaHomeDir });
-    const { session } = await createAgentSession({
-      cwd: workspaceDir,
-      agentDir: arisaHomeDir,
-      resourceLoader,
-      authStorage,
-      modelRegistry,
-      model,
-      thinkingLevel: clampModelThinkingLevel(model, selection?.thinkingLevel || pi.thinkingLevel),
-      tools: [],
-      customTools: [],
-      sessionManager
-    });
-    await promptAndThrowOnAssistantError(session, legacyHandoffPrompt);
-    const message = [...session.messages].reverse().find((item) => item.role === "assistant");
-    const text = Array.isArray(message?.content)
-      ? message.content.filter((item) => item.type === "text").map((item) => item.text).join("\n")
-      : message?.content;
-    return sanitizeHandoff(text);
-  }
-
-  async getPrimeSessionContext(chatId) {
-    const sessionKey = String(chatId);
-    const modelSelection = resolveChatModelSelection(this.config, sessionKey);
-    const modelKey = `${modelSelection.provider}/${modelSelection.model}@${modelSelection.sessionRevision}`;
-    const generation = this.getPrimeSessionGeneration(sessionKey);
-    const pending = this.pendingPrimeSessions.get(sessionKey);
-    if (pending?.modelKey === modelKey && pending.generation === generation) return pending.promise;
-    if (pending) {
-      await pending.promise.catch(() => {});
-      return this.getPrimeSessionContext(sessionKey);
-    }
-
-    const creation = this.createPrimeSessionContext(sessionKey, modelSelection, modelKey)
-      .then((context) => this.acceptPrimeSessionGeneration(sessionKey, generation, context));
-    this.trackPendingPrimeSession(sessionKey, modelKey, generation, creation);
-    return creation;
-  }
-
-  async createPrimeSessionContext(sessionKey, modelSelection, modelKey) {
-    await this.waitForSessionClose(sessionKey);
-    const existing = this.sessions.get(sessionKey);
-    if (existing?.modelKey === modelKey) {
-      if (existing.session.thinkingLevel !== modelSelection.thinkingLevel) {
-        await existing.session.setThinkingLevel(modelSelection.thinkingLevel);
-      }
-      const serviceTier = speedToServiceTier(modelSelection.speed);
-      if (existing.session.serviceTier !== serviceTier) {
-        await existing.session.setServiceTier(serviceTier);
-      }
-      this.schedulePrimeIdleClose(sessionKey, existing.session);
-      return existing;
-    }
-    if (existing) {
-      this.logger?.log("agent", `Prime model changed for chat ${sessionKey}; recreating RPC session`);
-      await this.closeCachedSession(sessionKey);
-      this.pendingNewSessions.add(sessionKey);
-    }
-
-    const prime = this.config.prime;
-    const workspaceDir = path.resolve(prime.workspaceDir || arisaInstallDir);
-    await assertDirectory(workspaceDir, "prime.workspaceDir");
-    await this.syncPrimeCredentials();
-    const sessionDir = getChatPrimeSessionsDir(sessionKey, modelSelection.sessionRevision);
-    const handoffFile = getChatPrimeHandoffFile(sessionKey, modelSelection.sessionRevision);
-    const runtimeContextFile = path.join(sessionDir, "arisa-runtime-context.txt");
-    await mkdir(sessionDir, { recursive: true, mode: 0o700 });
-    let pendingHandoff = this.pendingSessionHandoffs.get(sessionKey)?.text || "";
-    if (!pendingHandoff && !this.pendingNewSessions.has(sessionKey) && !await containsJsonl(sessionDir)) {
-      const piSelection = this.config.pi.chatModels?.[sessionKey];
-      const legacyRevision = piSelection?.sessionRevision ?? modelSelection.sessionRevision;
-      if (await containsJsonl(getChatPiSessionsDir(sessionKey, legacyRevision))) {
-        let migrationStatus = "migrated";
-        try {
-          pendingHandoff = await this.summarizeLegacyPiSession(sessionKey, legacyRevision);
-          if (!pendingHandoff) migrationStatus = "no_handoff";
-          else this.logger?.log("agent", `created safe Pi-to-Prime handoff for chat ${sessionKey}`);
-        } catch (error) {
-          migrationStatus = "failed";
-          this.logger?.error?.("agent", `Pi-to-Prime handoff failed for chat ${sessionKey}; starting Prime without imported context: ${error instanceof Error ? error.message : String(error)}`);
-        }
-        await writeFile(path.join(sessionDir, "migration.json"), `${JSON.stringify({
-          from: "pi",
-          to: "prime",
-          status: migrationStatus,
-          migratedAt: new Date().toISOString(),
-          handoffCharacters: pendingHandoff.length,
-          sourcePreserved: true
-        }, null, 2)}\n`, { encoding: "utf8", mode: 0o600 });
-      }
-    }
-    await writeFile(handoffFile, pendingHandoff, { encoding: "utf8", mode: 0o600 });
-    await writeFile(runtimeContextFile, buildAgentRuntimeContext({
-      workspaceDir,
-      coreTools: [{ name: "ipython", enabled: true, source: "prime-native" }]
-    }), { encoding: "utf8", mode: 0o600 });
-
-    const session = new PrimeRpcSession({
-      command: prime.command,
-      commandArgs: prime.commandArgs,
-      expectedVersion: prime.version,
-      provider: modelSelection.provider,
-      model: modelSelection.model,
-      thinkingLevel: modelSelection.thinkingLevel,
-      serviceTier: speedToServiceTier(modelSelection.speed),
-      cwd: workspaceDir,
-      agentDir: primeStateDir,
-      sessionDir,
-      kernelVenvDir: prime.kernelVenvDir,
-      daemonSocketPath: primeDaemonSocketFile,
-      supervisorRegistryDir: primeSupervisorRegistryDir,
-      extensionPath: path.join(arisaPackageDir, "src", "core", "agent", "prime-arisa-extension.js"),
-      chatId: sessionKey,
-      continueSession: !this.pendingNewSessions.has(sessionKey),
-      env: {
-        ARISA_IPC_SOCKET: arisaIpcSocketFile,
-        ARISA_PACKAGE_DIR: arisaPackageDir,
-        ARISA_AGENTS_FILE: arisaAgentsFile,
-        ARISA_RUNTIME_CONTEXT_FILE: runtimeContextFile,
-        ARISA_HANDOFF_FILE: handoffFile
-      },
-      logger: this.logger,
-      onUiRequest: (request) => this.primeUiHandler?.(sessionKey, request),
-      onUnsolicitedText: (text, event) => this.primeOutputHandler?.(sessionKey, text, event)
-    });
-    const capabilityToken = crypto.randomBytes(32).toString("hex");
-    session.extraEnv.ARISA_IPC_TOKEN = capabilityToken;
-    this.primeCapabilities.set(sessionKey, capabilityToken);
-    const unsubscribe = session.subscribe((event) => {
-      if (event.type === "agent_start") {
-        const timer = this.idleTimers.get(sessionKey);
-        if (timer) clearTimeout(timer);
-        this.idleTimers.delete(sessionKey);
-      } else if (event.type === "agent_settled") {
-        this.schedulePrimeIdleClose(sessionKey, session);
-      }
-    });
-    try {
-      await session.start();
-    } catch (error) {
-      this.primeCapabilities.delete(sessionKey);
-      unsubscribe();
-      await session.close().catch(() => {});
-      throw error;
-    }
-    const ctx = { session, modelId: modelSelection.model, modelKey, unsubscribe };
-    this.sessions.set(sessionKey, ctx);
-    this.pendingNewSessions.delete(sessionKey);
-    this.pendingSessionHandoffs.delete(sessionKey);
-    this.schedulePrimeIdleClose(sessionKey, session);
-    return ctx;
+    return this.validatePiAgent(config);
   }
 
   async getSessionContext(chatId, telegram) {
-    if (this.isPrimeRuntime()) return this.getPrimeSessionContext(chatId);
     const sessionKey = String(chatId);
     const modelSelection = resolveChatModelSelection(this.config, sessionKey);
     const effectiveModelId = modelSelection.model;
@@ -835,38 +469,12 @@ export class AgentManager {
   }
 
   async getAvailableModels(chatId) {
-    if (!this.isPrimeRuntime()) {
-      const { listProviderModels } = await import("./pi-runtime.js");
-      const runtime = createPiRuntime({ provider: this.config.pi.provider, apiKey: this.config.pi.apiKey });
-      return listProviderModels(this.config.pi.provider, runtime);
-    }
-    const { session } = await this.getPrimeSessionContext(chatId);
-    const models = await session.getAvailableModels();
-    return models.filter((model) => !model.provider || model.provider === this.config.prime.provider);
-  }
-
-  async setPrimeModel(chatId, model) {
-    if (!this.isPrimeRuntime()) return model;
-    const { session } = await this.getPrimeSessionContext(chatId);
-    return session.setModel(model.provider, model.id);
-  }
-
-  async setPrimeThinkingLevel(chatId, thinkingLevel) {
-    if (!this.isPrimeRuntime()) return thinkingLevel;
-    const { session } = await this.getPrimeSessionContext(chatId);
-    await session.setThinkingLevel(thinkingLevel);
-    return thinkingLevel;
-  }
-
-  async setPrimeSpeed(chatId, speed) {
-    if (!this.isPrimeRuntime()) return speed;
-    const { session } = await this.getPrimeSessionContext(chatId);
-    await session.setServiceTier(speedToServiceTier(speed));
-    return speed;
+    const { listProviderModels } = await import("./pi-runtime.js");
+    const runtime = createPiRuntime({ provider: this.config.pi.provider, apiKey: this.config.pi.apiKey });
+    return listProviderModels(this.config.pi.provider, runtime);
   }
 
   async setModelSpeed(chatId, speed) {
-    if (this.isPrimeRuntime()) return this.setPrimeSpeed(chatId, speed);
     const context = this.sessions.get(String(chatId));
     if (!context) return speed;
     const effectiveSpeed = clampModelSpeed(context.session.model, speed);
@@ -876,21 +484,10 @@ export class AgentManager {
 
   async close() {
     const contexts = [...this.sessions.values()];
-    const pendingSessions = [...this.pendingPrimeSessions.values()].map(({ promise }) => promise);
-    for (const timer of this.idleTimers.values()) clearTimeout(timer);
-    this.idleTimers.clear();
-    this.primeCapabilities.clear();
     this.sessions.clear();
-    for (const context of contexts) context.unsubscribe?.();
-    const createdContexts = (await Promise.allSettled(pendingSessions))
-      .filter((result) => result.status === "fulfilled")
-      .map((result) => result.value)
-      .filter((context) => context && !contexts.includes(context));
-    for (const context of createdContexts) context.unsubscribe?.();
     await Promise.allSettled([
       ...this.sessionClosePromises.values(),
-      ...contexts.map((context) => closeAgentSession(context.session)),
-      ...createdContexts.map((context) => closeAgentSession(context.session))
+      ...contexts.map((context) => closeAgentSession(context.session))
     ]);
   }
 

@@ -89,11 +89,10 @@ test("chat state uses one queue for numeric and string chat IDs", () => {
   });
 });
 
-test("a queued /new continues only after the active Prime session closes", async () => {
+test("a queued /new continues after the active session closes", async () => {
   const chatState = { processing: true, nextPrompt: "", continueAfterClose: false };
   const processed = [];
-  const interruption = new Error("Prime RPC session closed");
-  interruption.code = "ARISA_PRIME_RPC_SESSION_CLOSED";
+  const interruption = new Error("active session closed");
 
   await drainChatPromptQueue({
     chatState,

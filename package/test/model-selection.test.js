@@ -10,14 +10,14 @@ import {
   selectChatSpeed,
   selectChatThinkingLevel
 } from "../src/core/agent/model-selection.js";
-import { applyConfigDefaults, piConfigDefaults, primeConfigDefaults, telegramConfigDefaults } from "../src/core/config/config-defaults.js";
+import { applyConfigDefaults, piConfigDefaults, telegramConfigDefaults } from "../src/core/config/config-defaults.js";
 import {
   clampModelThinkingLevel,
   listModelThinkingLevels,
   modelSupportsThinking
 } from "../src/core/agent/pi-runtime.js";
 import { clampModelSpeed, createModelSpeedController, modelSupportsSpeed, normalizeModelSpeed, speedToServiceTier } from "../src/core/agent/model-speed.js";
-import { getChatPiSessionsDir, getChatPrimeSessionsDir } from "../src/runtime/paths.js";
+import { getChatPiSessionsDir } from "../src/runtime/paths.js";
 import {
   buildEffortPicker,
   buildModelPicker,
@@ -72,24 +72,6 @@ test("starts a distinct persisted Pi session revision on every model change", ()
   );
 });
 
-test("uses isolated Prime selections and session revisions", () => {
-  const config = applyConfigDefaults({
-    agent: { runtime: "prime" },
-    telegram: {},
-    pi: {
-      provider: "openai-codex",
-      model: "pi-model",
-      chatModels: { "123": { provider: "openai-codex", model: "pi-chat", sessionRevision: 2 } }
-    }
-  });
-  selectChatModel(config, 123, { provider: "openai-codex", id: "prime-model" }, { thinkingLevel: "high" });
-  assert.equal(config.prime.chatModels["123"].model, "prime-model");
-  assert.equal(config.prime.chatModels["123"].sessionRevision, 3);
-  assert.equal(config.pi.chatModels["123"].model, "pi-chat");
-  assert.equal(getChatPrimeSessionsDir(123, 3), path.join(path.dirname(getChatPrimeSessionsDir(123)), "3"));
-  assert.equal(resolveChatSpeed(config, 123), 1);
-});
-
 test("updates effort without bumping the session revision", () => {
   const config = createConfig();
 
@@ -114,21 +96,6 @@ test("updates Pi speed without bumping the session revision", () => {
   assert.equal(resolveChatSpeed(config, 123), 1.5);
   assert.equal(config.pi.chatModels["123"].sessionRevision, 1);
   assert.equal(config.pi.chatModels["123"].thinkingLevel, "high");
-});
-
-test("keeps Prime speed selection isolated from Pi", () => {
-  const config = applyConfigDefaults({
-    agent: { runtime: "prime" },
-    telegram: {},
-    pi: { provider: "openai-codex", model: "pi-model" }
-  });
-
-  selectChatModel(config, 123, { provider: "openai-codex", id: "gpt-5.6-sol" }, { thinkingLevel: "high" });
-  selectChatSpeed(config, 123, 1.5);
-
-  assert.equal(resolveChatSpeed(config, 123), 1.5);
-  assert.equal(config.prime.chatModels["123"].sessionRevision, 1);
-  assert.equal(config.pi.chatModels, undefined);
 });
 
 test("ignores a chat selection from a different active provider", () => {
@@ -283,7 +250,6 @@ test("centralizes picker defaults in config", () => {
   assert.equal(config.telegram.modelPickerPageSize, telegramConfigDefaults.modelPickerPageSize);
   assert.equal(config.pi.thinkingLevel, piConfigDefaults.thinkingLevel);
   assert.equal(config.pi.speed, piConfigDefaults.speed);
-  assert.equal(config.prime.speed, primeConfigDefaults.speed);
 });
 
 test("lists and clamps thinking levels from model capabilities", () => {

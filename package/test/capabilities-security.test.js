@@ -152,7 +152,6 @@ test("delivers only artifacts resolved from the requesting chat", async () => {
       })
     },
     agentManager: {
-      authorizePrimeCapability: (chatId, token) => chatId === "chat-a" && token === "bound-token",
       deliverArtifact: async (payload) => {
         deliveries.push(payload);
         return { ok: true };
@@ -162,18 +161,16 @@ test("delivers only artifacts resolved from the requesting chat", async () => {
 
   await assert.rejects(() => capabilities.dispatch({
     method: "artifacts.deliver",
-    toolName: "prime-agent-bridge",
+    toolName: "ipc-tool",
     chatId: "chat-b",
-    capabilityToken: "bound-token",
     params: { artifactId: "artifact-1", path: artifact.path }
-  }), /invalid Prime chat capability/);
+  }), /Artifact not found/);
   assert.equal(deliveries.length, 0);
 
   await capabilities.dispatch({
     method: "artifacts.deliver",
-    toolName: "prime-agent-bridge",
+    toolName: "ipc-tool",
     chatId: "chat-a",
-    capabilityToken: "bound-token",
     params: { artifactId: "artifact-1", path: "/attacker/chosen/path" }
   });
   assert.equal(deliveries.length, 1);

@@ -42,11 +42,8 @@ function normalizeLimit(limit) {
 }
 
 export function createArisaCapabilities({ artifactStore, taskStore, toolRegistry, agentManager } = {}) {
-  async function dispatch({ method, toolName, chatId = null, capabilityToken = "", params = {} } = {}) {
+  async function dispatch({ method, toolName, chatId = null, params = {} } = {}) {
     const scopedToolName = requireToolName(toolName);
-    if (scopedToolName === "prime-agent-bridge" && !agentManager?.authorizePrimeCapability?.(chatId, capabilityToken)) {
-      throw new Error("invalid Prime chat capability");
-    }
 
     if (method === "tools.list") {
       await toolRegistry.load();

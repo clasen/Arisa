@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 
 import { bootstrapIfNeeded } from "./runtime/bootstrap.js";
-import { applyRuntimeOverrides, createApp, prepareAgentRuntime } from "./runtime/create-app.js";
+import { applyRuntimeOverrides, createApp } from "./runtime/create-app.js";
 import { loadConfig } from "./core/config/config-store.js";
 import { createLogger } from "./runtime/logger.js";
 import { getServiceStatus, handoffServiceRestart, registerServiceProcess, restartService, startService, stopService, unregisterServiceProcess } from "./runtime/service-manager.js";
@@ -72,7 +72,6 @@ function toNestedOverrides(nestedFlags) {
 function toServiceRunnerArgs(nestedFlags) {
   const args = [];
   const serviceSafeAgentFlags = [
-    "agent.runtime",
     "pi.provider",
     "pi.model",
     "pi.workspaceDir",
@@ -80,15 +79,7 @@ function toServiceRunnerArgs(nestedFlags) {
     "pi.excludeTools",
     "pi.shellPath",
     "pi.shellTimeoutMs",
-    "pi.speed",
-    "prime.provider",
-    "prime.model",
-    "prime.workspaceDir",
-    "prime.command",
-    "prime.version",
-    "prime.thinkingLevel",
-    "prime.speed",
-    "prime.idleMinutes"
+    "pi.speed"
   ];
 
   for (const flag of serviceSafeAgentFlags) {
@@ -137,7 +128,7 @@ async function startRuntimeApp() {
 
 async function startBackgroundService() {
   const persistedConfig = await loadConfig();
-  await prepareAgentRuntime(applyRuntimeOverrides(persistedConfig, runtimeOverrides), { logger });
+  applyRuntimeOverrides(persistedConfig, runtimeOverrides);
   const result = await startService({ verbose, cliArgs: toServiceRunnerArgs(cli.nestedFlags) });
   if (!result.ok) {
     console.log(`Arisa is already running in background (pid ${result.pid}).`);
@@ -150,7 +141,7 @@ async function startBackgroundService() {
 
 async function restartBackgroundService() {
   const persistedConfig = await loadConfig();
-  await prepareAgentRuntime(applyRuntimeOverrides(persistedConfig, runtimeOverrides), { logger });
+  applyRuntimeOverrides(persistedConfig, runtimeOverrides);
   const result = await restartService({
     verbose,
     cliArgs: toServiceRunnerArgs(cli.nestedFlags),
@@ -175,12 +166,6 @@ async function restartBackgroundService() {
 
 async function runForeground() {
   const hasRuntimePiOverrides = Boolean(
-    runtimeOverrides?.prime?.model
-    || runtimeOverrides?.prime?.provider
-    || runtimeOverrides?.prime?.apiKey
-    || runtimeOverrides?.prime?.workspaceDir
-    || runtimeOverrides?.agent?.runtime
-    ||
     runtimeOverrides?.pi?.model
     || runtimeOverrides?.pi?.provider
     || runtimeOverrides?.pi?.apiKey

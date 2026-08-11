@@ -20,7 +20,6 @@ export const telegramConfigDefaults = Object.freeze({
 
 export const doctorConfigDefaults = Object.freeze({
   contextInspectionTimeoutMs: 5_000,
-  primeShutdownTimeoutMs: 15_000,
   contextWarningPercent: 70,
   contextCriticalPercent: 90,
   contextInefficientMinTokens: 32_000,
@@ -38,23 +37,9 @@ export const serviceConfigDefaults = Object.freeze({
   shutdownPollIntervalMs: 100
 });
 
-export const agentConfigDefaults = Object.freeze({
-  runtime: "pi"
-});
-
 export const piConfigDefaults = Object.freeze({
   thinkingLevel: "medium",
   speed: 1
-});
-
-export const defaultPrimeVersion = "0.7.1";
-
-export const primeConfigDefaults = Object.freeze({
-  command: "",
-  version: defaultPrimeVersion,
-  thinkingLevel: "medium",
-  speed: 1,
-  idleMinutes: 90
 });
 
 function cloneChatModels(chatModels) {
@@ -66,25 +51,13 @@ function cloneChatModels(chatModels) {
 }
 
 export function applyConfigDefaults(config) {
-  const legacyPi = config.pi || {};
-  const configuredPrime = config.prime || {};
-  const prime = {
-    ...primeConfigDefaults,
-    provider: configuredPrime.provider ?? legacyPi.provider,
-    model: configuredPrime.model ?? legacyPi.model,
-    apiKey: configuredPrime.apiKey ?? legacyPi.apiKey,
-    workspaceDir: configuredPrime.workspaceDir ?? legacyPi.workspaceDir,
-    chatModels: cloneChatModels(configuredPrime.chatModels ?? legacyPi.chatModels),
-    ...configuredPrime
-  };
-  if (!String(prime.command || "").trim()) prime.version = defaultPrimeVersion;
+  const normalized = { ...config };
+  delete normalized.agent;
+  delete normalized.prime;
+  const configuredPi = normalized.pi || {};
 
   return {
-    ...config,
-    agent: {
-      ...agentConfigDefaults,
-      ...(config.agent || {})
-    },
+    ...normalized,
     telegram: {
       ...telegramConfigDefaults,
       ...(config.telegram || {})
@@ -99,9 +72,9 @@ export function applyConfigDefaults(config) {
     },
     pi: {
       ...piConfigDefaults,
-      ...legacyPi
+      ...configuredPi,
+      chatModels: cloneChatModels(configuredPi.chatModels)
     },
-    prime,
     daemons: {
       ...daemonConfigDefaults,
       ...(config.daemons || {})

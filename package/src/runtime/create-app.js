@@ -1,9 +1,8 @@
-import { clearManagedPrimeRuntimeDetails, loadConfig, saveConfig, updateConfig } from "../core/config/config-store.js";
+import { loadConfig, saveConfig, updateConfig } from "../core/config/config-store.js";
 import { ArtifactStore } from "../core/artifacts/artifact-store.js";
 import { ToolRegistry } from "../core/tools/tool-registry.js";
 import { TaskStore } from "../core/tasks/task-store.js";
 import { AgentManager } from "../core/agent/agent-manager.js";
-import { shutdownPrimeDaemon } from "../core/agent/prime-rpc-session.js";
 import { getErrorMessage, getPiAuthIssue } from "../core/agent/auth-flow.js";
 import { createTelegramBot } from "../transport/telegram/bot.js";
 import { createToolProcessSupervisor } from "./tool-process-supervisor.js";
@@ -11,9 +10,7 @@ import { createArisaCapabilities } from "./arisa-capabilities.js";
 import { createIpcServer } from "./ipc/ipc-server.js";
 import { getAgentConfig } from "../core/agent/model-selection.js";
 import { normalizeModelSpeed } from "../core/agent/model-speed.js";
-import { resolvePrimeAgentRuntime } from "./prime-agent-installer.js";
-import { isOwnedPrimeDaemon, listPrimeDaemonOwners, runDoctor } from "./doctor.js";
-import { recordHarnessTransition } from "./harness-transition-journal.js";
+import { runDoctor } from "./doctor.js";
 
 function normalizeString(value) {
   const text = String(value ?? "").trim();
@@ -57,13 +54,11 @@ function splitModelOverride(modelOverride) {
 }
 
 export function applyRuntimeOverrides(config, runtimeOverrides) {
-  const runtime = normalizeString(runtimeOverrides?.agent?.runtime);
-  if (runtime && !["pi", "prime"].includes(runtime)) {
-    throw new Error(`Unsupported agent runtime: ${runtime}`);
+  const unsupportedNamespaces = Object.keys(runtimeOverrides || {}).filter((name) => name !== "pi");
+  if (unsupportedNamespaces.length) {
+    throw new Error(`Unsupported runtime override namespace: ${unsupportedNamespaces.join(", ")}`);
   }
-  const effectiveRuntime = runtime || config.agent?.runtime || "pi";
-  const legacyPiRuntimeOverrides = runtimeOverrides?.pi || {};
-  const piRuntimeOverrides = effectiveRuntime === "pi" ? legacyPiRuntimeOverrides : {};
+  const piRuntimeOverrides = runtimeOverrides?.pi || {};
   const pi = {};
   const providerOverride = normalizeString(piRuntimeOverrides.provider);
   const modelOverride = normalizeString(piRuntimeOverrides.model);
@@ -91,65 +86,13 @@ export function applyRuntimeOverrides(config, runtimeOverrides) {
   if (shellTimeoutMs) pi.shellTimeoutMs = shellTimeoutMs;
   if (piRuntimeOverrides.speed !== undefined) pi.speed = normalizeModelSpeed(piRuntimeOverrides.speed);
 
-  const primeRuntimeOverrides = runtimeOverrides?.prime || {};
-  const legacyPrimeAliases = effectiveRuntime === "prime" ? legacyPiRuntimeOverrides : {};
-  const primeSource = { ...legacyPrimeAliases, ...primeRuntimeOverrides };
-  const prime = {};
-  const primeProviderOverride = normalizeString(primeSource.provider);
-  const primeModelOverride = normalizeString(primeSource.model);
-  if (primeProviderOverride || primeModelOverride) {
-    const splitOverride = primeModelOverride ? splitModelOverride(primeModelOverride) : null;
-    prime.provider = primeProviderOverride || splitOverride?.provider || config.prime.provider;
-    prime.model = splitOverride && (!primeProviderOverride || primeProviderOverride === splitOverride.provider)
-      ? splitOverride.model
-      : (primeModelOverride || config.prime.model);
-  }
-  for (const key of ["apiKey", "workspaceDir", "command", "version", "thinkingLevel"]) {
-    const value = normalizeString(primeSource[key]);
-    if (value) prime[key] = value;
-  }
-  if (primeSource.speed !== undefined) prime.speed = normalizeModelSpeed(primeSource.speed);
-  const idleMinutes = normalizePositiveInteger(primeSource.idleMinutes);
-  if (idleMinutes) prime.idleMinutes = idleMinutes;
-
-  if (!Object.keys(pi).length && !Object.keys(prime).length && !runtime) return config;
+  if (!Object.keys(pi).length) return config;
 
   return {
     ...config,
-    agent: {
-      ...config.agent,
-      runtime: effectiveRuntime
-    },
     pi: {
       ...config.pi,
       ...pi
-    },
-    prime: {
-      ...config.prime,
-      ...prime
-    }
-  };
-}
-
-export async function prepareAgentRuntime(config, { logger, resolvePrimeImpl = resolvePrimeAgentRuntime } = {}) {
-  if (config.agent?.runtime !== "prime") {
-    if (config.prime?.managedRuntime !== true) return config;
-    return { ...config, prime: clearManagedPrimeRuntimeDetails(config.prime) };
-  }
-  const runtime = await resolvePrimeImpl({
-    command: config.prime.managedRuntime === true ? "" : config.prime.command,
-    version: config.prime.version,
-    logger
-  });
-  return {
-    ...config,
-    prime: {
-      ...config.prime,
-      command: runtime.command,
-      commandArgs: runtime.commandArgs,
-      managedRuntime: runtime.managed,
-      runtimeDir: runtime.runtimeDir,
-      kernelVenvDir: runtime.kernelVenvDir
     }
   };
 }
@@ -161,14 +104,11 @@ export async function createApp({ logger, runtimeOverrides, requestRestart } = {
   logger?.log("app", "loading config");
   const persistedConfig = await loadConfig();
   const overriddenConfig = applyRuntimeOverrides(persistedConfig, runtimeOverrides);
-  const config = await prepareAgentRuntime(overriddenConfig, { logger });
+  const config = overriddenConfig;
   const activeConfig = getAgentConfig(config);
   const persistedActiveConfig = getAgentConfig(persistedConfig);
   if (activeConfig.provider !== persistedActiveConfig.provider || activeConfig.model !== persistedActiveConfig.model) {
     logger?.log("app", `applying runtime model override: ${persistedActiveConfig.provider}/${persistedActiveConfig.model} -> ${activeConfig.provider}/${activeConfig.model}`);
-  }
-  if (config.agent.runtime === "prime" && runtimeOverrides?.pi && !runtimeOverrides?.prime) {
-    logger?.log("app", "deprecated --pi.* flags are being used as --prime.* aliases; rename them before the next major release");
   }
 
   const artifactStore = new ArtifactStore();
@@ -189,22 +129,11 @@ export async function createApp({ logger, runtimeOverrides, requestRestart } = {
     agentManager,
     saveConfig,
     updateConfig,
-    prepareRuntime: (candidate) => prepareAgentRuntime(candidate, { logger }),
-    traceHarnessTransition: async (event) => recordHarnessTransition({
-      ...event,
-      primeDaemons: (await listPrimeDaemonOwners()).filter(isOwnedPrimeDaemon)
-    }),
     doctor: () => runDoctor({
       agentManager,
       toolProcessSupervisor,
       daemonPolicy: config.daemons,
       doctorPolicy: config.doctor,
-      stopPrimeDaemon: (owner, { timeoutMs }) => shutdownPrimeDaemon({
-        socketPath: owner.socketPath,
-        pid: owner.pid,
-        processStartId: owner.processStartId,
-        timeoutMs
-      }),
       logger
     }),
     requestRestart,
@@ -213,7 +142,7 @@ export async function createApp({ logger, runtimeOverrides, requestRestart } = {
 
   return {
     async start() {
-      logger?.log("app", `validating ${config.agent.runtime} model ${activeConfig.provider}/${activeConfig.model}`);
+      logger?.log("app", `validating Pi model ${activeConfig.provider}/${activeConfig.model}`);
       let skipAgentStartupPrompts = false;
       try {
         await agentManager.validateAgent();
@@ -223,7 +152,7 @@ export async function createApp({ logger, runtimeOverrides, requestRestart } = {
           throw error;
         }
         skipAgentStartupPrompts = true;
-        logger?.error("app", `${config.agent.runtime} auth validation failed; starting Telegram in auth recovery mode: ${getErrorMessage(error)}`);
+        logger?.error("app", `Pi auth validation failed; starting Telegram in auth recovery mode: ${getErrorMessage(error)}`);
         await bot.notifyPiAuthIssue?.(error);
       }
       let ipcStarted = false;

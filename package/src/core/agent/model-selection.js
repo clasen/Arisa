@@ -5,7 +5,7 @@ function chatKey(chatId) {
 }
 
 export function getAgentConfig(config) {
-  return config?.agent?.runtime === "prime" ? config.prime : config.pi;
+  return config.pi;
 }
 
 function normalizeSessionRevision(sessionRevision) {

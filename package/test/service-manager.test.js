@@ -8,6 +8,8 @@ test("registers /restart as a native Telegram command", () => {
     telegramCommands.some((command) => command.command === "restart"),
     true
   );
+  assert.equal(telegramCommands.some((command) => command.command === "harness"), false);
+  assert.equal(telegramCommands.some((command) => command.command === "login"), false);
 });
 
 test("replies before handing restart to a detached CLI process", async () => {
@@ -18,7 +20,7 @@ test("replies before handing restart to a detached CLI process", async () => {
 
   const result = await handoffServiceRestart({
     verbose: false,
-    cliArgs: ["--agent.runtime", "prime"]
+    cliArgs: ["--pi.model", "example/model"]
   }, {
     ensureHome: async () => { calls.push("ensure-home"); },
     getStatus: async () => {
@@ -52,8 +54,8 @@ test("replies before handing restart to a detached CLI process", async () => {
   assert.deepEqual(calls[3][2], [
     serviceEntryFile,
     "restart",
-    "--agent.runtime",
-    "prime",
+    "--pi.model",
+    "example/model",
     "--silent"
   ]);
   assert.deepEqual(calls[3][3], {
@@ -139,7 +141,7 @@ test("waits until the stopped service releases its PID before restarting", async
 
   const result = await restartService({
     verbose: false,
-    cliArgs: ["--prime.model", "example/model"],
+    cliArgs: ["--pi.model", "example/model"],
     shutdownTimeoutMs: 1_000,
     shutdownPollIntervalMs: 1
   }, {
@@ -155,7 +157,7 @@ test("waits until the stopped service releases its PID before restarting", async
       calls.push("start");
       assert.deepEqual(options, {
         verbose: false,
-        cliArgs: ["--prime.model", "example/model"]
+        cliArgs: ["--pi.model", "example/model"]
       });
       return { ok: true, pid: 84, logFile: "/tmp/arisa.log" };
     },

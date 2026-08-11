@@ -4,7 +4,6 @@ import { authorizeChat } from "./auth.js";
 import { captureIncomingArtifact, formatLocationText } from "./media.js";
 import { buildDeviceCodeTelegramMessage } from "./device-code-message.js";
 import { buildEffortPicker, buildModelPicker, buildSpeedPicker, parseEffortPickerAction, parseModelPickerAction, parseSpeedPickerAction, reverseModelOrder } from "./model-picker.js";
-import { buildHarnessPicker, harnessLabel, parseHarnessPickerAction } from "./harness-picker.js";
 import { renderTelegramHtml } from "./text-format.js";
 import { buildPiAuthRecoveryBlockedMessage, buildPiAuthTelegramMessage, getErrorMessage, getPiAuthIssue, getPiAuthStatus } from "../../core/agent/auth-flow.js";
 import { createPiOAuthLogin } from "../../core/agent/pi-auth-login.js";
@@ -12,10 +11,8 @@ import { getAgentConfig, resolveChatModel, resolveChatSpeed, resolveChatThinking
 import { clampModelThinkingLevel, createPiRuntime, listModelThinkingLevels, listProviderModels, modelSupportsThinking } from "../../core/agent/pi-runtime.js";
 import { clampModelSpeed, MODEL_SPEEDS, modelSupportsSpeed } from "../../core/agent/model-speed.js";
 import { normalizeArtifactForReasoning, shouldNormalizeArtifactToText } from "../../core/artifacts/normalize-for-reasoning.js";
-import { isPrimeRpcSessionClosedError } from "../../core/agent/prime-rpc-session.js";
 import { formatPortableSessionHistory } from "../../core/agent/agent-manager.js";
 import { ConversationHistoryStore } from "../../core/conversation/conversation-history-store.js";
-import { activateHarness } from "../../runtime/harness-switch.js";
 import { formatDoctorReport } from "../../runtime/doctor.js";
 
 const slowPromptNoticeMs = 300_000;
@@ -24,12 +21,10 @@ export const telegramCommands = Object.freeze([
   { command: "new", description: "Start a new chat context" },
   { command: "restart", description: "Restart the Arisa service" },
   { command: "doctor", description: "Check and repair Arisa runtime health" },
-  { command: "harness", description: "Choose Pi Agent or Prime Agent" },
   { command: "model", description: "Choose the model for this chat" },
   { command: "effort", description: "Choose reasoning effort for this chat" },
   { command: "speed", description: "Choose model speed for this chat" },
-  { command: "auth", description: "Show authentication status" },
-  { command: "login", description: "Open Prime Agent login" }
+  { command: "auth", description: "Show authentication status" }
 ]);
 
 export function createTelegramRestartHandler({ authorize, requestRestart, logger }) {
@@ -116,7 +111,7 @@ export function shouldIncludeArtifactReference({ artifact, messageText = "" } = 
   return !isInlineTextArtifact(artifact, messageText);
 }
 
-export function buildPrompt({ ctx, artifact, transcript, toolResult, runtime = "pi" }) {
+export function buildPrompt({ ctx, artifact, transcript, toolResult }) {
   const parts = [
     `Incoming Telegram message.`,
     `chatId: ${ctx.chat.id}`,
@@ -144,9 +139,7 @@ export function buildPrompt({ ctx, artifact, transcript, toolResult, runtime = "
     parts.push(`Important: pre-reasoning media normalization could not be completed, so you do not have a transcript for this audio/video message.`);
   }
 
-  parts.push(runtime === "prime"
-    ? `Use Prime's persistent ipython tool for file work, shell commands, and programmatic exploration in the active workspace.`
-    : `Use read/write/edit for file work in the active workspace, bash for bash-compatible commands, and system_shell for native system commands such as PowerShell on Windows.`);
+  parts.push(`Use read/write/edit for file work in the active workspace, bash for bash-compatible commands, and system_shell for native system commands such as PowerShell on Windows.`);
   parts.push(`If you need an Arisa modular CLI tool, use list_tools/tool_help/run_tool.`);
   parts.push(`If a tool config is missing, ask the user naturally and then use set_tool_config.`);
   parts.push(`To deliver a file to the chat: run_tool with deliver:true to generate and send in one step, or send_artifact with an existing artifactId (e.g. an inbound file).`);
@@ -162,7 +155,7 @@ function buildNewSessionPrompt(ctx) {
   ].join("\n");
 }
 
-async function buildAsyncTaskPrompt({ task, artifactStore, toolRegistry, logger, runtime = "pi" }) {
+async function buildAsyncTaskPrompt({ task, artifactStore, toolRegistry, logger }) {
   const taskText = task.payload.prompt || "";
   const parts = [
     "Scheduled task fired.",
@@ -206,13 +199,11 @@ async function buildAsyncTaskPrompt({ task, artifactStore, toolRegistry, logger,
   }
 
   parts.push("Treat this as a new request for the chat and fulfill it now.");
-  parts.push(runtime === "prime"
-    ? "If needed, use Prime's persistent ipython tool or Arisa modular tools via run_tool."
-    : "If needed, use read/write/edit, bash, system_shell, or Arisa modular tools via run_tool.");
+  parts.push("If needed, use read/write/edit, bash, system_shell, or Arisa modular tools via run_tool.");
   return parts.filter(Boolean).join("\n");
 }
 
-function buildAsyncEventPrompt(task, runtime = "pi") {
+function buildAsyncEventPrompt(task) {
   return [
     "External event arrived.",
     `taskId: ${task.id}`,
@@ -220,9 +211,7 @@ function buildAsyncEventPrompt(task, runtime = "pi") {
     task.payload.prompt ? `event: ${task.payload.prompt}` : null,
     "A polling checker detected this external event. Evaluate it and decide the next action.",
     "If it warrants no action, you may stay silent.",
-    runtime === "prime"
-      ? "If needed, use Prime's persistent ipython tool or Arisa modular tools via run_tool."
-      : "If needed, use read/write/edit, bash, system_shell, or Arisa modular tools via run_tool."
+    "If needed, use read/write/edit, bash, system_shell, or Arisa modular tools via run_tool."
   ].filter(Boolean).join("\n");
 }
 
@@ -419,7 +408,7 @@ export async function drainChatPromptQueue({
       try {
         await processPrompt({ prompt: currentPrompt, ctx: currentCtx });
       } catch (error) {
-        if (isPrimeRpcSessionClosedError(error) && chatState.continueAfterClose && chatState.nextPrompt) {
+        if (chatState.continueAfterClose && chatState.nextPrompt) {
           await onPromptInterrupted?.(error);
         } else {
           await onPromptFailure?.(error);
@@ -451,16 +440,14 @@ export async function closeModelPicker(ctx, { messageText, callbackText }) {
   await ctx.answerCallbackQuery({ text: callbackText });
 }
 
-export async function createTelegramBot({ config, artifactStore, toolRegistry, taskStore, agentManager, saveConfig, updateConfig, prepareRuntime, traceHarnessTransition, doctor, requestRestart, logger }) {
+export async function createTelegramBot({ config, artifactStore, toolRegistry, taskStore, agentManager, saveConfig, updateConfig, doctor, requestRestart, logger }) {
   const bot = new Bot(config.telegram.token);
   const perChatState = createChatStateStore();
   const conversationHistory = new ConversationHistoryStore();
   const notifiedPromptErrors = new WeakSet();
   const authRenewals = new Map();
-  const pendingPrimeUi = new Map();
   let piAuthIssue = null;
   let taskTimer = null;
-  let harnessSwitchGate = null;
 
   const handleRestartCommand = createTelegramRestartHandler({
     authorize: (ctx) => authorizeChat({
@@ -515,7 +502,6 @@ export async function createTelegramBot({ config, artifactStore, toolRegistry, t
   async function finishAuthRenewal(chatId, renewal) {
     try {
       await renewal.promise;
-      await agentManager.syncPrimeCredentials?.();
       await agentManager.validateAgent();
       agentManager.clearSessionCache(chatId);
       piAuthIssue = null;
@@ -598,53 +584,7 @@ export async function createTelegramBot({ config, artifactStore, toolRegistry, t
     return perChatState.get(chatId);
   }
 
-  async function waitForHarnessSwitch() {
-    if (harnessSwitchGate) await harnessSwitchGate;
-  }
-
-  async function showHarnessPicker(ctx) {
-    const picker = buildHarnessPicker(config.agent?.runtime);
-    return ctx.reply(picker.text, { reply_markup: picker.replyMarkup });
-  }
-
-  async function ensureCanonicalHistory(chatId) {
-    if (await conversationHistory.hasEntries(chatId)) return;
-    const { session } = await agentManager.getSessionContext(chatId, createTelegramSessionBridge(chatId));
-    await conversationHistory.ensureSeed(chatId, {
-      runtime: config.agent?.runtime,
-      history: formatPortableSessionHistory(session.messages)
-    });
-  }
-
-  async function prepareHarnessContinuity() {
-    const chatIds = [...new Set((config.telegram.authorizedChatIds || []).map(chatKey))];
-    for (const chatId of chatIds) await ensureCanonicalHistory(chatId);
-    const handoffs = new Map();
-    for (const chatId of chatIds) {
-      const handoff = await conversationHistory.buildHandoff(chatId);
-      if (handoff) handoffs.set(chatId, handoff);
-    }
-    return handoffs;
-  }
-
-  async function switchHarness(targetRuntime) {
-    return activateHarness({
-      config,
-      targetRuntime,
-      prepareRuntime,
-      validateRuntime: (candidate) => agentManager.validateAgent(candidate),
-      prepareContinuity: prepareHarnessContinuity,
-      saveConfig,
-      switchRuntime: (candidate, options) => agentManager.switchRuntime(candidate, options),
-      traceTransition: traceHarnessTransition
-    });
-  }
-
   async function getProviderModels(chatId) {
-    await waitForHarnessSwitch();
-    if (config.agent?.runtime === "prime") {
-      return reverseModelOrder(await agentManager.getAvailableModels(chatId));
-    }
     const runtime = createPiRuntime({
       provider: config.pi.provider,
       apiKey: config.pi.apiKey
@@ -659,7 +599,7 @@ export async function createTelegramBot({ config, artifactStore, toolRegistry, t
       models: await getProviderModels(ctx.chat.id),
       selectedModelId: resolveChatModel(config, ctx.chat.id),
       selectedThinkingLevel: resolveChatThinkingLevel(config, ctx.chat.id),
-      selectedSpeed: config.agent?.runtime === "prime" ? resolveChatSpeed(config, ctx.chat.id) : undefined,
+      selectedSpeed: resolveChatSpeed(config, ctx.chat.id),
       page,
       pageSize: config.telegram.modelPickerPageSize
     });
@@ -733,7 +673,6 @@ export async function createTelegramBot({ config, artifactStore, toolRegistry, t
     const previousSelection = agentConfig.chatModels?.[key];
     const level = clampModelThinkingLevel(model, thinkingLevel ?? resolveChatThinkingLevel(config, chatId));
     const speed = clampModelSpeed(model, resolveChatSpeed(config, chatId));
-    await agentManager.setPrimeModel?.(chatId, model);
     selectChatModel(config, chatId, model, { thinkingLevel: level, speed });
     try {
       await saveConfig(config);
@@ -744,7 +683,6 @@ export async function createTelegramBot({ config, artifactStore, toolRegistry, t
         delete agentConfig.chatModels[key];
         if (!hadSelections) delete agentConfig.chatModels;
       }
-      if (config.agent?.runtime === "prime") agentManager.clearSessionCache(chatId);
       throw error;
     }
     agentManager.resetSession(chatId);
@@ -757,7 +695,6 @@ export async function createTelegramBot({ config, artifactStore, toolRegistry, t
     const hadSelections = Boolean(agentConfig.chatModels);
     const previousSelection = agentConfig.chatModels?.[key];
     const level = clampModelThinkingLevel(model, thinkingLevel);
-    await agentManager.setPrimeThinkingLevel?.(chatId, level);
     selectChatThinkingLevel(config, chatId, level);
     try {
       await saveConfig(config);
@@ -768,7 +705,6 @@ export async function createTelegramBot({ config, artifactStore, toolRegistry, t
         delete agentConfig.chatModels[key];
         if (!hadSelections) delete agentConfig.chatModels;
       }
-      if (config.agent?.runtime === "prime") agentManager.clearSessionCache(chatId);
       throw error;
     }
     return level;
@@ -808,7 +744,7 @@ export async function createTelegramBot({ config, artifactStore, toolRegistry, t
     if (shouldNormalizeArtifactToText(artifact) && !transcript) {
       logger?.log("telegram", `media normalization unavailable for chat ${ctx.chat.id}: ${toolResult?.error || toolResult?.missingConfig?.join(", ") || "unknown error"}`);
     }
-    return buildPrompt({ ctx, artifact, transcript, toolResult, runtime: config.agent?.runtime });
+    return buildPrompt({ ctx, artifact, transcript, toolResult });
   }
 
   async function sendTextReply({ sendText, sendDocument, chatId, text }) {
@@ -854,72 +790,6 @@ export async function createTelegramBot({ config, artifactStore, toolRegistry, t
     };
   }
 
-  function finishPrimeUi(chatId, response) {
-    const key = chatKey(chatId);
-    const pending = pendingPrimeUi.get(key);
-    if (!pending) return false;
-    pendingPrimeUi.delete(key);
-    clearTimeout(pending.timer);
-    pending.resolve(response);
-    return true;
-  }
-
-  async function handlePrimeUiRequest(chatId, request) {
-    const params = request.params || request;
-    const method = request.method;
-    const message = params.message || params.title || `Prime Agent requests ${method}.`;
-    if (method === "notify") {
-      await bot.api.sendMessage(chatId, message);
-      return {};
-    }
-
-    const key = chatKey(chatId);
-    finishPrimeUi(chatId, { cancelled: true });
-    const token = Math.random().toString(36).slice(2, 10);
-    const promise = new Promise((resolve) => {
-      const timeoutMs = Number(params.timeoutMs || params.timeout || 300_000);
-      const timer = setTimeout(() => finishPrimeUi(chatId, { cancelled: true }), Math.max(timeoutMs, 60_000));
-      timer.unref?.();
-      pendingPrimeUi.set(key, { method, params, token, resolve, timer });
-    });
-
-    if (method === "select") {
-      const options = Array.isArray(params.options) ? params.options : [];
-      const rows = options.map((option, index) => ([{
-        text: typeof option === "string" ? option : (option.label || option.value || String(index + 1)),
-        callback_data: `primeui:${token}:${index}`
-      }]));
-      rows.push([{ text: "Cancel", callback_data: `primeui:${token}:cancel` }]);
-      await bot.api.sendMessage(chatId, message, { reply_markup: { inline_keyboard: rows } });
-    } else if (method === "confirm") {
-      await bot.api.sendMessage(chatId, message, {
-        reply_markup: { inline_keyboard: [[
-          { text: "Yes", callback_data: `primeui:${token}:yes` },
-          { text: "No", callback_data: `primeui:${token}:no` }
-        ]] }
-      });
-    } else if (method === "input" || method === "editor") {
-      await bot.api.sendMessage(chatId, `${message}\nReply to this chat with the value.`);
-    } else {
-      finishPrimeUi(chatId, { cancelled: true });
-    }
-    return promise;
-  }
-
-  agentManager.setPrimeUiHandler?.(handlePrimeUiRequest);
-  agentManager.setPrimeOutputHandler?.(async (chatId, text) => {
-    await conversationHistory.appendTurn(chatId, {
-      runtime: "prime",
-      prompt: "",
-      response: text
-    });
-    await sendTextReply({
-      sendText: (message, extra) => bot.api.sendMessage(chatId, message, extra),
-      sendDocument: (file, extra) => bot.api.sendDocument(chatId, file, extra),
-      chatId,
-      text
-    });
-  });
   agentManager.setArtifactDeliveryHandler?.(async ({ chatId, artifact, caption, method }) => {
     const resolvedMethod = method
       || artifact.metadata?.delivery?.method
@@ -939,10 +809,9 @@ export async function createTelegramBot({ config, artifactStore, toolRegistry, t
   async function processPromptForChat({ chatId, prompt, ctx = null }) {
     const work = async () => {
       const { session } = await agentManager.getSessionContext(chatId, createTelegramSessionBridge(chatId));
-      const activeRuntime = config.agent?.runtime;
       const historyRevision = getChatState(chatId).historyRevision;
       await conversationHistory.ensureSeed(chatId, {
-        runtime: activeRuntime,
+        runtime: "pi",
         history: formatPortableSessionHistory(session.messages)
       });
       let text = "";
@@ -956,16 +825,12 @@ export async function createTelegramBot({ config, artifactStore, toolRegistry, t
           )
         });
       } catch (error) {
-        if (config.agent?.runtime === "prime") {
-          agentManager.clearSessionCache(chatId);
-        } else {
-          agentManager.resetSession(chatId);
-        }
+        agentManager.resetSession(chatId);
         throw error;
       }
       if (getChatState(chatId).historyRevision === historyRevision) {
         await conversationHistory.appendTurn(chatId, {
-          runtime: activeRuntime,
+          runtime: "pi",
           prompt,
           response: text
         });
@@ -985,7 +850,6 @@ export async function createTelegramBot({ config, artifactStore, toolRegistry, t
   }
 
   async function enqueuePrompt({ chatId, prompt, label, ctx = null, replaceQueued = false }) {
-    await waitForHarnessSwitch();
     const chatState = getChatState(chatId);
 
     if (chatState.processing) {
@@ -1075,7 +939,6 @@ export async function createTelegramBot({ config, artifactStore, toolRegistry, t
   }
 
   async function dispatchTask(task) {
-    await waitForHarnessSwitch();
     const chatId = task.payload?.chatId;
     if (!chatId) {
       await taskStore.fail(task.id, `Task missing chatId: ${task.kind}`);
@@ -1090,7 +953,7 @@ export async function createTelegramBot({ config, artifactStore, toolRegistry, t
       logger?.log("tasks", `running task ${task.id} for chat ${chatId}`);
       await enqueuePrompt({
         chatId,
-        prompt: await buildAsyncTaskPrompt({ task, artifactStore, toolRegistry, logger, runtime: config.agent?.runtime }),
+        prompt: await buildAsyncTaskPrompt({ task, artifactStore, toolRegistry, logger }),
         label: `scheduled task ${task.id}`
       });
       await taskStore.complete(task.id);
@@ -1101,7 +964,7 @@ export async function createTelegramBot({ config, artifactStore, toolRegistry, t
       logger?.log("tasks", `agent event ${task.id} for chat ${chatId}`);
       await enqueuePrompt({
         chatId,
-        prompt: buildAsyncEventPrompt(task, config.agent?.runtime),
+        prompt: buildAsyncEventPrompt(task),
         label: `agent event ${task.id}`
       });
       await taskStore.complete(task.id);
@@ -1157,7 +1020,6 @@ export async function createTelegramBot({ config, artifactStore, toolRegistry, t
   }
 
   async function handleNewCommand(ctx) {
-    await waitForHarnessSwitch();
     const chatState = getChatState(ctx.chat.id);
     const wasProcessing = chatState.processing;
     chatState.historyRevision += 1;
@@ -1169,7 +1031,7 @@ export async function createTelegramBot({ config, artifactStore, toolRegistry, t
       chatState.nextPrompt = prompt;
       chatState.continueAfterClose = true;
       const reset = (async () => {
-        await conversationHistory.reset(ctx.chat.id, { runtime: config.agent?.runtime });
+        await conversationHistory.reset(ctx.chat.id, { runtime: "pi" });
         agentManager.resetSession(ctx.chat.id);
       })();
       chatState.beforeNextPrompt = reset;
@@ -1192,7 +1054,7 @@ export async function createTelegramBot({ config, artifactStore, toolRegistry, t
         const handoff = await withTyping(ctx, () => summarizeSessionBeforeReset(ctx.chat.id));
         if (chatState.historyRevision !== commandRevision) return;
         await conversationHistory.reset(ctx.chat.id, {
-          runtime: config.agent?.runtime,
+          runtime: "pi",
           history: handoff.handoff
         });
         if (chatState.historyRevision !== commandRevision) return;
@@ -1260,12 +1122,6 @@ export async function createTelegramBot({ config, artifactStore, toolRegistry, t
     await showSpeedPicker(ctx);
   });
 
-  bot.command("harness", async (ctx) => {
-    const auth = await authorizeChat({ config, chatId: ctx.chat.id, saveConfig, chatMeta: getIncomingChatMeta(ctx) });
-    if (!auth.ok) return;
-    await showHarnessPicker(ctx);
-  });
-
   bot.command("auth", async (ctx) => {
     const auth = await authorizeChat({ config, chatId: ctx.chat.id, saveConfig, chatMeta: getIncomingChatMeta(ctx) });
     if (!auth.ok) return;
@@ -1274,7 +1130,6 @@ export async function createTelegramBot({ config, artifactStore, toolRegistry, t
     if (status.hasApiKey || !status.supportsOAuth) {
       await withTyping(ctx, async () => {
         try {
-          await agentManager.syncPrimeCredentials?.();
           await agentManager.validateAgent();
           agentManager.clearSessionCache(ctx.chat.id);
           piAuthIssue = null;
@@ -1300,120 +1155,12 @@ export async function createTelegramBot({ config, artifactStore, toolRegistry, t
     }
   });
 
-  bot.command("login", async (ctx) => {
-    const auth = await authorizeChat({ config, chatId: ctx.chat.id, saveConfig, chatMeta: getIncomingChatMeta(ctx) });
-    if (!auth.ok) return;
-    if (config.agent?.runtime !== "prime") {
-      await ctx.reply("/login is available when agent.runtime is set to prime. Use /auth for the Pi rollback runtime.");
-      return;
-    }
-    try {
-      await enqueuePrompt({ chatId: ctx.chat.id, prompt: "/login", label: "Prime login command", ctx });
-      await agentManager.validateAgent();
-      agentManager.clearSessionCache(ctx.chat.id);
-      piAuthIssue = null;
-      await ctx.reply("Prime Agent authentication is working.");
-    } catch (error) {
-      const issue = rememberPiAuthIssue(error) || { kind: "validation-failed", message: getErrorMessage(error) };
-      piAuthIssue = issue;
-      await ctx.reply(`Prime Agent login could not be validated: ${getErrorMessage(error)}`);
-    }
-  });
-
   bot.on("callback_query:data", async (ctx, next) => {
-    const primeUiMatch = /^primeui:([a-z0-9]+):(.+)$/.exec(ctx.callbackQuery.data);
-    if (primeUiMatch) {
-      const pending = pendingPrimeUi.get(chatKey(ctx.chat.id));
-      if (!pending || pending.token !== primeUiMatch[1]) {
-        await ctx.answerCallbackQuery({ text: "This Prime Agent request has expired." });
-        return;
-      }
-      const choice = primeUiMatch[2];
-      if (pending.method === "confirm") {
-        finishPrimeUi(ctx.chat.id, choice === "yes" ? { confirmed: true } : { confirmed: false });
-      } else if (pending.method === "select") {
-        const index = Number(choice);
-        const option = pending.params.options?.[index];
-        if (choice === "cancel" || option == null) {
-          finishPrimeUi(ctx.chat.id, { cancelled: true });
-        } else {
-          finishPrimeUi(ctx.chat.id, { value: typeof option === "string" ? option : (option.value ?? option.label) });
-        }
-      } else {
-        finishPrimeUi(ctx.chat.id, { cancelled: true });
-      }
-      await ctx.answerCallbackQuery();
-      await ctx.editMessageReplyMarkup({ reply_markup: { inline_keyboard: [] } }).catch(() => {});
-      return;
-    }
-    const harnessAction = parseHarnessPickerAction(ctx.callbackQuery.data);
-    if (harnessAction) {
-      if (harnessSwitchGate) {
-        await ctx.answerCallbackQuery({ text: "A harness change is already in progress.", show_alert: true });
-        return;
-      }
-      let releaseHarnessSwitch;
-      harnessSwitchGate = new Promise((resolve) => { releaseHarnessSwitch = resolve; });
-      try {
-        const auth = await authorizeChat({ config, chatId: ctx.chat.id, saveConfig });
-        if (!auth.ok) {
-          await ctx.answerCallbackQuery({ text: "This chat is not authorized.", show_alert: true });
-          return;
-        }
-        if (harnessAction.runtime === config.agent?.runtime) {
-          await ctx.api.editMessageText(
-            ctx.chat.id,
-            ctx.callbackQuery.message.message_id,
-            `Already using ${harnessLabel(harnessAction.runtime)}.`
-          );
-          await ctx.answerCallbackQuery({ text: `Already using ${harnessLabel(harnessAction.runtime)}.` });
-          return;
-        }
-        if (perChatState.anyProcessing()) {
-          await ctx.answerCallbackQuery({
-            text: "Wait for all active responses before changing the harness.",
-            show_alert: true
-          });
-          return;
-        }
-
-        await ctx.answerCallbackQuery({ text: `Preparing ${harnessLabel(harnessAction.runtime)}...` });
-        await ctx.api.editMessageText(
-          ctx.chat.id,
-          ctx.callbackQuery.message.message_id,
-          harnessAction.runtime === "prime"
-            ? "Preparing Prime Agent. If it is not installed, Arisa will install and validate it now."
-            : "Validating Pi Agent before changing the harness."
-        );
-        await switchHarness(harnessAction.runtime);
-        piAuthIssue = null;
-        await ctx.api.editMessageText(
-          ctx.chat.id,
-          ctx.callbackQuery.message.message_id,
-          `Harness changed to ${harnessLabel(harnessAction.runtime)}. Conversation history and durable memory were preserved.`
-        );
-      } catch (error) {
-        logger?.error("telegram", `harness change failed: ${getErrorMessage(error)}`);
-        await ctx.api.editMessageText(
-          ctx.chat.id,
-          ctx.callbackQuery.message.message_id,
-          `Could not change the harness: ${getErrorMessage(error)}\nStill using ${harnessLabel(config.agent?.runtime)}.`
-        ).catch(() => {});
-      } finally {
-        releaseHarnessSwitch();
-        harnessSwitchGate = null;
-      }
-      return;
-    }
     const modelAction = parseModelPickerAction(ctx.callbackQuery.data);
     const effortAction = modelAction ? null : parseEffortPickerAction(ctx.callbackQuery.data);
     const speedAction = modelAction || effortAction ? null : parseSpeedPickerAction(ctx.callbackQuery.data);
     const action = modelAction || effortAction || speedAction;
     if (!action) return next();
-    if (harnessSwitchGate) {
-      await ctx.answerCallbackQuery({ text: "Wait for the harness change to finish.", show_alert: true });
-      return;
-    }
     if (action.type === "noop") {
       await ctx.answerCallbackQuery();
       return;
@@ -1633,18 +1380,6 @@ export async function createTelegramBot({ config, artifactStore, toolRegistry, t
     if (command) return;
 
     if (await submitAuthRenewalInput(ctx)) return;
-
-    const pendingUi = pendingPrimeUi.get(chatKey(ctx.chat.id));
-    if (pendingUi && (pendingUi.method === "input" || pendingUi.method === "editor")) {
-      const value = getIncomingMessageText(ctx.message).trim();
-      if (!value) {
-        await ctx.reply("Please send a text value, or use the Prime Agent dialog again to cancel.");
-        return;
-      }
-      finishPrimeUi(ctx.chat.id, { value });
-      await ctx.reply("Got it. Continuing Prime Agent.");
-      return;
-    }
 
     if (piAuthIssue) {
       await ctx.reply(buildPiAuthRecoveryBlockedMessage({

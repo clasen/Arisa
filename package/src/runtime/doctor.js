@@ -1,18 +1,7 @@
 import { execFile } from "node:child_process";
-import { readFile, readdir } from "node:fs/promises";
-import path from "node:path";
 import process from "node:process";
 import { promisify } from "node:util";
 import { stopManagedDaemon, unregisterManagedDaemon } from "../core/tools/daemon-processes.js";
-import { listHarnessTransitionPrimeOwners } from "./harness-transition-journal.js";
-import {
-  chatsDir,
-  legacyPrimeDaemonSocketFile,
-  legacyPrimeSupervisorRegistryDir,
-  primeDaemonSocketFile,
-  primeStateDir,
-  primeSupervisorRegistryDir
-} from "./paths.js";
 import { getServiceStatus, serviceEntryFile } from "./service-manager.js";
 
 const execFileAsync = promisify(execFile);
@@ -49,131 +38,9 @@ export async function listSystemProcesses({ timeoutMs, platform = process.platfo
   return parsePosixProcesses(stdout);
 }
 
-function includesArgument(command, name, value) {
-  const escapedName = name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-  const escapedValue = value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-  return new RegExp(`(?:^|\\s)${escapedName}(?:=|\\s+)${escapedValue}(?:\\s|$)`).test(command);
-}
-
 function isArisaServiceProcess(record) {
   return record.command.includes(serviceEntryFile)
     && /(?:^|\s)--service-runner(?:\s|$)/.test(record.command);
-}
-
-function isPrimeRpcProcess(record) {
-  return includesArgument(record.command, "--mode", "rpc")
-    && /(?:^|\s)--session-dir(?:=|\s+)/.test(record.command)
-    && record.command.includes(chatsDir);
-}
-
-function isPathInside(root, candidate) {
-  const relative = path.relative(path.resolve(root), path.resolve(candidate));
-  return Boolean(relative) && relative !== ".." && !relative.startsWith(`..${path.sep}`) && !path.isAbsolute(relative);
-}
-
-function isPrimeDaemonOwnerRecord(value) {
-  return value?.version === 1
-    && value.role === "supervisor"
-    && typeof value.token === "string"
-    && typeof value.generation === "string"
-    && Number.isSafeInteger(value.pid)
-    && value.pid > 0
-    && (value.processStartId === undefined || typeof value.processStartId === "string")
-    && typeof value.socketPath === "string"
-    && typeof value.descriptorDir === "string"
-    && typeof value.agentDir === "string"
-    && typeof value.appVersion === "string";
-}
-
-export async function listPrimeDaemonOwners({
-  registryDirs = [primeSupervisorRegistryDir, legacyPrimeSupervisorRegistryDir]
-} = {}) {
-  const owners = [];
-  for (const registryDir of new Set(registryDirs.map((item) => path.resolve(item)))) {
-    let entries;
-    try {
-      entries = await readdir(registryDir, { withFileTypes: true });
-    } catch (error) {
-      if (error?.code === "ENOENT") continue;
-      throw error;
-    }
-    for (const entry of entries) {
-      if (!entry.isDirectory() || !entry.name.endsWith(".owner")) continue;
-      try {
-        const record = JSON.parse(await readFile(path.join(registryDir, entry.name, "owner.json"), "utf8"));
-        if (!isPrimeDaemonOwnerRecord(record)) continue;
-        owners.push({
-          registryDir,
-          pid: record.pid,
-          processStartId: record.processStartId,
-          socketPath: record.socketPath,
-          descriptorDir: record.descriptorDir,
-          agentDir: record.agentDir,
-          appVersion: record.appVersion
-        });
-      } catch (error) {
-        if (error?.code === "ENOENT") continue;
-        if (registryDir === path.resolve(primeSupervisorRegistryDir)) throw error;
-      }
-    }
-  }
-  return owners;
-}
-
-export async function getSystemProcessStartId(pid, { timeoutMs, platform = process.platform } = {}) {
-  if (!Number.isSafeInteger(pid) || pid <= 0) throw new Error(`Invalid process identity PID: ${pid}`);
-  if (!Number.isFinite(timeoutMs) || timeoutMs <= 0) {
-    throw new Error("Process identity inspection requires a positive timeoutMs");
-  }
-  if (platform === "linux") {
-    try {
-      const stat = await readFile(`/proc/${pid}/stat`, "utf8");
-      const commandEnd = stat.lastIndexOf(")");
-      const startTime = stat.slice(commandEnd + 2).split(" ")[19];
-      if (startTime) return `proc:${startTime}`;
-    } catch (error) {
-      if (error?.code === "ENOENT") return undefined;
-    }
-  }
-  if (platform === "win32") {
-    try {
-      const { stdout } = await execFileAsync("powershell.exe", [
-        "-NoLogo",
-        "-NoProfile",
-        "-NonInteractive",
-        "-Command",
-        `([System.Diagnostics.Process]::GetProcessById(${pid})).StartTime.ToUniversalTime().Ticks`
-      ], { timeout: timeoutMs, windowsHide: true });
-      const ticks = stdout.trim();
-      return /^\d+$/.test(ticks) ? `win:${ticks}` : undefined;
-    } catch {
-      return undefined;
-    }
-  }
-  try {
-    const { stdout } = await execFileAsync("ps", ["-p", String(pid), "-o", "lstart="], { timeout: timeoutMs });
-    const startedAt = stdout.trim();
-    return startedAt ? `ps:${startedAt}` : undefined;
-  } catch {
-    return undefined;
-  }
-}
-
-export function isOwnedPrimeDaemon(owner) {
-  if (path.resolve(owner.agentDir) !== path.resolve(primeStateDir)) return false;
-  if (!isPathInside(primeStateDir, owner.descriptorDir)) return false;
-  const registryDir = path.resolve(owner.registryDir);
-  if (registryDir === path.resolve(primeSupervisorRegistryDir)) {
-    return owner.socketPath === primeDaemonSocketFile;
-  }
-  return registryDir === path.resolve(legacyPrimeSupervisorRegistryDir)
-    && owner.socketPath === legacyPrimeDaemonSocketFile;
-}
-
-function isPrimeDaemonProcess(record, owner) {
-  return record.command.trim() === "prime-agent"
-    || (includesArgument(record.command, "--mode", "daemon")
-      && includesArgument(record.command, "--daemon-socket", owner.socketPath));
 }
 
 function isDaemonProcess(record, daemon) {
@@ -235,7 +102,6 @@ function formatTokenCount(tokens) {
 function assertDoctorPolicy(policy) {
   const positiveValues = [
     "contextInspectionTimeoutMs",
-    "primeShutdownTimeoutMs",
     "contextWarningPercent",
     "contextCriticalPercent",
     "contextInefficientMinTokens",
@@ -311,70 +177,13 @@ function addContextAttention(report) {
   }
 }
 
-async function repairOrphanedPrimeDaemons({
-  report,
-  runtime,
-  processByPid,
-  daemonPolicy,
-  doctorPolicy,
-  listOwners,
-  listTransitionOwners,
-  readProcessStartId,
-  stopPrimeDaemon
-}) {
-  if (runtime.runtime === "prime" && runtime.sessions > 0) return;
-  const owners = [];
-  try {
-    owners.push(...await listOwners());
-  } catch (error) {
-    report.attention.push(`Prime daemon ownership inspection failed: ${error?.message || error}`);
-  }
-  try {
-    owners.push(...await listTransitionOwners());
-  } catch (error) {
-    report.attention.push(`Harness transition inspection failed: ${error?.message || error}`);
-  }
-  const inspected = new Set();
-  for (const owner of owners) {
-    if (!isOwnedPrimeDaemon(owner)) continue;
-    const identity = `${owner.pid}:${owner.processStartId || "unknown"}`;
-    if (inspected.has(identity)) continue;
-    inspected.add(identity);
-    const record = processByPid.get(owner.pid);
-    if (!record) {
-      if (owner.transitionId) continue;
-      report.attention.push(`Arisa Prime daemon ownership for PID ${owner.pid} is stale; no matching process is running.`);
-      continue;
-    }
-    if (!owner.processStartId || !isPrimeDaemonProcess(record, owner)) {
-      report.attention.push(`Arisa Prime daemon process ${owner.pid} could not be verified and was left running.`);
-      continue;
-    }
-    const currentStartId = await readProcessStartId(owner.pid, {
-      timeoutMs: daemonPolicy.healthTimeoutMs
-    });
-    if (currentStartId !== owner.processStartId) {
-      report.attention.push(`Arisa Prime daemon process ${owner.pid} changed identity and was left running.`);
-      continue;
-    }
-    try {
-      await stopPrimeDaemon(owner, { timeoutMs: doctorPolicy.primeShutdownTimeoutMs });
-      const traced = owner.transitionId ? ` from harness transition ${owner.transitionId}` : "";
-      report.repairs.push(`Stopped orphaned Arisa Prime daemon ${owner.pid}${traced} and its workers.`);
-    } catch (error) {
-      report.attention.push(`Orphaned Arisa Prime daemon ${owner.pid} could not be stopped: ${error?.message || error}`);
-    }
-  }
-}
-
 export function formatDoctorReport(report) {
   const status = report.attention.length
     ? "attention needed"
     : report.repairs.length ? "repaired" : "healthy";
-  const runtime = report.runtime.runtime === "prime" ? "Prime" : "Pi";
   const lines = [
     `Arisa Doctor: ${status}`,
-    `Core: ${runtime}, ${report.runtime.sessions} active session(s), ${report.runtime.startingSessions} starting, ${report.runtime.closingSessions} closing.`,
+    `Core: Pi, ${report.runtime.sessions} active session(s), ${report.runtime.closingSessions} closing.`,
     contextSummary(report.contexts),
     `Daemons: ${report.daemons.length} checked${report.daemons.length ? ` (${daemonResultSummary(report.daemons)})` : ""}.`
   ];
@@ -393,12 +202,8 @@ export async function runDoctor({
   toolProcessSupervisor,
   daemonPolicy,
   doctorPolicy,
-  stopPrimeDaemon,
   logger,
   listProcesses = listSystemProcesses,
-  listOwners = listPrimeDaemonOwners,
-  listTransitionOwners = listHarnessTransitionPrimeOwners,
-  readProcessStartId = getSystemProcessStartId,
   stopProcess = terminateProcess,
   serviceStatus = getServiceStatus,
   stopDaemon = stopManagedDaemon,
@@ -417,16 +222,13 @@ export async function runDoctor({
   };
   addContextAttention(report);
   let processes = [];
-  let processInspectionSucceeded = true;
   try {
     processes = await listProcesses({ timeoutMs: daemonPolicy.healthTimeoutMs });
   } catch (error) {
-    processInspectionSucceeded = false;
     report.attention.push(`Process inspection failed: ${error?.message || error}`);
   }
 
   const processByPid = new Map(processes.map((record) => [record.pid, record]));
-  const activePids = new Set([process.pid, ...runtime.managedProcessIds]);
   const currentService = await serviceStatus();
   if (currentService.running && currentService.pid !== process.pid) {
     const registered = processByPid.get(currentService.pid);
@@ -439,33 +241,6 @@ export async function runDoctor({
       }
     } else {
       report.attention.push(`Registered service process ${currentService.pid} could not be verified and was left running.`);
-    }
-  }
-
-  if (runtime.startingSessions || runtime.closingSessions) {
-    report.attention.push("Prime orphan cleanup was deferred while sessions are starting or closing; run /doctor again when they settle.");
-  } else {
-    for (const record of processes) {
-      if (activePids.has(record.pid) || !isPrimeRpcProcess(record)) continue;
-      try {
-        await stopProcess(record.pid, { forceAfterMs: daemonPolicy.stopTimeoutMs });
-        report.repairs.push(`Stopped orphaned Prime RPC process ${record.pid}.`);
-      } catch (error) {
-        report.attention.push(`Orphaned Prime RPC process ${record.pid} could not be stopped: ${error?.message || error}`);
-      }
-    }
-    if (processInspectionSucceeded) {
-      await repairOrphanedPrimeDaemons({
-        report,
-        runtime,
-        processByPid,
-        daemonPolicy,
-        doctorPolicy,
-        listOwners,
-        listTransitionOwners,
-        readProcessStartId,
-        stopPrimeDaemon
-      });
     }
   }
 

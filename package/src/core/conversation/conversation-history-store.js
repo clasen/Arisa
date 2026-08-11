@@ -25,7 +25,7 @@ export function formatPortableConversation(records) {
   if (!records.length) return "";
   const sections = [
     "Portable Arisa conversation history.",
-    "This history belongs to the same Telegram chat and was preserved while changing agent harnesses.",
+    "This portable history belongs to the same Telegram chat and is independent of the active agent harness.",
     "Use it as prior conversation context. Do not repeat it unless the user asks."
   ];
 

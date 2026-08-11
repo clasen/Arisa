@@ -44,18 +44,10 @@ test("ignores unrelated Pi errors", () => {
 
 test("reports the active chat model after authentication", () => {
   const config = {
-    agent: { runtime: "prime" },
     pi: {
       provider: "openai-codex",
       model: "gpt-5.5",
       apiKey: "",
-      chatModels: {}
-    },
-    prime: {
-      provider: "openai-codex",
-      model: "gpt-5.5",
-      thinkingLevel: "high",
-      speed: 1,
       chatModels: {
         "123": {
           provider: "openai-codex",
@@ -72,5 +64,5 @@ test("reports the active chat model after authentication", () => {
 
   assert.match(message, /^Pi authentication is working for openai-codex\/gpt-5\.6\./);
   assert.doesNotMatch(message, /gpt-5\.5/);
-  assert.equal(config.prime.chatModels["123"].sessionRevision, 4);
+  assert.equal(config.pi.chatModels["123"].sessionRevision, 4);
 });
