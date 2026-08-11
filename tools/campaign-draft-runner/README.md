@@ -4,6 +4,7 @@ Runs recurring, profile-driven outreach research and creates Gmail drafts. It ne
 
 The tool can:
 
+- reconcile manually sent Gmail messages with `pr-campaign` before each live cycle;
 - select unused contacts from `pr-campaign`;
 - discover public editorial contacts through `web-browser`, following same-site contact and staff links when result pages do not expose an address;
 - reject previously used recipients and outlets;
@@ -36,6 +37,12 @@ Minimal profile structure:
   "gmailTool": "gmail-workspace",
   "contactStatus": "new",
   "draftType": "first",
+  "sentReconciliation": {
+    "enabled": true,
+    "query": "in:sent \"Campaign name\"",
+    "initialMaxResults": 2000,
+    "incrementalMaxResults": 500
+  },
   "selection": {
     "includeKeywords": ["topic"],
     "excludeKeywords": ["advertising", "jobs"],
@@ -46,13 +53,16 @@ Minimal profile structure:
   "discovery": {
     "enabled": true,
     "webTool": "web-browser",
-    "minEligiblePool": 3,
-    "queriesPerRun": 2,
+    "minEligiblePool": 1,
+    "queryBudgetPerRun": 1,
+    "pageBudgetPerRun": 3,
+    "timeoutMs": 15000,
     "maxResults": 6,
     "queries": ["topic publication editor contact"],
     "creativeDiscovery": {
       "enabled": true,
-      "queryBudgetPerRun": 4,
+      "queryBudgetPerRun": 1,
+      "pageBudgetPerRun": 3,
       "seeds": ["Comparable title"],
       "themes": ["adjacent audience theme"],
       "audiences": ["reviewer", "YouTube creator"],
@@ -91,9 +101,13 @@ Minimal profile structure:
 }
 ```
 
-Use `action: "status"` to inspect campaign and Gmail draft counts. `minEligiblePool` asks discovery to maintain a backlog of unused, eligible contacts so recurring one-draft runs do not depend on finding a new contact during every interval.
+Use `action: "status"` to reconcile Gmail Sent, then inspect campaign and Gmail draft counts. The first reconciliation scans the configured sent-mail query. Later runs use the newest Gmail timestamp and persist message IDs in chat-scoped state. This records drafts sent manually as contacted without reopening them or changing terminal statuses such as bounced, opted-out, wrong-fit, and successful publication.
 
-Set `untilDrafted: "true"` on a non-dry run to retry discovery with rotating queries until at least one new draft is created. `retryDelaySeconds` controls the pause between attempts; `maxAttempts` and `maxRuntimeSeconds` keep the retry loop bounded.
+Use `action: "reconcile-sent"` to run the same synchronization without discovery or drafting. `gmail-workspace` paginates sent mail, fetches message metadata concurrently, and passes recipients, subjects, timestamps, and Gmail message IDs to `pr-campaign` in one batch.
+
+`minEligiblePool` controls the unused-contact backlog. Keep recurring one-draft jobs bounded with small query and page budgets. A pool target of 1, one normal query, one creative query, three pages per mode, and a 15-second web timeout prevent long zero-yield cycles.
+
+Set `untilDrafted: "true"` on a non-dry run to retry discovery with rotating queries until at least one new draft is created. `retryDelaySeconds` controls the pause between attempts; `maxAttempts` and `maxRuntimeSeconds` bound the retry loop. The runner stops after one empty normal and creative discovery pass instead of repeating the same zero-yield work.
 
 When the normal pass leaves no eligible candidates, `discovery.creativeDiscovery` provides a bounded fallback. It builds and rotates queries from comparable titles (`seeds`), adjacent audience ideas (`themes`), outlet types (`audiences`), contact intents, and templates. The fallback has its own persistent cursor, query budget, page budget, and optional URL cooldown, so repeated zero-result runs explore new combinations rather than repeating the same searches. Existing email verification, provenance, deduplication, exclusions, and draft-only safeguards still apply.
 

@@ -19,8 +19,9 @@ Usage:
   node index.js run --request-file <json>
 
 Actions via args.action:
-  run-batch   Verify contacts selected by a profile and create Gmail drafts only. args: profile?, limit?, dryRun?, untilDrafted?, retryDelaySeconds?, maxAttempts?, maxRuntimeSeconds?
-  status      Return campaign status and Gmail draft count. args: profile?
+  run-batch   Reconcile Gmail Sent, verify contacts selected by a profile, and create Gmail drafts only. args: profile?, limit?, dryRun?, untilDrafted?, retryDelaySeconds?, maxAttempts?, maxRuntimeSeconds?
+  reconcile-sent Reconcile manually sent Gmail messages into campaign state. args: profile?
+  status      Reconcile Gmail Sent and return campaign status and Gmail draft count. args: profile?
 
 Profiles live under the chat-scoped state directory:
   <chatToolStateDir>/profiles/<profile>.json
@@ -720,6 +721,67 @@ async function gmailDraftRecipients(arisa, profile) {
   return recipients;
 }
 
+async function readSentSyncState(chatId) {
+  const file = path.join(getChatToolStateDir(chatId, toolName), "sent-sync.json");
+  try {
+    return { file, data: JSON.parse((await readFile(file, "utf8")).replace(/^\uFEFF/, "")) };
+  } catch {
+    return { file, data: { version: 1, seenMessageIds: [], latestInternalDate: 0 } };
+  }
+}
+
+async function reconcileSentMessages(arisa, chatId, profile) {
+  const settings = profile.sentReconciliation || {};
+  if (settings.enabled === false) return { enabled: false, observed: 0, matched: 0, added: 0 };
+  const { file, data: state } = await readSentSyncState(chatId);
+  const seen = new Set(state.seenMessageIds || []);
+  const baseQuery = clean(settings.query || `in:sent "${clean(profile.name).replace(/-/g, " ")}"`);
+  const after = Number(state.latestInternalDate || 0);
+  const query = after ? `${baseQuery} after:${Math.floor(after / 1000)}` : baseQuery;
+  const gmailTool = profile.gmailTool || defaults.GMAIL_TOOL;
+  const campaignTool = profile.campaignTool || defaults.CAMPAIGN_TOOL;
+  const sent = await runTool(arisa, gmailTool, {
+    action: "list-sent",
+    q: query,
+    maxResults: String(after ? Number(settings.incrementalMaxResults || 500) : Number(settings.initialMaxResults || 2000)),
+    maxPages: String(settings.maxPages || 10),
+    concurrency: String(settings.concurrency || 10)
+  }, Number(settings.timeoutMs || 300_000));
+  const messages = sent.messages || [];
+  const records = [];
+  let latestInternalDate = after;
+  for (const message of messages) {
+    const id = clean(message.id);
+    latestInternalDate = Math.max(latestInternalDate, Number(message.internalDate || 0));
+    if (!id || seen.has(id)) continue;
+    seen.add(id);
+    const sentAt = Number(message.internalDate || 0)
+      ? new Date(Number(message.internalDate)).toISOString()
+      : clean(message.date);
+    for (const email of emailAddresses(message.to || "")) {
+      records.push({
+        email,
+        subject: clean(message.subject),
+        type: "first",
+        sentAt,
+        sourceMessageId: id
+      });
+    }
+  }
+  let reconciliation = { observed: records.length, matched: 0, added: 0, ignored: 0 };
+  if (records.length) {
+    reconciliation = await runTool(arisa, campaignTool, { action: "record-sent-batch", records }, Number(settings.timeoutMs || 300_000));
+  }
+  state.version = 1;
+  state.query = baseQuery;
+  state.latestInternalDate = latestInternalDate;
+  state.seenMessageIds = [...seen].slice(-5000);
+  state.lastSyncAt = new Date().toISOString();
+  state.lastResult = { messages: messages.length, ...reconciliation };
+  await saveDiscoveryState(file, state);
+  return { enabled: true, query, messages: messages.length, ...reconciliation };
+}
+
 function chooseContacts(allContacts, candidateContacts, draftRecipients, profile, limit, excludedEmails = new Set()) {
   const alreadyUsedOutlets = new Set();
   if (profile.selection?.skipOutletsAlreadyUsed !== false) {
@@ -788,9 +850,16 @@ async function handleRun(request) {
   const arisa = createArisaClient({ toolName, chatId: request.chatId });
 
   if ((args.action || "run-batch") === "status") {
+    const sentReconciliation = await reconcileSentMessages(arisa, request.chatId, profile);
     const campaign = await runTool(arisa, profile.campaignTool || defaults.CAMPAIGN_TOOL, { action: "status" });
     const draftRecipients = await gmailDraftRecipients(arisa, profile);
-    return { action: "status", profile: profile.name, campaign, gmailDrafts: draftRecipients.size };
+    return { action: "status", profile: profile.name, campaign, gmailDrafts: draftRecipients.size, sentReconciliation };
+  }
+
+  if (args.action === "reconcile-sent") {
+    const sentReconciliation = await reconcileSentMessages(arisa, request.chatId, profile);
+    const campaign = await runTool(arisa, profile.campaignTool || defaults.CAMPAIGN_TOOL, { action: "status" });
+    return { action: "reconcile-sent", profile: profile.name, campaign, sentReconciliation };
   }
 
   const lock = await acquireRunLock(request.chatId);
@@ -798,6 +867,9 @@ async function handleRun(request) {
     const limit = Math.max(1, Math.min(10, Number(args.limit || profile.limit || config.DEFAULT_LIMIT || 1)));
     const dryRun = truthy(args.dryRun);
     const excludedEmails = new Set((args._excludedEmails || []).map(normalizedEmail));
+    const sentReconciliation = dryRun
+      ? { enabled: profile.sentReconciliation?.enabled !== false, skipped: "dry-run" }
+      : await reconcileSentMessages(arisa, request.chatId, profile);
     let allContacts = await listAllContacts(arisa, profile);
     let candidateContacts = await listContacts(arisa, profile);
     const draftRecipients = await gmailDraftRecipients(arisa, profile);
@@ -857,6 +929,7 @@ async function handleRun(request) {
       action: "run-batch",
       profile: profile.name,
       dryRun,
+      sentReconciliation,
       candidates: candidateContacts.length,
       eligiblePool: eligiblePool.length,
       poolTarget,
@@ -891,6 +964,12 @@ async function runRequest(request) {
     const attemptRequest = { ...request, args: { ...(request.args || {}), _excludedEmails: [...excludedEmails] } };
     lastOutput = await handleRun(attemptRequest);
     if (lastOutput.drafted > 0) return { ...lastOutput, attempts, exhausted: false, elapsedMs: Date.now() - startedAt };
+    const discoveryEmpty = lastOutput.eligiblePool === 0
+      && Number(lastOutput.discovery?.found || 0) === 0
+      && Number(lastOutput.creativeDiscovery?.found || 0) === 0;
+    if (discoveryEmpty) {
+      return { ...lastOutput, attempts, exhausted: true, stopReason: "discovery-empty", elapsedMs: Date.now() - startedAt };
+    }
     for (const item of lastOutput.skipped || []) {
       if (item.email) excludedEmails.add(normalizedEmail(item.email));
     }

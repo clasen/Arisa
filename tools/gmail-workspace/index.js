@@ -32,6 +32,7 @@ Actions via args.action:
   auth-help       Show safe OAuth setup options; cookies are not accepted
   auth-status     Run: gws auth status
   list/search     List Gmail message IDs. args: q?, maxResults?, labelIds?, includeSpamTrash?
+  list-sent       List sent-message recipients and metadata across pages. args: q?, maxResults?, maxPages?, concurrency?
   list-drafts     List Gmail drafts with recipient, subject, and duplicate-recipient groups. args: maxResults?
   get             Read one message. args: id, format? full|metadata|raw|minimal
   draft           Create a Gmail draft. args: to, subject, body, cc?, bcc?, from?
@@ -194,6 +195,20 @@ async function gwsJson(argv, config) {
   const { stdout } = await runCommand(argv, config);
   try { return JSON.parse(stdout); }
   catch { return stdout; }
+}
+
+async function mapConcurrent(items, concurrency, operation) {
+  const results = new Array(items.length);
+  let cursor = 0;
+  async function worker() {
+    while (cursor < items.length) {
+      const index = cursor;
+      cursor += 1;
+      results[index] = await operation(items[index], index);
+    }
+  }
+  await Promise.all(Array.from({ length: Math.min(Math.max(1, concurrency), items.length || 1) }, worker));
+  return results;
 }
 
 function userId(request, config) {
@@ -366,6 +381,45 @@ async function handle(request, config) {
     if (request.args?.includeSpamTrash !== undefined) params.includeSpamTrash = truthy(request.args.includeSpamTrash);
     const data = await gwsJson(["gmail", "users", "messages", "list", "--params", JSON.stringify(params)], config);
     return { text: formatList(data), json: data };
+  }
+
+  if (action === "list-sent") {
+    const requestedMaxResults = Number(request.args?.maxResults || 1000);
+    const maxResults = Number.isFinite(requestedMaxResults) ? Math.max(1, Math.min(Math.trunc(requestedMaxResults), 5000)) : 1000;
+    const maxPages = Math.max(1, Math.min(Number(request.args?.maxPages || 10), 20));
+    const query = String(request.args?.q || "in:sent");
+    const messages = [];
+    let pageToken = request.args?.pageToken ? String(request.args.pageToken) : "";
+    for (let page = 0; page < maxPages && messages.length < maxResults; page += 1) {
+      const params = { userId: uid, q: query, maxResults: Math.min(500, maxResults - messages.length) };
+      if (pageToken) params.pageToken = pageToken;
+      const data = await gwsJson(["gmail", "users", "messages", "list", "--params", JSON.stringify(params)], config);
+      messages.push(...(data.messages || []));
+      pageToken = data.nextPageToken || "";
+      if (!pageToken) break;
+    }
+    const concurrency = Math.max(1, Math.min(Number(request.args?.concurrency || 10), 20));
+    const sent = await mapConcurrent(messages, concurrency, async (message) => {
+      const current = await gwsJson(["gmail", "users", "messages", "get", "--params", JSON.stringify({
+        userId: uid,
+        id: String(message.id),
+        format: "metadata",
+        metadataHeaders: ["To", "Subject", "Date"]
+      })], config);
+      const headers = current.payload?.headers || [];
+      return {
+        id: String(current.id || message.id),
+        threadId: String(current.threadId || message.threadId || ""),
+        to: headerValue(headers, "To").toLowerCase(),
+        subject: decodeMimeWords(headerValue(headers, "Subject")),
+        date: headerValue(headers, "Date"),
+        internalDate: Number(current.internalDate || 0)
+      };
+    });
+    return {
+      text: `${sent.length} sent message(s) matched.`,
+      json: { query, messages: sent, nextPageToken: pageToken || null, truncated: Boolean(pageToken) }
+    };
   }
 
   if (action === "list-drafts") {

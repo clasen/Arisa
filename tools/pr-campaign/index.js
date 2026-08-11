@@ -32,7 +32,8 @@ Actions via args.action:
   followups       List contacts eligible for a follow-up.
   opt-out         Mark a contact as do-not-contact. args: email
   record-bounce   Record a permanent delivery failure. args: email, reason?, sourceMessageId?
-  record-sent     Reconcile a message observed in Gmail Sent without sending. args: email, subject?, type?
+  record-sent     Reconcile a message observed in Gmail Sent without sending. args: email, subject?, type?, sentAt?, sourceMessageId?
+  record-sent-batch Reconcile many observed Gmail Sent messages in one state write. args: records [{email,subject?,type?,sentAt?,sourceMessageId?}]
   record-offer    Save a commercial/rate-card response for future reference. args: email, provider?, offers JSON, sourceMessageId?, attachment?, notes?
   sync-bounces    Scan Gmail delivery failures for tracked contacts and block follow-ups.
   status          Show daily send count and campaign totals.
@@ -164,6 +165,40 @@ function messageHeader(message, name) {
   return message?.payload?.headers?.find((header) => header.name.toLowerCase() === name.toLowerCase())?.value || "";
 }
 
+function reconcileSentRecord(state, args) {
+  const email = normalizedEmail(required(args.email, "email"));
+  const contact = contactFor(state, email);
+  if (!contact) return { email, matched: false, added: false };
+  const type = args.type === "follow-up" ? "follow-up" : "first";
+  const parsedSentAt = Date.parse(String(args.sentAt || ""));
+  const sentAt = Number.isFinite(parsedSentAt) ? new Date(parsedSentAt).toISOString() : now();
+  const sourceMessageId = String(args.sourceMessageId || "").trim();
+  const existing = state.sends.find((entry) => entry.email === email && entry.type === type);
+  if (!existing) {
+    state.sends.push({
+      email,
+      type,
+      subject: String(args.subject || "").trim(),
+      sentAt,
+      reconciled: true,
+      ...(sourceMessageId ? { sourceMessageId } : {})
+    });
+  }
+  contact.drafts = Array.isArray(contact.drafts)
+    ? contact.drafts.map((draft) => draft.type === type && draft.status === "open" ? { ...draft, status: "sent" } : draft)
+    : [];
+  const terminalStatuses = new Set([
+    "bounced",
+    "opted-out",
+    "wrong-fit",
+    "replied-paid-placement-declined",
+    "successful_publication"
+  ]);
+  if (!terminalStatuses.has(contact.status)) contact.status = "contacted";
+  contact.updatedAt = now();
+  return { email, matched: true, added: !existing, type, sentAt: existing?.sentAt || sentAt };
+}
+
 function campaignStatus(state, config) {
   const contacts = Object.values(state.contacts);
   return {
@@ -200,12 +235,15 @@ async function handleRun(request) {
       if (!email || !state.contacts[email]) continue;
       const contact = state.contacts[email];
       const failures = Array.isArray(contact.deliveryFailures) ? contact.deliveryFailures : [];
-      if (failures.some((failure) => failure.sourceMessageId === item.id)) continue;
-      contact.status = "bounced";
-      failures.push({ reason: "Permanent delivery failure", sourceMessageId: item.id, recordedAt: now() });
-      contact.deliveryFailures = failures;
-      contact.updatedAt = now();
-      recorded.push(email);
+      const alreadyRecorded = failures.some((failure) => failure.sourceMessageId === item.id);
+      const statusChanged = contact.status !== "bounced";
+      if (!alreadyRecorded) failures.push({ reason: "Permanent delivery failure", sourceMessageId: item.id, recordedAt: now() });
+      if (!alreadyRecorded || statusChanged) {
+        contact.status = "bounced";
+        contact.deliveryFailures = failures;
+        contact.updatedAt = now();
+        recorded.push(email);
+      }
     }
     if (recorded.length) await saveState(request.chatId, state);
     return { action, recorded, scanned: listed.output?.json?.messages?.length || 0 };
@@ -289,18 +327,26 @@ async function handleRun(request) {
   }
 
   if (action === "record-sent") {
-    const email = normalizedEmail(required(args.email, "email"));
-    const contact = contactFor(state, email);
-    if (!contact) throw new Error("Contact not found");
-    const type = args.type === "follow-up" ? "follow-up" : "first";
-    if (!state.sends.some((entry) => entry.email === email && entry.type === type)) {
-      state.sends.push({ email, type, subject: String(args.subject || "").trim(), sentAt: now(), reconciled: true });
-    }
-    contact.drafts = Array.isArray(contact.drafts) ? contact.drafts.map((draft) => draft.type === type && draft.status === "open" ? { ...draft, status: "sent" } : draft) : [];
-    contact.status = "contacted";
-    contact.updatedAt = now();
+    const result = reconcileSentRecord(state, args);
+    if (!result.matched) throw new Error("Contact not found");
     await saveState(request.chatId, state);
-    return { action, email, type, sentAt: state.sends.find((entry) => entry.email === email && entry.type === type)?.sentAt };
+    return { action, ...result };
+  }
+
+  if (action === "record-sent-batch") {
+    let records = args.records;
+    if (typeof records === "string") records = JSON.parse(records);
+    if (!Array.isArray(records) || !records.length) throw new Error("args.records must contain at least one sent message");
+    if (records.length > 5000) throw new Error("args.records cannot exceed 5000 items");
+    const results = records.map((record) => reconcileSentRecord(state, record || {}));
+    await saveState(request.chatId, state);
+    return {
+      action,
+      observed: records.length,
+      matched: results.filter((result) => result.matched).length,
+      added: results.filter((result) => result.added).length,
+      ignored: results.filter((result) => !result.matched).length
+    };
   }
 
   if (action === "record-offer") {
