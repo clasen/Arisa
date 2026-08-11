@@ -1,6 +1,6 @@
 import dns from "node:dns/promises";
-import net from "node:net";
-import { mkdir, readFile, readdir, writeFile } from "node:fs/promises";
+import https from "node:https";
+import { access, mkdir, readFile, readdir, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { createRequire } from "node:module";
 import { fileURLToPath, pathToFileURL } from "node:url";
@@ -17,9 +17,10 @@ const {
   getChatToolStateDir,
   getToolStateDir
 } = pathsModule;
-const { loadToolConfig } = await import(pathToFileURL(path.join(arisaPackageDir, "src/core/tools/tool-config.js")).href);
-const { createDaemonRuntime } = await import(pathToFileURL(path.join(arisaPackageDir, "src/core/tools/daemon-runtime.js")).href);
-const { isProcessAlive, readJson } = await import(pathToFileURL(path.join(arisaPackageDir, "src/core/tools/daemon-processes.js")).href);
+const importCore = (relativePath) => import(pathToFileURL(path.join(arisaPackageDir, "src", relativePath)).href);
+const { loadToolConfig } = await importCore("core/tools/tool-config.js");
+const { createDaemonRuntime } = await importCore("core/tools/daemon-runtime.js");
+const { isProcessAlive, readJson } = await importCore("core/tools/daemon-processes.js");
 const daemon = createDaemonRuntime({ toolName, entryPath, autoStart: true });
 
 function printHelp() {
@@ -51,16 +52,16 @@ async function loadConfig(chatId = null) {
 function resultOk(output) { return { ok: true, output: { text: JSON.stringify(output, null, 2), mimeType: "application/json" } }; }
 function resultError(error) { return { ok: false, error: error?.message || String(error) }; }
 
-async function stopDaemon() {
-  const pid = await daemon.getPid();
-  await daemon.stop();
-  return { ok: true, action: "stop", pid };
-}
-
 async function startDaemon() {
   const pid = await daemon.start();
   const status = await daemon.ensureReady();
   return { ok: true, action: "start", pid, status, paths: daemon.paths };
+}
+
+async function stopDaemon() {
+  const pid = await daemon.getPid();
+  await daemon.stop();
+  return { ok: true, action: "stop", pid: pid || null };
 }
 
 function slugify(value = "") {
@@ -128,7 +129,7 @@ async function savePage(db, { domain, slug, title, html, kind = "page" }) {
 }
 
 function siteHandlerSource(domain) {
-  return `import { readFile } from "node:fs/promises";\nimport path from "node:path";\nimport { fileURLToPath, pathToFileURL } from "node:url";\n\nconst root = path.dirname(fileURLToPath(import.meta.url));\nconst domain = ${JSON.stringify(domain)};\nconst types = { ".css": "text/css; charset=utf-8", ".js": "text/javascript; charset=utf-8", ".json": "application/json; charset=utf-8", ".html": "text/html; charset=utf-8", ".svg": "image/svg+xml" };\nlet customRoutesPromise;\n\nfunction safeDecodePathname(pathname) {\n  try { return decodeURIComponent(pathname); }\n  catch { return pathname; }\n}\n\nasync function sendFile(res, filePath) {\n  const ext = path.extname(filePath);\n  const body = await readFile(filePath);\n  res.writeHead(200, { "content-type": types[ext] || "application/octet-stream" });\n  res.end(body);\n}\n\nasync function loadPages() {\n  return JSON.parse(await readFile(path.join(root, "data", "pages.json"), "utf8"));\n}\n\nasync function loadCustomRoutes() {\n  if (!customRoutesPromise) {\n    customRoutesPromise = import(pathToFileURL(path.join(root, "custom-routes.js")).href).catch((error) => {\n      if (error?.code === "ERR_MODULE_NOT_FOUND" || error?.code === "ENOENT") return null;\n      throw error;\n    });\n  }\n  return customRoutesPromise;\n}\n\nfunction notFound(res) {\n  res.writeHead(404, { "content-type": "text/plain; charset=utf-8" });\n  res.end("not found");\n}\n\nexport default () => async (req, res) => {\n  const url = new URL(req.url || "/", ` + "`https://${domain}`" + `);\n  const pathname = safeDecodePathname(url.pathname);\n  try {\n    const customRoutes = await loadCustomRoutes();\n    if (typeof customRoutes?.handleCustomRoute === "function") {\n      const handled = await customRoutes.handleCustomRoute(req, res, { root, domain, url, pathname, sendFile });\n      if (handled) return;\n    }\n\n    if (pathname.startsWith("/assets/")) {\n      const relative = pathname.slice(1);\n      if (relative.includes("..")) return notFound(res);\n      try {\n        return await sendFile(res, path.join(root, relative));\n      } catch (error) {\n        if (error?.code === "ENOENT") return notFound(res);\n        throw error;\n      }\n    }\n    const pages = await loadPages();\n    const slug = pathname === "/" ? "home" : pathname.replace(/^\\/+|\\/+$/g, "");\n    const page = pages.find((item) => item.slug === slug);\n    if (!page) return notFound(res);\n    res.writeHead(200, { "content-type": "text/html; charset=utf-8", "cache-control": "no-store" });\n    res.end(page.html);\n  } catch (error) {\n    res.writeHead(500, { "content-type": "text/plain; charset=utf-8" });\n    res.end(error.message || String(error));\n  }\n};\n`;
+  return `import { readFile } from "node:fs/promises";\nimport path from "node:path";\nimport { fileURLToPath, pathToFileURL } from "node:url";\nimport * as customRoutes from "./custom-routes.js";\n\nconst root = path.dirname(fileURLToPath(import.meta.url));\nconst domain = ${JSON.stringify(domain)};\nconst types = { ".css": "text/css; charset=utf-8", ".js": "text/javascript; charset=utf-8", ".json": "application/json; charset=utf-8", ".html": "text/html; charset=utf-8", ".svg": "image/svg+xml" };\nlet customRoutesPromise;\n\nfunction safeDecodePathname(pathname) {\n  try { return decodeURIComponent(pathname); }\n  catch { return pathname; }\n}\n\nasync function sendFile(res, filePath) {\n  const ext = path.extname(filePath);\n  const body = await readFile(filePath);\n  res.writeHead(200, { "content-type": types[ext] || "application/octet-stream" });\n  res.end(body);\n}\n\nasync function loadPages() {\n  return JSON.parse(await readFile(path.join(root, "data", "pages.json"), "utf8"));\n}\n\nasync function loadCustomRoutes() {\n  if (!customRoutesPromise) {\n    customRoutesPromise = import(pathToFileURL(path.join(root, "custom-routes.js")).href).catch((error) => {\n      if (error?.code === "ERR_MODULE_NOT_FOUND" || error?.code === "ENOENT") return null;\n      throw error;\n    });\n  }\n  return customRoutesPromise;\n}\n\nfunction notFound(res) {\n  res.writeHead(404, { "content-type": "text/plain; charset=utf-8" });\n  res.end("not found");\n}\n\nexport default (virtualServer) => {\n  customRoutes.registerCustomRoutes?.(virtualServer);\n  return async (req, res) => {\n  const url = new URL(req.url || "/", ` + "`https://${domain}`" + `);\n  const pathname = safeDecodePathname(url.pathname);\n  try {\n    const customRoutes = await loadCustomRoutes();\n    if (typeof customRoutes?.handleCustomRoute === "function") {\n      const handled = await customRoutes.handleCustomRoute(req, res, { root, domain, url, pathname, sendFile });\n      if (handled) return;\n    }\n\n    if (pathname.startsWith("/assets/")) {\n      const relative = pathname.slice(1);\n      if (relative.includes("..")) return notFound(res);\n      try {\n        return await sendFile(res, path.join(root, relative));\n      } catch (error) {\n        if (error?.code === "ENOENT") return notFound(res);\n        throw error;\n      }\n    }\n    const pages = await loadPages();\n    const slug = pathname === "/" ? "home" : pathname.replace(/^\\/+|\\/+$/g, "");\n    const page = pages.find((item) => item.slug === slug);\n    if (!page) return notFound(res);\n    res.writeHead(200, { "content-type": "text/html; charset=utf-8", "cache-control": "no-store" });\n    res.end(page.html);\n  } catch (error) {\n    res.writeHead(500, { "content-type": "text/plain; charset=utf-8" });\n    res.end(error.message || String(error));\n  }\n};\n}\n`;
 }
 function fallbackStyles() { return `:root{color-scheme:dark;--bg:#1d2021;--fg:#ebdbb2;--muted:#928374;--orange:#fe8019;--green:#b8bb26;--blue:#83a598;--red:#fb4934;--panel:#282828;--line:#3c3836}*{box-sizing:border-box}body{margin:0;background:radial-gradient(circle at 20% 0,#32302f 0,#1d2021 34rem);color:var(--fg);font-family:"Fira Code",ui-monospace,monospace;line-height:1.55}a{color:var(--blue)}`; }
 function appScript() { return `window.__applyTweaks=window.__applyTweaks||(()=>{});`; }
@@ -139,6 +140,11 @@ async function deploySite(config, domain, pages) {
   await mkdir(path.join(siteDir, "assets"), { recursive: true });
   await mkdir(path.join(siteDir, "data"), { recursive: true });
   await writeFile(path.join(siteDir, "index.js"), siteHandlerSource(domain), "utf8");
+  await readFile(path.join(siteDir, "custom-routes.js"), "utf8").catch(() => writeFile(
+    path.join(siteDir, "custom-routes.js"),
+    "export function registerCustomRoutes() {}\nexport async function handleCustomRoute() { return false; }\n",
+    "utf8"
+  ));
   await writeFile(path.join(siteDir, "assets", "styles.css"), fallbackStyles(), "utf8");
   await writeFile(path.join(siteDir, "assets", "app.js"), appScript(), "utf8");
   await writeFile(path.join(siteDir, "assets", "tweaks-panel.jsx"), "", "utf8");
@@ -163,68 +169,58 @@ async function startRosterServer(config) {
   return server;
 }
 
-async function probePort(port) {
+async function deployedDomains(wwwPath) {
+  const entries = await readdir(wwwPath, { withFileTypes: true });
+  const domains = [];
+  for (const entry of entries) {
+    if (!entry.isDirectory() || !entry.name.includes(".")) continue;
+    const hasHandler = await access(path.join(wwwPath, entry.name, "index.js")).then(() => true, () => false);
+    if (hasHandler) domains.push(entry.name);
+  }
+  return domains.sort();
+}
+
+async function probeHttps(domain) {
   await new Promise((resolve, reject) => {
-    const socket = net.createConnection({ host: "127.0.0.1", port });
-    socket.once("connect", () => {
-      socket.destroy();
-      resolve();
+    const request = https.request({
+      host: "127.0.0.1",
+      port: 443,
+      method: "GET",
+      path: "/",
+      servername: domain,
+      rejectUnauthorized: true,
+      headers: { host: domain }
+    }, (response) => {
+      response.resume();
+      if (response.statusCode >= 200 && response.statusCode < 400) resolve();
+      else reject(new Error(`${domain} health probe returned HTTP ${response.statusCode}`));
     });
-    socket.once("error", reject);
+    request.setTimeout(4000, () => request.destroy(new Error(`${domain} health probe timed out`)));
+    request.once("error", reject);
+    request.end();
   });
 }
 
-async function probeRosterServer() {
-  const errors = [];
-  for (const port of [443, 80]) {
-    try {
-      await probePort(port);
-      return { message: `RosterServer is accepting connections on port ${port}` };
-    } catch (error) {
-      errors.push(error?.message || String(error));
-    }
-  }
-  throw new Error(`RosterServer listeners are unavailable: ${errors.join("; ")}`);
+async function rosterHealth(config) {
+  const domains = await deployedDomains(config.wwwPath);
+  if (!domains.length) throw new Error(`RosterServer has no deployed sites under ${config.wwwPath}`);
+  await Promise.all(domains.map(probeHttps));
+  return { message: `RosterServer served ${domains.length} HTTPS site${domains.length === 1 ? "" : "s"}`, domains };
 }
 
 async function runDaemon() {
-  try {
-    let config = await loadConfig();
-    let server = await startRosterServer(config);
-    await daemon.writeStatus({
-      wwwPath: config.wwwPath,
-      greenlockStorePath: config.greenlockStorePath
-    });
-    await daemon.workLoop({
-      processJob: async () => ({ running: true }),
-      healthCheck: probeRosterServer,
-      recover: async () => {
-        if (typeof server?.stop !== "function") return false;
-        await Promise.resolve(server.stop());
-        config = await loadConfig();
-        server = await startRosterServer(config);
-        await daemon.writeStatus({
-          wwwPath: config.wwwPath,
-          greenlockStorePath: config.greenlockStorePath
-        });
-        return true;
-      }
-    });
-  } catch (error) {
-    await daemon.writeStatus({
-      state: "failed",
-      lastError: { at: new Date().toISOString(), phase: "start", message: error?.message || String(error) },
-      message: error?.message || String(error)
-    });
-    console.error(error?.stack || error);
-    process.exitCode = 1;
-  }
+  const config = await loadConfig();
+  await startRosterServer(config);
+  await daemon.workLoop({
+    processJob: async () => ({ wwwPath: config.wwwPath, greenlockStorePath: config.greenlockStorePath }),
+    healthCheck: () => rosterHealth(config)
+  });
 }
 
 async function statusAction() {
-  const status = await readJson(daemon.paths.statusFile, {});
+  const status = await readJson(daemon.paths.statusFile, { state: "stopped" });
   const pid = await daemon.getPid();
-  return { ...status, pid, alive: isProcessAlive(pid), paths: daemon.paths };
+  return { ...status, pid: pid || null, alive: isProcessAlive(pid), paths: daemon.paths };
 }
 
 async function dnsAction(domain) {
@@ -268,8 +264,8 @@ async function handleRun(request) {
     const page = await savePage(db, { domain, slug, title: args.title, html, kind: action === "init" ? "home" : "page" });
     const pages = await getAllPages(db, domain, config.domain);
     const siteDir = await deploySite(config, domain, pages);
-    const daemon = await startDaemon();
-    return { ok: true, action, domain, url: `https://${domain}/${slug === "home" ? "" : slug}`, siteDir, daemon: { pid: daemon.pid, status: daemon.status }, page: { slug: page.slug, title: page.title, updatedAt: page.updatedAt } };
+    const daemonStatus = await startDaemon();
+    return { ok: true, action, domain, url: `https://${domain}/${slug === "home" ? "" : slug}`, siteDir, daemon: { pid: daemonStatus.pid, status: daemonStatus.status }, page: { slug: page.slug, title: page.title, updatedAt: page.updatedAt } };
   }
 
   throw new Error(`Unknown action: ${action}`);

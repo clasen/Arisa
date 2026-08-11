@@ -65,9 +65,15 @@ test("approval hashes detect message tampering", () => {
 });
 
 
-test("first-name greetings preserve brand names and allow explicit overrides", () => {
+test("first-name greetings require verified identity or profile-seed overrides", () => {
   const profile = { message: { greetingMode: "first-name" } };
-  assert.equal(greetingNameFor({ username: "JohnWolfeYT", displayName: "John Wolfe" }, profile), "John");
-  assert.equal(greetingNameFor({ username: "HandheldPlayers", displayName: "Handheld Players" }, profile), "Handheld Players");
-  assert.equal(greetingNameFor({ username: "Creator", displayName: "Public Name", greetingName: "Sam" }, profile), "Sam");
+  assert.throws(
+    () => greetingNameFor({ username: "JohnWolfeYT", displayName: "John Wolfe" }, profile),
+    /no verified personal first name/
+  );
+  assert.equal(greetingNameFor({ username: "JohnWolfeYT", verifiedGreetingName: "John" }, profile), "John");
+  assert.equal(
+    greetingNameFor({ username: "Creator", displayName: "Public Name", source: "profile-seed", greetingName: "Sam" }, profile),
+    "Sam"
+  );
 });

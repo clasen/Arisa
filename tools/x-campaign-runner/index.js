@@ -234,9 +234,25 @@ function candidateScore(candidate, profile) {
   return score;
 }
 
+function synthesizedCreativeQueries(discovery) {
+  const themes = unique(discovery.creativeThemes || []);
+  const audiences = unique(discovery.creativeAudiences || []);
+  const intents = unique(discovery.creativeIntents || []);
+  const queries = [];
+  for (const theme of themes) {
+    for (const intent of intents) queries.push(`site:x.com "${theme}" ${intent}`);
+  }
+  for (const audience of audiences) {
+    for (const intent of intents) queries.push(`site:x.com "${audience}" ${intent}`);
+  }
+  return queries;
+}
+
 function queryCatalog(profile, creative = false) {
   const discovery = profile.discovery || {};
-  const queries = creative ? discovery.creativeQueries || [] : discovery.queries || [];
+  const queries = creative
+    ? [...(discovery.creativeQueries || []), ...synthesizedCreativeQueries(discovery)]
+    : discovery.queries || [];
   return unique(queries).sort((a, b) => stableHash(a) - stableHash(b));
 }
 
@@ -317,19 +333,22 @@ async function discoverCandidates(arisa, profile, state, excluded, needed, creat
 
   for (const query of queries) {
     if (added.length >= needed) break;
-    let xSearchWorked = false;
+    const acceptedBeforeXSearch = added.length;
+    const nativeQuery = query.replace(/\bsite:x\.com\b/gi, "").replace(/\s+/g, " ").trim();
     if (discovery.xSearchEnabled !== false) {
-      try {
-        const output = await runTool(arisa, xSearchTool, { action: "search", query, mode: "posts", maxResults: String(discovery.maxResults || 10) }, intArg(discovery.xSearchTimeoutMs, 150000));
-        searches += 1;
-        xSearchWorked = Array.isArray(output.items) && output.items.length > 0;
-        for (const item of output.items || []) {
-          addCandidate(item, query, creative ? "creative-x-search" : "standard-x-search");
-          if (added.length >= needed) break;
-        }
-      } catch (error) { errors.push({ query, source: "x-search", error: clean(error.message || error).slice(0, 300) }); }
+      for (const mode of ["posts", "people"]) {
+        try {
+          const output = await runTool(arisa, xSearchTool, { action: "search", query: nativeQuery, mode, maxResults: String(discovery.maxResults || 10) }, intArg(discovery.xSearchTimeoutMs, 150000));
+          searches += 1;
+          for (const item of output.items || []) {
+            addCandidate(item, query, creative ? `creative-x-${mode}` : `standard-x-${mode}`);
+            if (added.length >= needed) break;
+          }
+        } catch (error) { errors.push({ query: nativeQuery, source: `x-search-${mode}`, error: clean(error.message || error).slice(0, 300) }); }
+        if (added.length > acceptedBeforeXSearch || added.length >= needed) break;
+      }
     }
-    if (xSearchWorked || added.length >= needed) continue;
+    if (added.length > acceptedBeforeXSearch || added.length >= needed) continue;
     let webResults = [];
     try {
       const output = await runTool(arisa, webTool, { mode: "search", maxResults: String(discovery.maxResults || 10) }, intArg(discovery.timeoutMs, 90000), query);
@@ -366,15 +385,39 @@ function personalOpening(candidate, profile) {
   return template.replace(/{{\s*reference\s*}}/g, reference).replace(/{{\s*name\s*}}/g, clean(candidate.displayName || candidate.username));
 }
 
+function verifiedPersonalFirstName(displayName) {
+  const name = clean(displayName)
+    .replace(/\s*\([^)]*\)\s*$/g, "")
+    .split(/[|–—]/)[0]
+    .trim();
+  if (!name || /[@:/!?]|\.\.\./.test(name)) return "";
+  const words = name.split(/\s+/).filter(Boolean);
+  const nonNameWords = new Set([
+    "about", "all", "alternate", "app", "central", "channel", "creator", "deep", "fates", "game", "games",
+    "gamer", "gaming", "indie", "media", "news", "official", "picks", "players", "program", "reality",
+    "reviews", "studio", "studios", "the", "this", "video"
+  ]);
+  if (words.length < 2 || words.length > 4) return "";
+  if (!words.every((word) => /^[\p{Lu}][\p{L}.'-]*$/u.test(word))) return "";
+  if (words.some((word) => nonNameWords.has(word.toLowerCase()))) return "";
+  return words[0].slice(0, 50);
+}
+
+function verifiedGreetingFor(candidate, profile, target = null) {
+  if (profile.message?.greetingMode !== "first-name") {
+    return clean(candidate.greetingName || target?.displayName || candidate.displayName || candidate.username).slice(0, 50);
+  }
+  if (candidate.source === "profile-seed" && clean(candidate.greetingName)) return clean(candidate.greetingName).slice(0, 50);
+  if (target?.profileIdentityVerified !== true) return "";
+  return verifiedPersonalFirstName(target.displayName);
+}
+
 function greetingNameFor(candidate, profile) {
-  const explicit = clean(candidate.greetingName || "");
-  if (explicit) return explicit.slice(0, 50);
-  const displayName = clean(candidate.displayName || candidate.username).split(/[|–—]/)[0].trim();
-  if (profile.message?.greetingMode !== "first-name") return displayName.slice(0, 50) || candidate.username;
-  const words = displayName.split(/\s+/).filter(Boolean);
-  const brandWords = new Set(["app", "games", "gamer", "gaming", "media", "news", "official", "players", "reviews", "studio", "studios"]);
-  const looksPersonal = words.length >= 2 && words.length <= 3 && words.every((word) => /^[\p{L}.'-]+$/u.test(word)) && !words.some((word) => brandWords.has(word.toLowerCase()));
-  return (looksPersonal ? words[0] : displayName).slice(0, 50) || candidate.username;
+  const greeting = clean(candidate.verifiedGreetingName || (candidate.source === "profile-seed" ? candidate.greetingName : ""));
+  if (profile.message?.greetingMode === "first-name" && !greeting) {
+    throw new Error(`@${candidate.username} has no verified personal first name.`);
+  }
+  return (greeting || candidate.displayName || candidate.username).slice(0, 50);
 }
 
 function renderMessage(candidate, profile) {
@@ -476,7 +519,18 @@ async function handlePrepareNext(request, args) {
         checked.push({ username: candidate.username, canDm: Boolean(check.target?.canDm) });
         candidate.lastCheckedAt = new Date().toISOString();
         candidate.profileHint = check.target?.profileHint || "";
+        candidate.verifiedDisplayName = clean(check.target?.displayName || "");
+        candidate.profileBio = clean(check.target?.bio || "");
         if (!check.target?.canDm) { candidate.status = "unavailable"; continue; }
+        const verifiedGreetingName = verifiedGreetingFor(candidate, profile, check.target);
+        if (profile.message?.greetingMode === "first-name" && !verifiedGreetingName) {
+          candidate.status = "not-personal";
+          candidate.lastError = "No verified personal first name was found in the target-bound X profile header.";
+          checked[checked.length - 1].reason = candidate.lastError;
+          continue;
+        }
+        candidate.verifiedGreetingName = verifiedGreetingName;
+        if (candidate.verifiedDisplayName) candidate.displayName = candidate.verifiedDisplayName;
         const message = renderMessage(candidate, profile);
         const createdAt = new Date();
         const ttlHours = Math.max(1, Math.min(intArg(profile.message?.approvalTtlHours, 24), 168));
@@ -707,4 +761,4 @@ async function main(cliArgs = process.argv.slice(2)) {
 const isCli = process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url);
 if (isCli) await main();
 
-export { availableCandidates, candidateScore, greetingNameFor, handleFromXUrl, parseSearchResults, pendingApproval, renderMessage, sha256 };
+export { availableCandidates, candidateScore, greetingNameFor, handleFromXUrl, parseSearchResults, pendingApproval, renderMessage, sha256, synthesizedCreativeQueries, verifiedPersonalFirstName };

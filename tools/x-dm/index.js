@@ -42,14 +42,15 @@ Actions:
   status   Check the X session and include campaign/send health. args: campaignId?
   check    Validate a target profile and whether its DM button is visible. args: username
   search   Search visible X posts or people without sending. args: query, mode=posts|people, maxResults?
-  verify-delivery Read a bound target conversation and reconcile one unresolved uncertain attempt. args: attemptId, username, message
-  resolve-uncertain Record human confirmation of one uncertain attempt without opening X. args: attemptId, username, message, outcome=delivered|not-sent, confirm=true
+  verify-delivery Read a bound target conversation and reconcile one unresolved uncertain attempt. args: attemptId, username, message or messageHash
+  resolve-uncertain Record human confirmation of one uncertain attempt without opening X. args: attemptId, username, message or messageHash, outcome=delivered|not-sent, confirm=true
   get-bio  Read the logged-in account bio without changing it.
   get-posts Read recent visible posts from the logged-in account. args: maxResults?
   update-bio Replace or append to the logged-in account bio. args: bio? or appendText?, confirm=true
   create-post Publish one exact post from the logged-in account. args: post, confirm=true
   relationship-status Read the target-bound Follow/Following state without changing it. args: username
-  follow   Follow one target profile and record campaign metadata. args: username, campaignId?, idempotencyKey?, unfollowIfNoResponse?, confirm=true, dryRun=false
+  follow   Follow one target profile and record campaign metadata. args: username, campaignId?, unfollowIfNoResponse?, confirm=true
+  unfollow Unfollow only a profile previously followed by this tool. Requires noResponseConfirmed=true and confirm=true.
   send     Send one approved DM. args: username, message, campaignId?, confirm=true, dryRun=false
 
 Safety and reliability:
@@ -57,9 +58,9 @@ Safety and reliability:
   - one send runs at a time through a chat-scoped lock
   - duplicate recipients, cooldown, and daily cap are enforced
   - follow changes require explicit confirmation, exact target binding, state verification, and a daily cap
-  - future no-response cleanup intent is recorded, but this tool does not auto-unfollow
+  - unfollow is allowed only for a tool-created follow after explicit no-response confirmation
   - target conversation must remain stable before the tool types or clicks send
-  - success requires composer clear, one new exact message in the bound message list, and a matching X send receipt
+  - success requires immediate send evidence or an exact-message readback after reopening the bound conversation
   - explicit send-button confirmation is required; keyboard fallback is never used
   - uncertain delivery is recorded and blocks an automatic retry
   - every browser run has a hard timeout and uses a persistent chat-scoped browser profile
@@ -249,7 +250,7 @@ function auditState(state, campaignId = "") {
     const id = sentCampaignId(entry);
     byCampaign[id] = (byCampaign[id] || 0) + 1;
   }
-  const resolvedAttemptIds = new Set(state.attempts.filter((attempt) => ["sent", "failed", "not-sent", "following", "already-following"].includes(attempt.outcome)).map((attempt) => attempt.attemptId));
+  const resolvedAttemptIds = new Set(state.attempts.filter((attempt) => ["sent", "failed", "not-sent"].includes(attempt.outcome)).map((attempt) => attempt.attemptId));
   const uncertain = state.attempts.filter((attempt) => attempt.outcome === "uncertain" && !resolvedAttemptIds.has(attempt.attemptId) && (!campaignId || attempt.campaignId === campaignId));
   const unresolved = state.attempts.filter((attempt) => attempt.outcome === "in-flight" && !resolvedAttemptIds.has(attempt.attemptId) && (!campaignId || attempt.campaignId === campaignId));
   return {
@@ -426,53 +427,47 @@ function profileUrlMatchesUsername(urlValue, username) {
   } catch { return false; }
 }
 
-async function boundProfileRelationshipControl(page, username) {
-  const headers = page.locator('[data-testid="UserName"]');
-  const count = Math.min(await headers.count().catch(() => 0), 5);
-  let header = null;
+async function describeFollowControl(locator, username, following) {
+  if (!await locator.isVisible().catch(() => false) || !await locator.isEnabled().catch(() => false)) return null;
+  const testId = await locator.getAttribute("data-testid").catch(() => "");
+  const suffix = following ? "-unfollow" : "-follow";
+  const idMatch = String(testId || "").match(new RegExp(`^(\\d+)${suffix}$`));
+  if (!idMatch) return null;
+  const ariaLabel = await locator.getAttribute("aria-label").catch(() => "");
+  const text = (await locator.innerText().catch(() => "")).trim();
+  const box = await locator.boundingBox().catch(() => null);
+  const targetPattern = new RegExp(`@${escapedRegex(username)}\\b`, "i");
+  const targetNamed = targetPattern.test(`${ariaLabel} ${text}`);
+  const profileHeaderBound = Boolean(box && box.y >= 0 && box.y < 500);
+  if (!targetNamed && !profileHeaderBound) return null;
+  return { locator, targetUserId: idMatch[1], testId, ariaLabel, text, targetNamed, profileHeaderBound, boxY: box?.y ?? null };
+}
+
+async function profileFollowControl(page, username, following) {
+  const suffix = following ? "-unfollow" : "-follow";
+  const candidates = page.locator(`[data-testid="primaryColumn"] button[data-testid$="${suffix}"]`);
+  const count = Math.min(await candidates.count().catch(() => 0), 10);
   for (let index = 0; index < count; index += 1) {
-    const candidate = headers.nth(index);
-    if (!await candidate.isVisible().catch(() => false)) continue;
-    const lines = (await candidate.innerText().catch(() => "")).split(/\r?\n/).map((line) => line.trim());
-    if (lines.some((line) => line.toLowerCase() === `@${username.toLowerCase()}`)) { header = candidate; break; }
+    const described = await describeFollowControl(candidates.nth(index), username, following);
+    if (described) return described;
   }
-  if (!header) throw new Error(`X did not expose a profile header bound to @${username}.`);
-  const descriptor = await header.evaluate((node) => {
-    for (let ancestor = node.parentElement, depth = 0; ancestor && depth < 10; ancestor = ancestor.parentElement, depth += 1) {
-      const controls = [...ancestor.querySelectorAll('button[data-testid$="-follow"], button[data-testid$="-unfollow"]')]
-        .map((button) => ({
-          testId: button.getAttribute("data-testid") || "",
-          ariaLabel: button.getAttribute("aria-label") || "",
-          text: (button.innerText || "").trim()
-        }))
-        .filter((item) => /^\d+-(?:un)?follow$/.test(item.testId));
-      const unique = [...new Map(controls.map((item) => [item.testId, item])).values()];
-      if (unique.length === 1) return unique[0];
-      if (unique.length > 1) return { ambiguous: true };
-    }
-    return null;
-  });
-  if (!descriptor || descriptor.ambiguous) throw new Error(`X did not expose one unique relationship control in @${username}'s profile header.`);
-  const match = descriptor.testId.match(/^(\d+)-(un)?follow$/);
-  if (!match) throw new Error(`X relationship control for @${username} was not target-verifiable.`);
-  const locator = page.locator(`[data-testid="${descriptor.testId}"]`);
-  if (await locator.count().catch(() => 0) !== 1 || !await locator.isVisible().catch(() => false) || !await locator.isEnabled().catch(() => false)) {
-    throw new Error(`X relationship control for @${username} was not uniquely actionable.`);
-  }
-  return {
-    locator,
-    following: Boolean(match[2]),
-    targetUserId: match[1],
-    testId: descriptor.testId,
-    ariaLabel: descriptor.ariaLabel,
-    text: descriptor.text,
-    profileHeaderBound: true
-  };
+  return null;
 }
 
 async function readFollowState(page, username) {
-  const control = await boundProfileRelationshipControl(page, username);
-  return { following: control.following, control };
+  const followingControl = await profileFollowControl(page, username, true);
+  const followControl = await profileFollowControl(page, username, false);
+  if (followingControl && followControl) {
+    if (followingControl.targetNamed !== followControl.targetNamed) {
+      return followingControl.targetNamed ? { following: true, control: followingControl } : { following: false, control: followControl };
+    }
+    const distance = Math.abs(Number(followingControl.boxY) - Number(followControl.boxY));
+    if (distance >= 100) return followingControl.boxY < followControl.boxY ? { following: true, control: followingControl } : { following: false, control: followControl };
+    throw new Error(`X exposed ambiguous relationship controls on @${username}; refusing the operation.`);
+  }
+  if (followingControl) return { following: true, control: followingControl };
+  if (followControl) return { following: false, control: followControl };
+  throw new Error(`X did not expose a target-bound Follow/Following control for @${username}.`);
 }
 
 async function waitForFollowState(page, username, expected, targetUserId) {
@@ -543,7 +538,6 @@ async function performRelationshipChange(page, username, before, shouldFollow) {
   page.on("response", onResponse);
   let mutationStarted = false;
   try {
-    if (shouldFollow) mutationStarted = true;
     await before.control.locator.click({ timeout: 10000 });
     if (!shouldFollow) {
       const dialog = page.locator('[role="dialog"]').filter({ hasText: new RegExp(escapedRegex(username), "i") }).first();
@@ -581,7 +575,9 @@ async function performRelationshipChange(page, username, before, shouldFollow) {
 
 async function changeFollowState(page, username, shouldFollow, beforeChange = async () => {}) {
   const profile = await openProfile(page, username);
-  if (!profileUrlMatchesUsername(profile.profileUrl, username)) throw new Error(`X profile URL for @${username} could not be verified; refusing the follow change.`);
+  if (!profileUrlMatchesUsername(profile.profileUrl, username) || !new RegExp(`@${escapedRegex(username)}\\b`, "i").test(profile.body)) {
+    throw new Error(`X profile binding for @${username} could not be verified; refusing the follow change.`);
+  }
   const before = await readFollowState(page, username);
   if (before.following === shouldFollow) {
     return { changed: false, following: shouldFollow, profileUrl: profile.profileUrl, targetUserId: before.control.targetUserId, preexisting: true, evidence: null };
@@ -895,11 +891,33 @@ async function findDmButton(page) {
   return null;
 }
 
+function cleanVisibleText(value) { return String(value || "").replace(/\s+/g, " ").trim(); }
+
+function profileIdentityFromHeader(lines, username) {
+  const normalized = (lines || []).map((line) => cleanVisibleText(line)).filter(Boolean);
+  const handleIndex = normalized.findIndex((line) => line.toLowerCase() === `@${String(username || "").toLowerCase()}`);
+  if (handleIndex <= 0) return { handleVerified: false, displayName: "" };
+  return { handleVerified: true, displayName: normalized[handleIndex - 1].slice(0, 100) };
+}
+
 async function inspectTarget(page, username) {
   const profile = await openProfile(page, username);
   const canDm = Boolean(await findDmButton(page));
   const lines = profile.body.split("\n").map((line) => line.trim()).filter(Boolean).slice(0, 12);
-  return { username, canDm, profileUrl: profile.profileUrl, httpStatus: profile.status, profileHint: lines.join(" | ").slice(0, 500) };
+  const headerLines = (await page.locator('[data-testid="UserName"]').first().innerText().catch(() => ""))
+    .split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
+  const identity = profileIdentityFromHeader(headerLines, username);
+  const bio = cleanVisibleText(await page.locator('[data-testid="UserDescription"]').first().innerText().catch(() => "")).slice(0, 300);
+  return {
+    username,
+    canDm,
+    profileUrl: profile.profileUrl,
+    httpStatus: profile.status,
+    profileHint: lines.join(" | ").slice(0, 500),
+    displayName: identity.handleVerified ? identity.displayName : "",
+    bio,
+    profileIdentityVerified: identity.handleVerified
+  };
 }
 
 function conversationIdFromUrl(value) {
@@ -952,6 +970,20 @@ async function scopedExactMessageCount(page, message) {
     }
     return count;
   }, message).catch(() => 0);
+}
+
+async function scopedMessageTexts(page) {
+  return page.locator('[data-testid="dm-message-list"]').evaluate((list) => {
+    const canonical = (value) => String(value || "").normalize("NFC").replace(/\r\n/g, "\n").replace(/\u00a0/g, " ").trim();
+    const texts = new Set();
+    for (const node of list.querySelectorAll("*")) {
+      const own = canonical(node.innerText || node.textContent);
+      if (!own || own.length > 2000) continue;
+      const childAlsoMatches = [...node.children].some((child) => canonical(child.innerText || child.textContent) === own);
+      if (!childAlsoMatches) texts.add(own);
+    }
+    return [...texts];
+  }).catch(() => []);
 }
 
 async function unlockXChatPasscode(page, passcode, returnUrl) {
@@ -1178,9 +1210,25 @@ async function sendDm(page, username, message, config) {
   evidence.networkReceipt = receipts.find((item) => item.valid) || receipts[0] || null;
   evidence.receiptCandidates = receipts.length;
   const assessment = assessDeliveryEvidence(evidence);
-  return assessment.verified
-    ? { ok: true, verified: true, verificationMethod: "bound-conversation-new-exact-message-plus-x-receipt-v2", evidence, target: binding }
-    : { ok: false, uncertain: true, reason: `X send could not be proven. Missing evidence: ${assessment.missing.join(", ")}. Do not retry until the conversation is checked.`, evidence, target: binding };
+  if (assessment.verified) {
+    return { ok: true, verified: true, verificationMethod: "bound-conversation-new-exact-message-plus-x-receipt-v2", evidence, target: binding };
+  }
+
+  if (evidence.conversationBound && evidence.composerCleared && !evidence.explicitError) {
+    await page.waitForTimeout(2500);
+    const readback = await verifyDeliveryInConversation(page, username, message, binding.conversationId, config);
+    evidence.deferredReadback = {
+      verified: readback.verified,
+      reason: readback.reason,
+      exactCount: readback.exactCount || 0,
+      conversationId: readback.target?.conversationId || null
+    };
+    if (readback.verified) {
+      return { ok: true, verified: true, verificationMethod: "bound-conversation-deferred-exact-readback-v3", evidence, target: readback.target || binding };
+    }
+  }
+
+  return { ok: false, uncertain: true, reason: `X send could not be proven. Missing evidence: ${assessment.missing.join(", ")}. Deferred conversation readback did not find the exact message. Do not retry until the conversation is checked.`, evidence, target: binding };
 }
 
 function handleFromStatusHref(value) {
@@ -1242,34 +1290,56 @@ async function searchX(page, args) {
 
 function normalizedConversationText(value) { return String(value || "").toLowerCase().replace(/https?:\/\/\S+/g, (url) => url.replace(/[),.!?]+$/, "")).replace(/[^\p{L}\p{N}:/.@_-]+/gu, " ").replace(/\s+/g, " ").trim(); }
 
-async function verifyDeliveryInConversation(page, username, message, expectedConversationId, config) {
+async function openBoundConversation(page, username, expectedConversationId, config) {
   const composer = await openDmComposer(page, username, config);
-  if (!composer.ok) return { verified: false, reason: composer.reason || "Could not open the target conversation.", target: composer.target };
-  const target = composer.target;
-  if (!expectedConversationId || target.conversationId !== expectedConversationId) {
-    return { verified: false, reason: "The opened X conversation does not match the conversation bound to the uncertain attempt.", target };
+  if (!composer.ok) return { ok: false, reason: composer.reason || "Could not open the target conversation.", target: composer.target };
+  if (!expectedConversationId || composer.target.conversationId !== expectedConversationId) {
+    return { ok: false, reason: "The opened X conversation does not match the conversation bound to the uncertain attempt.", target: composer.target };
   }
+  return { ok: true, target: composer.target };
+}
+
+async function verifyDeliveryInConversation(page, username, message, expectedConversationId, config) {
+  const conversation = await openBoundConversation(page, username, expectedConversationId, config);
+  if (!conversation.ok) return { verified: false, reason: conversation.reason, target: conversation.target };
   const exactCount = await scopedExactMessageCount(page, message);
   return {
     verified: exactCount > 0,
     reason: exactCount > 0 ? "The exact approved message is visible inside the bound target message list." : "The exact approved message was not found inside the bound target message list.",
-    target,
+    target: conversation.target,
     exactCount
+  };
+}
+
+async function verifyDeliveryHashInConversation(page, username, hash, expectedConversationId, config) {
+  const conversation = await openBoundConversation(page, username, expectedConversationId, config);
+  if (!conversation.ok) return { verified: false, reason: conversation.reason, target: conversation.target };
+  const matchingCount = (await scopedMessageTexts(page)).filter((text) => messageHash(text) === hash).length;
+  return {
+    verified: matchingCount > 0,
+    reason: matchingCount > 0 ? "A message matching the approved hash is visible inside the bound target message list." : "No message matching the approved hash was found inside the bound target message list.",
+    target: conversation.target,
+    exactCount: matchingCount
   };
 }
 
 async function reconcileVerifiedDelivery(request, args, stateDir, statePath, state, page, config) {
   const attemptId = String(args.attemptId || "").trim();
   const username = usernameFrom(args.username || request.text || request.artifact?.text || "", args);
-  const message = messageFrom(request, args);
-  if (!attemptId || !username || !message) return toolError("verify-delivery requires attemptId, a valid username, and the exact approved message.");
-  const hash = messageHash(message);
+  const suppliedHash = String(args.messageHash || "").trim().toLowerCase();
+  const message = suppliedHash
+    ? String(args.message || request.artifact?.text || "").replace(/\r\n/g, "\n").trim()
+    : messageFrom(request, args);
+  const hash = message ? messageHash(message) : suppliedHash;
+  if (!attemptId || !username || !/^[a-f0-9]{16}$/.test(hash)) return toolError("verify-delivery requires attemptId, a valid username, and the exact approved message or its 16-character messageHash.");
   const records = state.attempts.filter((item) => item.attemptId === attemptId);
   const uncertain = records.find((item) => item.action === "send" && item.outcome === "uncertain" && String(item.username || "").toLowerCase() === username.toLowerCase() && item.messageHash === hash);
   const resolved = records.some((item) => ["sent", "failed", "not-sent"].includes(item.outcome));
   if (!uncertain || resolved) return toolError("No currently unresolved matching uncertain attempt exists.");
   if (!uncertain.conversationId) return toolError("The uncertain attempt predates conversation-bound evidence and cannot be reconciled automatically.");
-  const verification = await verifyDeliveryInConversation(page, username, message, uncertain.conversationId, config);
+  const verification = message
+    ? await verifyDeliveryInConversation(page, username, message, uncertain.conversationId, config)
+    : await verifyDeliveryHashInConversation(page, username, hash, uncertain.conversationId, config);
   if (!verification.verified) return toolOk({ text: `${verification.reason} Nothing was sent or retried.`, json: { username, attemptId, verified: false, verification } });
   const release = await acquireStateLock(stateDir);
   try {
@@ -1280,20 +1350,20 @@ async function reconcileVerifiedDelivery(request, args, stateDir, statePath, sta
       username,
       campaignId: uncertain.campaignId,
       idempotencyKey: uncertain.idempotencyKey,
-      message,
+      ...(message ? { message } : {}),
       messageHash: hash,
       sentAt: uncertain.at,
       deliveryVerified: true,
-      verificationMethod: "bound-conversation-scoped-readback-v2",
-      evidenceVersion: 2,
+      verificationMethod: message ? "bound-conversation-scoped-readback-v2" : "bound-conversation-hash-readback-v3",
+      evidenceVersion: message ? 2 : 3,
       conversationId: uncertain.conversationId,
       profileUrl: verification.target?.profileUrl || `https://x.com/${username}`
     };
     latest.sends = [...latest.sends, entry].slice(-5000);
     latest.recipientIndex[username.toLowerCase()] = { username, firstSentAt: entry.sentAt, lastSentAt: entry.sentAt, campaignId: entry.campaignId };
-    appendAttempt(latest, { attemptId, action: "send", username, campaignId: entry.campaignId, idempotencyKey: entry.idempotencyKey, messageHash: hash, outcome: "sent", verificationMethod: entry.verificationMethod, conversationId: entry.conversationId, evidenceVersion: 2 });
+    appendAttempt(latest, { attemptId, action: "send", username, campaignId: entry.campaignId, idempotencyKey: entry.idempotencyKey, messageHash: hash, outcome: "sent", verificationMethod: entry.verificationMethod, conversationId: entry.conversationId, evidenceVersion: entry.evidenceVersion });
     await writeState(statePath, latest);
-    return toolOk({ text: `Verified the exact approved X DM inside @${username}'s bound conversation.`, json: entry });
+    return toolOk({ text: `Verified the approved X DM inside @${username}'s bound conversation.`, json: entry });
   } finally { await release(); }
 }
 
@@ -1308,9 +1378,12 @@ async function resolveUncertainAction(request, args) {
   const attemptId = String(args.attemptId || "").trim();
   if (!attemptId) return toolError("resolve-uncertain requires the exact uncertain attemptId.");
   const username = usernameFrom(args.username || request.text || request.artifact?.text || "", args);
-  const message = messageFrom(request, args);
-  if (!username || !message) return toolError("resolve-uncertain requires a valid username and exact approved message.");
-  const hash = messageHash(message);
+  const suppliedHash = String(args.messageHash || "").trim().toLowerCase();
+  const message = suppliedHash
+    ? String(args.message || request.artifact?.text || "").replace(/\r\n/g, "\n").trim()
+    : messageFrom(request, args);
+  const hash = message ? messageHash(message) : suppliedHash;
+  if (!username || !/^[a-f0-9]{16}$/.test(hash)) return toolError("resolve-uncertain requires a valid username and the exact approved message or its 16-character messageHash.");
   const { stateDir, statePath } = await statePaths(request);
   const release = await acquireStateLock(stateDir);
   try {
@@ -1345,11 +1418,11 @@ async function resolveUncertainAction(request, args) {
         username,
         campaignId: attempt.campaignId || campaignIdFrom(args),
         idempotencyKey: attempt.idempotencyKey || null,
-        message,
+        ...(message ? { message } : {}),
         messageHash: hash,
         sentAt: attempt.at,
         deliveryVerified: true,
-        verificationMethod: "human-confirmed",
+        verificationMethod: message ? "human-confirmed" : "human-confirmed-by-message-hash",
         userConfirmedAt: new Date().toISOString(),
         profileUrl: `https://x.com/${username}`
       };
@@ -1369,7 +1442,7 @@ async function resolveUncertainAction(request, args) {
       idempotencyKey: entry.idempotencyKey,
       messageHash: hash,
       outcome: "sent",
-      verificationMethod: "human-confirmed"
+      verificationMethod: entry.verificationMethod
     });
     await writeState(statePath, state);
     return toolOk({ text: `Resolved the uncertain X DM to @${username} as human-confirmed delivered.`, json: entry });
@@ -1532,7 +1605,9 @@ async function relationshipStatusAction(request, args, page, account) {
   const username = usernameFrom(args.username || request.text || request.artifact?.text || "", args);
   if (!username) return toolError("A valid args.username, @handle, or X profile URL is required.");
   const profile = await openProfile(page, username);
-  if (!profileUrlMatchesUsername(profile.profileUrl, username)) return toolError(`X profile URL for @${username} could not be verified.`);
+  if (!profileUrlMatchesUsername(profile.profileUrl, username) || !new RegExp(`@${escapedRegex(username)}\\b`, "i").test(profile.body)) {
+    return toolError(`X profile binding for @${username} could not be verified.`);
+  }
   const state = await readFollowState(page, username);
   return toolOk({
     text: `@${username} is ${state.following ? "currently followed" : "not currently followed"} by @${account.handle || "the logged-in account"}.`,
@@ -1552,54 +1627,43 @@ async function relationshipStatusAction(request, args, page, account) {
   });
 }
 
-async function followAction(request, args, stateDir, statePath, page, account, config) {
+async function followAction(request, args, stateDir, statePath, page, account, config, shouldFollow) {
   const username = usernameFrom(args.username || request.text || request.artifact?.text || "", args);
   if (!username) return toolError("A valid args.username, @handle, or X profile URL is required.");
   const campaignId = campaignIdFrom(args);
-  const actorHandle = cleanHandle(account.handle || config.EXPECTED_ACCOUNT_HANDLE);
-  const key = username.toLowerCase();
-  const idempotencyKey = String(args.idempotencyKey || `${campaignId}:${key}:follow`).slice(0, 200);
-  if (!exactBoolean(args.confirm, true) || !exactBoolean(args.dryRun, false)) return toolOk({
-    text: `Dry run only. Would follow @${username} as @${actorHandle || "the logged-in account"}. Pass confirm=true and dryRun=false to apply it.`,
-    json: { dryRun: true, username, campaignId, action: "follow", idempotencyKey }
+  if (!exactBoolean(args.confirm, true)) return toolOk({
+    text: `Dry run only. Would ${shouldFollow ? "follow" : "unfollow"} @${username} as @${account.handle || config.EXPECTED_ACCOUNT_HANDLE || "the logged-in account"}. Pass confirm=true to apply it.`,
+    json: { dryRun: true, username, campaignId, action: shouldFollow ? "follow" : "unfollow" }
   });
 
   const initial = await readState(statePath);
+  const key = username.toLowerCase();
   const existing = initial.follows[key] || null;
   if (existing?.status === "manual-review") return toolError(`@${username} has an uncertain prior relationship change; check X manually before another follow action.`);
-  let reservation = null;
+  if (!shouldFollow) {
+    if (!exactBoolean(args.noResponseConfirmed, true)) return toolError("unfollow requires exact noResponseConfirmed=true after checking that the recipient did not respond.");
+    if (!existing?.followedByTool || existing.status !== "following") return toolError(`@${username} was not recorded as actively followed by this tool; refusing to unfollow.`);
+    if (!existing.unfollowIfNoResponse) return toolError(`@${username} was not marked for no-response unfollow; refusing to unfollow.`);
+    const verifiedSend = initial.sends.find((send) =>
+      send.deliveryVerified === true &&
+      normalizedUsername(send.username) === key &&
+      send.campaignId === campaignId &&
+      (!existing.followedAt || Date.parse(send.sentAt) >= Date.parse(existing.followedAt))
+    );
+    if (!verifiedSend) return toolError(`No verified DM sent after the managed follow to @${username}; refusing to unfollow.`);
+  }
+
   let result;
   try {
-    result = await changeFollowState(page, username, true, async (before) => {
-      const release = await acquireStateLock(stateDir);
-      try {
-        const latest = await readState(statePath);
-        const resolvedIds = new Set(latest.attempts.filter((attempt) => ["following", "already-following", "failed", "not-sent", "sent"].includes(attempt.outcome)).map((attempt) => attempt.attemptId));
-        const unresolved = latest.attempts.find((attempt) =>
-          attempt.action === "follow" &&
-          String(attempt.username || "").toLowerCase() === key &&
-          attempt.outcome === "in-flight" &&
-          !resolvedIds.has(attempt.attemptId)
-        );
-        if (unresolved) throw new Error(`@${username} has an unresolved follow reservation; check X manually before retrying.`);
-        const guard = followSafetyGuard(
-          latest,
-          Math.max(intArg(config.MAX_FOLLOWS_PER_DAY, 20), 1),
-          Math.max(intArg(config.MIN_SECONDS_BETWEEN_FOLLOWS, 300), 60)
-        );
-        if (guard) throw new Error(guard);
-        reservation = appendAttempt(latest, {
-          action: "follow",
-          username,
-          campaignId,
-          approvalId: clean(args.approvalId) || null,
-          idempotencyKey,
-          actorHandle,
-          targetUserId: before.control.targetUserId,
-          outcome: "in-flight"
-        });
-        await writeState(statePath, latest);
-      } finally { await release(); }
+    result = await changeFollowState(page, username, shouldFollow, async () => {
+    if (!shouldFollow) return;
+    const latest = await readState(statePath);
+    const guard = followSafetyGuard(
+      latest,
+      Math.max(intArg(config.MAX_FOLLOWS_PER_DAY, 20), 1),
+      Math.max(intArg(config.MIN_SECONDS_BETWEEN_FOLLOWS, 300), 60)
+    );
+      if (guard) throw new Error(guard);
     });
   } catch (error) {
     if (error.relationshipUncertain) {
@@ -1610,28 +1674,13 @@ async function followAction(request, args, stateDir, statePath, page, account, c
           ...(latest.follows[key] || {}),
           username,
           campaignId,
-          approvalId: clean(args.approvalId) || null,
-          actorHandle,
-          targetUserId: error.relationshipEvidence?.targetUserId || reservation?.targetUserId || null,
-          followId: reservation?.attemptId || null,
           status: "manual-review",
           unfollowIfNoResponse: false,
           lastError: error.message || String(error),
           evidence: error.relationshipEvidence || null,
           updatedAt: new Date().toISOString()
         };
-        appendAttempt(latest, {
-          attemptId: reservation?.attemptId,
-          action: "follow",
-          username,
-          campaignId,
-          idempotencyKey,
-          actorHandle,
-          targetUserId: error.relationshipEvidence?.targetUserId || reservation?.targetUserId || null,
-          outcome: "uncertain",
-          reason: error.message || String(error),
-          evidence: error.relationshipEvidence || null
-        });
+        appendAttempt(latest, { action: shouldFollow ? "follow" : "unfollow", username, campaignId, outcome: "uncertain", reason: error.message || String(error), evidence: error.relationshipEvidence || null });
         await writeState(statePath, latest);
       } finally { await release(); }
     }
@@ -1642,71 +1691,39 @@ async function followAction(request, args, stateDir, statePath, page, account, c
   try {
     const latest = await readState(statePath);
     const previous = latest.follows[key] || null;
-    const preservesManagedOwnership = Boolean(
-      !result.changed &&
-      previous?.followedByTool &&
-      previous.status === "following" &&
-      String(previous.actorHandle || "").toLowerCase() === actorHandle.toLowerCase() &&
-      previous.targetUserId === result.targetUserId
-    );
-    if (result.changed) {
+    if (shouldFollow) {
+      const followedByTool = result.changed || Boolean(previous?.followedByTool);
       latest.follows[key] = {
         username,
         campaignId,
-        approvalId: clean(args.approvalId) || null,
-        idempotencyKey,
-        actorHandle,
+        profileUrl: result.profileUrl,
         targetUserId: result.targetUserId,
-        followId: reservation?.attemptId || null,
         status: "following",
-        followedByTool: true,
-        preexisting: false,
-        unfollowIfNoResponse: exactBoolean(args.unfollowIfNoResponse, true),
-        followedAt: new Date().toISOString(),
-        eligibleUnfollowAt: null,
+        followedByTool,
+        preexisting: !result.changed && !previous?.followedByTool,
+        unfollowIfNoResponse: followedByTool && exactBoolean(args.unfollowIfNoResponse, true),
+        followedAt: result.changed ? new Date().toISOString() : previous?.followedAt || null,
         observedAt: new Date().toISOString(),
-        verificationMethod: "target-dom-transition-plus-x-receipt",
+        verificationMethod: result.changed ? "target-dom-transition-plus-x-receipt" : "target-dom-preexisting",
         evidence: result.evidence
       };
-    } else if (preservesManagedOwnership) {
-      latest.follows[key] = { ...previous, observedAt: new Date().toISOString(), verificationMethod: "target-header-dom-reverification" };
+      appendAttempt(latest, { action: "follow", username, campaignId, outcome: result.changed ? "following" : "already-following", followedByTool, targetUserId: result.targetUserId, verificationMethod: latest.follows[key].verificationMethod });
     } else {
       latest.follows[key] = {
-        username,
-        campaignId,
-        approvalId: clean(args.approvalId) || null,
-        idempotencyKey,
-        actorHandle,
-        targetUserId: result.targetUserId,
-        followId: null,
-        status: "following",
-        followedByTool: false,
-        preexisting: true,
-        unfollowIfNoResponse: false,
-        followedAt: null,
-        eligibleUnfollowAt: null,
-        observedAt: new Date().toISOString(),
-        verificationMethod: "target-header-dom-preexisting",
-        evidence: null
+        ...previous,
+        status: "unfollowed",
+        unfollowedAt: new Date().toISOString(),
+        noResponseConfirmedAt: new Date().toISOString()
       };
+      appendAttempt(latest, { action: "unfollow", username, campaignId, outcome: result.changed ? "unfollowed" : "already-unfollowed" });
     }
-    appendAttempt(latest, {
-      attemptId: reservation?.attemptId,
-      action: "follow",
-      username,
-      campaignId,
-      approvalId: clean(args.approvalId) || null,
-      idempotencyKey,
-      actorHandle,
-      outcome: result.changed ? "following" : "already-following",
-      followedByTool: latest.follows[key].followedByTool,
-      targetUserId: result.targetUserId,
-      verificationMethod: latest.follows[key].verificationMethod
-    });
     await writeState(statePath, latest);
+    const record = latest.follows[key];
     return toolOk({
-      text: result.changed ? `Followed and verified @${username}.` : `Verified that @${username} is already followed; no follow click was needed.`,
-      json: { account: { handle: actorHandle }, follow: latest.follows[key], changed: result.changed }
+      text: shouldFollow
+        ? result.changed ? `Followed and verified @${username}.` : `@${username} was already followed; no follow click was needed.`
+        : result.changed ? `Unfollowed and verified @${username}.` : `@${username} was already unfollowed.`,
+      json: { account: { handle: account.handle }, follow: record, changed: result.changed }
     });
   } finally { await release(); }
 }
@@ -1731,7 +1748,7 @@ async function browserAction(request, args, config) {
       const result = await readOwnPosts(page, handle, intArg(args.maxResults, 10));
       return toolOk({ text: `Found ${result.posts.length} visible post(s) for @${handle}.`, json: { account: { handle }, ...result } });
     }
-    if (action === "create-post") return createPostAction(request, args, stateDir, statePath, state, page, account, config);
+    if (action === "create-post") return await createPostAction(request, args, stateDir, statePath, state, page, account, config);
     if (action === "get-bio" || action === "update-bio") {
       const handle = cleanHandle(account.handle || config.EXPECTED_ACCOUNT_HANDLE);
       if (!handle) return toolError("Could not determine the logged-in X handle; refusing the profile operation.");
@@ -1762,10 +1779,12 @@ Pass confirm=true to apply exactly this bio.`,
     }
     if (action === "verify-delivery") {
       const { stateDir } = await statePaths(request);
-      return reconcileVerifiedDelivery(request, args, stateDir, statePath, state, page, config);
+      return await reconcileVerifiedDelivery(request, args, stateDir, statePath, state, page, config);
     }
-    if (action === "relationship-status") return relationshipStatusAction(request, args, page, account);
-    if (action === "follow") return followAction(request, args, stateDir, statePath, page, account, config);
+    if (action === "relationship-status") return await relationshipStatusAction(request, args, page, account);
+    if (action === "follow" || action === "unfollow") {
+      return await followAction(request, args, stateDir, statePath, page, account, config, action === "follow");
+    }
     const username = usernameFrom(args.username || request.text || request.artifact?.text || "", args);
     if (!username) return toolError("A valid args.username, @handle, or X profile URL is required.");
     if (String(args.action).toLowerCase() === "check") {
@@ -1897,8 +1916,8 @@ async function execute(requestFile) {
   const action = String(args.action || "status").toLowerCase();
   if (action === "audit") return auditAction(request, args);
   if (action === "resolve-uncertain") return resolveUncertainAction(request, args);
-  if (!["status", "check", "search", "verify-delivery", "get-bio", "get-posts", "update-bio", "create-post", "relationship-status", "follow", "send"].includes(action)) return toolError(`Unknown action: ${action}`);
-  if (["relationship-status", "follow", "send"].includes(action)) {
+  if (!["status", "check", "search", "verify-delivery", "get-bio", "get-posts", "update-bio", "create-post", "relationship-status", "follow", "unfollow", "send"].includes(action)) return toolError(`Unknown action: ${action}`);
+  if (["relationship-status", "follow", "unfollow", "send"].includes(action)) {
     const username = usernameFrom(args.username || request.text || request.artifact?.text || "", args);
     if (!username) return toolError("A valid args.username, @handle, or X profile URL is required.");
   }
@@ -1972,6 +1991,7 @@ export {
   messageHash,
   normalizeState,
   parseCookies,
+  profileIdentityFromHeader,
   requestTargetsUser,
   usernameFrom,
   withinDailyCap

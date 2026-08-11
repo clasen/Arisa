@@ -10,7 +10,8 @@ It does not bypass login, CAPTCHAs, recipient restrictions, rate limits, or othe
 - `status`: validate the logged-in X account and include campaign health.
 - `check`: open one profile and report whether the DM button is visible; `verifyComposer=true` confirms that the conversation composer actually opens without typing.
 - `search`: read a bounded set of visible X post or people results without sending.
-- `verify-delivery`: read back an approved message from a target conversation to reconcile an uncertain send without retrying it.
+- `verify-delivery`: read back an approved message, or match its stored hash, in a bound target conversation to reconcile an uncertain send without retrying it.
+- `resolve-uncertain`: record explicit human confirmation using the exact message or its stored hash; it never opens X or retries the send.
 - `resolve-uncertain`: record explicit human confirmation of one matching uncertain attempt without reopening or resending the conversation.
 - `get-bio`: read the logged-in account bio without changing it.
 - `update-bio`: replace the bio or append text with `appendText`; requires `confirm=true`, changes only the bio field, and verifies it after saving.
@@ -47,9 +48,10 @@ Example dry run:
 - The tool clicks only an explicit DM send button. It does not use keyboard fallbacks.
 - The browser profile persists per chat so X Chat encryption state survives between runs.
 - Before typing, the tool binds and observes one stable `/i/chat/<conversationId>` page. Passcode recovery, navigation, or a disappearing composer blocks the send before the click.
-- Success requires all concrete evidence: the composer clears, one new exact message appears inside that bound conversation's message list, X shows no send error, and a matching successful X send receipt contains the approved text, conversation id, and a stable message or event id.
-- A draft in the composer, an old matching message, global page text, an unrelated HTTP 200, or only a cleared composer can never count as delivered.
-- Otherwise the attempt is marked uncertain and retries are blocked. `verify-delivery` requires the exact unresolved attempt id and bound conversation; it never resends or manufactures a send record.
+- Immediate success requires concrete evidence: the composer clears, one new exact message appears inside the bound conversation's message list, X shows no send error, and a matching successful X send receipt contains the approved text, conversation id, and a stable message or event id.
+- When immediate evidence is incomplete, the tool reopens the same bound conversation and looks for the exact message before marking delivery uncertain.
+- A draft in the composer, global page text, an unrelated HTTP 200, or only a cleared composer can never count as delivered.
+- Otherwise the attempt is marked uncertain and retries are blocked. `verify-delivery` requires the exact unresolved attempt id and bound conversation; it can use the exact message or its stored 16-character hash, and it never resends.
 - `EXPECTED_ACCOUNT_HANDLE` can pin the permitted sending account.
 - Tool-created follows have their own cooldown and daily cap. Preexisting follows are never eligible for tool-managed unfollow.
 - Missing follow/unfollow proof records a manual-review state and blocks automatic retries.

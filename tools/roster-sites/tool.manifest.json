@@ -3,6 +3,7 @@
   "description": "Manage and publish small HTTPS sites through RosterServer.",
   "entry": "index.js",
   "daemon": {
+    "command": "node index.js daemon",
     "scope": "global",
     "autoStart": true,
     "health": "internal"
