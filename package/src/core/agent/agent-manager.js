@@ -10,7 +10,7 @@ import { withTimeout } from "./prompt-timeout.js";
 import { buildPiToolPolicy, getCoreCodingTools } from "./core-tools.js";
 import { createSystemShellTool } from "./system-shell-tool.js";
 import { clampModelThinkingLevel } from "./pi-runtime.js";
-import { speedToServiceTier } from "./model-speed.js";
+import { clampModelSpeed, createModelSpeedController, speedToServiceTier } from "./model-speed.js";
 import { PrimeRpcSession, PrimeRpcSessionClosedError } from "./prime-rpc-session.js";
 import { syncPrimeAuth } from "./prime-auth.js";
 import {
@@ -756,6 +756,11 @@ export class AgentManager {
           this.logger?.log("agent", `updating effort for chat ${sessionKey}: ${existing.session.thinkingLevel} -> ${desiredThinkingLevel}`);
           existing.session.setThinkingLevel(desiredThinkingLevel);
         }
+        const desiredSpeed = clampModelSpeed(existing.session.model, modelSelection.speed);
+        if (existing.speedController.speed !== desiredSpeed) {
+          this.logger?.log("agent", `updating speed for chat ${sessionKey}: ${existing.speedController.speed}x -> ${desiredSpeed}x`);
+          existing.speedController.setSpeed(desiredSpeed);
+        }
         this.logger?.log("agent", `reusing session for chat ${sessionKey}`);
         return existing;
       }
@@ -774,6 +779,7 @@ export class AgentManager {
       throw new Error(`No auth found for ${this.config.pi.provider}. Re-run bootstrap and complete login for this provider before Telegram starts.`);
     }
     const thinkingLevel = clampModelThinkingLevel(model, modelSelection.thinkingLevel);
+    const speed = clampModelSpeed(model, modelSelection.speed);
 
     const policy = buildPiToolPolicy({
       config: this.config,
@@ -786,7 +792,7 @@ export class AgentManager {
       modelSelection.sessionRevision
     );
     const hasExistingSession = sessionManager.buildSessionContext().messages.length > 0;
-    this.logger?.log("agent", `${hasExistingSession ? "resuming" : "creating"} session for chat ${sessionKey} with model ${effectiveModelId} effort ${thinkingLevel}`);
+    this.logger?.log("agent", `${hasExistingSession ? "resuming" : "creating"} session for chat ${sessionKey} with model ${effectiveModelId} effort ${thinkingLevel} speed ${speed}x`);
     const customTools = [
       ...this.createTools(telegram, chatId, policy),
       createSystemShellTool({ workspaceDir: policy.workspaceDir, shell: policy.shell })
@@ -808,6 +814,8 @@ export class AgentManager {
       customTools,
       sessionManager
     });
+    const speedController = createModelSpeedController(session.agent.streamFn, speed);
+    session.agent.streamFn = speedController.streamFn;
 
     if (!hasExistingSession) {
       this.logger?.log("agent", `created new session for chat ${sessionKey}`);
@@ -817,7 +825,7 @@ export class AgentManager {
       })}`);
     }
 
-    const ctx = { session, modelId: effectiveModelId, modelKey: effectiveModelKey };
+    const ctx = { session, modelId: effectiveModelId, modelKey: effectiveModelKey, speedController };
     this.sessions.set(sessionKey, ctx);
     if (isNewSession) {
       this.pendingNewSessions.delete(sessionKey);
@@ -855,6 +863,15 @@ export class AgentManager {
     const { session } = await this.getPrimeSessionContext(chatId);
     await session.setServiceTier(speedToServiceTier(speed));
     return speed;
+  }
+
+  async setModelSpeed(chatId, speed) {
+    if (this.isPrimeRuntime()) return this.setPrimeSpeed(chatId, speed);
+    const context = this.sessions.get(String(chatId));
+    if (!context) return speed;
+    const effectiveSpeed = clampModelSpeed(context.session.model, speed);
+    context.speedController.setSpeed(effectiveSpeed);
+    return effectiveSpeed;
   }
 
   async close() {

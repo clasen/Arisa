@@ -496,7 +496,7 @@ export async function createTelegramBot({ config, artifactStore, toolRegistry, t
     if (!issue) return false;
 
     try {
-      await bot.api.sendMessage(chatId, buildPiAuthTelegramMessage({ config, issue }));
+      await bot.api.sendMessage(chatId, buildPiAuthTelegramMessage({ config, chatId, issue }));
       markPromptErrorNotified(error);
       return true;
     } catch (notifyError) {
@@ -520,12 +520,12 @@ export async function createTelegramBot({ config, artifactStore, toolRegistry, t
       agentManager.clearSessionCache(chatId);
       piAuthIssue = null;
       logger?.log("telegram", `Pi auth renewal completed for chat ${chatId}`);
-      await bot.api.sendMessage(chatId, buildPiAuthTelegramMessage({ config, verified: true }));
+      await bot.api.sendMessage(chatId, buildPiAuthTelegramMessage({ config, chatId, verified: true }));
     } catch (error) {
       const issue = rememberPiAuthIssue(error) || { kind: "validation-failed", message: getErrorMessage(error) };
       piAuthIssue = issue;
       logger?.error("telegram", `Pi auth renewal failed for chat ${chatId}: ${getErrorMessage(error)}`);
-      await bot.api.sendMessage(chatId, buildPiAuthTelegramMessage({ config, issue })).catch((notifyError) => {
+      await bot.api.sendMessage(chatId, buildPiAuthTelegramMessage({ config, chatId, issue })).catch((notifyError) => {
         logger?.error("telegram", `auth renewal failure notice failed for chat ${chatId}: ${getErrorMessage(notifyError)}`);
       });
     } finally {
@@ -703,9 +703,6 @@ export async function createTelegramBot({ config, artifactStore, toolRegistry, t
   }
 
   async function showSpeedPicker(ctx) {
-    if (config.agent?.runtime !== "prime") {
-      return ctx.reply("Model speed is only available with the Prime Agent harness.");
-    }
     const agentConfig = getAgentConfig(config);
     const models = await getProviderModels(ctx.chat.id);
     const model = models.find((item) => item.id === resolveChatModel(config, ctx.chat.id));
@@ -735,9 +732,7 @@ export async function createTelegramBot({ config, artifactStore, toolRegistry, t
     const hadSelections = Boolean(agentConfig.chatModels);
     const previousSelection = agentConfig.chatModels?.[key];
     const level = clampModelThinkingLevel(model, thinkingLevel ?? resolveChatThinkingLevel(config, chatId));
-    const speed = config.agent?.runtime === "prime"
-      ? clampModelSpeed(model, resolveChatSpeed(config, chatId))
-      : undefined;
+    const speed = clampModelSpeed(model, resolveChatSpeed(config, chatId));
     await agentManager.setPrimeModel?.(chatId, model);
     selectChatModel(config, chatId, model, { thinkingLevel: level, speed });
     try {
@@ -785,7 +780,7 @@ export async function createTelegramBot({ config, artifactStore, toolRegistry, t
     const hadSelections = Boolean(agentConfig.chatModels);
     const previousSelection = agentConfig.chatModels?.[key];
     const level = clampModelSpeed(model, speed);
-    await agentManager.setPrimeSpeed(chatId, level);
+    await agentManager.setModelSpeed(chatId, level);
     selectChatSpeed(config, chatId, level);
     try {
       await saveConfig(config);
@@ -1223,6 +1218,7 @@ export async function createTelegramBot({ config, artifactStore, toolRegistry, t
     if (piAuthIssue) {
       await ctx.reply(buildPiAuthRecoveryBlockedMessage({
         config,
+        chatId: ctx.chat.id,
         issue: piAuthIssue,
         renewalActive: authRenewals.has(chatKey(ctx.chat.id))
       }));
@@ -1274,7 +1270,7 @@ export async function createTelegramBot({ config, artifactStore, toolRegistry, t
     const auth = await authorizeChat({ config, chatId: ctx.chat.id, saveConfig, chatMeta: getIncomingChatMeta(ctx) });
     if (!auth.ok) return;
 
-    const status = getPiAuthStatus(config);
+    const status = getPiAuthStatus(config, ctx.chat.id);
     if (status.hasApiKey || !status.supportsOAuth) {
       await withTyping(ctx, async () => {
         try {
@@ -1282,11 +1278,11 @@ export async function createTelegramBot({ config, artifactStore, toolRegistry, t
           await agentManager.validateAgent();
           agentManager.clearSessionCache(ctx.chat.id);
           piAuthIssue = null;
-          await ctx.reply(buildPiAuthTelegramMessage({ config, verified: true }));
+          await ctx.reply(buildPiAuthTelegramMessage({ config, chatId: ctx.chat.id, verified: true }));
         } catch (error) {
           const issue = rememberPiAuthIssue(error) || { kind: "validation-failed", message: getErrorMessage(error) };
           piAuthIssue = issue;
-          await ctx.reply(buildPiAuthTelegramMessage({ config, issue }));
+          await ctx.reply(buildPiAuthTelegramMessage({ config, chatId: ctx.chat.id, issue }));
         }
       });
       return;
@@ -1300,7 +1296,7 @@ export async function createTelegramBot({ config, artifactStore, toolRegistry, t
     } catch (error) {
       const issue = rememberPiAuthIssue(error) || { kind: "validation-failed", message: getErrorMessage(error) };
       piAuthIssue = issue;
-      await ctx.reply(buildPiAuthTelegramMessage({ config, issue }));
+      await ctx.reply(buildPiAuthTelegramMessage({ config, chatId: ctx.chat.id, issue }));
     }
   });
 
@@ -1589,13 +1585,6 @@ export async function createTelegramBot({ config, artifactStore, toolRegistry, t
       }
 
       if (action.type === "speed") {
-        if (config.agent?.runtime !== "prime") {
-          await ctx.answerCallbackQuery({
-            text: "Model speed is only available with Prime Agent.",
-            show_alert: true
-          });
-          return;
-        }
         const model = models.find((item) => item.id === resolveChatModel(config, ctx.chat.id));
         if (!model) {
           await ctx.answerCallbackQuery({
@@ -1660,6 +1649,7 @@ export async function createTelegramBot({ config, artifactStore, toolRegistry, t
     if (piAuthIssue) {
       await ctx.reply(buildPiAuthRecoveryBlockedMessage({
         config,
+        chatId: ctx.chat.id,
         issue: piAuthIssue,
         renewalActive: authRenewals.has(chatKey(ctx.chat.id))
       }));
@@ -1674,7 +1664,7 @@ export async function createTelegramBot({ config, artifactStore, toolRegistry, t
       if (wasPromptErrorNotified(error)) return;
       const issue = getPiAuthIssue(error);
       await ctx.reply(issue
-        ? buildPiAuthTelegramMessage({ config, issue })
+        ? buildPiAuthTelegramMessage({ config, chatId: ctx.chat.id, issue })
         : getErrorMessage(error));
     }
   });

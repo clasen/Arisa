@@ -1,10 +1,11 @@
 import { createPiRuntime, hasProviderAuth, supportsProviderOAuth } from "./pi-runtime.js";
+import { resolveChatModelSelection } from "./model-selection.js";
 
 const authInvalidatedPatterns = [
   /authentication token has been invalidated/i,
   /token (?:has been )?invalidated/i,
   /try signing in again/i,
-  /auth(?:entication)? token (?:expired|revoked|invalid)/i
+  /auth(?:entication)? token (?:is |has been )?(?:expired|revoked|invalid)/i
 ];
 
 const missingAuthPatterns = [
@@ -32,23 +33,26 @@ export function getPiAuthIssue(error) {
   return null;
 }
 
-export function getPiAuthStatus(config) {
+export function getPiAuthStatus(config, chatId = null) {
   const runtime = createPiRuntime({
     provider: config.pi.provider,
     apiKey: config.pi.apiKey
   });
+  const modelSelection = chatId == null
+    ? { provider: config.pi.provider, model: config.pi.model }
+    : resolveChatModelSelection(config, chatId);
 
   return {
-    provider: config.pi.provider,
-    model: config.pi.model,
+    provider: modelSelection.provider,
+    model: modelSelection.model,
     hasApiKey: Boolean(config.pi.apiKey),
     hasStoredAuth: hasProviderAuth(config.pi.provider, runtime),
     supportsOAuth: supportsProviderOAuth(config.pi.provider, runtime)
   };
 }
 
-export function buildPiAuthTelegramMessage({ config, issue = null, verified = false }) {
-  const status = getPiAuthStatus(config);
+export function buildPiAuthTelegramMessage({ config, chatId = null, issue = null, verified = false }) {
+  const status = getPiAuthStatus(config, chatId);
   let title = `Pi authentication status for ${status.provider}/${status.model}.`;
   if (issue) {
     title = `Pi authentication needs attention for ${status.provider}/${status.model}.`;
@@ -91,8 +95,8 @@ export function buildPiAuthTelegramMessage({ config, issue = null, verified = fa
   return lines.join("\n");
 }
 
-export function buildPiAuthRecoveryBlockedMessage({ config, issue = null, renewalActive = false }) {
-  const status = getPiAuthStatus(config);
+export function buildPiAuthRecoveryBlockedMessage({ config, chatId = null, issue = null, renewalActive = false }) {
+  const status = getPiAuthStatus(config, chatId);
   const lines = [
     `Pi authentication is not ready for ${status.provider}/${status.model}.`,
     "I did not send your message to the agent."

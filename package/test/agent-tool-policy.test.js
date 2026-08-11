@@ -60,7 +60,8 @@ test("applies runtime overrides without dropping persisted Pi config", () => {
       workspaceDir: "/tmp/arisa",
       tools: "read,bash",
       excludeTools: "write",
-      shellTimeoutMs: "90000"
+      shellTimeoutMs: "90000",
+      speed: "1.5"
     }
   });
 
@@ -71,6 +72,7 @@ test("applies runtime overrides without dropping persisted Pi config", () => {
   assert.deepEqual(next.pi.tools, ["read", "bash"]);
   assert.deepEqual(next.pi.excludeTools, ["write"]);
   assert.equal(next.pi.shellTimeoutMs, 90000);
+  assert.equal(next.pi.speed, 1.5);
 });
 
 test("applies Prime overrides and accepts deprecated Pi aliases without coupling configs", () => {

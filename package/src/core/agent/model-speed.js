@@ -28,3 +28,32 @@ export function clampModelSpeed(model, speed) {
 export function speedToServiceTier(speed) {
   return normalizeModelSpeed(speed) === 1.5 ? "priority" : "default";
 }
+
+export function createModelSpeedController(streamFn, initialSpeed) {
+  if (typeof streamFn !== "function") throw new Error("Pi stream function is unavailable");
+  let speed = normalizeModelSpeed(initialSpeed);
+  return {
+    get speed() {
+      return speed;
+    },
+    setSpeed(nextSpeed) {
+      speed = normalizeModelSpeed(nextSpeed);
+    },
+    streamFn(model, context, options) {
+      const serviceTier = speedToServiceTier(speed);
+      const onPayload = options?.onPayload;
+      return streamFn(model, context, {
+        ...options,
+        serviceTier,
+        async onPayload(payload, requestModel) {
+          const replacement = await onPayload?.(payload, requestModel);
+          const effectivePayload = replacement === undefined ? payload : replacement;
+          if (!effectivePayload || typeof effectivePayload !== "object" || Array.isArray(effectivePayload)) {
+            throw new Error("Pi provider payload is not an object");
+          }
+          return { ...effectivePayload, service_tier: serviceTier };
+        }
+      });
+    }
+  };
+}

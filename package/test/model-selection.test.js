@@ -16,7 +16,7 @@ import {
   listModelThinkingLevels,
   modelSupportsThinking
 } from "../src/core/agent/pi-runtime.js";
-import { clampModelSpeed, modelSupportsSpeed, normalizeModelSpeed, speedToServiceTier } from "../src/core/agent/model-speed.js";
+import { clampModelSpeed, createModelSpeedController, modelSupportsSpeed, normalizeModelSpeed, speedToServiceTier } from "../src/core/agent/model-speed.js";
 import { getChatPiSessionsDir, getChatPrimeSessionsDir } from "../src/runtime/paths.js";
 import {
   buildEffortPicker,
@@ -54,6 +54,7 @@ test("resolves the default model until a chat selects one", () => {
     provider: "openai-codex",
     model: "gpt-selected",
     thinkingLevel: "high",
+    speed: 1,
     sessionRevision: 1
   });
 });
@@ -99,15 +100,27 @@ test("updates effort without bumping the session revision", () => {
     provider: "openai-codex",
     model: "gpt-a",
     thinkingLevel: "high",
+    speed: 1,
     sessionRevision: 1
   });
 });
 
-test("updates Prime speed without bumping the session revision", () => {
+test("updates Pi speed without bumping the session revision", () => {
+  const config = createConfig();
+
+  selectChatModel(config, 123, { provider: "openai-codex", id: "gpt-5.6-sol" }, { thinkingLevel: "high" });
+  selectChatSpeed(config, 123, 1.5);
+
+  assert.equal(resolveChatSpeed(config, 123), 1.5);
+  assert.equal(config.pi.chatModels["123"].sessionRevision, 1);
+  assert.equal(config.pi.chatModels["123"].thinkingLevel, "high");
+});
+
+test("keeps Prime speed selection isolated from Pi", () => {
   const config = applyConfigDefaults({
     agent: { runtime: "prime" },
     telegram: {},
-    pi: { provider: "openai-codex", model: "gpt-5.6-sol" }
+    pi: { provider: "openai-codex", model: "pi-model" }
   });
 
   selectChatModel(config, 123, { provider: "openai-codex", id: "gpt-5.6-sol" }, { thinkingLevel: "high" });
@@ -115,7 +128,7 @@ test("updates Prime speed without bumping the session revision", () => {
 
   assert.equal(resolveChatSpeed(config, 123), 1.5);
   assert.equal(config.prime.chatModels["123"].sessionRevision, 1);
-  assert.equal(config.prime.chatModels["123"].thinkingLevel, "high");
+  assert.equal(config.pi.chatModels, undefined);
 });
 
 test("ignores a chat selection from a different active provider", () => {
@@ -269,6 +282,7 @@ test("centralizes picker defaults in config", () => {
 
   assert.equal(config.telegram.modelPickerPageSize, telegramConfigDefaults.modelPickerPageSize);
   assert.equal(config.pi.thinkingLevel, piConfigDefaults.thinkingLevel);
+  assert.equal(config.pi.speed, piConfigDefaults.speed);
   assert.equal(config.prime.speed, primeConfigDefaults.speed);
 });
 
@@ -294,7 +308,7 @@ test("lists and clamps thinking levels from model capabilities", () => {
   assert.equal(modelSupportsThinking(plain), false);
 });
 
-test("maps supported model speeds to Prime service tiers", () => {
+test("maps supported model speeds to provider service tiers", () => {
   const fastModel = {
     provider: "openai-codex",
     api: "openai-codex-responses",
@@ -306,4 +320,32 @@ test("maps supported model speeds to Prime service tiers", () => {
   assert.equal(speedToServiceTier(1), "default");
   assert.equal(speedToServiceTier(1.5), "priority");
   assert.throws(() => normalizeModelSpeed(2), /Invalid model speed/);
+});
+
+test("applies Pi speed to every provider request and updates it in place", async () => {
+  const calls = [];
+  const controller = createModelSpeedController((model, context, options) => {
+    calls.push({ model, context, options });
+    return "stream";
+  }, 1);
+
+  assert.equal(controller.streamFn("model", "context", {
+    signal: "signal",
+    onPayload: (payload) => ({ ...payload, preserved: true })
+  }), "stream");
+  controller.setSpeed(1.5);
+  controller.streamFn("model", "context", { signal: "signal" });
+
+  assert.equal(calls[0].options.serviceTier, "default");
+  assert.equal(calls[1].options.serviceTier, "priority");
+  assert.equal(calls[1].options.signal, "signal");
+  assert.deepEqual(await calls[0].options.onPayload({ model: "gpt" }, "model"), {
+    model: "gpt",
+    preserved: true,
+    service_tier: "default"
+  });
+  assert.deepEqual(await calls[1].options.onPayload({ model: "gpt" }, "model"), {
+    model: "gpt",
+    service_tier: "priority"
+  });
 });

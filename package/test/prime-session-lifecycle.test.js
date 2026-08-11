@@ -39,6 +39,27 @@ test("shares an in-flight Prime session creation for the same chat", async () =>
   assert.equal(creationCount, 1);
 });
 
+test("updates speed on a cached Pi session without recreating it", async () => {
+  const manager = new AgentManager({ config: { agent: { runtime: "pi" } } });
+  const changes = [];
+  manager.sessions.set("42", {
+    session: {
+      model: {
+        provider: "openai-codex",
+        api: "openai-codex-responses",
+        id: "gpt-5.6-sol"
+      }
+    },
+    speedController: {
+      setSpeed: (speed) => changes.push(speed)
+    }
+  });
+
+  assert.equal(await manager.setModelSpeed(42, 1.5), 1.5);
+  assert.deepEqual(changes, [1.5]);
+  assert.equal(manager.sessions.has("42"), true);
+});
+
 test("waits for a cached Prime session to close before reopening", async () => {
   const manager = createManager();
   let releaseClose;

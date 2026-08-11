@@ -80,6 +80,7 @@ function toServiceRunnerArgs(nestedFlags) {
     "pi.excludeTools",
     "pi.shellPath",
     "pi.shellTimeoutMs",
+    "pi.speed",
     "prime.provider",
     "prime.model",
     "prime.workspaceDir",

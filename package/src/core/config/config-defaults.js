@@ -43,7 +43,8 @@ export const agentConfigDefaults = Object.freeze({
 });
 
 export const piConfigDefaults = Object.freeze({
-  thinkingLevel: "medium"
+  thinkingLevel: "medium",
+  speed: 1
 });
 
 export const defaultPrimeVersion = "0.7.1";

@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { getErrorMessage, getPiAuthIssue } from "../src/core/agent/auth-flow.js";
+import { buildPiAuthTelegramMessage, getErrorMessage, getPiAuthIssue } from "../src/core/agent/auth-flow.js";
 
 test("extracts messages from Error instances and other thrown values", () => {
   assert.equal(getErrorMessage(new Error("boom")), "boom");
@@ -13,7 +13,8 @@ test("classifies invalidated Pi authentication tokens", () => {
     new Error("authentication token has been invalidated"),
     new Error("Token invalidated by provider"),
     new Error("Please try signing in again"),
-    new Error("auth token expired")
+    new Error("auth token expired"),
+    new Error("Provided authentication token is expired.")
   ]) {
     assert.deepEqual(getPiAuthIssue(error), {
       kind: "invalidated-token",
@@ -39,4 +40,37 @@ test("classifies missing Pi authentication", () => {
 test("ignores unrelated Pi errors", () => {
   assert.equal(getPiAuthIssue(new Error("model rate limit exceeded")), null);
   assert.equal(getPiAuthIssue(new Error("")), null);
+});
+
+test("reports the active chat model after authentication", () => {
+  const config = {
+    agent: { runtime: "prime" },
+    pi: {
+      provider: "openai-codex",
+      model: "gpt-5.5",
+      apiKey: "",
+      chatModels: {}
+    },
+    prime: {
+      provider: "openai-codex",
+      model: "gpt-5.5",
+      thinkingLevel: "high",
+      speed: 1,
+      chatModels: {
+        "123": {
+          provider: "openai-codex",
+          model: "gpt-5.6",
+          thinkingLevel: "high",
+          speed: 1,
+          sessionRevision: 4
+        }
+      }
+    }
+  };
+
+  const message = buildPiAuthTelegramMessage({ config, chatId: 123, verified: true });
+
+  assert.match(message, /^Pi authentication is working for openai-codex\/gpt-5\.6\./);
+  assert.doesNotMatch(message, /gpt-5\.5/);
+  assert.equal(config.prime.chatModels["123"].sessionRevision, 4);
 });

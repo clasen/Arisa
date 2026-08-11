@@ -50,7 +50,7 @@ export function resolveChatThinkingLevel(config, chatId) {
 
 export function resolveChatSpeed(config, chatId) {
   const speed = resolveChatModelSelection(config, chatId).speed;
-  if (speed === undefined) throw new Error("Model speed is only available with the Prime runtime");
+  if (speed === undefined) throw new Error("Model speed is not configured for the active runtime");
   return speed;
 }
 
@@ -90,7 +90,7 @@ export function selectChatThinkingLevel(config, chatId, thinkingLevel) {
 export function selectChatSpeed(config, chatId, speed) {
   const agentConfig = getAgentConfig(config);
   if (agentConfig.speed === undefined) {
-    throw new Error("Model speed is only available with the Prime runtime");
+    throw new Error("Model speed is not configured for the active runtime");
   }
   agentConfig.chatModels ||= {};
   const key = chatKey(chatId);

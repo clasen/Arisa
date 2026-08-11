@@ -89,6 +89,7 @@ export function applyRuntimeOverrides(config, runtimeOverrides) {
 
   const shellTimeoutMs = normalizePositiveInteger(piRuntimeOverrides.shellTimeoutMs);
   if (shellTimeoutMs) pi.shellTimeoutMs = shellTimeoutMs;
+  if (piRuntimeOverrides.speed !== undefined) pi.speed = normalizeModelSpeed(piRuntimeOverrides.speed);
 
   const primeRuntimeOverrides = runtimeOverrides?.prime || {};
   const legacyPrimeAliases = effectiveRuntime === "prime" ? legacyPiRuntimeOverrides : {};
