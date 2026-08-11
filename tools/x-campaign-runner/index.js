@@ -223,6 +223,20 @@ function referenceFrom(query, result, profile) {
   return matched || clean(result.title).slice(0, 120) || "narrative mystery games";
 }
 
+function hasGroundedCoverageEvidence(candidate) {
+  const reference = clean(candidate.reference).toLowerCase();
+  const evidenceText = `${clean(candidate.evidenceTitle)} ${clean(candidate.snippet)}`.toLowerCase();
+  if (!reference || !evidenceText.includes(reference)) return false;
+  try {
+    const url = new URL(candidate.evidenceUrl);
+    const parts = url.pathname.split("/").filter(Boolean);
+    if (["x.com", "www.x.com", "twitter.com", "www.twitter.com"].includes(url.hostname.toLowerCase()) && parts.length < 3) return false;
+  } catch {
+    return false;
+  }
+  return true;
+}
+
 function candidateScore(candidate, profile) {
   const text = `${candidate.query} ${candidate.evidenceTitle} ${candidate.snippet} ${candidate.reference}`.toLowerCase();
   let score = 0;
@@ -515,6 +529,13 @@ async function handlePrepareNext(request, args) {
     const checked = [];
     for (const candidate of pool.slice(0, maxChecks)) {
       try {
+        if (!hasGroundedCoverageEvidence(candidate)) {
+          candidate.status = "unsupported-evidence";
+          candidate.lastCheckedAt = new Date().toISOString();
+          candidate.lastError = "The evidence does not contain the proposed coverage reference on a specific post or article.";
+          checked.push({ username: candidate.username, canDm: false, reason: candidate.lastError });
+          continue;
+        }
         const check = await runTool(arisa, profile.dmTool || "x-dm", { action: "check", username: candidate.username, verifyComposer: "true" }, intArg(profile.dmCheckTimeoutMs, 150000));
         checked.push({ username: candidate.username, canDm: Boolean(check.target?.canDm) });
         candidate.lastCheckedAt = new Date().toISOString();
@@ -761,4 +782,4 @@ async function main(cliArgs = process.argv.slice(2)) {
 const isCli = process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url);
 if (isCli) await main();
 
-export { availableCandidates, candidateScore, greetingNameFor, handleFromXUrl, parseSearchResults, pendingApproval, renderMessage, sha256, synthesizedCreativeQueries, verifiedPersonalFirstName };
+export { availableCandidates, candidateScore, greetingNameFor, handleFromXUrl, hasGroundedCoverageEvidence, parseSearchResults, pendingApproval, renderMessage, sha256, synthesizedCreativeQueries, verifiedPersonalFirstName };

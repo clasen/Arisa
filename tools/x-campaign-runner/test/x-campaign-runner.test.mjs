@@ -1,6 +1,6 @@
 ﻿import test from "node:test";
 import assert from "node:assert/strict";
-import { availableCandidates, candidateScore, greetingNameFor, handleFromXUrl, parseSearchResults, pendingApproval, renderMessage, sha256 } from "../index.js";
+import { availableCandidates, candidateScore, greetingNameFor, handleFromXUrl, hasGroundedCoverageEvidence, parseSearchResults, pendingApproval, renderMessage, sha256 } from "../index.js";
 
 test("extracts only real X profile handles", () => {
   assert.equal(handleFromXUrl("https://x.com/Good_Handle/status/123"), "Good_Handle");
@@ -23,6 +23,27 @@ test("scoring rewards close comparables and penalizes paid promotion", () => {
   const good = candidateScore({ query: "Duskwood review", snippet: "indie games", evidenceTitle: "", reference: "Duskwood" }, profile);
   const bad = candidateScore({ query: "Duskwood review", snippet: "paid promotion agency", evidenceTitle: "", reference: "Duskwood" }, profile);
   assert.ok(good > bad);
+});
+
+test("coverage evidence must mention the reference on a specific post or article", () => {
+  assert.equal(hasGroundedCoverageEvidence({
+    reference: "SIMULACRA",
+    evidenceTitle: "SIMULACRA review",
+    snippet: "A review of the found-phone mystery game.",
+    evidenceUrl: "https://x.com/reviewer/status/123"
+  }), true);
+  assert.equal(hasGroundedCoverageEvidence({
+    reference: "SIMULACRA",
+    evidenceTitle: "The philosophy of talking to AI",
+    snippet: "A post about chatbots.",
+    evidenceUrl: "https://x.com/writer/status/456"
+  }), false);
+  assert.equal(hasGroundedCoverageEvidence({
+    reference: "interactive fiction",
+    evidenceTitle: "Creator profile",
+    snippet: "Creator @handle Follow",
+    evidenceUrl: "https://x.com/handle"
+  }), false);
 });
 
 test("message rendering is deterministic and includes the official site", () => {
