@@ -1,6 +1,14 @@
 ﻿import assert from "node:assert/strict";
 import test from "node:test";
-import { collectText, createChatStateStore, drainChatPromptQueue, isSilentReply } from "../src/transport/telegram/bot.js";
+import {
+  collectText,
+  createChatStateStore,
+  drainChatPromptQueue,
+  isSilentReply,
+  queueChatPrompt,
+  resolveTelegramBusyMessageMode,
+  routeBusyPrompt
+} from "../src/transport/telegram/bot.js";
 import { selectScheduledTasks } from "../src/core/agent/agent-manager.js";
 
 function createSession(events) {
@@ -72,25 +80,44 @@ test("chat state uses one queue for numeric and string chat IDs", () => {
   const states = createChatStateStore();
   const telegramState = states.get(879964957);
   telegramState.processing = true;
-  telegramState.nextPrompt = "queued prompt";
+  queueChatPrompt(telegramState, "queued prompt");
 
   assert.strictEqual(states.get("879964957"), telegramState);
   assert.equal(states.get("879964957").processing, true);
-  assert.equal(states.get("879964957").nextPrompt, "queued prompt");
+  assert.deepEqual(states.get("879964957").pendingPrompts, ["queued prompt"]);
 
   const resetState = states.reset("879964957");
   assert.strictEqual(states.get(879964957), resetState);
   assert.deepEqual(resetState, {
     processing: false,
-    nextPrompt: "",
+    pendingPrompts: [],
     continueAfterClose: false,
     historyRevision: 0,
-    beforeNextPrompt: null
+    beforeNextPrompt: null,
+    activeSession: null,
+    activeSteers: []
   });
 });
 
+test("queued prompts retain their message boundaries and order", async () => {
+  const chatState = createChatStateStore().get("chat");
+  chatState.processing = true;
+  queueChatPrompt(chatState, "second request");
+  queueChatPrompt(chatState, "third request");
+  const processed = [];
+
+  await drainChatPromptQueue({
+    chatState,
+    initialPrompt: "first request",
+    processPrompt: async ({ prompt }) => processed.push(prompt)
+  });
+
+  assert.deepEqual(processed, ["first request", "second request", "third request"]);
+});
+
 test("a queued /new continues after the active session closes", async () => {
-  const chatState = { processing: true, nextPrompt: "", continueAfterClose: false };
+  const chatState = createChatStateStore().get("chat");
+  chatState.processing = true;
   const processed = [];
   const interruption = new Error("active session closed");
 
@@ -100,7 +127,7 @@ test("a queued /new continues after the active session closes", async () => {
     processPrompt: async ({ prompt }) => {
       processed.push(prompt);
       if (prompt === "old request") {
-        chatState.nextPrompt = "new session confirmation";
+        queueChatPrompt(chatState, "new session confirmation", { replace: true });
         chatState.continueAfterClose = true;
         throw interruption;
       }
@@ -108,11 +135,13 @@ test("a queued /new continues after the active session closes", async () => {
   });
 
   assert.deepEqual(processed, ["old request", "new session confirmation"]);
-  assert.deepEqual(chatState, { processing: false, nextPrompt: "", continueAfterClose: false });
+  assert.equal(chatState.processing, false);
+  assert.deepEqual(chatState.pendingPrompts, []);
 });
 
 test("exclusive pre-prompt work keeps concurrent messages queued", async () => {
-  const chatState = { processing: true, nextPrompt: "", continueAfterClose: false, beforeNextPrompt: null };
+  const chatState = createChatStateStore().get("chat");
+  chatState.processing = true;
   const processed = [];
   let releasePreparation;
   const preparation = new Promise((resolve) => { releasePreparation = resolve; });
@@ -124,7 +153,7 @@ test("exclusive pre-prompt work keeps concurrent messages queued", async () => {
     processPrompt: async ({ prompt }) => processed.push(prompt)
   });
   await new Promise((resolve) => setImmediate(resolve));
-  chatState.nextPrompt = "message received during handoff";
+  queueChatPrompt(chatState, "message received during handoff");
   releasePreparation();
   await draining;
 
@@ -133,7 +162,8 @@ test("exclusive pre-prompt work keeps concurrent messages queued", async () => {
 });
 
 test("a queued /new supersedes the initial prompt after exclusive preparation", async () => {
-  const chatState = { processing: true, nextPrompt: "", continueAfterClose: false, beforeNextPrompt: null };
+  const chatState = createChatStateStore().get("chat");
+  chatState.processing = true;
   const processed = [];
   let releasePreparation;
   const preparation = new Promise((resolve) => { releasePreparation = resolve; });
@@ -145,13 +175,76 @@ test("a queued /new supersedes the initial prompt after exclusive preparation", 
     processPrompt: async ({ prompt }) => processed.push(prompt)
   });
   await new Promise((resolve) => setImmediate(resolve));
-  chatState.nextPrompt = "latest new session confirmation";
+  queueChatPrompt(chatState, "latest new session confirmation", { replace: true });
   chatState.continueAfterClose = true;
   releasePreparation();
   await draining;
 
   assert.deepEqual(processed, ["latest new session confirmation"]);
   assert.equal(chatState.processing, false);
+});
+
+test("busy message mode supports global defaults and per-chat overrides", () => {
+  const config = {
+    telegram: {
+      busyMessageMode: "queue",
+      chatMeta: { "879964957": { busyMessageMode: "steer" } }
+    }
+  };
+
+  assert.equal(resolveTelegramBusyMessageMode(config, 879964957), "steer");
+  assert.equal(resolveTelegramBusyMessageMode(config, 123), "queue");
+  assert.equal(resolveTelegramBusyMessageMode({ telegram: { busyMessageMode: "invalid" } }, 123), "queue");
+});
+
+test("steer mode sends text to the active Pi session", async () => {
+  const received = [];
+  const chatState = createChatStateStore().get("chat");
+  chatState.activeSession = {
+    isStreaming: true,
+    async steer(prompt) { received.push(prompt); }
+  };
+
+  const result = await routeBusyPrompt({ chatState, prompt: "change direction", mode: "steer" });
+
+  assert.equal(result.disposition, "steered");
+  assert.deepEqual(received, ["change direction"]);
+  assert.deepEqual(chatState.activeSteers, ["change direction"]);
+  assert.deepEqual(chatState.pendingPrompts, []);
+});
+
+test("failed or unavailable steering falls back to the ordered queue", async () => {
+  const chatState = createChatStateStore().get("chat");
+  chatState.activeSession = {
+    isStreaming: true,
+    async steer() { throw new Error("stream ended"); }
+  };
+
+  const failed = await routeBusyPrompt({ chatState, prompt: "keep this", mode: "steer" });
+  chatState.activeSession = null;
+  const unavailable = await routeBusyPrompt({ chatState, prompt: "and this", mode: "steer" });
+
+  assert.equal(failed.disposition, "queued");
+  assert.match(failed.steerError.message, /stream ended/);
+  assert.equal(unavailable.disposition, "queued");
+  assert.deepEqual(chatState.pendingPrompts, ["keep this", "and this"]);
+});
+
+test("a pending /new forces later text into the replacement queue", async () => {
+  const steered = [];
+  const chatState = createChatStateStore().get("chat");
+  chatState.continueAfterClose = true;
+  chatState.activeSession = {
+    isStreaming: true,
+    async steer(prompt) { steered.push(prompt); }
+  };
+  queueChatPrompt(chatState, "new session confirmation", { replace: true });
+
+  const result = await routeBusyPrompt({ chatState, prompt: "message after new", mode: "steer" });
+
+  assert.equal(result.disposition, "queued");
+  assert.deepEqual(steered, []);
+  assert.deepEqual(chatState.pendingPrompts, ["new session confirmation", "message after new"]);
 });
 
 test("selectScheduledTasks bounds history while keeping active tasks", () => {

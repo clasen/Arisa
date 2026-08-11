@@ -358,10 +358,12 @@ export function createChatStateStore() {
   function reset(chatId) {
     const state = {
       processing: false,
-      nextPrompt: "",
+      pendingPrompts: [],
       continueAfterClose: false,
       historyRevision: 0,
-      beforeNextPrompt: null
+      beforeNextPrompt: null,
+      activeSession: null,
+      activeSteers: []
     };
     states.set(String(chatId), state);
     return state;
@@ -377,6 +379,45 @@ export function createChatStateStore() {
       return [...states.values()].some((state) => state.processing);
     }
   };
+}
+
+export function queueChatPrompt(chatState, prompt, { replace = false } = {}) {
+  if (replace) chatState.pendingPrompts = [];
+  chatState.pendingPrompts.push(prompt);
+}
+
+function takeQueuedPrompt(chatState) {
+  return chatState.pendingPrompts.shift() || "";
+}
+
+export function resolveTelegramBusyMessageMode(config, chatId) {
+  const chatMode = config.telegram?.chatMeta?.[String(chatId)]?.busyMessageMode;
+  const mode = chatMode || config.telegram?.busyMessageMode;
+  return mode === "steer" ? "steer" : "queue";
+}
+
+export async function routeBusyPrompt({ chatState, prompt, mode = "queue", replaceQueued = false }) {
+  const session = chatState.activeSession;
+  if (
+    mode === "steer"
+    && !replaceQueued
+    && !chatState.continueAfterClose
+    && !chatState.beforeNextPrompt
+    && session?.isStreaming
+    && typeof session.steer === "function"
+  ) {
+    try {
+      await session.steer(prompt);
+      chatState.activeSteers.push(prompt);
+      return { disposition: "steered" };
+    } catch (error) {
+      queueChatPrompt(chatState, prompt);
+      return { disposition: "queued", steerError: error };
+    }
+  }
+
+  queueChatPrompt(chatState, prompt, { replace: replaceQueued });
+  return { disposition: "queued" };
 }
 
 export async function drainChatPromptQueue({
@@ -399,16 +440,15 @@ export async function drainChatPromptQueue({
         await gate;
         if (chatState.beforeNextPrompt === gate) chatState.beforeNextPrompt = null;
       }
-      if (chatState.continueAfterClose && chatState.nextPrompt) {
-        currentPrompt = chatState.nextPrompt;
-        chatState.nextPrompt = "";
+      if (chatState.continueAfterClose && chatState.pendingPrompts.length) {
+        currentPrompt = takeQueuedPrompt(chatState);
         chatState.continueAfterClose = false;
         currentCtx = null;
       }
       try {
         await processPrompt({ prompt: currentPrompt, ctx: currentCtx });
       } catch (error) {
-        if (chatState.continueAfterClose && chatState.nextPrompt) {
+        if (chatState.continueAfterClose && chatState.pendingPrompts.length) {
           await onPromptInterrupted?.(error);
         } else {
           await onPromptFailure?.(error);
@@ -418,16 +458,13 @@ export async function drainChatPromptQueue({
         currentCtx = null;
       }
 
-      if (chatState.nextPrompt) {
-        currentPrompt = chatState.nextPrompt;
-        chatState.nextPrompt = "";
-        chatState.continueAfterClose = false;
-      } else {
-        currentPrompt = "";
-      }
+      currentPrompt = takeQueuedPrompt(chatState);
+      chatState.continueAfterClose = false;
     }
   } finally {
     chatState.processing = false;
+    chatState.activeSession = null;
+    chatState.activeSteers = [];
   }
 }
 
@@ -815,6 +852,10 @@ export async function createTelegramBot({ config, artifactStore, toolRegistry, t
         history: formatPortableSessionHistory(session.messages)
       });
       let text = "";
+      let steeredPrompts = [];
+      const chatState = getChatState(chatId);
+      chatState.activeSession = session;
+      chatState.activeSteers = [];
       try {
         text = await collectText(session, prompt, {
           logger,
@@ -827,11 +868,18 @@ export async function createTelegramBot({ config, artifactStore, toolRegistry, t
       } catch (error) {
         agentManager.resetSession(chatId);
         throw error;
+      } finally {
+        steeredPrompts = [...chatState.activeSteers];
+        if (chatState.activeSession === session) chatState.activeSession = null;
+        chatState.activeSteers = [];
       }
       if (getChatState(chatId).historyRevision === historyRevision) {
+        const historyPrompt = steeredPrompts.length
+          ? [prompt, ...steeredPrompts.map((message) => `[Steering message]\n${message}`)].join("\n\n")
+          : prompt;
         await conversationHistory.appendTurn(chatId, {
           runtime: "pi",
-          prompt,
+          prompt: historyPrompt,
           response: text
         });
       }
@@ -849,19 +897,25 @@ export async function createTelegramBot({ config, artifactStore, toolRegistry, t
     return work();
   }
 
-  async function enqueuePrompt({ chatId, prompt, label, ctx = null, replaceQueued = false }) {
+  async function enqueuePrompt({ chatId, prompt, label, ctx = null, replaceQueued = false, busyMessageMode = "queue" }) {
     const chatState = getChatState(chatId);
 
     if (chatState.processing) {
-      logger?.log("telegram", `chat ${chatId} busy, queueing ${label}`);
-      if (replaceQueued) {
-        chatState.nextPrompt = prompt;
-        chatState.continueAfterClose = true;
+      const routed = await routeBusyPrompt({
+        chatState,
+        prompt,
+        mode: busyMessageMode,
+        replaceQueued
+      });
+      if (routed.disposition === "steered") {
+        logger?.log("telegram", `chat ${chatId} busy, steering ${label}`);
       } else {
-        chatState.nextPrompt = chatState.nextPrompt
-          ? `${chatState.nextPrompt}\n\n${prompt}`
-          : prompt;
+        logger?.log("telegram", `chat ${chatId} busy, queueing ${label}`);
+        if (routed.steerError) {
+          logger?.log("telegram", `steer failed for chat ${chatId}, queued instead: ${getErrorMessage(routed.steerError)}`);
+        }
       }
+      if (replaceQueued) chatState.continueAfterClose = true;
       return;
     }
 
@@ -897,10 +951,14 @@ export async function createTelegramBot({ config, artifactStore, toolRegistry, t
 
     if (chatState.processing) {
       const incomingPrompt = await buildIncomingPrompt(ctx);
+      const busyMessageMode = typeof ctx.message?.text === "string"
+        ? resolveTelegramBusyMessageMode(config, ctx.chat.id)
+        : "queue";
       return enqueuePrompt({
         chatId: ctx.chat.id,
         prompt: incomingPrompt,
-        label: `message ${ctx.msg.message_id}`
+        label: `message ${ctx.msg.message_id}`,
+        busyMessageMode
       });
     }
 
@@ -1028,7 +1086,7 @@ export async function createTelegramBot({ config, artifactStore, toolRegistry, t
 
     if (wasProcessing) {
       logger?.log("telegram", `chat ${ctx.chat.id} busy, queueing new-session command`);
-      chatState.nextPrompt = prompt;
+      queueChatPrompt(chatState, prompt, { replace: true });
       chatState.continueAfterClose = true;
       const reset = (async () => {
         await conversationHistory.reset(ctx.chat.id, { runtime: "pi" });

@@ -241,13 +241,14 @@ test("parses effort picker callback data", () => {
   assert.equal(parseEffortPickerAction("model:1"), null);
 });
 
-test("centralizes picker defaults in config", () => {
+test("centralizes Telegram and Pi defaults in config", () => {
   const config = applyConfigDefaults({
     telegram: {},
     pi: { provider: "openai-codex", model: "gpt-default" }
   });
 
   assert.equal(config.telegram.modelPickerPageSize, telegramConfigDefaults.modelPickerPageSize);
+  assert.equal(config.telegram.busyMessageMode, "queue");
   assert.equal(config.pi.thinkingLevel, piConfigDefaults.thinkingLevel);
   assert.equal(config.pi.speed, piConfigDefaults.speed);
 });

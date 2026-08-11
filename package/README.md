@@ -58,6 +58,12 @@ The result is a toolset shaped by how you actually use the assistant, not by def
 - text messages go directly to Pi Agent
 - audio/voice messages are transcribed first when a transcription tool is installed, then passed to Pi Agent as text; otherwise the agent is told transcription failed and can offer to install one
 - media is stored as artifacts
+- while a chat is busy, messages use an ordered queue by default and retain their individual boundaries
+- set `telegram.busyMessageMode` to `"steer"` to route concurrent text messages into Pi's active run; override one chat with `telegram.chatMeta[chatId].busyMessageMode`
+- media and normalized audio stay queued, and failed steering falls back to the ordered queue
+- while a chat is busy, messages use an ordered queue by default and retain their individual boundaries
+- set `telegram.busyMessageMode` to `"steer"` to route concurrent text messages into Pi's active run; override one chat with `telegram.chatMeta[chatId].busyMessageMode`
+- media and normalized audio stay queued, and failed steering falls back to the ordered queue
 
 ### Tool model
 No tools ship with the core. All installed tools live under `~/.arisa/tools/<tool-name>`, whether they come from the [official catalog](https://github.com/clasen/Arisa/tree/main/tools), from another source the user chooses, or are created by the agent itself.
