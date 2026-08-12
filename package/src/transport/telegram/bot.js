@@ -14,18 +14,20 @@ import { normalizeArtifactForReasoning, shouldNormalizeArtifactToText } from "..
 import { formatPortableSessionHistory } from "../../core/agent/agent-manager.js";
 import { ConversationHistoryStore } from "../../core/conversation/conversation-history-store.js";
 import { formatDoctorReport } from "../../runtime/doctor.js";
+import { formatToolUsageReport } from "../../runtime/tool-usage-report.js";
 
 const slowPromptNoticeMs = 300_000;
 
 export const telegramCommands = Object.freeze([
-  { command: "new", description: "Start a new chat context" },
-  { command: "restart", description: "Restart the Arisa service" },
-  { command: "doctor", description: "Check and repair Arisa runtime health" },
-  { command: "update", description: "Check Arisa and official tool updates" },
-  { command: "model", description: "Choose the model for this chat" },
-  { command: "effort", description: "Choose reasoning effort for this chat" },
-  { command: "speed", description: "Choose model speed for this chat" },
-  { command: "auth", description: "Show authentication status" }
+  { command: "new", description: "New chat context" },
+  { command: "restart", description: "Restart Arisa" },
+  { command: "doctor", description: "Check runtime health" },
+  { command: "update", description: "Check for updates" },
+  { command: "tools", description: "Tool usage counts" },
+  { command: "model", description: "Choose chat model" },
+  { command: "effort", description: "Choose reasoning effort" },
+  { command: "speed", description: "Choose model speed" },
+  { command: "auth", description: "Authentication status" }
 ]);
 
 export function createTelegramRestartHandler({ authorize, requestRestart, logger }) {
@@ -1182,6 +1184,12 @@ export async function createTelegramBot({ config, artifactStore, toolRegistry, t
       logger?.error("update", `update check failed: ${getErrorMessage(error)}`);
       await ctx.api.editMessageText(ctx.chat.id, pending.message_id, `Arisa update check failed: ${getErrorMessage(error)}`);
     }
+  });
+
+  bot.command("tools", async (ctx) => {
+    const auth = await authorizeChat({ config, chatId: ctx.chat.id, saveConfig, chatMeta: getIncomingChatMeta(ctx) });
+    if (!auth.ok) return;
+    await ctx.reply(renderTelegramHtml(formatToolUsageReport(await toolRegistry.usage(ctx.chat.id))), { parse_mode: "HTML" });
   });
 
   bot.command("model", async (ctx) => {

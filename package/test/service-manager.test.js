@@ -9,6 +9,8 @@ test("registers maintenance as native Telegram commands", () => {
     true
   );
   assert.equal(telegramCommands.some((command) => command.command === "update"), true);
+  assert.equal(telegramCommands.some((command) => command.command === "tools"), true);
+  assert.ok(telegramCommands.every((command) => command.description.length <= 24));
   assert.equal(telegramCommands.some((command) => command.command === "harness"), false);
   assert.equal(telegramCommands.some((command) => command.command === "login"), false);
 });

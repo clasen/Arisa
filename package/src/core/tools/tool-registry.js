@@ -6,6 +6,7 @@ import { loadToolConfig, parseConfigModule, writeToolConfig } from "./tool-confi
 import { normalizeToolResult } from "./tool-result.js";
 import { readDaemonDiagnostic } from "./daemon-processes.js";
 import { SkillRegistry } from "../skills/skill-registry.js";
+import { ToolUsageStore } from "./tool-usage-store.js";
 
 function toolEnv() {
   return { ...process.env, ARISA_PACKAGE_DIR: arisaPackageDir, ARISA_IPC_SOCKET: arisaIpcSocketFile };
@@ -45,10 +46,11 @@ function formatSemanticMetadata(tool) {
 }
 
 export class ToolRegistry {
-  constructor({ logger } = {}) {
+  constructor({ logger, usageStore = new ToolUsageStore() } = {}) {
     this.logger = logger;
     this.tools = new Map();
     this.skillRegistry = new SkillRegistry();
+    this.usageStore = usageStore;
   }
 
   async load() {
@@ -193,9 +195,19 @@ export class ToolRegistry {
     return { ok: true, tool: name, field, configPath };
   }
 
+  async usage(chatId) {
+    const counts = await this.usageStore.counts(chatId);
+    return this.list()
+      .map((tool) => ({ name: tool.name, count: counts[tool.name] || 0 }))
+      .sort((left, right) => left.name.localeCompare(right.name));
+  }
+
   async run({ name, request, chatId = null }) {
     const tool = this.get(name);
     if (!tool) throw new Error(`Tool not found: ${name}`);
+    await this.usageStore.record(chatId, name).catch((error) => {
+      this.logger?.error("tools", `could not record ${name} usage: ${error?.message || String(error)}`);
+    });
     this.logger?.log("tools", `running ${name}`);
     const tmpDir = chatId != null ? getChatToolTmpDir(chatId, name) : getToolTmpDir(name);
     await mkdir(tmpDir, { recursive: true });
