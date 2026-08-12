@@ -1,0 +1,63 @@
+{
+  "name": "official-tool-sync",
+  "description": "Compare installed Arisa tools with the official catalog, detect local divergence, and safely stage, validate, back up, and apply official updates without overwriting tool configuration.",
+  "entry": "index.js",
+  "input": [
+    "text/plain",
+    "application/json"
+  ],
+  "output": [
+    "application/json",
+    "text/plain"
+  ],
+  "configSchema": {
+    "repoUrl": {
+      "type": "string",
+      "required": false,
+      "prompt": "Official Arisa Git repository URL."
+    },
+    "branch": {
+      "type": "string",
+      "required": false,
+      "prompt": "Official catalog branch to compare."
+    },
+    "minimumFreeBytes": {
+      "type": "number",
+      "required": false,
+      "prompt": "Free bytes that must remain while cloning and staging updates."
+    },
+    "maxFilesystemUsagePercent": {
+      "type": "number",
+      "required": false,
+      "prompt": "Maximum projected filesystem usage allowed while staging an update."
+    },
+    "stagingHeadroomBytes": {
+      "type": "number",
+      "required": false,
+      "prompt": "Additional staging allowance for dependency installation."
+    },
+    "commandTimeoutMs": {
+      "type": "number",
+      "required": false,
+      "prompt": "Timeout for Git, dependency installation, and validation commands."
+    },
+    "protectedFiles": {
+      "type": "array",
+      "required": false,
+      "prompt": "Tool-relative files that official updates must never overwrite."
+    }
+  },
+  "category": "developer",
+  "keywords": [
+    "catalog",
+    "compare",
+    "developer",
+    "essential",
+    "official",
+    "sync",
+    "tools",
+    "update",
+    "upgrade"
+  ],
+  "skillHints": []
+}

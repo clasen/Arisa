@@ -1,0 +1,53 @@
+{
+  "name": "trash",
+  "description": "Safely move local files and directories into chat-scoped recoverable trash, inspect storage pressure, restore mistakes, and explicitly purge retained content.",
+  "entry": "index.js",
+  "input": [
+    "text/plain",
+    "application/json"
+  ],
+  "output": [
+    "application/json",
+    "text/plain"
+  ],
+  "configSchema": {
+    "retentionDays": {
+      "type": "number",
+      "required": false,
+      "prompt": "Days trashed content remains eligible for cleanup."
+    },
+    "minimumFreeBytes": {
+      "type": "number",
+      "required": false,
+      "prompt": "Free bytes that must remain after a cross-filesystem trash or restore copy."
+    },
+    "maxFilesystemUsagePercent": {
+      "type": "number",
+      "required": false,
+      "prompt": "Maximum projected filesystem usage allowed for cross-filesystem copies."
+    },
+    "allowCrossFilesystemCopy": {
+      "type": "boolean",
+      "required": false,
+      "prompt": "Allow guarded copy-and-verify moves when atomic rename is impossible across filesystems."
+    },
+    "protectedPaths": {
+      "type": "array",
+      "required": false,
+      "prompt": "Additional absolute paths the trash tool must refuse to move."
+    }
+  },
+  "category": "filesystem",
+  "keywords": [
+    "delete",
+    "essential",
+    "filesystem",
+    "recover",
+    "restore",
+    "safety",
+    "storage",
+    "trash",
+    "undo"
+  ],
+  "skillHints": []
+}
