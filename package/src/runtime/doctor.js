@@ -232,8 +232,8 @@ export function formatDoctorReport(report) {
     lines.push(...reportRow("Uptime", formatUptime(report.system.uptimeSeconds)));
     lines.push(...reportRow("CPU", `${report.system.cpuCores} cores`));
     lines.push(...reportRow("Load", report.system.loadAverage.map((value) => value.toFixed(2)).join(" / ")));
-    lines.push(...reportRow("Memory", `${memoryPercent.toFixed(1)}% used / ${formatBytes(report.system.memoryFree)} free`));
-    lines.push(...reportRow("Disk", `${diskPercent.toFixed(1)}% used / ${formatBytes(report.system.diskFree)} free`));
+    lines.push(...reportRow("Memory", `${memoryPercent.toFixed(1)}% / ${formatBytes(report.system.memoryFree)} free`, { labelWidth: 7 }));
+    lines.push(...reportRow("Disk", `${diskPercent.toFixed(1)}% / ${formatBytes(report.system.diskFree)} free`, { labelWidth: 7 }));
     lines.push(...reportRow("Arisa RSS", formatBytes(report.system.processRss)));
   } else if (report.systemError) {
     lines.push("", "System");

@@ -82,8 +82,8 @@ test("reports Pi context size and retained-content inefficiency", async () => {
   assert.match(formatted, /Core\n  Runtime    Pi/);
   assert.match(formatted, /CPU        4 cores/);
   assert.match(formatted, /Load       0\.25 \/ 0\.50 \/ 0\.75/);
-  assert.match(formatted, /Memory     62\.5% used \/ 3\.0 GB/);
-  assert.match(formatted, /Disk       60\.0% used \/ 40\.0 GB/);
+  assert.match(formatted, /Memory  62\.5% \/ 3\.0 GB free/);
+  assert.match(formatted, /Disk    60\.0% \/ 40\.0 GB free/);
   assert.ok(formatted.split("\n").every((line) => [...line].length <= 35));
 });
 
