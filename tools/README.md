@@ -184,6 +184,17 @@ Load the complete stop-slop writing guidance as editorial context for drafting a
 - **Setup:** none
 - **Install footprint:** **Low**, no npm dependencies
 
+### [`tools-archive`](./tools-archive/)
+
+Create a review-before-sharing ZIP of installed tool source while excluding local configuration, credentials, dependencies, browser sessions, caches, and runtime data.
+
+- **Category:** `developer`
+- **Tags:** `archive` · `backup` · `developer` · `source` · `tools` · `zip`
+- **Accepts:** `text/plain`, `application/json`
+- **Produces:** `application/zip`
+- **Setup:** zip command
+- **Install footprint:** **Medium**, external zip binary and no npm dependencies
+
 ### [`trash`](./trash/)
 
 Move files and directories into chat-scoped recoverable trash, restore mistakes, and report retained storage safely.

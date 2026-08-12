@@ -1,0 +1,23 @@
+{
+  "name": "tools-archive",
+  "description": "Create a review-before-sharing zip of installed Arisa tool source without local config, credentials, dependencies, or runtime data.",
+  "entry": "index.js",
+  "input": [
+    "text/plain",
+    "application/json"
+  ],
+  "output": [
+    "application/zip"
+  ],
+  "configSchema": {},
+  "skillHints": [],
+  "category": "developer",
+  "keywords": [
+    "archive",
+    "backup",
+    "developer",
+    "source",
+    "tools",
+    "zip"
+  ]
+}
