@@ -66,10 +66,10 @@ async function cloneCatalog(scratchRoot) {
 async function installDependencies(toolDir) {
   if (!(await exists(path.join(toolDir, "package.json")))) return null;
   try {
-    await runCommand("pnpm", ["install"], { cwd: toolDir, timeoutMs: 300_000 });
+    await runCommand("pnpm", ["install", "--lockfile=false"], { cwd: toolDir, timeoutMs: 300_000 });
     return "pnpm";
   } catch {
-    await runCommand("npm", ["install"], { cwd: toolDir, timeoutMs: 300_000 });
+    await runCommand("npm", ["install", "--no-package-lock"], { cwd: toolDir, timeoutMs: 300_000 });
     return "npm";
   }
 }

@@ -199,10 +199,10 @@ async function installDependencies(stageDir, config) {
   if (!dependencyCount) return { installed: false };
   const timeoutMs = parsePositive(config.commandTimeoutMs, 180000);
   try {
-    await runCommand("pnpm", ["install"], { cwd: stageDir, timeoutMs });
+    await runCommand("pnpm", ["install", "--lockfile=false"], { cwd: stageDir, timeoutMs });
     return { installed: true, manager: "pnpm" };
   } catch (pnpmError) {
-    await runCommand("npm", ["install"], { cwd: stageDir, timeoutMs });
+    await runCommand("npm", ["install", "--no-package-lock"], { cwd: stageDir, timeoutMs });
     return { installed: true, manager: "npm", fallbackFrom: pnpmError.message };
   }
 }
