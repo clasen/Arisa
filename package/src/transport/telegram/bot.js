@@ -1166,12 +1166,17 @@ export async function createTelegramBot({ config, artifactStore, toolRegistry, t
   bot.command("update", async (ctx) => {
     const auth = await authorizeChat({ config, chatId: ctx.chat.id, saveConfig, chatMeta: getIncomingChatMeta(ctx) });
     if (!auth.ok) return;
-    await ctx.reply("Checking Arisa and official tool updates…");
+    const pending = await ctx.reply(renderTelegramHtml("```text\nChecking Arisa and official tool updates…\n```"), { parse_mode: "HTML" });
     try {
-      await ctx.reply(renderTelegramHtml(await checkUpdates(ctx.chat.id)), { parse_mode: "HTML" });
+      await ctx.api.editMessageText(
+        ctx.chat.id,
+        pending.message_id,
+        renderTelegramHtml(await checkUpdates(ctx.chat.id)),
+        { parse_mode: "HTML" }
+      );
     } catch (error) {
       logger?.error("update", `update check failed: ${getErrorMessage(error)}`);
-      await ctx.reply(`Arisa update check failed: ${getErrorMessage(error)}`);
+      await ctx.api.editMessageText(ctx.chat.id, pending.message_id, `Arisa update check failed: ${getErrorMessage(error)}`);
     }
   });
 
