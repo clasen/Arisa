@@ -30,14 +30,14 @@ Run profile-driven outreach batches that discover public editorial contacts, fil
 
 ### [`context-vault`](./context-vault/)
 
-Store, search, update, and forget chat-scoped user context and preferences, with fallback search over prior Pi sessions.
+Store, search, update, and forget chat-scoped user context and preferences with hybrid multilingual semantic and lexical recall plus prior Pi session fallback.
 
 - **Category:** `memory`
-- **Tags:** `chat-scoped` · `contacts` · `context` · `essential` · `memory` · `preferences` · `recall` · `remember` · `session-search`
+- **Tags:** `chat-scoped` · `contacts` · `context` · `essential` · `memory` · `multilingual` · `preferences` · `recall` · `remember` · `semantic-search` · `session-search`
 - **Accepts:** `text/plain`, `application/json`
 - **Produces:** `text/plain`, `application/json`
 - **Setup:** none
-- **Install footprint:** **Low**, one npm dependency
+- **Install footprint:** **High**, local embedding model, native SQLite dependency, and chat-scoped daemon
 
 ### [`file-document`](./file-document/)
 

@@ -1,3 +1,10 @@
 export default {
-  MAX_RESULTS: 20
+  MAX_RESULTS: 20,
+  SEMANTIC_CANDIDATES: 5,
+  MIN_SIMILARITY: 0.55,
+  MODEL: "Xenova/multilingual-e5-large",
+  DTYPE: "q8",
+  IDLE_TIMEOUT_MS: 1800000,
+  READY_TIMEOUT_MS: 120000,
+  JOB_TIMEOUT_MS: 300000
 };

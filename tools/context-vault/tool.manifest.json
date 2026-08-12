@@ -1,7 +1,12 @@
 {
   "name": "context-vault",
-  "description": "Store, search, update, and forget chat-scoped user context and preferences, with lightweight fallback search over prior Pi sessions.",
+  "description": "Store, search, update, and forget chat-scoped user context and preferences with hybrid multilingual semantic and lexical recall plus prior Pi session fallback.",
   "entry": "index.js",
+  "daemon": {
+    "scope": "chat",
+    "autoStart": false,
+    "health": "internal"
+  },
   "input": [
     "text/plain",
     "application/json"
@@ -15,6 +20,31 @@
       "type": "number",
       "required": false,
       "prompt": "Maximum number of context results to return."
+    },
+    "SEMANTIC_CANDIDATES": {
+      "type": "number",
+      "required": false,
+      "prompt": "Minimum number of semantic candidates considered before hybrid reranking."
+    },
+    "MIN_SIMILARITY": {
+      "type": "number",
+      "required": false,
+      "prompt": "Minimum semantic similarity accepted during memory recall."
+    },
+    "MODEL": {
+      "type": "string",
+      "required": false,
+      "prompt": "Local Hugging Face embedding model used by SeekMix."
+    },
+    "DTYPE": {
+      "type": "string",
+      "required": false,
+      "prompt": "Local embedding model data type, for example q8."
+    },
+    "IDLE_TIMEOUT_MS": {
+      "type": "number",
+      "required": false,
+      "prompt": "How long the chat-scoped semantic memory daemon stays warm while idle."
     }
   },
   "skillHints": [],
@@ -25,9 +55,11 @@
     "context",
     "essential",
     "memory",
+    "multilingual",
     "preferences",
     "recall",
     "remember",
+    "semantic-search",
     "session-search"
   ]
 }
