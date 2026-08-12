@@ -15,6 +15,12 @@ test("formats core and official tool update status", () => {
     bootstrapInstalled: ["official-tool-sync"],
     tools: {
       installedOfficial: 3,
+      official: [
+        { name: "context-vault", status: "up-to-date" },
+        { name: "customized", status: "diverged" },
+        { name: "gmail-workspace", status: "upstream-update" }
+      ],
+      nonOfficial: ["private-helper"],
       counts: { "up-to-date": 1, "upstream-update": 1, diverged: 1 },
       updateable: ["context-vault"],
       blocked: [{ name: "customized", status: "diverged" }]
@@ -33,6 +39,15 @@ test("formats core and official tool update status", () => {
     "  up-to-date           1",
     "  upstream-update      1",
     "  diverged             1",
+    "",
+    "Official (3)",
+    "  - context-vault",
+    "  - customized [diverged]",
+    "  - gmail-workspace",
+    "    [upstream-update]",
+    "",
+    "Non-official (1)",
+    "  - private-helper",
     "",
     "Safe updates",
     "  - context-vault",
@@ -53,6 +68,11 @@ test("shortens long review status labels", () => {
     bootstrapInstalled: [],
     tools: {
       installedOfficial: 2,
+      official: [
+        { name: "audio-extractor", status: "locally-modified" },
+        { name: "campaign-draft-runner", status: "untracked-difference" }
+      ],
+      nonOfficial: [],
       counts: {},
       updateable: [],
       blocked: [

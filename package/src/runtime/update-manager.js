@@ -127,13 +127,21 @@ function parseToolSyncOutput(result) {
   return JSON.parse(text);
 }
 
-function summarizeTools(sync) {
+function summarizeTools(sync, installedTools) {
   const tools = sync.tools || [];
+  const officialNames = new Set(tools.map((tool) => tool.name));
   const counts = {};
   for (const tool of tools) counts[tool.status] = (counts[tool.status] || 0) + 1;
   const updateable = tools.filter((tool) => tool.safeToUpdate && !["up-to-date", "baseline-refresh"].includes(tool.status));
   const blocked = tools.filter((tool) => !tool.safeToUpdate && !["up-to-date", "baseline-refresh"].includes(tool.status));
-  return { installedOfficial: sync.installedOfficialCount || tools.length, counts, updateable: updateable.map((tool) => tool.name), blocked: blocked.map((tool) => ({ name: tool.name, status: tool.status })) };
+  return {
+    installedOfficial: sync.installedOfficialCount || tools.length,
+    official: tools.map(({ name, status }) => ({ name, status })).sort((left, right) => left.name.localeCompare(right.name)),
+    nonOfficial: installedTools.map((tool) => tool.name).filter((name) => !officialNames.has(name)).sort(),
+    counts,
+    updateable: updateable.map((tool) => tool.name),
+    blocked: blocked.map((tool) => ({ name: tool.name, status: tool.status }))
+  };
 }
 
 export async function checkForUpdates({ chatId, toolRegistry }) {
@@ -144,7 +152,7 @@ export async function checkForUpdates({ chatId, toolRegistry }) {
   return {
     core: { currentVersion, latestVersion, updateAvailable: compareVersions(currentVersion, latestVersion) === -1 },
     bootstrapInstalled: bootstrapped.installed,
-    tools: summarizeTools(sync)
+    tools: summarizeTools(sync, toolRegistry.list())
   };
 }
 
@@ -167,6 +175,17 @@ export function formatUpdateReport(report) {
   lines.push(...reportRow("Installed", report.tools.installedOfficial));
   for (const [status, count] of Object.entries(report.tools.counts)) {
     lines.push(...reportRow(status, count, { labelWidth: 20 }));
+  }
+  lines.push("", `Official (${report.tools.official.length})`);
+  for (const item of report.tools.official) {
+    const status = shortToolStatus(item.status);
+    const suffix = status === "current" ? "" : ` [${status}]`;
+    lines.push(...wrapReportText(`${item.name}${suffix}`, { firstPrefix: "  - ", nextPrefix: "    " }));
+  }
+  lines.push("", `Non-official (${report.tools.nonOfficial.length})`);
+  if (!report.tools.nonOfficial.length) lines.push("  (none)");
+  for (const name of report.tools.nonOfficial) {
+    lines.push(...wrapReportText(name, { firstPrefix: "  - ", nextPrefix: "    " }));
   }
   if (report.tools.updateable.length) {
     lines.push("", "Safe updates");
