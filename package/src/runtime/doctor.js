@@ -241,8 +241,8 @@ export function formatDoctorReport(report) {
       "├─ System",
       `│  ├─ Host: ${report.system.platform}, uptime ${formatUptime(report.system.uptimeSeconds)}`,
       `│  ├─ CPU: ${report.system.cpuCores} cores, load ${report.system.loadAverage.map((value) => value.toFixed(2)).join(" / ")}`,
-      `│  ├─ Memory: ${formatBytes(report.system.memoryUsed)} / ${formatBytes(report.system.memoryTotal)} (${memoryPercent.toFixed(1)}%), ${formatBytes(report.system.memoryFree)} available`,
-      `│  ├─ Disk: ${formatBytes(report.system.diskUsed)} / ${formatBytes(report.system.diskTotal)} (${diskPercent.toFixed(1)}%), ${formatBytes(report.system.diskFree)} available`,
+      `│  ├─ Memory: ${memoryPercent.toFixed(1)}% used, ${formatBytes(report.system.memoryFree)} free`,
+      `│  ├─ Disk: ${diskPercent.toFixed(1)}% used, ${formatBytes(report.system.diskFree)} free`,
       `│  └─ Arisa RSS: ${formatBytes(report.system.processRss)}`
     );
   } else if (report.systemError) {

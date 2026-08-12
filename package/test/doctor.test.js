@@ -81,8 +81,8 @@ test("reports Pi context size and retained-content inefficiency", async () => {
   const formatted = formatDoctorReport(report);
   assert.match(formatted, /├─ Core: Pi/);
   assert.match(formatted, /CPU: 4 cores, load 0\.25 \/ 0\.50 \/ 0\.75/);
-  assert.match(formatted, /Memory: 5\.0 GB \/ 8\.0 GB \(62\.5%\), 3\.0 GB available/);
-  assert.match(formatted, /Disk: 60\.0 GB \/ 100\.0 GB \(60\.0%\), 40\.0 GB available/);
+  assert.match(formatted, /Memory: 62\.5% used, 3\.0 GB free/);
+  assert.match(formatted, /Disk: 60\.0% used, 40\.0 GB free/);
 });
 
 test("stops only a registered duplicate Arisa service with verified identity", async () => {
