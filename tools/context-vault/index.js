@@ -75,7 +75,7 @@ function runtimeFor(chatId) {
     entryPath: fileURLToPath(import.meta.url),
     scope: { type: "chat", chatId: String(chatId) },
     startupContext: { chatId: String(chatId) },
-    autoStart: false
+    autoStart: true
   });
 }
 

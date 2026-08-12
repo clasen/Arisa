@@ -4,7 +4,7 @@
   "entry": "index.js",
   "daemon": {
     "scope": "chat",
-    "autoStart": false,
+    "autoStart": true,
     "health": "internal"
   },
   "input": [
