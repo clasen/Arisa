@@ -87,6 +87,7 @@ test("approval hashes detect message tampering", () => {
 
 test("uncertain send evidence failures are recognized", () => {
   assert.equal(isUncertainDeliveryError("X send could not be proven. Missing evidence: receipt."), true);
+  assert.equal(isUncertainDeliveryError("Arisa IPC request timed out"), true);
   assert.equal(isUncertainDeliveryError("Daily cap reached."), false);
 });
 

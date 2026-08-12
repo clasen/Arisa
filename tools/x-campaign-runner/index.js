@@ -469,7 +469,7 @@ function runRecord(action, detail = {}) {
 }
 
 function isUncertainDeliveryError(reason) {
-  return /uncertain|in-flight|delivery could not be verified|send could not be proven|missing evidence|deferred conversation readback/i.test(reason);
+  return /uncertain|in-flight|timed? out|timeout|delivery could not be verified|send could not be proven|missing evidence|deferred conversation readback/i.test(reason);
 }
 
 function markAssumedSent(state, approval, reason) {
