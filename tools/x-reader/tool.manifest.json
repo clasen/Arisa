@@ -1,0 +1,36 @@
+{
+  "name": "x-reader",
+  "description": "Read recent public posts from X/Twitter using the official X API.",
+  "entry": "index.js",
+  "input": [
+    "text/plain",
+    "application/json"
+  ],
+  "output": [
+    "text/plain",
+    "application/json"
+  ],
+  "configSchema": {
+    "X_BEARER_TOKEN": {
+      "type": "string",
+      "required": true,
+      "secret": true,
+      "prompt": "I need an X API Bearer Token to read posts through the official X API."
+    },
+    "MAX_RESULTS": {
+      "type": "number",
+      "required": false,
+      "prompt": "Default number of recent posts to fetch."
+    }
+  },
+  "skillHints": [],
+  "category": "social",
+  "keywords": [
+    "api",
+    "posts",
+    "reader",
+    "social",
+    "twitter",
+    "x"
+  ]
+}

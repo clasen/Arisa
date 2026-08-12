@@ -1,4 +1,4 @@
-﻿# Tools
+# Tools
 
 This is the official Arisa tool catalog. Each subdirectory is a self-contained tool that Arisa can install into `~/.arisa/tools/<tool-name>` and invoke. Tools communicate through a standard `tool.manifest.json` contract and expose a single `index.js` entry point.
 
@@ -48,6 +48,17 @@ Return an existing local file as a document artifact.
 - **Accepts:** `text/plain`
 - **Produces:** `text/markdown`, `text/plain`, `application/octet-stream`
 - **Setup:** none
+- **Install footprint:** **Low**, no npm dependencies
+
+### [`github-ops`](./github-ops/)
+
+Check GitHub token and repository access or star a repository through the GitHub API without exposing credentials.
+
+- **Category:** `developer`
+- **Tags:** `github` · `git` · `repo` · `deployment` · `source`
+- **Accepts:** `text/plain`, `application/json`
+- **Produces:** `application/json`, `text/plain`
+- **Setup:** `GITHUB_TOKEN`; optional `DEFAULT_REPO`
 - **Install footprint:** **Low**, no npm dependencies
 
 ### [`gmail-workspace`](./gmail-workspace/)
@@ -297,6 +308,17 @@ Manage X/Twitter outreach, follows, account profile changes, and explicitly conf
 - **Setup:** X/Twitter session cookies and Chromium
 - **Install footprint:** **High**, one npm dependency and a persistent browser session
 
+### [`x-reader`](./x-reader/)
+
+Read recent public posts through the official X API without browser automation or session cookies.
+
+- **Category:** `social`
+- **Tags:** `api` · `posts` · `reader` · `social` · `twitter` · `x`
+- **Accepts:** `text/plain`, `application/json`
+- **Produces:** `text/plain`, `application/json`
+- **Setup:** `X_BEARER_TOKEN`
+- **Install footprint:** **Low**, no npm dependencies
+
 ### [`x-session-reader`](./x-session-reader/)
 
 Read posts and bookmarks visible through a user-provided X/Twitter web session without bypassing login or anti-bot controls.
@@ -307,6 +329,17 @@ Read posts and bookmarks visible through a user-provided X/Twitter web session w
 - **Produces:** `text/plain`, `application/json`, `text/markdown`, `text/csv`
 - **Setup:** X/Twitter session cookies and Chromium
 - **Install footprint:** **High**, one npm dependency and a browser session
+
+### [`youtube-transcript`](./youtube-transcript/)
+
+Download YouTube subtitles with yt-dlp and return a plain-text or Markdown transcript.
+
+- **Category:** `transcription`
+- **Tags:** `youtube` · `transcript` · `subtitles` · `captions` · `yt-dlp` · `cookies` · `video`
+- **Accepts:** `text/plain`, `application/json`
+- **Produces:** `text/plain`, `text/markdown`
+- **Setup:** yt-dlp; optional chat-scoped YouTube cookies
+- **Install footprint:** **Medium**, external yt-dlp binary and no npm dependencies
 
 **Install footprint guides autonomy.** Low-footprint tools can be installed and used within the same request without asking the user first. Medium and High-footprint tools require confirmation because they add external binaries, heavier dependency trees, daemons, or interactive setup. A missing secret follows the normal missing-config flow and does not by itself require installation approval.
 

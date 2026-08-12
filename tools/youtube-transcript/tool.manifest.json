@@ -1,0 +1,14 @@
+{
+  "name": "youtube-transcript",
+  "description": "Download YouTube subtitles/transcripts with yt-dlp, optionally using chat-scoped cookies for videos blocked by YouTube bot checks.",
+  "entry": "index.js",
+  "input": ["text/plain", "application/json"],
+  "output": ["text/plain", "text/markdown"],
+  "configSchema": {
+    "YTDLP_COMMAND": { "type": "string", "required": false, "prompt": "Optional yt-dlp command or absolute path. Defaults to yt-dlp." },
+    "YOUTUBE_COOKIES_PATH": { "type": "string", "required": false, "secret": true, "prompt": "Optional Netscape cookies.txt path for YouTube requests that require login." }
+  },
+  "category": "transcription",
+  "keywords": ["youtube", "transcript", "subtitles", "captions", "yt-dlp", "cookies", "video"],
+  "skillHints": []
+}
