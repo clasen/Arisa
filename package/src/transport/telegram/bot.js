@@ -1168,7 +1168,7 @@ export async function createTelegramBot({ config, artifactStore, toolRegistry, t
     if (!auth.ok) return;
     await ctx.reply("Checking Arisa and official tool updates…");
     try {
-      await ctx.reply(await checkUpdates(ctx.chat.id));
+      await ctx.reply(renderTelegramHtml(await checkUpdates(ctx.chat.id)), { parse_mode: "HTML" });
     } catch (error) {
       logger?.error("update", `update check failed: ${getErrorMessage(error)}`);
       await ctx.reply(`Arisa update check failed: ${getErrorMessage(error)}`);

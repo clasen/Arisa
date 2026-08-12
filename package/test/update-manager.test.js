@@ -20,11 +20,19 @@ test("formats core and official tool update status", () => {
       blocked: [{ name: "customized", status: "diverged" }]
     }
   }), [
-    "Arisa core: 5.0.2 → 5.1.0 available",
-    "Official tools installed: 3",
-    "Tool status: up-to-date: 1, upstream-update: 1, diverged: 1",
-    "Safe updates available: context-vault",
-    "Needs review: customized (diverged)",
-    "Installed update support: official-tool-sync"
+    "```text",
+    "Arisa update report",
+    "├─ Core: 5.0.2 -> 5.1.0  update available",
+    "└─ Official tools: 3 installed",
+    "   ├─ up-to-date: 1",
+    "   ├─ upstream-update: 1",
+    "   ├─ diverged: 1",
+    "   ├─ Safe updates",
+    "   │  └─ context-vault",
+    "   ├─ Needs review",
+    "   │  └─ customized [diverged]",
+    "   └─ Update support installed",
+    "      └─ official-tool-sync",
+    "```"
   ].join("\n"));
 });

@@ -148,14 +148,43 @@ export async function checkForUpdates({ chatId, toolRegistry }) {
 }
 
 export function formatUpdateReport(report) {
+  const coreState = report.core.updateAvailable
+    ? `${report.core.currentVersion} -> ${report.core.latestVersion}  update available`
+    : `${report.core.currentVersion}  up to date`;
   const lines = [
-    `Arisa core: ${report.core.currentVersion}${report.core.updateAvailable ? ` → ${report.core.latestVersion} available` : " (latest)"}`,
-    `Official tools installed: ${report.tools.installedOfficial}`
+    "Arisa update report",
+    `├─ Core: ${coreState}`,
+    `└─ Official tools: ${report.tools.installedOfficial} installed`
   ];
-  const statuses = Object.entries(report.tools.counts).map(([status, count]) => `${status}: ${count}`);
-  if (statuses.length) lines.push(`Tool status: ${statuses.join(", ")}`);
-  if (report.tools.updateable.length) lines.push(`Safe updates available: ${report.tools.updateable.join(", ")}`);
-  if (report.tools.blocked.length) lines.push(`Needs review: ${report.tools.blocked.map((item) => `${item.name} (${item.status})`).join(", ")}`);
-  if (report.bootstrapInstalled.length) lines.push(`Installed update support: ${report.bootstrapInstalled.join(", ")}`);
-  return lines.join("\n");
+  const statuses = Object.entries(report.tools.counts);
+  statuses.forEach(([status, count], index) => {
+    const lastStatus = index === statuses.length - 1
+      && !report.tools.updateable.length
+      && !report.tools.blocked.length
+      && !report.bootstrapInstalled.length;
+    lines.push(`   ${lastStatus ? "└" : "├"}─ ${status}: ${count}`);
+  });
+  if (report.tools.updateable.length) {
+    lines.push("   ├─ Safe updates");
+    report.tools.updateable.forEach((name, index) => {
+      const last = index === report.tools.updateable.length - 1;
+      lines.push(`   │  ${last ? "└" : "├"}─ ${name}`);
+    });
+  }
+  if (report.tools.blocked.length) {
+    const bootstrapFollows = report.bootstrapInstalled.length > 0;
+    lines.push(`   ${bootstrapFollows ? "├" : "└"}─ Needs review`);
+    report.tools.blocked.forEach((item, index) => {
+      const last = index === report.tools.blocked.length - 1;
+      lines.push(`   ${bootstrapFollows ? "│" : " "}  ${last ? "└" : "├"}─ ${item.name} [${item.status}]`);
+    });
+  }
+  if (report.bootstrapInstalled.length) {
+    lines.push("   └─ Update support installed");
+    report.bootstrapInstalled.forEach((name, index) => {
+      const last = index === report.bootstrapInstalled.length - 1;
+      lines.push(`      ${last ? "└" : "├"}─ ${name}`);
+    });
+  }
+  return `\`\`\`text\n${lines.join("\n")}\n\`\`\``;
 }
