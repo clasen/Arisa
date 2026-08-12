@@ -21,18 +21,28 @@ test("formats core and official tool update status", () => {
     }
   }), [
     "```text",
-    "Arisa update report",
-    "├─ Core: 5.0.2 -> 5.1.0  update available",
-    "└─ Official tools: 3 installed",
-    "   ├─ up-to-date: 1",
-    "   ├─ upstream-update: 1",
-    "   ├─ diverged: 1",
-    "   ├─ Safe updates",
-    "   │  └─ context-vault",
-    "   ├─ Needs review",
-    "   │  └─ customized [diverged]",
-    "   └─ Update support installed",
-    "      └─ official-tool-sync",
+    "Arisa update",
+    "============",
+    "Core",
+    "  Current    5.0.2",
+    "  Latest     5.1.0",
+    "  Status     update available",
+    "",
+    "Official tools",
+    "  Installed  3",
+    "  up-to-date           1",
+    "  upstream-update      1",
+    "  diverged             1",
+    "",
+    "Safe updates",
+    "  - context-vault",
+    "",
+    "Needs review",
+    "  - customized",
+    "    [diverged]",
+    "",
+    "Update support installed",
+    "  - official-tool-sync",
     "```"
   ].join("\n"));
 });
@@ -51,6 +61,7 @@ test("shortens long review status labels", () => {
       ]
     }
   });
-  assert.match(report, /audio-extractor \[local\]/);
-  assert.match(report, /campaign-draft-runner \[untracked\]/);
+  assert.match(report, /audio-extractor\n    \[local\]/);
+  assert.match(report, /campaign-draft-runner\n    \[untracked\]/);
+  assert.ok(report.split("\n").every((line) => [...line].length <= 35));
 });

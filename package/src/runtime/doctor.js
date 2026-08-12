@@ -6,6 +6,7 @@ import { promisify } from "node:util";
 import { stopManagedDaemon, unregisterManagedDaemon } from "../core/tools/daemon-processes.js";
 import { getServiceStatus, serviceEntryFile } from "./service-manager.js";
 import { arisaHomeDir } from "./paths.js";
+import { renderTextReport, reportRow, wrapReportText } from "./report-format.js";
 
 const execFileAsync = promisify(execFile);
 
@@ -184,25 +185,6 @@ function evaluateContext(context, policy) {
   return { ...context, level, inefficiencies };
 }
 
-function contextSummary(contexts) {
-  if (!contexts.length) return "Contexts: no active contexts.";
-  const measured = contexts.filter((context) => Number.isFinite(context.percent));
-  const oversized = contexts.filter((context) => context.level === "warning" || context.level === "critical").length;
-  const inefficient = contexts.filter((context) => context.inefficiencies.length).length;
-  const unavailable = contexts.length - measured.length;
-  const details = [
-    `${contexts.length} active`,
-    `${measured.length} measured`,
-    `${oversized} large`,
-    `${inefficient} inefficient`
-  ];
-  if (unavailable) details.push(`${unavailable} unavailable`);
-  if (measured.length) {
-    details.push(`max ${Math.max(...measured.map((context) => context.percent)).toFixed(1)}%`);
-  }
-  return `Contexts: ${details.join(", ")}.`;
-}
-
 function addContextAttention(report) {
   for (const context of report.contexts) {
     const label = `Chat ${context.chatId}`;
@@ -227,32 +209,41 @@ export function formatDoctorReport(report) {
   const status = report.attention.length
     ? "attention needed"
     : report.repairs.length ? "repaired" : "healthy";
-  const lines = [
-    `Arisa Doctor  [${status}]`,
-    `├─ Core: Pi`,
-    `│  ├─ Sessions: ${report.runtime.sessions} active, ${report.runtime.closingSessions} closing`,
-    `│  └─ ${contextSummary(report.contexts).replace(/^Contexts:\s*/, "Contexts: ").replace(/\.$/, "")}`,
-    `├─ Daemons: ${report.daemons.length} checked${report.daemons.length ? ` [${daemonResultSummary(report.daemons)}]` : ""}`
-  ];
+  const measured = report.contexts.filter((context) => Number.isFinite(context.percent));
+  const large = report.contexts.filter((context) => context.level === "warning" || context.level === "critical").length;
+  const inefficient = report.contexts.filter((context) => context.inefficiencies.length).length;
+  const lines = ["Arisa Doctor", "============"];
+  lines.push(...reportRow("Status", status));
+  lines.push("", "Core");
+  lines.push(...reportRow("Runtime", "Pi"));
+  lines.push(...reportRow("Sessions", `${report.runtime.sessions} active / ${report.runtime.closingSessions} closing`));
+  lines.push(...reportRow("Contexts", `${report.contexts.length} active / ${measured.length} measured`));
+  lines.push(...reportRow("Large", large));
+  lines.push(...reportRow("Ineff.", inefficient));
+  if (measured.length) lines.push(...reportRow("Max", `${Math.max(...measured.map((context) => context.percent)).toFixed(1)}%`));
+  lines.push("", "Daemons");
+  lines.push(...reportRow("Checked", report.daemons.length));
+  if (report.daemons.length) lines.push(...reportRow("Status", daemonResultSummary(report.daemons)));
   if (report.system) {
     const memoryPercent = report.system.memoryTotal ? (report.system.memoryUsed / report.system.memoryTotal) * 100 : 0;
     const diskPercent = report.system.diskTotal ? (report.system.diskUsed / report.system.diskTotal) * 100 : 0;
-    lines.push(
-      "├─ System",
-      `│  ├─ Host: ${report.system.platform}, uptime ${formatUptime(report.system.uptimeSeconds)}`,
-      `│  ├─ CPU: ${report.system.cpuCores} cores, load ${report.system.loadAverage.map((value) => value.toFixed(2)).join(" / ")}`,
-      `│  ├─ Memory: ${memoryPercent.toFixed(1)}% used, ${formatBytes(report.system.memoryFree)} free`,
-      `│  ├─ Disk: ${diskPercent.toFixed(1)}% used, ${formatBytes(report.system.diskFree)} free`,
-      `│  └─ Arisa RSS: ${formatBytes(report.system.processRss)}`
-    );
+    lines.push("", "System");
+    lines.push(...reportRow("Host", report.system.platform));
+    lines.push(...reportRow("Uptime", formatUptime(report.system.uptimeSeconds)));
+    lines.push(...reportRow("CPU", `${report.system.cpuCores} cores`));
+    lines.push(...reportRow("Load", report.system.loadAverage.map((value) => value.toFixed(2)).join(" / ")));
+    lines.push(...reportRow("Memory", `${memoryPercent.toFixed(1)}% used / ${formatBytes(report.system.memoryFree)} free`));
+    lines.push(...reportRow("Disk", `${diskPercent.toFixed(1)}% used / ${formatBytes(report.system.diskFree)} free`));
+    lines.push(...reportRow("Arisa RSS", formatBytes(report.system.processRss)));
   } else if (report.systemError) {
-    lines.push(`├─ System: unavailable [${report.systemError}]`);
+    lines.push("", "System");
+    lines.push(...reportRow("Status", `unavailable: ${report.systemError}`));
   }
-  lines.push(`├─ Repairs: ${report.repairs.length}`);
-  report.repairs.forEach((item) => lines.push(`│  └─ ${item}`));
-  lines.push(`└─ Attention: ${report.attention.length}`);
-  report.attention.forEach((item) => lines.push(`   └─ ${item}`));
-  return `\`\`\`text\n${lines.join("\n")}\n\`\`\``;
+  lines.push("", `Repairs (${report.repairs.length})`);
+  for (const item of report.repairs) lines.push(...wrapReportText(item, { firstPrefix: "  - ", nextPrefix: "    " }));
+  lines.push("", `Attention (${report.attention.length})`);
+  for (const item of report.attention) lines.push(...wrapReportText(item, { firstPrefix: "  - ", nextPrefix: "    " }));
+  return renderTextReport(lines);
 }
 
 export async function runDoctor({

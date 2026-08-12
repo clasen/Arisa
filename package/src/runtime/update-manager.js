@@ -3,6 +3,7 @@ import { access, cp, mkdir, readFile, rm } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { arisaPackageDir, getToolDir } from "./paths.js";
+import { renderTextReport, reportRow, wrapReportText } from "./report-format.js";
 
 const defaultRepoUrl = "https://github.com/clasen/Arisa.git";
 const defaultBranch = "main";
@@ -158,43 +159,29 @@ function shortToolStatus(status) {
 }
 
 export function formatUpdateReport(report) {
-  const coreState = report.core.updateAvailable
-    ? `${report.core.currentVersion} -> ${report.core.latestVersion}  update available`
-    : `${report.core.currentVersion}  up to date`;
-  const lines = [
-    "Arisa update report",
-    `├─ Core: ${coreState}`,
-    `└─ Official tools: ${report.tools.installedOfficial} installed`
-  ];
-  const statuses = Object.entries(report.tools.counts);
-  statuses.forEach(([status, count], index) => {
-    const lastStatus = index === statuses.length - 1
-      && !report.tools.updateable.length
-      && !report.tools.blocked.length
-      && !report.bootstrapInstalled.length;
-    lines.push(`   ${lastStatus ? "└" : "├"}─ ${status}: ${count}`);
-  });
+  const lines = ["Arisa update", "============", "Core"];
+  lines.push(...reportRow("Current", report.core.currentVersion));
+  lines.push(...reportRow("Latest", report.core.latestVersion));
+  lines.push(...reportRow("Status", report.core.updateAvailable ? "update available" : "up to date"));
+  lines.push("", "Official tools");
+  lines.push(...reportRow("Installed", report.tools.installedOfficial));
+  for (const [status, count] of Object.entries(report.tools.counts)) {
+    lines.push(...reportRow(status, count, { labelWidth: 20 }));
+  }
   if (report.tools.updateable.length) {
-    lines.push("   ├─ Safe updates");
-    report.tools.updateable.forEach((name, index) => {
-      const last = index === report.tools.updateable.length - 1;
-      lines.push(`   │  ${last ? "└" : "├"}─ ${name}`);
-    });
+    lines.push("", "Safe updates");
+    for (const name of report.tools.updateable) lines.push(...wrapReportText(name, { firstPrefix: "  - ", nextPrefix: "    " }));
   }
   if (report.tools.blocked.length) {
-    const bootstrapFollows = report.bootstrapInstalled.length > 0;
-    lines.push(`   ${bootstrapFollows ? "├" : "└"}─ Needs review`);
-    report.tools.blocked.forEach((item, index) => {
-      const last = index === report.tools.blocked.length - 1;
-      lines.push(`   ${bootstrapFollows ? "│" : " "}  ${last ? "└" : "├"}─ ${item.name} [${shortToolStatus(item.status)}]`);
-    });
+    lines.push("", "Needs review");
+    for (const item of report.tools.blocked) {
+      lines.push(...wrapReportText(item.name, { firstPrefix: "  - ", nextPrefix: "    " }));
+      lines.push(...wrapReportText(`[${shortToolStatus(item.status)}]`, { firstPrefix: "    ", nextPrefix: "    " }));
+    }
   }
   if (report.bootstrapInstalled.length) {
-    lines.push("   └─ Update support installed");
-    report.bootstrapInstalled.forEach((name, index) => {
-      const last = index === report.bootstrapInstalled.length - 1;
-      lines.push(`      ${last ? "└" : "├"}─ ${name}`);
-    });
+    lines.push("", "Update support installed");
+    for (const name of report.bootstrapInstalled) lines.push(...wrapReportText(name, { firstPrefix: "  - ", nextPrefix: "    " }));
   }
-  return `\`\`\`text\n${lines.join("\n")}\n\`\`\``;
+  return renderTextReport(lines);
 }
