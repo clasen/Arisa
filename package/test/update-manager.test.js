@@ -36,3 +36,21 @@ test("formats core and official tool update status", () => {
     "```"
   ].join("\n"));
 });
+
+test("shortens long review status labels", () => {
+  const report = formatUpdateReport({
+    core: { currentVersion: "5.0.2", latestVersion: "5.0.2", updateAvailable: false },
+    bootstrapInstalled: [],
+    tools: {
+      installedOfficial: 2,
+      counts: {},
+      updateable: [],
+      blocked: [
+        { name: "audio-extractor", status: "locally-modified" },
+        { name: "campaign-draft-runner", status: "untracked-difference" }
+      ]
+    }
+  });
+  assert.match(report, /audio-extractor \[local\]/);
+  assert.match(report, /campaign-draft-runner \[untracked\]/);
+});

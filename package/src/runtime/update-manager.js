@@ -147,6 +147,16 @@ export async function checkForUpdates({ chatId, toolRegistry }) {
   };
 }
 
+function shortToolStatus(status) {
+  return ({
+    "locally-modified": "local",
+    "untracked-difference": "untracked",
+    "update-available": "update",
+    "baseline-refresh": "refresh",
+    "up-to-date": "current"
+  })[status] || status;
+}
+
 export function formatUpdateReport(report) {
   const coreState = report.core.updateAvailable
     ? `${report.core.currentVersion} -> ${report.core.latestVersion}  update available`
@@ -176,7 +186,7 @@ export function formatUpdateReport(report) {
     lines.push(`   ${bootstrapFollows ? "├" : "└"}─ Needs review`);
     report.tools.blocked.forEach((item, index) => {
       const last = index === report.tools.blocked.length - 1;
-      lines.push(`   ${bootstrapFollows ? "│" : " "}  ${last ? "└" : "├"}─ ${item.name} [${item.status}]`);
+      lines.push(`   ${bootstrapFollows ? "│" : " "}  ${last ? "└" : "├"}─ ${item.name} [${shortToolStatus(item.status)}]`);
     });
   }
   if (report.bootstrapInstalled.length) {
