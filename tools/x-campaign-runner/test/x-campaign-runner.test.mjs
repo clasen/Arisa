@@ -1,6 +1,6 @@
 ﻿import test from "node:test";
 import assert from "node:assert/strict";
-import { availableCandidates, candidateScore, greetingNameFor, handleFromXUrl, hasGroundedCoverageEvidence, parseSearchResults, pendingApproval, renderMessage, sha256 } from "../index.js";
+import { availableCandidates, candidateScore, greetingNameFor, handleFromXUrl, hasGroundedCoverageEvidence, isUncertainDeliveryError, parseSearchResults, pendingApproval, renderMessage, sha256 } from "../index.js";
 
 test("extracts only real X profile handles", () => {
   assert.equal(handleFromXUrl("https://x.com/Good_Handle/status/123"), "Good_Handle");
@@ -83,6 +83,11 @@ test("pending approvals expire fail-closed", () => {
 test("approval hashes detect message tampering", () => {
   assert.equal(sha256("approved"), sha256("approved"));
   assert.notEqual(sha256("approved"), sha256("changed"));
+});
+
+test("uncertain send evidence failures are recognized", () => {
+  assert.equal(isUncertainDeliveryError("X send could not be proven. Missing evidence: receipt."), true);
+  assert.equal(isUncertainDeliveryError("Daily cap reached."), false);
 });
 
 

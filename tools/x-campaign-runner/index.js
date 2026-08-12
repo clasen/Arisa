@@ -29,6 +29,7 @@ Actions:
   send-approved Send exactly the persisted approval. args: profile?, approvalId, messageHash, confirm=true, dryRun=false
   skip         Skip one pending approval. args: profile?, approvalId, reason?
   reconcile    Reconcile a manual-review approval from x-dm history without sending. args: profile?, approvalId
+  assume-sent  Mark an uncertain approval as sent without retrying. args: profile?, approvalId, confirm=true, reason?
   resolve-not-sent Reopen a candidate only after x-dm records human-confirmed non-delivery. args: profile?, approvalId
 
 Safety:
@@ -467,6 +468,27 @@ function runRecord(action, detail = {}) {
   return { at: new Date().toISOString(), action, ...detail };
 }
 
+function isUncertainDeliveryError(reason) {
+  return /uncertain|in-flight|delivery could not be verified|send could not be proven|missing evidence|deferred conversation readback/i.test(reason);
+}
+
+function markAssumedSent(state, approval, reason) {
+  const assumedAt = new Date().toISOString();
+  approval.status = "sent";
+  approval.sentAt = assumedAt;
+  approval.deliveryVerified = false;
+  approval.verificationMethod = "user-policy-assumed-sent";
+  approval.assumedSentReason = clean(reason || "uncertain delivery treated as sent").slice(0, 500);
+  if (approval.lastError) approval.priorUncertainError = approval.lastError;
+  delete approval.lastError;
+  const candidate = state.candidates.find((item) => normalizedHandle(item.username) === normalizedHandle(approval.username));
+  if (candidate) {
+    candidate.status = "sent";
+    candidate.sentAt = assumedAt;
+    candidate.deliveryVerified = false;
+  }
+}
+
 async function handleStatus(request, args) {
   const name = profileName(args);
   const { profile, stateDir } = await loadProfile(request.chatId, name);
@@ -654,7 +676,16 @@ async function handleSendApproved(request, args) {
       return toolOk({ text: `Sent approved X campaign DM to @${approval.username}${follow ? " after verifying the follow state" : ""}.`, json: { profile: name, approval, follow, sent } });
     } catch (error) {
       const reason = clean(error.message || error).slice(0, 500);
-      if (/uncertain|in-flight|delivery could not be verified/i.test(reason)) approval.status = "manual-review";
+      const uncertain = isUncertainDeliveryError(reason);
+      if (uncertain && profile.uncertainDeliveryPolicy === "assume-sent") {
+        markAssumedSent(state, approval, reason);
+        approval.lastAttemptAt = new Date().toISOString();
+        state.runs = [...state.runs, runRecord("send-assumed", { approvalId: approval.id, username: approval.username, reason })].slice(-200);
+        state.updatedAt = new Date().toISOString();
+        await writeJson(file, state);
+        return toolOk({ text: `Treated uncertain X delivery to @${approval.username} as sent; no retry will occur.`, json: { profile: name, approval } });
+      }
+      if (uncertain) approval.status = "manual-review";
       else if (!/cooldown|daily cap|another X DM operation/i.test(reason)) approval.status = "failed";
       approval.lastError = reason;
       approval.lastAttemptAt = new Date().toISOString();
@@ -722,6 +753,24 @@ async function handleReconcile(request, args) {
   } finally { await release(); }
 }
 
+async function handleAssumeSent(request, args) {
+  const release = await acquireRunLock(request.chatId);
+  try {
+    const name = profileName(args);
+    const { stateDir } = await loadProfile(request.chatId, name);
+    const { file, state } = await loadState(stateDir, name);
+    const approval = state.approval;
+    if (!approval || approval.id !== clean(args.approvalId)) throw new Error("No matching approval exists for assumed-sent reconciliation.");
+    if (!exactBoolean(args.confirm, true)) throw new Error("Assuming delivery requires exact confirm=true.");
+    if (!["failed", "manual-review"].includes(approval.status)) throw new Error("Only a failed or manual-review approval can be assumed sent.");
+    markAssumedSent(state, approval, args.reason || approval.lastError);
+    state.runs = [...state.runs, runRecord("assume-sent", { approvalId: approval.id, username: approval.username, deliveryVerified: false })].slice(-200);
+    state.updatedAt = new Date().toISOString();
+    await writeJson(file, state);
+    return toolOk({ text: `Marked uncertain delivery to @${approval.username} as sent; no retry will occur.`, json: { profile: name, approval } });
+  } finally { await release(); }
+}
+
 async function handleResolveNotSent(request, args) {
   const release = await acquireRunLock(request.chatId);
   try {
@@ -766,6 +815,7 @@ async function execute(requestFile) {
   if (action === "send-approved") return handleSendApproved(request, args);
   if (action === "skip") return handleSkip(request, args);
   if (action === "reconcile") return handleReconcile(request, args);
+  if (action === "assume-sent") return handleAssumeSent(request, args);
   if (action === "resolve-not-sent") return handleResolveNotSent(request, args);
   return toolError(`Unknown action: ${action}`);
 }
@@ -782,4 +832,4 @@ async function main(cliArgs = process.argv.slice(2)) {
 const isCli = process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url);
 if (isCli) await main();
 
-export { availableCandidates, candidateScore, greetingNameFor, handleFromXUrl, hasGroundedCoverageEvidence, parseSearchResults, pendingApproval, renderMessage, sha256, synthesizedCreativeQueries, verifiedPersonalFirstName };
+export { availableCandidates, candidateScore, greetingNameFor, handleFromXUrl, hasGroundedCoverageEvidence, isUncertainDeliveryError, parseSearchResults, pendingApproval, renderMessage, sha256, synthesizedCreativeQueries, verifiedPersonalFirstName };

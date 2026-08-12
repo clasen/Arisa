@@ -9,7 +9,7 @@ Runs evidence-backed, profile-driven organic outreach on X while keeping `x-dm` 
 3. The user reviews the exact candidate and message.
 4. `send-approved` requires the persisted `approvalId`, exact `messageHash`, unchanged profile digest, `confirm=true`, and `dryRun=false`. When `follow.enabled` is true, it first asks `x-dm` to verify or create the target follow and persists that result before attempting the DM. A failed or uncertain follow blocks the DM.
 5. `skip` rejects the pending approval so another candidate can be prepared.
-6. `reconcile` converts a manual-review approval to sent only when verified matching `x-dm` history exists; it never sends.
+6. `reconcile` converts a manual-review approval to sent only when verified matching `x-dm` history exists; `assume-sent` records an explicitly accepted uncertain delivery without retrying. Profiles may set `uncertainDeliveryPolicy` to `assume-sent`.
 
 There is no batch-send or autonomous scheduled-send action. `x-dm` independently enforces account pinning, locking, a durable recipient index, idempotency, cooldown, daily caps, delivery verification, and manual review for uncertain outcomes.
 
