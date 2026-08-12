@@ -3,11 +3,12 @@ import test from "node:test";
 import { createTelegramRestartHandler, telegramCommands } from "../src/transport/telegram/bot.js";
 import { handoffServiceRestart, restartService, serviceEntryFile, waitForServiceStop } from "../src/runtime/service-manager.js";
 
-test("registers /restart as a native Telegram command", () => {
+test("registers maintenance as native Telegram commands", () => {
   assert.equal(
     telegramCommands.some((command) => command.command === "restart"),
     true
   );
+  assert.equal(telegramCommands.some((command) => command.command === "update"), true);
   assert.equal(telegramCommands.some((command) => command.command === "harness"), false);
   assert.equal(telegramCommands.some((command) => command.command === "login"), false);
 });

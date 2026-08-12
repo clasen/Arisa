@@ -11,6 +11,7 @@ import { createIpcServer } from "./ipc/ipc-server.js";
 import { getAgentConfig } from "../core/agent/model-selection.js";
 import { normalizeModelSpeed } from "../core/agent/model-speed.js";
 import { runDoctor } from "./doctor.js";
+import { checkForUpdates, formatUpdateReport } from "./update-manager.js";
 
 function normalizeString(value) {
   const text = String(value ?? "").trim();
@@ -136,6 +137,7 @@ export async function createApp({ logger, runtimeOverrides, requestRestart } = {
       doctorPolicy: config.doctor,
       logger
     }),
+    checkUpdates: async (chatId) => formatUpdateReport(await checkForUpdates({ chatId, toolRegistry })),
     requestRestart,
     logger
   });

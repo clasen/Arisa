@@ -72,6 +72,17 @@ Convert Markdown to PDF with support for headings, emphasis, links, code, blockq
 - **Setup:** none
 - **Install footprint:** **Medium**, four npm dependencies
 
+### [`official-tool-sync`](./official-tool-sync/)
+
+Compare installed official tools with the catalog and safely apply non-conflicting updates while preserving configuration and local additions.
+
+- **Category:** `developer`
+- **Tags:** `catalog` · `compare` · `developer` · `essential` · `official` · `sync` · `tools` · `update` · `upgrade`
+- **Accepts:** `text/plain`, `application/json`
+- **Produces:** `application/json`, `text/plain`
+- **Setup:** `trash`
+- **Install footprint:** **Low**, no npm dependencies
+
 ### [`openai-transcribe`](./openai-transcribe/)
 
 Transcribe audio files and video audio tracks through the OpenAI audio transcription API.
@@ -159,6 +170,17 @@ Load the complete stop-slop writing guidance as editorial context for drafting a
 - **Tags:** `anti-slop` · `editing` · `markdown` · `prose` · `review` · `style` · `writing`
 - **Accepts:** `text/plain`, `text/markdown`, `application/json`
 - **Produces:** `text/markdown`, `application/json`
+- **Setup:** none
+- **Install footprint:** **Low**, no npm dependencies
+
+### [`trash`](./trash/)
+
+Move files and directories into chat-scoped recoverable trash, restore mistakes, and report retained storage safely.
+
+- **Category:** `filesystem`
+- **Tags:** `delete` · `essential` · `filesystem` · `recover` · `restore` · `safety` · `storage` · `trash` · `undo`
+- **Accepts:** `text/plain`, `application/json`
+- **Produces:** `application/json`, `text/plain`
 - **Setup:** none
 - **Install footprint:** **Low**, no npm dependencies
 

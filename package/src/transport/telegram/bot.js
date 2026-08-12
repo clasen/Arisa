@@ -21,6 +21,7 @@ export const telegramCommands = Object.freeze([
   { command: "new", description: "Start a new chat context" },
   { command: "restart", description: "Restart the Arisa service" },
   { command: "doctor", description: "Check and repair Arisa runtime health" },
+  { command: "update", description: "Check Arisa and official tool updates" },
   { command: "model", description: "Choose the model for this chat" },
   { command: "effort", description: "Choose reasoning effort for this chat" },
   { command: "speed", description: "Choose model speed for this chat" },
@@ -477,7 +478,7 @@ export async function closeModelPicker(ctx, { messageText, callbackText }) {
   await ctx.answerCallbackQuery({ text: callbackText });
 }
 
-export async function createTelegramBot({ config, artifactStore, toolRegistry, taskStore, agentManager, saveConfig, updateConfig, doctor, requestRestart, logger }) {
+export async function createTelegramBot({ config, artifactStore, toolRegistry, taskStore, agentManager, saveConfig, updateConfig, doctor, checkUpdates, requestRestart, logger }) {
   const bot = new Bot(config.telegram.token);
   const perChatState = createChatStateStore();
   const conversationHistory = new ConversationHistoryStore();
@@ -1160,6 +1161,18 @@ export async function createTelegramBot({ config, artifactStore, toolRegistry, t
         await ctx.reply(`Arisa Doctor failed: ${getErrorMessage(error)}`);
       }
     });
+  });
+
+  bot.command("update", async (ctx) => {
+    const auth = await authorizeChat({ config, chatId: ctx.chat.id, saveConfig, chatMeta: getIncomingChatMeta(ctx) });
+    if (!auth.ok) return;
+    await ctx.reply("Checking Arisa and official tool updates…");
+    try {
+      await ctx.reply(await checkUpdates(ctx.chat.id));
+    } catch (error) {
+      logger?.error("update", `update check failed: ${getErrorMessage(error)}`);
+      await ctx.reply(`Arisa update check failed: ${getErrorMessage(error)}`);
+    }
   });
 
   bot.command("model", async (ctx) => {
