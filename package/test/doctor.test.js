@@ -28,6 +28,20 @@ function runtime(overrides = {}) {
   };
 }
 
+const system = {
+  platform: "linux x64",
+  cpuCores: 4,
+  loadAverage: [0.25, 0.5, 0.75],
+  memoryTotal: 8 * 1024 ** 3,
+  memoryFree: 3 * 1024 ** 3,
+  memoryUsed: 5 * 1024 ** 3,
+  diskTotal: 100 * 1024 ** 3,
+  diskFree: 40 * 1024 ** 3,
+  diskUsed: 60 * 1024 ** 3,
+  uptimeSeconds: 90061,
+  processRss: 256 * 1024 ** 2
+};
+
 async function run({ diagnostic = runtime(), processes = [], service = { running: false }, repairs = [] } = {}) {
   const stopped = [];
   const report = await runDoctor({
@@ -39,7 +53,8 @@ async function run({ diagnostic = runtime(), processes = [], service = { running
     serviceStatus: async () => service,
     stopProcess: async (pid) => { stopped.push(pid); },
     stopDaemon: async () => {},
-    unregisterDaemon: async () => {}
+    unregisterDaemon: async () => {},
+    inspectResources: async () => system
   });
   return { report, stopped };
 }
@@ -63,7 +78,11 @@ test("reports Pi context size and retained-content inefficiency", async () => {
   assert.equal(report.contexts[0].level, "warning");
   assert.match(report.attention.join("\n"), /80,000\/100,000 tokens/);
   assert.match(report.attention.join("\n"), /tool results occupy 70\.0%/);
-  assert.match(formatDoctorReport(report), /Core: Pi, 1 active session/);
+  const formatted = formatDoctorReport(report);
+  assert.match(formatted, /├─ Core: Pi/);
+  assert.match(formatted, /CPU: 4 cores, load 0\.25 \/ 0\.50 \/ 0\.75/);
+  assert.match(formatted, /Memory: 5\.0 GB \/ 8\.0 GB \(62\.5%\), 3\.0 GB available/);
+  assert.match(formatted, /Disk: 60\.0 GB \/ 100\.0 GB \(60\.0%\), 40\.0 GB available/);
 });
 
 test("stops only a registered duplicate Arisa service with verified identity", async () => {

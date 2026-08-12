@@ -1,8 +1,11 @@
 import { execFile } from "node:child_process";
+import { statfs } from "node:fs/promises";
+import os from "node:os";
 import process from "node:process";
 import { promisify } from "node:util";
 import { stopManagedDaemon, unregisterManagedDaemon } from "../core/tools/daemon-processes.js";
 import { getServiceStatus, serviceEntryFile } from "./service-manager.js";
+import { arisaHomeDir } from "./paths.js";
 
 const execFileAsync = promisify(execFile);
 
@@ -99,6 +102,49 @@ function formatTokenCount(tokens) {
   return new Intl.NumberFormat("en-US", { maximumFractionDigits: 0 }).format(tokens);
 }
 
+function formatBytes(bytes) {
+  if (!Number.isFinite(bytes) || bytes < 0) return "unknown";
+  const units = ["B", "KB", "MB", "GB", "TB"];
+  let value = bytes;
+  let index = 0;
+  while (value >= 1024 && index < units.length - 1) {
+    value /= 1024;
+    index += 1;
+  }
+  return `${value.toFixed(index < 2 ? 0 : 1)} ${units[index]}`;
+}
+
+function formatUptime(seconds) {
+  if (!Number.isFinite(seconds) || seconds < 0) return "unknown";
+  const days = Math.floor(seconds / 86400);
+  const hours = Math.floor((seconds % 86400) / 3600);
+  const minutes = Math.floor((seconds % 3600) / 60);
+  return [days ? `${days}d` : "", hours ? `${hours}h` : "", `${minutes}m`].filter(Boolean).join(" ");
+}
+
+export async function inspectSystemResources({ diskPath = arisaHomeDir } = {}) {
+  const [load1, load5, load15] = os.loadavg();
+  const memoryTotal = os.totalmem();
+  const memoryFree = os.freemem();
+  const filesystem = await statfs(diskPath);
+  const blockSize = Number(filesystem.bsize);
+  const diskTotal = Number(filesystem.blocks) * blockSize;
+  const diskFree = Number(filesystem.bavail) * blockSize;
+  return {
+    platform: `${os.platform()} ${os.arch()}`,
+    cpuCores: os.cpus().length,
+    loadAverage: [load1, load5, load15],
+    memoryTotal,
+    memoryFree,
+    memoryUsed: memoryTotal - memoryFree,
+    diskTotal,
+    diskFree,
+    diskUsed: diskTotal - diskFree,
+    uptimeSeconds: os.uptime(),
+    processRss: process.memoryUsage().rss
+  };
+}
+
 function assertDoctorPolicy(policy) {
   const positiveValues = [
     "contextInspectionTimeoutMs",
@@ -182,19 +228,31 @@ export function formatDoctorReport(report) {
     ? "attention needed"
     : report.repairs.length ? "repaired" : "healthy";
   const lines = [
-    `Arisa Doctor: ${status}`,
-    `Core: Pi, ${report.runtime.sessions} active session(s), ${report.runtime.closingSessions} closing.`,
-    contextSummary(report.contexts),
-    `Daemons: ${report.daemons.length} checked${report.daemons.length ? ` (${daemonResultSummary(report.daemons)})` : ""}.`
+    `Arisa Doctor  [${status}]`,
+    `├─ Core: Pi`,
+    `│  ├─ Sessions: ${report.runtime.sessions} active, ${report.runtime.closingSessions} closing`,
+    `│  └─ ${contextSummary(report.contexts).replace(/^Contexts:\s*/, "Contexts: ").replace(/\.$/, "")}`,
+    `├─ Daemons: ${report.daemons.length} checked${report.daemons.length ? ` [${daemonResultSummary(report.daemons)}]` : ""}`
   ];
-  if (!report.repairs.length) lines.push("Processes: no unnecessary managed processes found.");
-  if (report.repairs.length) {
-    lines.push("", "Repairs:", ...report.repairs.map((item) => `- ${item}`));
+  if (report.system) {
+    const memoryPercent = report.system.memoryTotal ? (report.system.memoryUsed / report.system.memoryTotal) * 100 : 0;
+    const diskPercent = report.system.diskTotal ? (report.system.diskUsed / report.system.diskTotal) * 100 : 0;
+    lines.push(
+      "├─ System",
+      `│  ├─ Host: ${report.system.platform}, uptime ${formatUptime(report.system.uptimeSeconds)}`,
+      `│  ├─ CPU: ${report.system.cpuCores} cores, load ${report.system.loadAverage.map((value) => value.toFixed(2)).join(" / ")}`,
+      `│  ├─ Memory: ${formatBytes(report.system.memoryUsed)} / ${formatBytes(report.system.memoryTotal)} (${memoryPercent.toFixed(1)}%), ${formatBytes(report.system.memoryFree)} available`,
+      `│  ├─ Disk: ${formatBytes(report.system.diskUsed)} / ${formatBytes(report.system.diskTotal)} (${diskPercent.toFixed(1)}%), ${formatBytes(report.system.diskFree)} available`,
+      `│  └─ Arisa RSS: ${formatBytes(report.system.processRss)}`
+    );
+  } else if (report.systemError) {
+    lines.push(`├─ System: unavailable [${report.systemError}]`);
   }
-  if (report.attention.length) {
-    lines.push("", "Attention:", ...report.attention.map((item) => `- ${item}`));
-  }
-  return lines.join("\n");
+  lines.push(`├─ Repairs: ${report.repairs.length}`);
+  report.repairs.forEach((item) => lines.push(`│  └─ ${item}`));
+  lines.push(`└─ Attention: ${report.attention.length}`);
+  report.attention.forEach((item) => lines.push(`   └─ ${item}`));
+  return `\`\`\`text\n${lines.join("\n")}\n\`\`\``;
 }
 
 export async function runDoctor({
@@ -207,7 +265,8 @@ export async function runDoctor({
   stopProcess = terminateProcess,
   serviceStatus = getServiceStatus,
   stopDaemon = stopManagedDaemon,
-  unregisterDaemon = unregisterManagedDaemon
+  unregisterDaemon = unregisterManagedDaemon,
+  inspectResources = inspectSystemResources
 }) {
   assertDoctorPolicy(doctorPolicy);
   const runtime = await agentManager.getRuntimeDiagnostic({
@@ -218,9 +277,17 @@ export async function runDoctor({
     contexts: runtime.contexts.map((context) => evaluateContext(context, doctorPolicy)),
     daemons: [],
     repairs: [],
-    attention: []
+    attention: [],
+    system: null,
+    systemError: null
   };
   addContextAttention(report);
+  try {
+    report.system = await inspectResources();
+  } catch (error) {
+    report.systemError = error?.message || String(error);
+    report.attention.push(`System resource inspection failed: ${report.systemError}`);
+  }
   let processes = [];
   try {
     processes = await listProcesses({ timeoutMs: daemonPolicy.healthTimeoutMs });

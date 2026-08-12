@@ -1155,7 +1155,7 @@ export async function createTelegramBot({ config, artifactStore, toolRegistry, t
     if (!auth.ok) return;
     await withTyping(ctx, async () => {
       try {
-        await ctx.reply(formatDoctorReport(await doctor()));
+        await ctx.reply(renderTelegramHtml(formatDoctorReport(await doctor())), { parse_mode: "HTML" });
       } catch (error) {
         logger?.error("doctor", `doctor command failed: ${getErrorMessage(error)}`);
         await ctx.reply(`Arisa Doctor failed: ${getErrorMessage(error)}`);
