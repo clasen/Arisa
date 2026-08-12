@@ -13,6 +13,7 @@ const arisaPackageDir = process.env.ARISA_PACKAGE_DIR || path.resolve(toolDir, "
 const importCore = (relativePath) => import(pathToFileURL(path.join(arisaPackageDir, "src", relativePath)).href);
 const { loadToolConfig } = await importCore("core/tools/tool-config.js");
 const { createDaemonRuntime } = await importCore("core/tools/daemon-runtime.js");
+const { getToolStateDir } = await importCore("runtime/paths.js");
 const { isProcessAlive, readJson } = await importCore("core/tools/daemon-processes.js");
 const daemon = createDaemonRuntime({ toolName, entryPath, autoStart: true });
 const rooms = new Map();
@@ -123,6 +124,20 @@ function makeClientJs(basePath) {
   return `class ArisaSignaling extends EventTarget {\n  constructor({ url, room, peer } = {}) {\n    super();\n    const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';\n    this.room = room || 'default';\n    this.peer = peer || crypto.randomUUID();\n    this.url = url || proto + '//' + location.host + '${basePath}/ws?room=' + encodeURIComponent(this.room) + '&peer=' + encodeURIComponent(this.peer);\n    this.ws = new WebSocket(this.url);\n    this.ws.addEventListener('message', (event) => {\n      let data;\n      try { data = JSON.parse(event.data); } catch { return; }\n      this.dispatchEvent(new CustomEvent(data.type, { detail: data }));\n      if (this['on' + data.type]) this['on' + data.type](data);\n    });\n    this.ws.addEventListener('open', () => this.dispatchEvent(new Event('open')));\n    this.ws.addEventListener('close', () => this.dispatchEvent(new Event('close')));\n  }\n  on(type, fn) { this.addEventListener(type, (event) => fn(event.detail)); return this; }\n  send(type, payload = {}) { this.ws.send(JSON.stringify({ type, ...payload })); }\n  offer(to, sdp) { this.send('offer', { to, sdp }); }\n  answer(to, sdp) { this.send('answer', { to, sdp }); }\n  ice(to, candidate) { this.send('ice', { to, candidate }); }\n  message(data, to) { this.send('message', { to, data }); }\n  broadcast(data) { this.send('broadcast', { data }); }\n}\nwindow.ArisaSignaling = ArisaSignaling;\n`;
 }
 
+async function hydrateTurnConfig(options) {
+  const config = { ...options };
+  if (!config.turnUrls?.length) {
+    const host = new URL(config.publicBaseUrl).hostname;
+    config.turnUrls = [`turn:${host}:3478?transport=udp`, `turn:${host}:3478?transport=tcp`];
+  }
+  if (!config.turnSecret && !config.turnUsername && !config.turnCredential) {
+    try {
+      config.turnSecret = (await readFile(path.join(getToolStateDir("turn-server"), "secret"), "utf8")).trim();
+    } catch {}
+  }
+  return config;
+}
+
 function iceServers(config) {
   const servers = [];
   if (config.stunUrls?.length) servers.push({ urls: config.stunUrls });
@@ -138,6 +153,10 @@ function iceServers(config) {
 
 function makeHelpText(config) {
   const wsUrl = `${config.publicBaseUrl.replace(/^http/, "ws")}/ws?room=my-room&peer=player-a`;
+  const turn = iceServers(config).find((server) => String(server.urls).startsWith("turn:"));
+  const turnInfo = turn
+    ? `TURN relays:\n  ${[].concat(turn.urls).join("\n  ")}\n  Time-limited TURN credentials are included in the ICE response.\n`
+    : "TURN relays: not configured.\n";
   return `Arisa Signaling API
 
 A tiny public WebRTC signaling service for browsers, apps, experiments, calls, data channels, and peer-to-peer systems.
@@ -150,6 +169,7 @@ ICE servers:
   const { iceServers } = await fetch("${config.publicBaseUrl}/ice-servers").then(r => r.json())
   const pc = new RTCPeerConnection({ iceServers })
 
+${turnInfo}
 Rooms:
   - A room is created automatically when the first peer joins.
   - Use ?room=ROOM to choose a room.
@@ -344,7 +364,7 @@ async function signalingHealth(config) {
 }
 
 async function runDaemon() {
-  let configOptions = await loadToolConfig(toolName, defaults);
+  let configOptions = await hydrateTurnConfig(await loadToolConfig(toolName, defaults));
   let active = createServer(configOptions);
 
   async function startServer() {
@@ -357,7 +377,7 @@ async function runDaemon() {
     healthCheck: () => signalingHealth(active.config),
     recover: async () => {
       await active.close();
-      configOptions = await loadToolConfig(toolName, defaults);
+      configOptions = await hydrateTurnConfig(await loadToolConfig(toolName, defaults));
       active = createServer(configOptions);
       await startServer();
       return true;
@@ -407,7 +427,7 @@ if (!argv.length || argv.includes("--help") || argv[0] === "help") {
   });
 } else if (argv[0] === "serve") {
   const flags = parseArgs(argv.slice(1));
-  const configOptions = await loadToolConfig(toolName, defaults);
+  const configOptions = await hydrateTurnConfig(await loadToolConfig(toolName, defaults));
   if (flags.port != null) configOptions.port = flags.port;
   if (flags["base-path"] != null) configOptions.basePath = flags["base-path"];
   const { server, config } = createServer(configOptions);

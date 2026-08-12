@@ -41,7 +41,7 @@ const { iceServers } = await fetch("https://arisa.sh/signaling/ice-servers").the
 const pc = new RTCPeerConnection({ iceServers })
 ```
 
-By default this returns a public STUN server. TURN can be added with env vars:
+By default this returns a public STUN server. When `turnUrls` is empty, the daemon derives UDP and TCP TURN URLs from `publicBaseUrl` and reuses the managed `turn-server` secret when available. TURN can also be configured explicitly:
 
 - `SIGNALING_TURN_URLS`
 - `SIGNALING_TURN_USERNAME`
