@@ -52,7 +52,7 @@ Each tool declares in `tool.manifest.json`:
 All textual content generated or sent by Arisa or its tools must use UTF-8.
 
 - User-facing text documents and exports in `.txt`, `.md`, or `.csv` format must start with a UTF-8 byte-order mark (BOM).
-- Source code, repository documentation, configuration, manifests, and structured data must use UTF-8 without BOM. This includes `.js`, `.mjs`, `.cjs`, `.json`, `.jsonl`, `config.js`, `tool.manifest.json`, and `package.json`.
+- Source code, repository documentation, configuration, manifests, and structured data must use UTF-8 without BOM.
 - Protocol payloads must declare UTF-8 through the protocol's standard mechanism and encode their bytes as UTF-8. For example, email and HTTP text content must use a `Content-Type` with `charset=UTF-8`.
 
 ## Tool-to-Arisa IPC
