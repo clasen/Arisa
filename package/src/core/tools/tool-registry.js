@@ -1,6 +1,7 @@
 import { mkdir, readdir, readFile, rmdir, unlink, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { spawn } from "node:child_process";
+import { randomUUID } from "node:crypto";
 import { arisaIpcSocketFile, arisaPackageDir, getToolConfigPath, getToolTmpDir, getChatToolTmpDir, toolsDir as userToolsRoot } from "../../runtime/paths.js";
 import { loadToolConfig, parseConfigModule, writeToolConfig } from "./tool-config.js";
 import { normalizeToolResult } from "./tool-result.js";
@@ -211,7 +212,7 @@ export class ToolRegistry {
     this.logger?.log("tools", `running ${name}`);
     const tmpDir = chatId != null ? getChatToolTmpDir(chatId, name) : getToolTmpDir(name);
     await mkdir(tmpDir, { recursive: true });
-    const requestFile = path.join(tmpDir, `.request-${Date.now()}.json`);
+    const requestFile = path.join(tmpDir, `.request-${Date.now()}-${randomUUID()}.json`);
     const skills = await this.resolveSkills(name);
     const enrichedRequest = { ...request, chatId, skills };
     await writeFile(requestFile, `${JSON.stringify(enrichedRequest, null, 2)}\n`, "utf8");

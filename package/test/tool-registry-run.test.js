@@ -162,6 +162,26 @@ test("runs a registered tool process with an enriched request and cleans up requ
   await assert.rejects(() => access(path.dirname(requestFile)), { code: "ENOENT" });
 });
 
+test("keeps concurrent requests to the same tool isolated", async () => {
+  await resetHome();
+  await createFakeTool("fake-tool");
+
+  const registry = new ToolRegistry();
+  await registry.load();
+
+  const results = await Promise.all(Array.from({ length: 12 }, (_, index) => registry.run({
+    name: "fake-tool",
+    chatId: "chat-1",
+    request: { text: `request-${index}`, args: { index } }
+  })));
+
+  assert.deepEqual(
+    results.map((result) => result.output.request.text).sort(),
+    Array.from({ length: 12 }, (_, index) => `request-${index}`).sort()
+  );
+  assert.equal(new Set(results.map((result) => result.output.requestFile)).size, 12);
+});
+
 test("rejects unknown tools", async () => {
   await resetHome();
   const registry = new ToolRegistry();
