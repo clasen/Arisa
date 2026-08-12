@@ -1153,14 +1153,18 @@ export async function createTelegramBot({ config, artifactStore, toolRegistry, t
   bot.command("doctor", async (ctx) => {
     const auth = await authorizeChat({ config, chatId: ctx.chat.id, saveConfig, chatMeta: getIncomingChatMeta(ctx) });
     if (!auth.ok) return;
-    await withTyping(ctx, async () => {
-      try {
-        await ctx.reply(renderTelegramHtml(formatDoctorReport(await doctor())), { parse_mode: "HTML" });
-      } catch (error) {
-        logger?.error("doctor", `doctor command failed: ${getErrorMessage(error)}`);
-        await ctx.reply(`Arisa Doctor failed: ${getErrorMessage(error)}`);
-      }
-    });
+    const pending = await ctx.reply(renderTelegramHtml("```text\nRunning Arisa Doctor…\n```"), { parse_mode: "HTML" });
+    try {
+      await ctx.api.editMessageText(
+        ctx.chat.id,
+        pending.message_id,
+        renderTelegramHtml(formatDoctorReport(await doctor())),
+        { parse_mode: "HTML" }
+      );
+    } catch (error) {
+      logger?.error("doctor", `doctor command failed: ${getErrorMessage(error)}`);
+      await ctx.api.editMessageText(ctx.chat.id, pending.message_id, `Arisa Doctor failed: ${getErrorMessage(error)}`);
+    }
   });
 
   bot.command("update", async (ctx) => {
