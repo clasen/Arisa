@@ -561,7 +561,7 @@ function incomingMessageTask(chatId, message, artifact = null, transcript = "") 
     runAt: now,
     payload: { chatId, prompt: buildIncomingMessagePrompt(message, artifact, transcript), artifactId: artifact?.id || "" },
     recurrence: null,
-    source: { type: "tool", toolName, chatId, messageId: message.id }
+    source: { type: "tool", toolName, chatId, resourceId: message.from, messageId: message.id }
   };
 }
 

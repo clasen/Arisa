@@ -76,7 +76,12 @@ const result = await arisa.tools.run({
 }, { timeoutMs: 120_000 });
 ```
 
-The IPC channel is a local socket under `~/.arisa/state`. Every request must include `toolName`; chat-scoped capabilities also require `chatId`. Exposed capabilities are explicit: tools (`list`, `help`, `skills`, `setConfig`, `run`), artifacts (`createText`, `listRecent`, `get`, `deliver`), tasks (`add`, `list`, `cancel`, `cancelAll`), agent events (`enqueueEvent`), and runtime paths (`getChatToolStateDir`, `getToolStateDir`, `getChatToolTmpDir`, `getToolTmpDir`, `getChatArtifactsDir`). Do not expose raw `agentManager`, `taskStore`, `artifactStore`, or `toolRegistry` access.
+The IPC channel is a local socket under `~/.arisa/state`. Every request must include `toolName`; chat-scoped capabilities also require `chatId`. Exposed capabilities are explicit: tools (`list`, `help`, `skills`, `setConfig`, `setResourceNote`, `getResourceNote`, `run`), artifacts (`createText`, `listRecent`, `get`, `deliver`), tasks (`add`, `list`, `cancel`, `cancelAll`), agent events (`enqueueEvent`), and runtime paths (`getChatToolStateDir`, `getToolStateDir`, `getChatToolTmpDir`, `getToolTmpDir`, `getChatArtifactsDir`). Do not expose raw `agentManager`, `taskStore`, `artifactStore`, or `toolRegistry` access.
+
+## Tool resource notes
+A tool resource may have one deterministic chat-scoped operational note of at most 200 characters, keyed by the exact pair `toolName:resourceId`. Notes live in the chat state file returned by `getChatToolResourceNotesFile(chatId)`. They are separate from semantic memory and contain no credentials.
+
+Use `set_tool_resource_note` to set or clear a note. Tool events must put the exact resource identifier in `task.source.resourceId` or pass `resourceId` to `agent.enqueueEvent`; Arisa injects the matching note into the prompt before reasoning. Tool executions may pass `resourceId` to `run_tool`, which injects the note as `request.resourceNote`. Never infer resource identifiers from free-form prompt text.
 
 ## Conceptual pipe model
 There are two different moments where pipes can happen:

@@ -12,6 +12,7 @@ import { clampModelThinkingLevel } from "./pi-runtime.js";
 import { clampModelSpeed, createModelSpeedController } from "./model-speed.js";
 import { arisaHomeDir, getChatPiSessionsDir } from "../../runtime/paths.js";
 import { searchOfficialToolCatalog } from "../tools/official-tool-catalog.js";
+import { ToolResourceNoteStore } from "../tools/tool-resource-note-store.js";
 
 const piValidationTimeoutMs = 60_000;
 const arisaToolNames = [
@@ -19,6 +20,7 @@ const arisaToolNames = [
   "tool_help",
   "tool_skills",
   "set_tool_config",
+  "set_tool_resource_note",
   "run_tool",
   "list_scheduled_tasks",
   "cancel_scheduled_task",
@@ -222,6 +224,7 @@ export class AgentManager {
     this.toolRegistry = toolRegistry;
     this.taskStore = taskStore;
     this.logger = logger;
+    this.resourceNotes = new ToolResourceNoteStore();
     this.sessions = new Map();
     this.pendingNewSessions = new Set();
     this.pendingSessionHandoffs = new Map();
@@ -506,7 +509,12 @@ export class AgentManager {
     await this.toolRegistry.load();
     this.logger?.log("agent", `run_tool ${name}`);
     const chatArtifactStore = this.artifactStore.forChat(chatId);
-    const result = await this.toolRegistry.run({ name, request, chatId });
+    const resourceId = String(request?.resourceId || "").trim();
+    const resourceNote = resourceId
+      ? await this.resourceNotes.get(chatId, name, resourceId)
+      : "";
+    const enrichedRequest = resourceNote ? { ...request, resourceId, resourceNote } : request;
+    const result = await this.toolRegistry.run({ name, request: enrichedRequest, chatId });
 
     if (result.output?.text) {
       const outArtifact = await chatArtifactStore.createText({
@@ -639,6 +647,20 @@ export class AgentManager {
         }
       }),
       defineTool({
+        name: "set_tool_resource_note",
+        label: "Set tool resource note",
+        description: "Set or clear a deterministic chat-scoped note of up to 200 characters for one tool resource.",
+        parameters: Type.Object({
+          name: Type.String(),
+          resourceId: Type.String(),
+          note: Type.String()
+        }),
+        execute: async (_id, params) => {
+          const result = await this.resourceNotes.set(chatId, params.name, params.resourceId, params.note);
+          return { content: [{ type: "text", text: JSON.stringify(result) }], details: result };
+        }
+      }),
+      defineTool({
         name: "run_tool",
         label: "Run tool",
         description: "Run a CLI tool using text input or an artifactId. Inspect the returned status/resolution fields. If a tool reports missing config, ask the user naturally, use set_tool_config, and retry. Set `deliver: true` to also send the generated file to the chat in one step (only when you want the user to receive it now, not for intermediate pipe steps).",
@@ -646,6 +668,7 @@ export class AgentManager {
           name: Type.String(),
           artifactId: Type.Optional(Type.String()),
           text: Type.Optional(Type.String()),
+          resourceId: Type.Optional(Type.String()),
           args: Type.Optional(Type.Record(Type.String(), Type.String())),
           deliver: Type.Optional(Type.Boolean())
         }),
@@ -662,6 +685,7 @@ export class AgentManager {
             request: {
               artifact,
               text: params.text,
+              resourceId: params.resourceId,
               args: params.args || {}
             },
             chatId

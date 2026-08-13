@@ -47,6 +47,10 @@ export function getChatToolUsageFile(chatId) {
   return path.join(getChatDir(chatId), "state", "tool-usage.json");
 }
 
+export function getChatToolResourceNotesFile(chatId) {
+  return path.join(getChatDir(chatId), "state", "tool-resource-notes.json");
+}
+
 export function getChatToolStateDir(chatId, toolName) {
   return path.join(getChatDir(chatId), "state", "tools", toolName);
 }

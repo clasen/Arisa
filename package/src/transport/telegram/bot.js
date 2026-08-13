@@ -15,6 +15,7 @@ import { formatPortableSessionHistory } from "../../core/agent/agent-manager.js"
 import { ConversationHistoryStore } from "../../core/conversation/conversation-history-store.js";
 import { formatDoctorReport } from "../../runtime/doctor.js";
 import { formatToolUsageReport } from "../../runtime/tool-usage-report.js";
+import { ToolResourceNoteStore } from "../../core/tools/tool-resource-note-store.js";
 
 const slowPromptNoticeMs = 300_000;
 
@@ -234,12 +235,17 @@ export async function withPromptSpeed({ speedController, speed, restoreSpeed }, 
   }
 }
 
-async function buildAsyncTaskPrompt({ task, artifactStore, toolRegistry, logger }) {
+export async function buildAsyncTaskPrompt({ task, artifactStore, toolRegistry, resourceNotes, logger }) {
   const taskText = task.payload.prompt || "";
+  const resourceId = String(task.source?.resourceId || task.payload?.resourceId || "").trim();
+  const resourceNote = resourceId && task.source?.toolName
+    ? await resourceNotes.get(task.payload.chatId, task.source.toolName, resourceId)
+    : "";
   const parts = [
     "Scheduled task fired.",
     `taskId: ${task.id}`,
     `chatId: ${task.payload.chatId}`,
+    resourceNote ? `resourceNote: ${resourceNote}` : null,
     taskText ? `text: ${taskText}` : null
   ];
 
@@ -282,11 +288,16 @@ async function buildAsyncTaskPrompt({ task, artifactStore, toolRegistry, logger 
   return parts.filter(Boolean).join("\n");
 }
 
-function buildAsyncEventPrompt(task) {
+async function buildAsyncEventPrompt(task, resourceNotes) {
+  const resourceId = String(task.source?.resourceId || task.payload?.resourceId || "").trim();
+  const resourceNote = resourceId && task.source?.toolName
+    ? await resourceNotes.get(task.payload.chatId, task.source.toolName, resourceId)
+    : "";
   return [
     "External event arrived.",
     `taskId: ${task.id}`,
     `chatId: ${task.payload.chatId}`,
+    resourceNote ? `resourceNote: ${resourceNote}` : null,
     task.payload.prompt ? `event: ${task.payload.prompt}` : null,
     "A polling checker detected this external event. Evaluate it and decide the next action.",
     "If it warrants no action, you may stay silent.",
@@ -558,6 +569,7 @@ export async function closeModelPicker(ctx, { messageText, callbackText }) {
 }
 
 export async function createTelegramBot({ config, artifactStore, toolRegistry, taskStore, agentManager, saveConfig, updateConfig, doctor, checkUpdates, requestRestart, logger }) {
+  const resourceNotes = new ToolResourceNoteStore();
   const bot = new Bot(config.telegram.token);
   const perChatState = createChatStateStore();
   const conversationHistory = new ConversationHistoryStore();
@@ -1100,7 +1112,7 @@ export async function createTelegramBot({ config, artifactStore, toolRegistry, t
       logger?.log("tasks", `running task ${task.id} for chat ${chatId}`);
       await enqueuePrompt({
         chatId,
-        prompt: await buildAsyncTaskPrompt({ task, artifactStore, toolRegistry, logger }),
+        prompt: await buildAsyncTaskPrompt({ task, artifactStore, toolRegistry, resourceNotes, logger }),
         label: `scheduled task ${task.id}`
       });
       await taskStore.complete(task.id);
@@ -1111,7 +1123,7 @@ export async function createTelegramBot({ config, artifactStore, toolRegistry, t
       logger?.log("tasks", `agent event ${task.id} for chat ${chatId}`);
       await enqueuePrompt({
         chatId,
-        prompt: buildAsyncEventPrompt(task),
+        prompt: await buildAsyncEventPrompt(task, resourceNotes),
         label: `agent event ${task.id}`
       });
       await taskStore.complete(task.id);

@@ -97,6 +97,8 @@ export function createArisaClient({
       help: (params) => call("tools.help", params),
       skills: (params) => call("tools.skills", params),
       setConfig: (params) => call("tools.setConfig", params),
+      setResourceNote: (params) => call("tools.setResourceNote", params),
+      getResourceNote: (params) => call("tools.getResourceNote", params),
       run: (params, options) => call("tools.run", params, options)
     },
     paths: {

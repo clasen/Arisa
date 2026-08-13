@@ -5,6 +5,7 @@ import {
   getToolStateDir,
   getToolTmpDir
 } from "./paths.js";
+import { ToolResourceNoteStore } from "../core/tools/tool-resource-note-store.js";
 
 function requireToolName(toolName) {
   if (typeof toolName !== "string" || !toolName.trim()) {
@@ -41,7 +42,7 @@ function normalizeLimit(limit) {
   return Math.min(value, 100);
 }
 
-export function createArisaCapabilities({ artifactStore, taskStore, toolRegistry, agentManager } = {}) {
+export function createArisaCapabilities({ artifactStore, taskStore, toolRegistry, agentManager, resourceNotes = new ToolResourceNoteStore() } = {}) {
   async function dispatch({ method, toolName, chatId = null, params = {} } = {}) {
     const scopedToolName = requireToolName(toolName);
 
@@ -70,6 +71,25 @@ export function createArisaCapabilities({ artifactStore, taskStore, toolRegistry
       );
     }
 
+    if (method === "tools.setResourceNote") {
+      const scopedChatId = requireChatId(chatId, method);
+      return resourceNotes.set(
+        scopedChatId,
+        scopedToolName,
+        requireString(params.resourceId, "resourceId"),
+        String(params.note ?? "")
+      );
+    }
+
+    if (method === "tools.getResourceNote") {
+      const scopedChatId = requireChatId(chatId, method);
+      return {
+        toolName: scopedToolName,
+        resourceId: requireString(params.resourceId, "resourceId"),
+        note: await resourceNotes.get(scopedChatId, scopedToolName, params.resourceId)
+      };
+    }
+
     if (method === "tools.run") {
       if (!agentManager?.runTool) {
         throw new Error("tools.run requires agentManager");
@@ -89,6 +109,7 @@ export function createArisaCapabilities({ artifactStore, taskStore, toolRegistry
         request: {
           artifact,
           text: params.text,
+          resourceId: params.resourceId,
           args: normalizeArgs(params.args)
         },
         chatId: scopedChatId
@@ -164,12 +185,13 @@ export function createArisaCapabilities({ artifactStore, taskStore, toolRegistry
 
     if (method === "agent.enqueueEvent") {
       const scopedChatId = requireChatId(chatId, method);
+      const resourceId = String(params.resourceId || "").trim();
       return taskStore.add({
         kind: "agent_event",
-        payload: { prompt: requireString(params.prompt, "prompt") }
+        payload: { prompt: requireString(params.prompt, "prompt"), resourceId }
       }, {
         payload: { chatId: scopedChatId },
-        source: { type: "tool", toolName: scopedToolName, chatId: scopedChatId }
+        source: { type: "tool", toolName: scopedToolName, chatId: scopedChatId, resourceId }
       });
     }
 
