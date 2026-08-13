@@ -82,9 +82,21 @@ test("builds a dedicated headless systemd service with isolated state", () => {
   });
   assert.match(unit, /User=arisa-slave/);
   assert.match(unit, /Environment="ARISA_HOME=\/var\/lib\/arisa-slave"/);
+  assert.match(unit, /^WorkingDirectory=\/var\/lib\/arisa-slave$/m);
   assert.match(unit, /ExecStart="\/usr\/bin\/node" "\/opt\/arisa\/src\/index\.js" slave --service-runner/);
   assert.match(unit, /StandardOutput=append:\/var\/lib\/arisa-slave\/state\/arisa-slave\.log/);
   assert.doesNotMatch(unit, /Telegram|Pi Agent/);
+});
+
+test("escapes systemd WorkingDirectory paths without quoting the entire value", () => {
+  const unit = buildSlaveSystemdUnit({
+    account: { scope: "user", user: "tester" },
+    slaveHome: "/srv/arisa slave",
+    entryFile: "/opt/arisa/src/index.js",
+    nodePath: "/usr/bin/node"
+  });
+  assert.match(unit, /^WorkingDirectory=\/srv\/arisa\\x20slave$/m);
+  assert.match(unit, /^StandardOutput=append:\/srv\/arisa\\x20slave\/state\/arisa-slave\.log$/m);
 });
 
 test("refuses to replace the PID of an active Slave host", async (t) => {

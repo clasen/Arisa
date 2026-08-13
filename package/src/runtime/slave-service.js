@@ -65,7 +65,21 @@ export async function selectSlaveServiceAccount({
 }
 
 function quoteSystemd(value) {
-  return `"${String(value).replaceAll("\\", "\\\\").replaceAll('"', '\\"')}"`;
+  return `"${String(value).replaceAll("\\", "\\\\").replaceAll('"', '\\"').replaceAll("%", "%%")}"`;
+}
+
+function escapeSystemdPath(value) {
+  const text = String(value);
+  if (text.includes("\0")) throw new Error("Systemd paths cannot contain NUL bytes");
+  return [...text].map((character) => {
+    if (character === "\\") return "\\\\";
+    if (character === "%") return "%%";
+    const codePoint = character.codePointAt(0);
+    if (codePoint <= 0x20 || codePoint === 0x7f || character === '"' || character === "'") {
+      return `\\x${codePoint.toString(16).padStart(2, "0")}`;
+    }
+    return character;
+  }).join("");
 }
 
 export function buildSlaveSystemdUnit({ account, slaveHome, entryFile, nodePath = process.execPath }) {
@@ -84,10 +98,10 @@ export function buildSlaveSystemdUnit({ account, slaveHome, entryFile, nodePath 
     userDirective.trimEnd(),
     `Environment=${quoteSystemd(`ARISA_HOME=${paths.home}`)}`,
     `Environment=${quoteSystemd(`ARISA_SLAVE_HOME=${paths.home}`)}`,
-    `WorkingDirectory=${quoteSystemd(paths.home)}`,
+    `WorkingDirectory=${escapeSystemdPath(paths.home)}`,
     `ExecStart=${quoteSystemd(nodePath)} ${quoteSystemd(entryFile)} slave --service-runner`,
-    `StandardOutput=append:${paths.logFile}`,
-    `StandardError=append:${paths.logFile}`,
+    `StandardOutput=append:${escapeSystemdPath(paths.logFile)}`,
+    `StandardError=append:${escapeSystemdPath(paths.logFile)}`,
     "Restart=on-failure",
     "RestartSec=2",
     "",
