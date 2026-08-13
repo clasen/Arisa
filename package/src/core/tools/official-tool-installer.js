@@ -87,7 +87,7 @@ async function sha256(file) {
 }
 
 export async function verifyOfficialToolTree(toolDir, expectedFiles) {
-  const actualFiles = await walkFiles(toolDir);
+  const actualFiles = (await walkFiles(toolDir)).sort();
   const lockedFiles = Object.keys(expectedFiles).sort();
   if (actualFiles.length !== lockedFiles.length || actualFiles.some((file, index) => file !== lockedFiles[index])) {
     const missing = lockedFiles.filter((file) => !actualFiles.includes(file));

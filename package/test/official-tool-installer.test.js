@@ -22,8 +22,11 @@ async function fixture(t) {
   await mkdir(source, { recursive: true });
   await writeFile(path.join(source, "tool.manifest.json"), `${JSON.stringify({ name: "master-slave", entry: "index.js" })}\n`);
   await writeFile(path.join(source, "index.js"), "process.stdout.write('ok');\n");
+  await mkdir(path.join(source, "lib"));
+  await writeFile(path.join(source, "lib", "helper.js"), "export {};\n");
   const files = {
     "index.js": await digest(path.join(source, "index.js")),
+    "lib/helper.js": await digest(path.join(source, "lib", "helper.js")),
     "tool.manifest.json": await digest(path.join(source, "tool.manifest.json"))
   };
   return { root, source, files };
@@ -51,7 +54,7 @@ test("requires immutable commits and exact SHA-256 entries", () => {
 
 test("verifies the exact file set and digests", async (t) => {
   const { source, files } = await fixture(t);
-  assert.deepEqual(await verifyOfficialToolTree(source, files), { files: 2 });
+  assert.deepEqual(await verifyOfficialToolTree(source, files), { files: 3 });
   await writeFile(path.join(source, "extra.js"), "unexpected\n");
   await assert.rejects(() => verifyOfficialToolTree(source, files), /unexpected=extra.js/);
 });

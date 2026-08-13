@@ -1,0 +1,40 @@
+{
+  "version": 1,
+  "repository": "https://github.com/clasen/Arisa.git",
+  "commit": "5959b7378c94b4d9c4864eba9e1ef9aa564f104a",
+  "tools": {
+    "master-slave": {
+      "files": {
+        "README.md": "39a546ca6046e622f92eff2d46f2c441beef43f150758799c68328bffd54efce",
+        "batch-runner.js": "be3939efe9c5800d3078c15a094f53db1094ef6e809d7826db7c47e3bec0c31b",
+        "chat-state-store.js": "50de39aa33432733bb688eb01968e314a32b169324a66d0f0089b2a19ed9c880",
+        "config.js": "ff1c1cb6701ae1da7a6eb1519ba96a416e48daa73c2155a6f93cf5d64f65cef8",
+        "index.js": "39dc9bf44f94864bc4fd09ce695cc2e084e59eea48d09764f0fb6f998faf9dd3",
+        "lib/bootstrap-url.js": "f05925cc0f0dff0882f94f9908c6f2c80aa8632cd51f63389381dcbb0f73afb3",
+        "lib/encrypted-frames.js": "47e1b11fafdbbcdfd86a0993a47a774e4f37d6386edeaf8ec1c8511b109728cf",
+        "lib/handshake-crypto.js": "9728b117aad7de53f5f0e255c0fd865ee1a19633368730a7634334d374094578",
+        "lib/ip-address.js": "3d5ab42d15fd47e79c5733114f905e995ef2d43226e29c434b250bf37878b0fa",
+        "lib/pairing-secret-store.js": "390f5d31d2a75707461147a1ec1b26de5f36da3ec4ec404b6f00a0f10c14065a",
+        "lib/profile-catalog.js": "d5cf43a564e45297d2c25642ba53a72a782ac2f3302f086658b3930236e6a154",
+        "lib/secure-store.js": "b8f365197f8e60d7f81fde6ed1cfc8851b603f6b0783e4cdc9036bb5c99726e1",
+        "master-domain.js": "10b7dfb43eb9939eb5baec54f742076cc73a2add6589a0ff57c51bc79c236faf",
+        "network-session.js": "db2d81a7ef47af29236d963b98e21414a11fef68e8b20895126eaad3f696ba3d",
+        "package.json": "8e9177238ba878dd4b51e32e0ed58a39c5789186c22b19ad7a43ab6caf9dc469",
+        "remote-runtime.js": "92c86adf575f2734c6f2f0d9004018f2019a8ac10288a1810425ce9fe0ffa129",
+        "slave-operations.js": "fec2e8addfff98f080284f24f722c1516124e5f6d12d8c03bb3c9cc0c475d1d6",
+        "state-store.js": "c56849a3f1b9c990128276e17963034a7836abacedc44f2e500d5732ebf9e451",
+        "test/batch-runner.test.js": "f14c6fddff5d6240008eef388df6a153e82490e534d06419d7bb267e4f4693a7",
+        "test/bootstrap-url.test.js": "62c112b1a38c59ea2c77f797e32873667b52db32386da661a6ae8410490126fe",
+        "test/encrypted-frames.test.js": "cfb3195d3a58df7dc570bc7840a21c1841a53e0abc8b92840e0c24ed3435bcc1",
+        "test/handshake-crypto.test.js": "f11d6e95658f2055d8256bd7dfb66b39bedf95bf62a3cec5525b109bb6f9bc95",
+        "test/master-domain.test.js": "7298766db3e6b186cca0109f352766e1bf417a8af12a58dd1c2b78fd1a61ff24",
+        "test/network-session.test.js": "2e459346cc9364be705bc5f54691245044588b2cd03ae77e2e870dee6dfbcca6",
+        "test/pairing-secret-store.test.js": "c51257365fd0b641c24768d710cdff2d1c5f8816bf90f66c2c01a226904cb43f",
+        "test/profile-catalog.test.js": "d8e297bee413d53ec13f2e1779c13f2e019cb8304976d567eab0e9f1ca36637c",
+        "test/remote-runtime.test.js": "a842c9934a3bf2e37c0a807ad2bc78f2f0d5adb38336c53369ddd92132bfb2b6",
+        "test/slave-operations.test.js": "a84526ad7554c7d03192a68655b4637bec18750559a5c3436f7471e912ca74cc",
+        "tool.manifest.json": "abf24c67b1d9ef0331ded59e04dcc092772419e74691c0d753ab51b40286d6f6"
+      }
+    }
+  }
+}

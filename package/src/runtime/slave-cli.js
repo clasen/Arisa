@@ -222,6 +222,10 @@ export async function runSlaveCli({
   }
 
   const action = positionals[0];
+  if (flags.help || action === "help") {
+    output.log("Usage: arisa slave <tcp://ip:port/secret> | start | stop | restart | status | log | tools | unpair");
+    return { help: true };
+  }
   if (action?.startsWith("tcp://")) {
     if (positionals.length !== 1) throw new Error("arisa slave accepts exactly one bootstrap URL");
     return runSlaveBootstrap(action, { paths, entryFile, output });

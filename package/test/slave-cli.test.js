@@ -6,7 +6,7 @@ import test from "node:test";
 import { createHeadlessApp } from "../src/runtime/create-headless-app.js";
 import { parseSlaveBootstrapUrl } from "../src/runtime/slave-bootstrap-url.js";
 import { withSecureRequestFile } from "../src/runtime/secure-request-file.js";
-import { runSlaveBootstrap, runSlaveCli } from "../src/runtime/slave-cli.js";
+import { ensureMasterSlaveTool, runSlaveBootstrap, runSlaveCli } from "../src/runtime/slave-cli.js";
 import {
   buildSlaveSystemdUnit,
   getSlavePaths,
@@ -164,6 +164,22 @@ test("validates before effects and keeps the bootstrap secret out of service met
   assert.deepEqual(calls, []);
 });
 
+test("ships an immutable verified master-slave bootstrap lock", async (t) => {
+  const home = await mkdtemp(path.join(os.tmpdir(), "arisa-slave-lock-"));
+  t.after(() => rm(home, { recursive: true, force: true }));
+  const calls = [];
+  const result = await ensureMasterSlaveTool(getSlavePaths(home), {
+    install: async (request) => {
+      calls.push(request);
+      return { commit: request.lock.commit };
+    }
+  });
+  assert.equal(result.installed, true);
+  assert.match(result.commit, /^[a-f0-9]{40}$/);
+  assert.equal(calls[0].toolName, "master-slave");
+  assert.ok(Object.keys(calls[0].lock.tools["master-slave"].files).length > 0);
+});
+
 test("starts the headless composition without Telegram or Pi components", async () => {
   const calls = [];
   const toolRegistry = {
@@ -252,4 +268,15 @@ test("combines systemd and local tool diagnostics for Slave status", async (t) =
   assert.match(output[0], /Tools: 4/);
   assert.match(output[0], /Jobs: active=1, queued=2, failed=0/);
   assert.match(output[0], /Pending secrets: 0/);
+});
+
+test("prints Slave help without touching service or Master bootstrap state", async () => {
+  const output = [];
+  const result = await runSlaveCli({
+    flags: { help: true },
+    output: { log: (line) => output.push(line) },
+    controlService: async () => assert.fail("service must not be inspected for help")
+  });
+  assert.deepEqual(result, { help: true });
+  assert.match(output[0], /^Usage: arisa slave/);
 });

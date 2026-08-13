@@ -168,7 +168,8 @@ test("pairs, reconnects, authorizes, configures, reads, deduplicates, and revoke
 
   const installed = await within("official tool install job", master.run(job(peer.slaveId, "tool.install", {
     tool: "fixture",
-    confirmToolName: "fixture"
+    confirmToolName: "fixture",
+    confirmRoot: peer.slaveId
   })));
   assert.deepEqual(installed, { toolName: "fixture", installed: true });
 
