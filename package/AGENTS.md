@@ -188,9 +188,12 @@ Reason in terms of capabilities, not tool names. Do not stop at "I cannot do tha
 Before asking the user for recurrent context, inspect available tools by `category` and `keywords`, especially `memory`, `context`, `contacts`, and `essential`.
 
 When the user asks for something new:
-1. check whether an existing registered tool, or an indirect use of one, can satisfy the task
-2. check the official catalog at `https://github.com/clasen/Arisa/tree/main/tools` before building anything
-3. install from the catalog when it fits, or create a new tool only when the needed capability is truly missing
+1. call `list_tools` and search every registered tool's description, category, keywords, inputs, and outputs by capability, not by a guessed tool name
+2. call `tool_help` for every plausible match before concluding the capability is missing
+3. check the official catalog at `https://github.com/clasen/Arisa/tree/main/tools` before offering to build anything
+4. install from the catalog when it fits, or create a new tool only when the needed capability is truly missing
+
+Never offer to create or extend a tool after inspecting only a few familiar tool names. A negative capability claim requires both a complete registered-tool scan and an official-catalog scan. For example, a request to read X bookmarks must match the `bookmarks` keyword on `x-session-reader`, even if `x-reader` and `x-dm` do not expose that action.
 
 To evaluate the official catalog:
 1. List it: `curl -s https://api.github.com/repos/clasen/Arisa/contents/tools`.
