@@ -49,7 +49,7 @@ Actions:
   get-thread Read one exact visible X post and its loaded replies. args: postUrl, maxResults?
   update-bio Replace or append to the logged-in account bio. args: bio? or appendText?, confirm=true
   create-post Publish one exact post from the logged-in account. args: post, confirm=true
-  reply-post Reply once to an exact visible X post. args: postUrl, reply, campaignId?, confirm=true, dryRun=false
+  reply-post Reply once to an exact visible X post. args: postUrl, reply, targetText? (search fallback), campaignId?, confirm=true, dryRun=false
   relationship-status Read the target-bound Follow/Following state without changing it. args: username
   follow   Follow one target profile and record campaign metadata. args: username, campaignId?, unfollowIfNoResponse?, confirm=true
   unfollow Unfollow only a profile previously followed by this tool. Requires noResponseConfirmed=true and confirm=true.
@@ -1645,6 +1645,27 @@ async function getThreadAction(request, args, page) {
   return toolOk({ text: `Read ${items.length} visible post(s) in the X thread.`, json: { target, items } });
 }
 
+async function findTargetPostArticle(page, target) {
+  const articles = page.locator('[data-testid="tweet"]');
+  const count = Math.min(await articles.count().catch(() => 0), 50);
+  for (let index = 0; index < count; index += 1) {
+    const article = articles.nth(index);
+    const hrefs = await article.locator('a[href*="/status/"]').evaluateAll((nodes) => nodes.map((node) => node.getAttribute("href") || "")).catch(() => []);
+    if (hrefs.some((href) => new RegExp(`/status/${target.tweetId}(?:$|[/?#])`).test(href))) return article;
+  }
+  return null;
+}
+
+async function openBoundReplyTarget(page, target, targetText = "") {
+  await page.goto(target.url, { waitUntil: "domcontentloaded", timeout: 45000 });
+  let article = await findTargetPostArticle(page, target);
+  if (article || !String(targetText || "").trim()) return article;
+  const query = `from:${target.username} \"${String(targetText).replace(/[\"\n\r]+/g, " ").trim()}\"`;
+  await page.goto(`https://x.com/search?q=${encodeURIComponent(query)}&src=typed_query&f=live`, { waitUntil: "domcontentloaded", timeout: 45000 });
+  await page.locator('[data-testid="tweet"]').first().waitFor({ state: "visible", timeout: 20000 }).catch(() => {});
+  return findTargetPostArticle(page, target);
+}
+
 async function replyPostAction(request, args, stateDir, statePath, state, page, account, config) {
   const target = replyTarget(args.postUrl);
   const reply = checkedPostText(args.reply || args.message || request.text);
@@ -1659,19 +1680,29 @@ async function replyPostAction(request, args, stateDir, statePath, state, page, 
     json: { dryRun: true, target, reply, messageHash: hash }
   });
 
-  await page.goto(target.url, { waitUntil: "domcontentloaded", timeout: 45000 });
-  if (!page.url().includes(`/status/${target.tweetId}`)) throw new Error("X navigation did not remain bound to the requested target post.");
+  const article = await openBoundReplyTarget(page, target, args.targetText);
+  if (!article) throw new Error("The exact target post was not visible in its thread or verified search results.");
+  const replyButton = article.locator('[data-testid="reply"]').first();
+  await replyButton.waitFor({ state: "visible", timeout: 10000 });
+  await replyButton.click();
+  const composer = page.locator('[data-testid="tweetTextarea_0"], [role="textbox"][contenteditable="true"]').last();
+  await composer.waitFor({ state: "visible", timeout: 15000 });
+  await composePost(page, composer, reply, { force: true });
+  const sendButton = page.locator('[data-testid="tweetButton"], [data-testid="tweetButtonInline"]').last();
+  await sendButton.waitFor({ state: "visible", timeout: 10000 });
+  if (await sendButton.isDisabled().catch(() => false)) throw new Error("X kept the Reply button disabled.");
 
   const attemptId = crypto.randomUUID();
   let submitStarted = false;
   try {
-    const receipt = await createPostViaGraphql(
-      parseCookies(config.X_COOKIES),
-      reply,
-      () => { submitStarted = true; },
-      { replyToTweetId: target.tweetId }
-    );
-    if (!receipt.valid) throw new Error("X reply receipt did not verify the exact text.");
+    const responsePromise = page.waitForResponse(isCandidatePostResponse, { timeout: 30000 });
+    submitStarted = true;
+    await sendButton.click();
+    const response = await responsePromise;
+    const receipt = await buildPostReceipt(response, reply);
+    let requestJson = null;
+    try { requestJson = JSON.parse(response.request().postData() || "null"); } catch {}
+    if (!receipt.valid || !nestedValueMatches(requestJson, target.tweetId)) throw new Error("X reply receipt did not bind the exact text to the target post.");
     const record = {
       campaignId: String(args.campaignId || "public-reply").trim(),
       targetUsername: target.username,
@@ -1683,7 +1714,7 @@ async function replyPostAction(request, args, stateDir, statePath, state, page, 
       url: `https://x.com/${encodeURIComponent(account.handle)}/status/${receipt.tweetId}`,
       repliedAt: new Date().toISOString(),
       deliveryVerified: true,
-      verificationMethod: "target-bound-create-tweet-graphql-receipt",
+      verificationMethod: "target-bound-create-tweet-receipt",
       receipt
     };
     const release = await acquireStateLock(stateDir);

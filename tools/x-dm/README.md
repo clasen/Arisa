@@ -17,7 +17,7 @@ It does not bypass login, CAPTCHAs, recipient restrictions, rate limits, or othe
 - `get-thread`: read one exact visible post and its currently loaded replies without publishing anything.
 - `update-bio`: replace the bio or append text with `appendText`; requires `confirm=true`, changes only the bio field, and verifies it after saving.
 - `create-post`: publish one exact post from the logged-in account; requires `confirm=true`, blocks exact duplicates, and verifies the CreateTweet receipt.
-- `reply-post`: reply to one exact visible post; requires `confirm=true` and `dryRun=false`, forbids links, binds the receipt to the target post and exact text, and enforces per-post deduplication, cooldown, and a daily cap.
+- `reply-post`: reply to one exact visible post; requires `confirm=true` and `dryRun=false`, forbids links, binds the receipt to the target post and exact text, and enforces per-post deduplication, cooldown, and a daily cap. Optional `targetText` enables a verified exact-post search fallback when X opens a nested thread without rendering the requested reply.
 - `relationship-status`: read the target-bound Follow/Following state without changing it.
 - `follow`: follow one profile with `confirm=true`; records whether the follow was tool-created or preexisting and verifies both the target DOM transition and a matching X receipt.
 - `unfollow`: unfollow only a tool-created follow marked for later cleanup; requires `confirm=true` and `noResponseConfirmed=true` after checking for a reply.
