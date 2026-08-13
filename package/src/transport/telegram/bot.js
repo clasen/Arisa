@@ -220,6 +220,20 @@ function buildNewSessionPrompt(ctx) {
   ].join("\n");
 }
 
+export function isScheduledTaskPrompt(prompt) {
+  return String(prompt || "").startsWith("Scheduled task fired.\n");
+}
+
+export async function withPromptSpeed({ speedController, speed, restoreSpeed }, work) {
+  if (!speedController || speed === undefined) return work();
+  speedController.setSpeed(speed);
+  try {
+    return await work();
+  } finally {
+    speedController.setSpeed(restoreSpeed());
+  }
+}
+
 async function buildAsyncTaskPrompt({ task, artifactStore, toolRegistry, logger }) {
   const taskText = task.payload.prompt || "";
   const parts = [
@@ -916,7 +930,7 @@ export async function createTelegramBot({ config, artifactStore, toolRegistry, t
 
   async function processPromptForChat({ chatId, prompt, ctx = null }) {
     const work = async () => {
-      const { session } = await agentManager.getSessionContext(chatId, createTelegramSessionBridge(chatId));
+      const { session, speedController } = await agentManager.getSessionContext(chatId, createTelegramSessionBridge(chatId));
       const historyRevision = getChatState(chatId).historyRevision;
       await conversationHistory.ensureSeed(chatId, {
         runtime: "pi",
@@ -928,14 +942,18 @@ export async function createTelegramBot({ config, artifactStore, toolRegistry, t
       chatState.activeSession = session;
       chatState.activeSteers = [];
       try {
-        text = await collectText(session, prompt, {
+        text = await withPromptSpeed({
+          speedController,
+          speed: isScheduledTaskPrompt(prompt) ? 1 : undefined,
+          restoreSpeed: () => clampModelSpeed(session.model, resolveChatSpeed(config, chatId))
+        }, () => collectText(session, prompt, {
           logger,
           chatId,
           onSlowPrompt: () => bot.api.sendMessage(
             chatId,
             "This is taking longer than 5 minutes, so I will keep the current session running instead of starting over. Send /new if you want to abandon it and start fresh."
           )
-        });
+        }));
       } catch (error) {
         agentManager.resetSession(chatId);
         throw error;

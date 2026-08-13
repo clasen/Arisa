@@ -1,7 +1,30 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { buildPrompt, buildReactionPrompt, shouldIncludeArtifactReference } from "../src/transport/telegram/bot.js";
+import { buildPrompt, buildReactionPrompt, isScheduledTaskPrompt, shouldIncludeArtifactReference, withPromptSpeed } from "../src/transport/telegram/bot.js";
 import { captureIncomingArtifact } from "../src/transport/telegram/media.js";
+
+test("scheduled agent prompts use normal speed for one turn and restore chat speed", async () => {
+  let speed = 1.5;
+  const speedController = {
+    setSpeed(value) { speed = value; }
+  };
+  assert.equal(isScheduledTaskPrompt("Scheduled task fired.\ntaskId: one"), true);
+  assert.equal(isScheduledTaskPrompt("Incoming Telegram message."), false);
+
+  await withPromptSpeed({ speedController, speed: 1, restoreSpeed: () => 1.5 }, async () => {
+    assert.equal(speed, 1);
+  });
+  assert.equal(speed, 1.5);
+
+  await assert.rejects(
+    withPromptSpeed({ speedController, speed: 1, restoreSpeed: () => 1.5 }, async () => {
+      assert.equal(speed, 1);
+      throw new Error("failed turn");
+    }),
+    /failed turn/
+  );
+  assert.equal(speed, 1.5);
+});
 
 function createTextContext(text = "hello") {
   return {
