@@ -98,6 +98,67 @@ function getIncomingMessageText(message) {
   return message?.text || message?.caption || formatLocationText(message) || "";
 }
 
+function telegramDisplayName(entity = {}) {
+  if (entity.username) return `@${entity.username}`;
+  return [entity.first_name, entity.last_name].filter(Boolean).join(" ") || entity.title || "unknown";
+}
+
+function forwardedMessageSummary(message) {
+  const origin = message?.forward_origin;
+  if (!origin) return [];
+
+  const parts = ["forwarded: true", `forwardedOriginType: ${origin.type}`];
+  if (origin.type === "user") parts.push(`forwardedFrom: ${telegramDisplayName(origin.sender_user)}`);
+  if (origin.type === "hidden_user") parts.push(`forwardedFrom: ${origin.sender_user_name}`);
+  if (origin.type === "chat" || origin.type === "channel") {
+    parts.push(`forwardedFrom: ${telegramDisplayName(origin.chat)}`);
+  }
+  if (origin.type === "channel" && origin.message_id) parts.push(`forwardedMessageId: ${origin.message_id}`);
+  if (origin.author_signature) parts.push(`forwardedAuthorSignature: ${origin.author_signature}`);
+  if (origin.date) parts.push(`forwardedAt: ${new Date(origin.date * 1000).toISOString()}`);
+  return parts;
+}
+
+function reactionLabel(reaction = {}) {
+  if (reaction.type === "emoji") return reaction.emoji || "emoji";
+  if (reaction.type === "custom_emoji") return `custom:${reaction.custom_emoji_id || "unknown"}`;
+  if (reaction.type === "paid") return "paid";
+  return reaction.type || "unknown";
+}
+
+function reactionDifference(left = [], right = []) {
+  const remaining = right.map(reactionLabel);
+  return left.map(reactionLabel).filter((label) => {
+    const index = remaining.indexOf(label);
+    if (index < 0) return true;
+    remaining.splice(index, 1);
+    return false;
+  });
+}
+
+export function buildReactionPrompt({ reaction, reactedMessageText = "" }) {
+  const oldReactions = reaction.old_reaction || [];
+  const newReactions = reaction.new_reaction || [];
+  const added = reactionDifference(newReactions, oldReactions);
+  const removed = reactionDifference(oldReactions, newReactions);
+  const actor = reaction.user || reaction.actor_chat || {};
+  const actorId = reaction.user?.id || reaction.actor_chat?.id || "unknown";
+
+  return [
+    "Incoming Telegram reaction.",
+    `chatId: ${reaction.chat.id}`,
+    `userId: ${actorId}`,
+    `username: ${reaction.user?.username || "(no username)"}`,
+    `reactedMessageId: ${reaction.message_id}`,
+    reactedMessageText ? `reactedMessageText: ${reactedMessageText}` : null,
+    added.length ? `addedReactions: ${added.join(" ")}` : null,
+    removed.length ? `removedReactions: ${removed.join(" ")}` : null,
+    `currentReactions: ${newReactions.map(reactionLabel).join(" ") || "none"}`,
+    `actor: ${telegramDisplayName(actor)}`,
+    "Treat this as lightweight feedback on the referenced message. Respond only if the reaction clearly requests action; otherwise stay silent."
+  ].filter(Boolean).join("\n");
+}
+
 function baseMimeType(mimeType = "") {
   return mimeType.split(";")[0].trim().toLowerCase();
 }
@@ -125,6 +186,7 @@ export function buildPrompt({ ctx, artifact, transcript, toolResult }) {
 
   const messageText = getIncomingMessageText(ctx.message);
   if (messageText) parts.push(`text: ${messageText}`);
+  parts.push(...forwardedMessageSummary(ctx.message));
   parts.push(...quotedMessageSummary(ctx.message?.reply_to_message));
   if (shouldIncludeArtifactReference({ artifact, messageText })) {
     if (artifact?.path) parts.push(`artifactPath: ${artifact.path}`);
@@ -366,7 +428,8 @@ export function createChatStateStore() {
       historyRevision: 0,
       beforeNextPrompt: null,
       activeSession: null,
-      activeSteers: []
+      activeSteers: [],
+      assistantMessages: new Map()
     };
     states.set(String(chatId), state);
     return state;
@@ -813,7 +876,12 @@ export async function createTelegramBot({ config, artifactStore, toolRegistry, t
     }
 
     logger?.log("telegram", `sending text reply for chat ${chatId}`);
-    await sendText(renderTelegramHtml(text), { parse_mode: "HTML" });
+    const sent = await sendText(renderTelegramHtml(text), { parse_mode: "HTML" });
+    if (sent?.message_id) {
+      const messages = getChatState(chatId).assistantMessages;
+      messages.set(sent.message_id, text);
+      while (messages.size > 50) messages.delete(messages.keys().next().value);
+    }
   }
 
   function createTelegramSessionBridge(chatId) {
@@ -1460,6 +1528,25 @@ export async function createTelegramBot({ config, artifactStore, toolRegistry, t
     }
   });
 
+  bot.on("message_reaction", async (ctx) => {
+    const reaction = ctx.messageReaction;
+    const chatId = reaction.chat.id;
+    const auth = await authorizeChat({ config, chatId, saveConfig });
+    if (!auth.ok || piAuthIssue) return;
+
+    const reactedMessageText = getChatState(chatId).assistantMessages.get(reaction.message_id) || "";
+    const prompt = buildReactionPrompt({ reaction, reactedMessageText });
+    enqueuePrompt({
+      chatId,
+      prompt,
+      label: `reaction to message ${reaction.message_id}`,
+      busyMessageMode: "queue"
+    }).catch((error) => {
+      getChatState(chatId).processing = false;
+      logger?.error("telegram", `reaction handling failed for chat ${chatId}: ${getErrorMessage(error)}`);
+    });
+  });
+
   bot.on("message", async (ctx) => {
     const auth = await authorizeChat({ config, chatId: ctx.chat.id, saveConfig, chatMeta: getIncomingChatMeta(ctx) });
     if (!auth.ok) return;
@@ -1507,7 +1594,7 @@ export async function createTelegramBot({ config, artifactStore, toolRegistry, t
       await bot.api.deleteWebhook({ drop_pending_updates: true });
       logger?.log("telegram", "bot polling started");
       scheduleStartupMessages({ skipAgentStartupPrompts });
-      await bot.start();
+      await bot.start({ allowed_updates: ["message", "callback_query", "message_reaction"] });
     },
 
     async stop() {

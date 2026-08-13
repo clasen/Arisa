@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { buildPrompt, shouldIncludeArtifactReference } from "../src/transport/telegram/bot.js";
+import { buildPrompt, buildReactionPrompt, shouldIncludeArtifactReference } from "../src/transport/telegram/bot.js";
 import { captureIncomingArtifact } from "../src/transport/telegram/media.js";
 
 function createTextContext(text = "hello") {
@@ -58,6 +58,41 @@ test("keeps distinct artifacts visible to the prompt", () => {
     }),
     true
   );
+});
+
+test("surfaces Telegram forwarding provenance in the prompt", () => {
+  const ctx = createTextContext("forwarded text");
+  ctx.message.forward_origin = {
+    type: "user",
+    sender_user: { id: 999, username: "source_user", first_name: "Source" },
+    date: 1_786_570_000
+  };
+
+  const prompt = buildPrompt({ ctx });
+
+  assert.match(prompt, /forwarded: true/);
+  assert.match(prompt, /forwardedOriginType: user/);
+  assert.match(prompt, /forwardedFrom: @source_user/);
+  assert.match(prompt, /forwardedAt: 2026-/);
+});
+
+test("formats Telegram reaction changes as lightweight feedback", () => {
+  const prompt = buildReactionPrompt({
+    reaction: {
+      chat: { id: 123 },
+      user: { id: 456, username: "martin", first_name: "Martin" },
+      message_id: 321,
+      old_reaction: [{ type: "emoji", emoji: "👍" }],
+      new_reaction: [{ type: "emoji", emoji: "❤️" }]
+    },
+    reactedMessageText: "Updated draft intro"
+  });
+
+  assert.match(prompt, /reactedMessageId: 321/);
+  assert.match(prompt, /reactedMessageText: Updated draft intro/);
+  assert.match(prompt, /addedReactions: ❤️/);
+  assert.match(prompt, /removedReactions: 👍/);
+  assert.match(prompt, /otherwise stay silent/);
 });
 
 test("marks incoming Telegram text artifacts as internal inline messages", async () => {

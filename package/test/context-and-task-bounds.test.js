@@ -95,7 +95,8 @@ test("chat state uses one queue for numeric and string chat IDs", () => {
     historyRevision: 0,
     beforeNextPrompt: null,
     activeSession: null,
-    activeSteers: []
+    activeSteers: [],
+    assistantMessages: new Map()
   });
 });
 
