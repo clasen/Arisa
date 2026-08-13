@@ -79,7 +79,12 @@ function isSelectable(contact, profile) {
   const allowedLanguages = profile.selection?.allowedLanguages || [];
   const requiredKeywordGroups = profile.selection?.requiredKeywordGroups || [];
   if (!isPlausibleEmail(contact.email)) return false;
-  if (profile.selection?.requireSourceProvenance !== false && !contactEmailFitsSource(contact)) return false;
+  const approvedCrossDomainEmails = (profile.selection?.approvedCrossDomainEmails || []).map(normalizedEmail);
+  if (
+    profile.selection?.requireSourceProvenance !== false
+    && !approvedCrossDomainEmails.includes(normalizedEmail(contact.email))
+    && !contactEmailFitsSource(contact)
+  ) return false;
   if (include.length && !matchesAny(text, include)) return false;
   if (requiredKeywordGroups.some((patterns) => !matchesAny(text, patterns))) return false;
   if (exclude.length && matchesAny(text, exclude)) return false;
