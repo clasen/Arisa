@@ -779,7 +779,7 @@ function escapedRegex(value) {
   return String(value).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
-async function createPostViaGraphql(cookies, post, onSubmit = () => {}) {
+async function createPostViaGraphql(cookies, post, onSubmit = () => {}, { replyToTweetId = "" } = {}) {
   const cookieHeader = cookies.map((cookie) => `${cookie.name}=${cookie.value}`).join("; ");
   const requestHeaders = { "user-agent": "Mozilla/5.0", accept: "*/*", cookie: cookieHeader };
   let homeResponse;
@@ -832,7 +832,8 @@ async function createPostViaGraphql(cookies, post, onSubmit = () => {}) {
           dark_request: false,
           media: { media_entities: [], possibly_sensitive: false },
           semantic_annotation_ids: [],
-          disallowed_reply_options: null
+          disallowed_reply_options: null,
+          ...(replyToTweetId ? { reply: { in_reply_to_tweet_id: replyToTweetId, exclude_reply_user_ids: [] } } : {})
         },
         features,
         fieldToggles,
@@ -850,7 +851,8 @@ async function createPostViaGraphql(cookies, post, onSubmit = () => {}) {
     status: response.status,
     noApplicationErrors,
     responseTextMatches: nestedValueMatches(responseJson, post),
-    tweetId: tweetId || null
+    tweetId: tweetId || null,
+    replyToTweetId: replyToTweetId || null
   };
   if (!receipt.valid) {
     const messages = Array.isArray(responseJson?.errors) ? responseJson.errors.map((error) => String(error?.message || "X application error")).slice(0, 5) : [];
@@ -1658,31 +1660,18 @@ async function replyPostAction(request, args, stateDir, statePath, state, page, 
   });
 
   await page.goto(target.url, { waitUntil: "domcontentloaded", timeout: 45000 });
-  const article = page.locator('[data-testid="tweet"]').first();
-  await article.waitFor({ state: "visible", timeout: 20000 });
-  const statusLinks = await article.locator('a[href*="/status/"]').evaluateAll((nodes) => nodes.map((node) => node.getAttribute("href") || ""));
-  if (!statusLinks.some((href) => href.includes(`/status/${target.tweetId}`))) throw new Error("The visible X post could not be bound to the requested target ID.");
-  const replyButton = article.locator('[data-testid="reply"]').first();
-  await replyButton.waitFor({ state: "visible", timeout: 10000 });
-  await replyButton.click();
-  const composer = page.locator('[data-testid="tweetTextarea_0"], [role="textbox"][contenteditable="true"]').last();
-  await composer.waitFor({ state: "visible", timeout: 15000 });
-  await composePost(page, composer, reply, { force: true });
-  const sendButton = page.locator('[data-testid="tweetButton"], [data-testid="tweetButtonInline"]').last();
-  await sendButton.waitFor({ state: "visible", timeout: 10000 });
-  if (await sendButton.isDisabled().catch(() => false)) throw new Error("X kept the Reply button disabled.");
+  if (!page.url().includes(`/status/${target.tweetId}`)) throw new Error("X navigation did not remain bound to the requested target post.");
 
   const attemptId = crypto.randomUUID();
   let submitStarted = false;
   try {
-    const responsePromise = page.waitForResponse(isCandidatePostResponse, { timeout: 30000 });
-    submitStarted = true;
-    await sendButton.click();
-    const response = await responsePromise;
-    const receipt = await buildPostReceipt(response, reply);
-    let requestJson = null;
-    try { requestJson = JSON.parse(response.request().postData() || "null"); } catch {}
-    if (!receipt.valid || !nestedValueMatches(requestJson, target.tweetId)) throw new Error("X reply receipt did not bind the exact text to the target post.");
+    const receipt = await createPostViaGraphql(
+      parseCookies(config.X_COOKIES),
+      reply,
+      () => { submitStarted = true; },
+      { replyToTweetId: target.tweetId }
+    );
+    if (!receipt.valid) throw new Error("X reply receipt did not verify the exact text.");
     const record = {
       campaignId: String(args.campaignId || "public-reply").trim(),
       targetUsername: target.username,
@@ -1694,7 +1683,7 @@ async function replyPostAction(request, args, stateDir, statePath, state, page, 
       url: `https://x.com/${encodeURIComponent(account.handle)}/status/${receipt.tweetId}`,
       repliedAt: new Date().toISOString(),
       deliveryVerified: true,
-      verificationMethod: "target-bound-create-tweet-receipt",
+      verificationMethod: "target-bound-create-tweet-graphql-receipt",
       receipt
     };
     const release = await acquireStateLock(stateDir);
