@@ -48,6 +48,7 @@ Actions:
   get-posts Read recent visible posts from the logged-in account. args: maxResults?
   update-bio Replace or append to the logged-in account bio. args: bio? or appendText?, confirm=true
   create-post Publish one exact post from the logged-in account. args: post, confirm=true
+  reply-post Reply once to an exact visible X post. args: postUrl, reply, campaignId?, confirm=true, dryRun=false
   relationship-status Read the target-bound Follow/Following state without changing it. args: username
   follow   Follow one target profile and record campaign metadata. args: username, campaignId?, unfollowIfNoResponse?, confirm=true
   unfollow Unfollow only a profile previously followed by this tool. Requires noResponseConfirmed=true and confirm=true.
@@ -188,6 +189,7 @@ function normalizeState(value) {
     version: stateVersion,
     sends,
     posts: Array.isArray(source.posts) ? source.posts : [],
+    replies: Array.isArray(source.replies) ? source.replies : [],
     follows: source.follows && typeof source.follows === "object" && !Array.isArray(source.follows) ? source.follows : {},
     attempts: Array.isArray(source.attempts) ? source.attempts : [],
     recipientIndex: { ...derivedRecipients, ...(source.recipientIndex || {}) }
@@ -728,9 +730,9 @@ async function openPostComposer(page, handle) {
   return { page, composer };
 }
 
-async function composePost(page, composer, post) {
-  await composer.click();
-  await composer.fill(post);
+async function composePost(page, composer, post, { force = false } = {}) {
+  await composer.click({ force });
+  await composer.fill(post, { force });
   const actual = canonicalExactText(await composer.innerText().catch(() => ""));
   if (actual !== canonicalExactText(post)) throw new Error("X post composer did not retain the exact requested text.");
 }
@@ -1601,6 +1603,102 @@ Pass confirm=true to publish it.`,
   }
 }
 
+function replyTarget(value) {
+  const raw = String(value || "").trim();
+  let url;
+  try { url = new URL(raw); } catch { throw new Error("reply-post requires a valid args.postUrl."); }
+  if (!/(^|\.)x\.com$/i.test(url.hostname)) throw new Error("reply-post only accepts x.com post URLs.");
+  const match = url.pathname.match(/^\/([A-Za-z0-9_]{1,15})\/status\/(\d+)/);
+  if (!match) throw new Error("reply-post requires an exact X status URL.");
+  return { username: match[1], tweetId: match[2], url: `https://x.com/${match[1]}/status/${match[2]}` };
+}
+
+function publicReplyGuard(state, target, config) {
+  if (state.replies.some((entry) => entry.targetTweetId === target.tweetId)) throw new Error("This X post already received a campaign reply; refusing a duplicate.");
+  const now = Date.now();
+  const today = new Date().toISOString().slice(0, 10);
+  const repliesToday = state.replies.filter((entry) => String(entry.repliedAt || "").startsWith(today));
+  const cap = Math.max(1, Math.min(intArg(config.MAX_REPLIES_PER_DAY, 3), 10));
+  if (repliesToday.length >= cap) throw new Error(`Daily public-reply cap reached (${cap}).`);
+  const latest = state.replies.map((entry) => Date.parse(entry.repliedAt || "")).filter(Number.isFinite).sort((a, b) => b - a)[0];
+  const cooldownMs = Math.max(60, intArg(config.MIN_SECONDS_BETWEEN_REPLIES, 1800)) * 1000;
+  if (latest && now - latest < cooldownMs) throw new Error(`Public-reply cooldown active for ${Math.ceil((cooldownMs - (now - latest)) / 1000)} more seconds.`);
+}
+
+async function replyPostAction(request, args, stateDir, statePath, state, page, account, config) {
+  const target = replyTarget(args.postUrl);
+  const reply = checkedPostText(args.reply || args.message || request.text);
+  if (/https?:\/\//i.test(reply)) throw new Error("Campaign public replies must not contain links.");
+  if (!/castle bravo/i.test(reply)) throw new Error("Campaign public replies must name Castle Bravo transparently.");
+  publicReplyGuard(state, target, config);
+  const hash = messageHash(reply);
+  const uncertain = [...state.attempts].reverse().find((entry) => entry.action === "reply-post" && entry.targetTweetId === target.tweetId && entry.outcome === "uncertain");
+  if (uncertain) throw new Error(`A prior reply attempt on this post is uncertain (${uncertain.attemptId}); never retry it automatically.`);
+  if (!(exactBoolean(args.confirm, true) && exactBoolean(args.dryRun, false))) return toolOk({
+    text: `Dry run only. Would reply to ${target.url}:\n\n${reply}\n\nPass confirm=true and dryRun=false to publish exactly this reply.`,
+    json: { dryRun: true, target, reply, messageHash: hash }
+  });
+
+  await page.goto(target.url, { waitUntil: "domcontentloaded", timeout: 45000 });
+  const article = page.locator('[data-testid="tweet"]').first();
+  await article.waitFor({ state: "visible", timeout: 20000 });
+  const statusLinks = await article.locator('a[href*="/status/"]').evaluateAll((nodes) => nodes.map((node) => node.getAttribute("href") || ""));
+  if (!statusLinks.some((href) => href.includes(`/status/${target.tweetId}`))) throw new Error("The visible X post could not be bound to the requested target ID.");
+  const replyButton = article.locator('[data-testid="reply"]').first();
+  await replyButton.waitFor({ state: "visible", timeout: 10000 });
+  await replyButton.click();
+  const composer = page.locator('[data-testid="tweetTextarea_0"], [role="textbox"][contenteditable="true"]').last();
+  await composer.waitFor({ state: "visible", timeout: 15000 });
+  await composePost(page, composer, reply, { force: true });
+  const sendButton = page.locator('[data-testid="tweetButton"], [data-testid="tweetButtonInline"]').last();
+  await sendButton.waitFor({ state: "visible", timeout: 10000 });
+  if (await sendButton.isDisabled().catch(() => false)) throw new Error("X kept the Reply button disabled.");
+
+  const attemptId = crypto.randomUUID();
+  let submitStarted = false;
+  try {
+    const responsePromise = page.waitForResponse(isCandidatePostResponse, { timeout: 30000 });
+    submitStarted = true;
+    await sendButton.click();
+    const response = await responsePromise;
+    const receipt = await buildPostReceipt(response, reply);
+    let requestJson = null;
+    try { requestJson = JSON.parse(response.request().postData() || "null"); } catch {}
+    if (!receipt.valid || !nestedValueMatches(requestJson, target.tweetId)) throw new Error("X reply receipt did not bind the exact text to the target post.");
+    const record = {
+      campaignId: String(args.campaignId || "public-reply").trim(),
+      targetUsername: target.username,
+      targetTweetId: target.tweetId,
+      targetUrl: target.url,
+      reply,
+      messageHash: hash,
+      replyTweetId: receipt.tweetId,
+      url: `https://x.com/${encodeURIComponent(account.handle)}/status/${receipt.tweetId}`,
+      repliedAt: new Date().toISOString(),
+      deliveryVerified: true,
+      verificationMethod: "target-bound-create-tweet-receipt",
+      receipt
+    };
+    const release = await acquireStateLock(stateDir);
+    try {
+      const latest = await readState(statePath);
+      latest.replies.push(record);
+      appendAttempt(latest, { attemptId, action: "reply-post", targetTweetId: target.tweetId, messageHash: hash, outcome: "published", tweetId: receipt.tweetId });
+      await writeState(statePath, latest);
+    } finally { await release(); }
+    return toolOk({ text: `Published and verified the X reply: ${record.url}`, json: { account: { handle: account.handle }, reply: record } });
+  } catch (error) {
+    const release = await acquireStateLock(stateDir);
+    try {
+      const latest = await readState(statePath);
+      appendAttempt(latest, { attemptId, action: "reply-post", targetTweetId: target.tweetId, messageHash: hash, outcome: submitStarted ? "uncertain" : "failed", reason: error.message || String(error) });
+      await writeState(statePath, latest);
+    } finally { await release(); }
+    if (submitStarted) throw new Error(`X reply delivery could not be proven. Treat it as sent and do not retry. ${error.message || error}`);
+    throw error;
+  }
+}
+
 async function relationshipStatusAction(request, args, page, account) {
   const username = usernameFrom(args.username || request.text || request.artifact?.text || "", args);
   if (!username) return toolError("A valid args.username, @handle, or X profile URL is required.");
@@ -1749,6 +1847,7 @@ async function browserAction(request, args, config) {
       return toolOk({ text: `Found ${result.posts.length} visible post(s) for @${handle}.`, json: { account: { handle }, ...result } });
     }
     if (action === "create-post") return await createPostAction(request, args, stateDir, statePath, state, page, account, config);
+    if (action === "reply-post") return await replyPostAction(request, args, stateDir, statePath, state, page, account, config);
     if (action === "get-bio" || action === "update-bio") {
       const handle = cleanHandle(account.handle || config.EXPECTED_ACCOUNT_HANDLE);
       if (!handle) return toolError("Could not determine the logged-in X handle; refusing the profile operation.");
@@ -1916,7 +2015,7 @@ async function execute(requestFile) {
   const action = String(args.action || "status").toLowerCase();
   if (action === "audit") return auditAction(request, args);
   if (action === "resolve-uncertain") return resolveUncertainAction(request, args);
-  if (!["status", "check", "search", "verify-delivery", "get-bio", "get-posts", "update-bio", "create-post", "relationship-status", "follow", "unfollow", "send"].includes(action)) return toolError(`Unknown action: ${action}`);
+  if (!["status", "check", "search", "verify-delivery", "get-bio", "get-posts", "update-bio", "create-post", "reply-post", "relationship-status", "follow", "unfollow", "send"].includes(action)) return toolError(`Unknown action: ${action}`);
   if (["relationship-status", "follow", "unfollow", "send"].includes(action)) {
     const username = usernameFrom(args.username || request.text || request.artifact?.text || "", args);
     if (!username) return toolError("A valid args.username, @handle, or X profile URL is required.");
@@ -1992,6 +2091,8 @@ export {
   normalizeState,
   parseCookies,
   profileIdentityFromHeader,
+  publicReplyGuard,
+  replyTarget,
   requestTargetsUser,
   usernameFrom,
   withinDailyCap

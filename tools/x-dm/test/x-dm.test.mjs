@@ -16,6 +16,8 @@ import {
   messageHash,
   normalizeState,
   parseCookies,
+  publicReplyGuard,
+  replyTarget,
   requestTargetsUser,
   usernameFrom,
   withinDailyCap
@@ -161,6 +163,14 @@ test("state migration preserves follow records and follow safety caps verified c
   assert.equal(state.follows.creator.status, "following");
   state.attempts = Array.from({ length: 2 }, (_, index) => ({ action: "follow", outcome: "following", at: new Date().toISOString(), attemptId: String(index) }));
   assert.match(followSafetyGuard(state, 2, 0), /Daily follow cap/);
+});
+
+test("public reply targets and safeguards are exact and deduplicated", () => {
+  const target = replyTarget("https://x.com/example/status/1234567890?s=20");
+  assert.deepEqual(target, { username: "example", tweetId: "1234567890", url: "https://x.com/example/status/1234567890" });
+  assert.throws(() => replyTarget("https://example.com/example/status/1234567890"), /only accepts x.com/);
+  assert.doesNotThrow(() => publicReplyGuard(normalizeState({}), target, { MAX_REPLIES_PER_DAY: "3", MIN_SECONDS_BETWEEN_REPLIES: "60" }));
+  assert.throws(() => publicReplyGuard(normalizeState({ replies: [{ targetTweetId: "1234567890", repliedAt: new Date().toISOString() }] }), target, {}), /already received/);
 });
 
 test("relationship receipts must name the exact target and expected action", () => {

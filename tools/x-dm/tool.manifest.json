@@ -67,6 +67,16 @@
       "type": "string",
       "required": false,
       "prompt": "Maximum confirmed X DMs per UTC day for one campaign."
+    },
+    "MIN_SECONDS_BETWEEN_REPLIES": {
+      "type": "string",
+      "required": false,
+      "prompt": "Minimum seconds between verified public X replies."
+    },
+    "MAX_REPLIES_PER_DAY": {
+      "type": "string",
+      "required": false,
+      "prompt": "Maximum verified public X replies per UTC day."
     }
   },
   "skillHints": [],

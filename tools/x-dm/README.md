@@ -16,6 +16,7 @@ It does not bypass login, CAPTCHAs, recipient restrictions, rate limits, or othe
 - `get-bio`: read the logged-in account bio without changing it.
 - `update-bio`: replace the bio or append text with `appendText`; requires `confirm=true`, changes only the bio field, and verifies it after saving.
 - `create-post`: publish one exact post from the logged-in account; requires `confirm=true`, blocks exact duplicates, and verifies the CreateTweet receipt.
+- `reply-post`: reply to one exact visible post; requires `confirm=true` and `dryRun=false`, forbids links, binds the receipt to the target post and exact text, and enforces per-post deduplication, cooldown, and a daily cap.
 - `relationship-status`: read the target-bound Follow/Following state without changing it.
 - `follow`: follow one profile with `confirm=true`; records whether the follow was tool-created or preexisting and verifies both the target DOM transition and a matching X receipt.
 - `unfollow`: unfollow only a tool-created follow marked for later cleanup; requires `confirm=true` and `noResponseConfirmed=true` after checking for a reply.
@@ -54,6 +55,7 @@ Example dry run:
 - Otherwise the attempt is marked uncertain and retries are blocked. `verify-delivery` requires the exact unresolved attempt id and bound conversation; it can use the exact message or its stored 16-character hash, and it never resends.
 - `EXPECTED_ACCOUNT_HANDLE` can pin the permitted sending account.
 - Tool-created follows have their own cooldown and daily cap. Preexisting follows are never eligible for tool-managed unfollow.
+- Public campaign replies have a separate cooldown and daily cap. Uncertain delivery blocks retries, and each target post can receive at most one recorded campaign reply.
 - Missing follow/unfollow proof records a manual-review state and blocks automatic retries.
 - Bio updates require explicit confirmation, modify only the bio field, and reopen the editor to verify X retained the requested content.
 
