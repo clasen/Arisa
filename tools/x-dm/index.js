@@ -46,6 +46,7 @@ Actions:
   resolve-uncertain Record human confirmation of one uncertain attempt without opening X. args: attemptId, username, message or messageHash, outcome=delivered|not-sent, confirm=true
   get-bio  Read the logged-in account bio without changing it.
   get-posts Read recent visible posts from the logged-in account. args: maxResults?
+  get-thread Read one exact visible X post and its loaded replies. args: postUrl, maxResults?
   update-bio Replace or append to the logged-in account bio. args: bio? or appendText?, confirm=true
   create-post Publish one exact post from the logged-in account. args: post, confirm=true
   reply-post Reply once to an exact visible X post. args: postUrl, reply, campaignId?, confirm=true, dryRun=false
@@ -745,7 +746,7 @@ async function buildPostReceipt(response, post) {
   const requestTextMatches = nestedValueMatches(requestJson, post);
   const statusOk = response.status() >= 200 && response.status() < 300;
   const noApplicationErrors = Boolean(responseJson) && !(Array.isArray(responseJson.errors) && responseJson.errors.length);
-  const tweetId = tweetIdFromResponse(responseJson);
+  const tweetId = createTweetResultId(responseJson) || tweetIdFromResponse(responseJson);
   return {
     valid: Boolean(requestTextMatches && statusOk && noApplicationErrors && tweetId),
     endpoint: (() => { try { return new URL(response.url()).pathname; } catch { return ""; } })(),
@@ -1625,6 +1626,23 @@ function publicReplyGuard(state, target, config) {
   if (latest && now - latest < cooldownMs) throw new Error(`Public-reply cooldown active for ${Math.ceil((cooldownMs - (now - latest)) / 1000)} more seconds.`);
 }
 
+async function getThreadAction(request, args, page) {
+  const target = replyTarget(args.postUrl || request.text);
+  await page.goto(target.url, { waitUntil: "domcontentloaded", timeout: 45000 });
+  const tweets = page.locator('[data-testid="tweet"]');
+  await tweets.first().waitFor({ state: "visible", timeout: 20000 });
+  const count = Math.min(await tweets.count(), Math.max(1, Math.min(intArg(args.maxResults, 20), 50)));
+  const items = [];
+  for (let index = 0; index < count; index += 1) {
+    const tweet = tweets.nth(index);
+    const text = await tweet.innerText().catch(() => "");
+    const hrefs = await tweet.locator('a[href*="/status/"]').evaluateAll((nodes) => nodes.map((node) => node.getAttribute("href") || "")).catch(() => []);
+    const href = hrefs.find((value) => /\/status\/\d+/.test(value)) || "";
+    items.push({ text, url: href ? new URL(href, "https://x.com").href : null });
+  }
+  return toolOk({ text: `Read ${items.length} visible post(s) in the X thread.`, json: { target, items } });
+}
+
 async function replyPostAction(request, args, stateDir, statePath, state, page, account, config) {
   const target = replyTarget(args.postUrl);
   const reply = checkedPostText(args.reply || args.message || request.text);
@@ -1847,6 +1865,7 @@ async function browserAction(request, args, config) {
       return toolOk({ text: `Found ${result.posts.length} visible post(s) for @${handle}.`, json: { account: { handle }, ...result } });
     }
     if (action === "create-post") return await createPostAction(request, args, stateDir, statePath, state, page, account, config);
+    if (action === "get-thread") return await getThreadAction(request, args, page);
     if (action === "reply-post") return await replyPostAction(request, args, stateDir, statePath, state, page, account, config);
     if (action === "get-bio" || action === "update-bio") {
       const handle = cleanHandle(account.handle || config.EXPECTED_ACCOUNT_HANDLE);
@@ -2015,7 +2034,7 @@ async function execute(requestFile) {
   const action = String(args.action || "status").toLowerCase();
   if (action === "audit") return auditAction(request, args);
   if (action === "resolve-uncertain") return resolveUncertainAction(request, args);
-  if (!["status", "check", "search", "verify-delivery", "get-bio", "get-posts", "update-bio", "create-post", "reply-post", "relationship-status", "follow", "unfollow", "send"].includes(action)) return toolError(`Unknown action: ${action}`);
+  if (!["status", "check", "search", "verify-delivery", "get-bio", "get-posts", "get-thread", "update-bio", "create-post", "reply-post", "relationship-status", "follow", "unfollow", "send"].includes(action)) return toolError(`Unknown action: ${action}`);
   if (["relationship-status", "follow", "unfollow", "send"].includes(action)) {
     const username = usernameFrom(args.username || request.text || request.artifact?.text || "", args);
     if (!username) return toolError("A valid args.username, @handle, or X profile URL is required.");

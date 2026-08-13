@@ -14,6 +14,7 @@ It does not bypass login, CAPTCHAs, recipient restrictions, rate limits, or othe
 - `resolve-uncertain`: record explicit human confirmation using the exact message or its stored hash; it never opens X or retries the send.
 - `resolve-uncertain`: record explicit human confirmation of one matching uncertain attempt without reopening or resending the conversation.
 - `get-bio`: read the logged-in account bio without changing it.
+- `get-thread`: read one exact visible post and its currently loaded replies without publishing anything.
 - `update-bio`: replace the bio or append text with `appendText`; requires `confirm=true`, changes only the bio field, and verifies it after saving.
 - `create-post`: publish one exact post from the logged-in account; requires `confirm=true`, blocks exact duplicates, and verifies the CreateTweet receipt.
 - `reply-post`: reply to one exact visible post; requires `confirm=true` and `dryRun=false`, forbids links, binds the receipt to the target post and exact text, and enforces per-post deduplication, cooldown, and a daily cap.
