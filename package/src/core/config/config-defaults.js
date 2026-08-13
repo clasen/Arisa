@@ -11,7 +11,9 @@ export const daemonConfigDefaults = Object.freeze({
   restartBackoffMaxMs: 60_000,
   startupTimeoutMs: 120_000,
   stopTimeoutMs: 3_000,
-  queuePollIntervalMs: 250
+  queuePollIntervalMs: 250,
+  streamBufferBytes: 1_048_576,
+  ipcFrameBytes: 1_048_576
 });
 
 export const telegramConfigDefaults = Object.freeze({

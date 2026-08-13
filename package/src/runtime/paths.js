@@ -27,6 +27,14 @@ export const toolsDir = path.join(arisaHomeDir, "tools");
 export const chatsDir = path.join(arisaHomeDir, "chats");
 export const toolStateDir = path.join(stateDir, "tools");
 
+export function requireToolName(toolName) {
+  const name = String(toolName ?? "");
+  if (!/^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?$/.test(name)) {
+    throw new Error(`Invalid tool name: ${name || "empty"}`);
+  }
+  return name;
+}
+
 export function getChatDir(chatId) {
   return path.join(chatsDir, String(chatId));
 }
@@ -52,7 +60,7 @@ export function getChatToolResourceNotesFile(chatId) {
 }
 
 export function getChatToolStateDir(chatId, toolName) {
-  return path.join(getChatDir(chatId), "state", "tools", toolName);
+  return path.join(getChatDir(chatId), "state", "tools", requireToolName(toolName));
 }
 
 export function normalizeDaemonScope(scope = { type: "global" }) {
@@ -95,7 +103,7 @@ export function getChatPiSessionsDir(chatId, sessionRevision = 0) {
 }
 
 export function getToolDir(toolName) {
-  return path.join(toolsDir, toolName);
+  return path.join(toolsDir, requireToolName(toolName));
 }
 
 export function getToolConfigPath(toolName) {
@@ -111,11 +119,11 @@ export function getChatTmpDir(chatId) {
 }
 
 export function getChatToolConfigPath(chatId, toolName) {
-  return path.join(getChatConfigDir(chatId), "tools", toolName, "config.js");
+  return path.join(getChatConfigDir(chatId), "tools", requireToolName(toolName), "config.js");
 }
 
 export function getToolStateDir(toolName) {
-  return path.join(toolStateDir, toolName);
+  return path.join(toolStateDir, requireToolName(toolName));
 }
 
 export function getToolTmpDir(toolName) {

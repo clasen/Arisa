@@ -6,6 +6,8 @@ import { arisaIpcSocketFile, arisaPackageDir, getToolConfigPath, getToolTmpDir, 
 import { loadToolConfig, parseConfigModule, writeToolConfig } from "./tool-config.js";
 import { normalizeToolResult } from "./tool-result.js";
 import { readDaemonDiagnostic } from "./daemon-processes.js";
+import { createDaemonRuntime, DAEMON_EVENT_TYPES, DAEMON_PROTOCOL_VERSION } from "./daemon-runtime.js";
+import { daemonConfigDefaults } from "../config/config-defaults.js";
 import { SkillRegistry } from "../skills/skill-registry.js";
 import { ToolUsageStore } from "./tool-usage-store.js";
 
@@ -22,6 +24,129 @@ function runProcess(command, args, options = {}) {
     child.stderr.on("data", (d) => { stderr += d.toString(); });
     child.on("close", (code) => resolve({ code, stdout, stderr }));
   });
+}
+
+function requirementNames(requirements) {
+  if (Array.isArray(requirements)) {
+    return requirements.map((item) => typeof item === "string" ? item : item?.name).filter(Boolean);
+  }
+  if (requirements && typeof requirements === "object") return Object.keys(requirements);
+  return [];
+}
+
+export function createToolOutputParser(name, { onEvent, maxFrameBytes = 1_048_576 } = {}) {
+  let buffer = "";
+  let mode = "unknown";
+  let rawOutput = "";
+  let terminalResult = null;
+  let activeJobId = null;
+  let sequence = 0;
+  let terminalSeen = false;
+
+  async function parseEvent(line) {
+    let event;
+    try {
+      event = JSON.parse(line);
+    } catch {
+      throw new Error(`Invalid NDJSON from ${name}`);
+    }
+    if (event?.version !== DAEMON_PROTOCOL_VERSION || !DAEMON_EVENT_TYPES.includes(event?.type)) {
+      throw new Error(`Invalid versioned tool event from ${name}`);
+    }
+    if (typeof event.jobId !== "string" || !event.jobId) throw new Error(`Tool event from ${name} is missing jobId`);
+    if (activeJobId == null) activeJobId = event.jobId;
+    if (event.jobId !== activeJobId) throw new Error(`Tool ${name} multiplexed an unexpected jobId`);
+    if (!Number.isSafeInteger(event.sequence) || event.sequence !== sequence + 1) {
+      throw new Error(`Invalid tool event sequence from ${name}: ${event.sequence}`);
+    }
+    if (terminalSeen) throw new Error(`Tool ${name} emitted more than one terminal event`);
+    sequence = event.sequence;
+    terminalSeen = event.type === "completed" || event.type === "failed";
+    await onEvent?.(event);
+    if (terminalSeen) {
+      terminalResult = event.type === "completed"
+        ? event.payload?.result ?? event.payload?.output ?? event.payload
+        : { ok: false, error: event.payload?.error || `Tool failed: ${name}`, ...(event.payload?.code ? { code: event.payload.code } : {}) };
+    }
+  }
+
+  async function consumeLine(line) {
+    if (Buffer.byteLength(line, "utf8") > maxFrameBytes) throw new Error(`Tool event from ${name} exceeds ${maxFrameBytes} bytes`);
+    if (mode === "unknown") {
+      let candidate;
+      try {
+        candidate = JSON.parse(line);
+      } catch {
+        mode = "legacy";
+        return;
+      }
+      if (candidate?.version === DAEMON_PROTOCOL_VERSION && DAEMON_EVENT_TYPES.includes(candidate?.type)) {
+        mode = "ndjson";
+        rawOutput = "";
+        return parseEvent(line);
+      }
+      mode = "legacy";
+      return;
+    }
+    if (mode === "legacy") return;
+    return parseEvent(line);
+  }
+
+  return {
+    async push(chunk) {
+      const text = chunk.toString("utf8");
+      if (mode !== "ndjson") rawOutput += text;
+      if (mode === "legacy") return;
+      buffer += text;
+      if (Buffer.byteLength(buffer, "utf8") > maxFrameBytes && !buffer.includes("\n")) {
+        throw new Error(`Tool event from ${name} exceeds ${maxFrameBytes} bytes`);
+      }
+      let newlineIndex = buffer.indexOf("\n");
+      while (newlineIndex !== -1) {
+        const line = buffer.slice(0, newlineIndex).trim();
+        buffer = buffer.slice(newlineIndex + 1);
+        if (line) await consumeLine(line);
+        newlineIndex = buffer.indexOf("\n");
+      }
+    },
+    async finish() {
+      const tail = buffer.trim();
+      buffer = "";
+      if (tail) await consumeLine(tail);
+      if (mode !== "ndjson") return { mode: "legacy", output: rawOutput };
+      if (!terminalSeen) throw new Error(`Tool ${name} ended without a terminal event`);
+      return { mode: "ndjson", result: terminalResult };
+    }
+  };
+}
+
+async function runToolProcess(command, args, { onEvent, maxFrameBytes, ...options } = {}) {
+  const child = spawn(command, args, { ...options, stdio: ["ignore", "pipe", "pipe"] });
+  const parser = createToolOutputParser(path.basename(args[0] || command), { onEvent, maxFrameBytes });
+  const stderrChunks = [];
+  let stderrBytes = 0;
+  const stdoutTask = (async () => {
+    for await (const chunk of child.stdout) await parser.push(chunk);
+    return parser.finish();
+  })();
+  const stderrTask = (async () => {
+    for await (const chunk of child.stderr) {
+      if (stderrBytes >= maxFrameBytes) continue;
+      const accepted = chunk.subarray(0, maxFrameBytes - stderrBytes);
+      stderrChunks.push(accepted);
+      stderrBytes += accepted.length;
+    }
+    return Buffer.concat(stderrChunks).toString("utf8");
+  })();
+  const exitPromise = new Promise((resolve, reject) => {
+    child.once("error", reject);
+    child.once("close", resolve);
+  });
+  child.stdout.resume();
+  child.stderr.resume();
+  const code = await exitPromise;
+  const [parsed, stderr] = await Promise.all([stdoutTask, stderrTask]);
+  return { code, parsed, stderr };
 }
 
 function normalizeCategory(category) {
@@ -131,6 +256,9 @@ export class ToolRegistry {
   list() {
     return [...this.tools.values()].map((tool) => ({
       name: tool.name,
+      version: typeof tool.version === "string" ? tool.version : null,
+      packageDigest: typeof tool.packageDigest === "string" ? tool.packageDigest : null,
+      requirements: requirementNames(tool.requirements),
       description: tool.description,
       input: tool.input,
       output: tool.output,
@@ -239,7 +367,7 @@ export class ToolRegistry {
       .sort((left, right) => left.name.localeCompare(right.name));
   }
 
-  async run({ name, request, chatId = null }) {
+  async run({ name, request, chatId = null, onEvent = null }) {
     const tool = this.get(name);
     if (!tool) throw new Error(`Tool not found: ${name}`);
     await this.usageStore.record(chatId, name).catch((error) => {
@@ -251,33 +379,54 @@ export class ToolRegistry {
     const requestFile = path.join(tmpDir, `.request-${Date.now()}-${randomUUID()}.json`);
     const skills = await this.resolveSkills(name);
     const enrichedRequest = { ...request, chatId, skills };
-    await writeFile(requestFile, `${JSON.stringify(enrichedRequest, null, 2)}\n`, "utf8");
-    const result = await runProcess("node", [tool.entry, "run", "--request-file", requestFile], {
-      cwd: tool.dir,
-      env: toolEnv()
-    });
-    await unlink(requestFile).catch(() => {});
-    await rmdir(tmpDir).catch(() => {});
-    if (chatId != null) {
-      await rmdir(path.dirname(tmpDir)).catch(() => {});
-      await rmdir(path.dirname(path.dirname(tmpDir))).catch(() => {});
-    }
+    let result;
     try {
-      const parsed = JSON.parse(result.stdout || result.stderr);
-      const normalized = normalizeToolResult(name, parsed);
+      if (tool.daemon?.protocol === "arisa-daemon-v1") {
+        const scope = tool.daemon.scope === "chat"
+          ? { type: "chat", chatId }
+          : { type: "global" };
+        const runtime = createDaemonRuntime({
+          toolName: name,
+          entryPath: tool.entry,
+          scope,
+          startupContext: scope.type === "chat" ? { chatId: String(chatId) } : {},
+          autoStart: Boolean(tool.daemon.autoStart)
+        });
+        result = await runtime.submit(enrichedRequest, { onEvent });
+      } else {
+        await writeFile(requestFile, `${JSON.stringify(enrichedRequest, null, 2)}\n`, "utf8");
+        const processResult = await runToolProcess("node", [tool.entry, "run", "--request-file", requestFile], {
+          cwd: tool.dir,
+          env: toolEnv(),
+          onEvent,
+          maxFrameBytes: daemonConfigDefaults.ipcFrameBytes
+        });
+        if (processResult.stderr.trim()) {
+          this.logger?.log("tools", `${name} stderr: ${processResult.stderr.trim()}`);
+        }
+        result = processResult.parsed.mode === "ndjson"
+          ? processResult.parsed.result
+          : JSON.parse(processResult.parsed.output);
+      }
+      const normalized = normalizeToolResult(name, result);
       if (normalized.ok === false) {
         this.logger?.log("tools", `${name} -> ${normalized.status || "error"}: ${normalized.error || "unknown error"}`);
       } else {
         this.logger?.log("tools", `${name} -> ok`);
       }
       return normalized;
-    } catch {
+    } catch (error) {
       return normalizeToolResult(name, {
         ok: false,
-        error: `Invalid tool response for ${name}`,
-        stdout: result.stdout,
-        stderr: result.stderr
+        error: error?.message || `Invalid tool response for ${name}`
       });
+    } finally {
+      await unlink(requestFile).catch(() => {});
+      await rmdir(tmpDir).catch(() => {});
+      if (chatId != null) {
+        await rmdir(path.dirname(tmpDir)).catch(() => {});
+        await rmdir(path.dirname(path.dirname(tmpDir))).catch(() => {});
+      }
     }
   }
 }

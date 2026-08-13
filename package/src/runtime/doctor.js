@@ -224,6 +224,21 @@ export function formatDoctorReport(report) {
   lines.push("", "Daemons");
   lines.push(...reportRow("Checked", report.daemons.length));
   if (report.daemons.length) lines.push(...reportRow("Status", daemonResultSummary(report.daemons)));
+  if (report.infrastructure) {
+    lines.push("", "Master/Slave");
+    if (report.infrastructure.error) {
+      lines.push(...reportRow("Status", `unavailable: ${report.infrastructure.error}`));
+    } else {
+      lines.push(...reportRow("Role", report.infrastructure.role || "unknown"));
+      lines.push(...reportRow("Daemon", report.infrastructure.daemon?.state || "unknown"));
+      lines.push(...reportRow("Endpoint", report.infrastructure.endpoint || "not configured"));
+      lines.push(...reportRow("Identity", report.infrastructure.identityFingerprint || "not configured"));
+      lines.push(...reportRow("Paired", report.infrastructure.paired == null ? "n/a" : report.infrastructure.paired ? "yes" : "no"));
+      lines.push(...reportRow("Tools", report.infrastructure.toolCount ?? "unknown"));
+      lines.push(...reportRow("Jobs", `active=${report.infrastructure.jobs?.active ?? "unknown"}, queued=${report.infrastructure.jobs?.queued ?? "unknown"}, failed=${report.infrastructure.jobs?.failed ?? "unknown"}`));
+      lines.push(...reportRow("Pending secrets", report.infrastructure.pendingSecrets ?? "unknown"));
+    }
+  }
   if (report.system) {
     const memoryPercent = report.system.memoryTotal ? (report.system.memoryUsed / report.system.memoryTotal) * 100 : 0;
     const diskPercent = report.system.diskTotal ? (report.system.diskUsed / report.system.diskTotal) * 100 : 0;
@@ -257,7 +272,8 @@ export async function runDoctor({
   serviceStatus = getServiceStatus,
   stopDaemon = stopManagedDaemon,
   unregisterDaemon = unregisterManagedDaemon,
-  inspectResources = inspectSystemResources
+  inspectResources = inspectSystemResources,
+  inspectInfrastructure = null
 }) {
   assertDoctorPolicy(doctorPolicy);
   const runtime = await agentManager.getRuntimeDiagnostic({
@@ -270,9 +286,18 @@ export async function runDoctor({
     repairs: [],
     attention: [],
     system: null,
-    systemError: null
+    systemError: null,
+    infrastructure: null
   };
   addContextAttention(report);
+  if (inspectInfrastructure) {
+    try {
+      report.infrastructure = await inspectInfrastructure();
+    } catch (error) {
+      report.infrastructure = { error: error?.message || String(error) };
+      report.attention.push(`Master/Slave inspection failed: ${report.infrastructure.error}`);
+    }
+  }
   try {
     report.system = await inspectResources();
   } catch (error) {

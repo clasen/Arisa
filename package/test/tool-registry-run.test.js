@@ -8,7 +8,7 @@ const homeDir = await mkdtemp(path.join(os.tmpdir(), "arisa-tool-registry-home-"
 process.env.HOME = homeDir;
 process.env.USERPROFILE = homeDir;
 
-const { ToolRegistry } = await import("../src/core/tools/tool-registry.js");
+const { ToolRegistry, createToolOutputParser } = await import("../src/core/tools/tool-registry.js");
 const {
   arisaHomeDir,
   arisaPackageDir,
@@ -69,6 +69,26 @@ process.stdout.write(JSON.stringify({
   return dir;
 }
 
+async function createStreamingTool(name = "stream-tool") {
+  const dir = await createFakeTool(name, { version: "2.1.0", packageDigest: "sha256:test", requirements: { ffmpeg: {} } });
+  await writeFile(path.join(dir, "index.js"), `const frames = [
+  { version: 1, jobId: "stream-job", type: "accepted", sequence: 1, payload: {} },
+  { version: 1, jobId: "stream-job", type: "progress", sequence: 2, payload: { percent: 50 } },
+  { version: 1, jobId: "stream-job", type: "chunk", sequence: 3, payload: { text: "part" } },
+  { version: 1, jobId: "stream-job", type: "completed", sequence: 4, payload: { result: { ok: true, output: { text: "stream completed" } } } }
+];
+process.stderr.write("stream diagnostic\\n");
+for (const frame of frames) {
+  const line = JSON.stringify(frame) + "\\n";
+  const midpoint = Math.floor(line.length / 2);
+  process.stdout.write(line.slice(0, midpoint));
+  await new Promise((resolve) => setTimeout(resolve, 2));
+  process.stdout.write(line.slice(midpoint));
+}
+`, "utf8");
+  return dir;
+}
+
 test("loads and lists installed tools from the user tools directory", async () => {
   await resetHome();
   await createFakeTool("fake-tool", {
@@ -81,6 +101,9 @@ test("loads and lists installed tools from the user tools directory", async () =
 
   assert.deepEqual(registry.list(), [{
     name: "fake-tool",
+    version: null,
+    packageDigest: null,
+    requirements: [],
     description: "Fake test tool",
     input: ["text/plain"],
     output: ["text/plain"],
@@ -191,4 +214,50 @@ test("rejects unknown tools", async () => {
     () => registry.run({ name: "missing-tool", request: {}, chatId: "chat-1" }),
     /Tool not found: missing-tool/
   );
+});
+
+test("parses fragmented NDJSON incrementally and keeps stderr diagnostic-only", async () => {
+  await resetHome();
+  await createStreamingTool();
+  const logs = [];
+  const registry = new ToolRegistry({ logger: { log: (...args) => logs.push(args.join(" ")) } });
+  await registry.load();
+  const events = [];
+
+  const result = await registry.run({
+    name: "stream-tool",
+    chatId: "chat-1",
+    request: { text: "hello" },
+    onEvent: (event) => events.push(event)
+  });
+
+  assert.equal(result.ok, true);
+  assert.equal(result.output.text, "stream completed");
+  assert.deepEqual(events.map((event) => event.type), ["accepted", "progress", "chunk", "completed"]);
+  assert.match(logs.join("\n"), /stream diagnostic/);
+  assert.doesNotMatch(JSON.stringify(events), /stream diagnostic/);
+});
+
+test("rejects invalid NDJSON sequences and a second terminal event", async () => {
+  const invalidSequence = createToolOutputParser("sequence-tool");
+  await invalidSequence.push(`${JSON.stringify({ version: 1, jobId: "job", type: "accepted", sequence: 1, payload: {} })}\n`);
+  await assert.rejects(
+    () => invalidSequence.push(`${JSON.stringify({ version: 1, jobId: "job", type: "chunk", sequence: 3, payload: {} })}\n`),
+    /Invalid tool event sequence/
+  );
+
+  const duplicateTerminal = createToolOutputParser("terminal-tool");
+  await duplicateTerminal.push(`${JSON.stringify({ version: 1, jobId: "job", type: "completed", sequence: 1, payload: { result: { ok: true } } })}\n`);
+  await assert.rejects(
+    () => duplicateTerminal.push(`${JSON.stringify({ version: 1, jobId: "job", type: "failed", sequence: 2, payload: { error: "late" } })}\n`),
+    /more than one terminal event/
+  );
+});
+
+test("preserves pretty-printed single JSON tool responses", async () => {
+  const parser = createToolOutputParser("legacy-tool");
+  const output = JSON.stringify({ ok: true, output: { text: "legacy" } }, null, 2);
+  await parser.push(output.slice(0, 11));
+  await parser.push(output.slice(11));
+  assert.deepEqual(await parser.finish(), { mode: "legacy", output });
 });

@@ -1,0 +1,127 @@
+{
+  "name": "master-slave",
+  "description": "Pair an Arisa Master with deterministic headless Arisa Slave hosts over an authenticated encrypted direct TCP connection.",
+  "entry": "index.js",
+  "daemon": {
+    "scope": "global",
+    "autoStart": true,
+    "health": "internal",
+    "protocol": "arisa-daemon-v1"
+  },
+  "input": [
+    "text/plain",
+    "application/json"
+  ],
+  "output": [
+    "application/json",
+    "application/octet-stream"
+  ],
+  "configSchema": {
+    "role": {
+      "type": "string",
+      "required": true,
+      "prompt": "Local role: master or slave."
+    },
+    "listenHost": {
+      "type": "string",
+      "required": true,
+      "prompt": "IP literal on which the Master listener binds."
+    },
+    "listenPort": {
+      "type": "number",
+      "required": true,
+      "prompt": "TCP port on which the Master listener binds."
+    },
+    "publicEndpoint": {
+      "type": "string",
+      "required": true,
+      "prompt": "Reachable tcp://IP:port endpoint published in Slave bootstrap URLs."
+    },
+    "bootstrapSecretTtlMs": {
+      "type": "number",
+      "required": false,
+      "prompt": "Lifetime of a one-use bootstrap secret in milliseconds."
+    },
+    "maxFrameBytes": {
+      "type": "number",
+      "required": false,
+      "prompt": "Maximum encrypted protocol frame size in bytes."
+    },
+    "maxCatalogTools": {
+      "type": "number",
+      "required": false,
+      "prompt": "Maximum number of tools accepted in a Slave capability catalog."
+    },
+    "maxJobOutputBytes": {
+      "type": "number",
+      "required": false,
+      "prompt": "Maximum accumulated output for one remote job in bytes."
+    },
+    "maxReadBytes": {
+      "type": "number",
+      "required": false,
+      "prompt": "Maximum bytes returned by one remote file read."
+    },
+    "maxDirectoryEntries": {
+      "type": "number",
+      "required": false,
+      "prompt": "Maximum entries returned by one remote directory listing."
+    },
+    "maxProcessTimeoutMs": {
+      "type": "number",
+      "required": false,
+      "prompt": "Maximum timeout allowed for a remote process."
+    },
+    "jobTtlMs": {
+      "type": "number",
+      "required": false,
+      "prompt": "Lifetime of an issued remote job in milliseconds."
+    },
+    "batchConcurrency": {
+      "type": "number",
+      "required": false,
+      "prompt": "Maximum number of simultaneous jobs in a batch."
+    },
+    "streamBufferBytes": {
+      "type": "number",
+      "required": false,
+      "prompt": "Maximum pending stream data before backpressure is applied."
+    },
+    "reconnectMinMs": {
+      "type": "number",
+      "required": false,
+      "prompt": "Minimum Slave reconnect delay."
+    },
+    "reconnectMaxMs": {
+      "type": "number",
+      "required": false,
+      "prompt": "Maximum Slave reconnect delay."
+    },
+    "offlineWarningMs": {
+      "type": "number",
+      "required": false,
+      "prompt": "Delay before Master emits a deduplicated offline warning."
+    },
+    "roots": {
+      "type": "array",
+      "required": false,
+      "prompt": "Absolute filesystem roots exposed by this Slave."
+    },
+    "capabilities": {
+      "type": "array",
+      "required": false,
+      "prompt": "Remote capability allowlist for this Slave."
+    }
+  },
+  "category": "remote-infrastructure",
+  "keywords": [
+    "daemon",
+    "headless",
+    "infrastructure",
+    "master",
+    "remote-execution",
+    "server",
+    "slave"
+  ],
+  "skillHints": []
+}

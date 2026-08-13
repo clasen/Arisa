@@ -99,6 +99,7 @@ export function createArisaClient({
       setConfig: (params) => call("tools.setConfig", params),
       setResourceNote: (params) => call("tools.setResourceNote", params),
       getResourceNote: (params) => call("tools.getResourceNote", params),
+      installOfficial: (params, options) => call("tools.installOfficial", params, options),
       run: (params, options) => call("tools.run", params, options)
     },
     paths: {

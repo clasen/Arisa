@@ -1,0 +1,21 @@
+export default {
+  role: "",
+  listenHost: "",
+  listenPort: null,
+  publicEndpoint: "",
+  bootstrapSecretTtlMs: 600000,
+  maxFrameBytes: 1048576,
+  maxJobOutputBytes: 16777216,
+  maxReadBytes: 1048576,
+  maxDirectoryEntries: 1000,
+  maxProcessTimeoutMs: 300000,
+  jobTtlMs: 300000,
+  batchConcurrency: 4,
+  streamBufferBytes: 1048576,
+  reconnectMinMs: 1000,
+  reconnectMaxMs: 60000,
+  offlineWarningMs: 300000,
+  maxCatalogTools: 1000,
+  roots: [],
+  capabilities: []
+};

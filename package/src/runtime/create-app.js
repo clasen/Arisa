@@ -135,6 +135,15 @@ export async function createApp({ logger, runtimeOverrides, requestRestart } = {
       toolProcessSupervisor,
       daemonPolicy: config.daemons,
       doctorPolicy: config.doctor,
+      inspectInfrastructure: async () => {
+        const tool = toolRegistry.get("master-slave");
+        if (!tool) return null;
+        const result = await toolRegistry.run({
+          name: "master-slave",
+          request: { args: { action: "master.status" } }
+        });
+        return result.ok ? result.output?.json || null : { error: result.error };
+      },
       logger
     }),
     checkUpdates: async (chatId) => formatUpdateReport(await checkForUpdates({ chatId, toolRegistry })),

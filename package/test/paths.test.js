@@ -50,20 +50,14 @@ test("keeps chat tool state and config paths scoped below the chat directory for
   );
 });
 
-test("documents current traversal behavior for unsanitized tool names", () => {
-  const expectedRoot = path.join(chatsDir, "chat-1", "state", "tools");
-  const traversed = getChatToolStateDir("chat-1", "../../evil");
-
-  assert.equal(path.resolve(traversed), path.join(chatsDir, "chat-1", "evil"));
-  assert.equal(path.resolve(traversed).startsWith(`${expectedRoot}${path.sep}`), false);
+test("rejects traversal and non-canonical chat tool names", () => {
+  assert.throws(() => getChatToolStateDir("chat-1", "../../evil"), /Invalid tool name/);
+  assert.throws(() => getChatToolConfigPath("chat-1", "Upper_Case"), /Invalid tool name/);
 });
 
-test("documents current traversal behavior for global tool state paths", () => {
-  const expectedRoot = path.join(stateDir, "tools");
-  const traversed = getToolStateDir("../../evil");
-
-  assert.equal(path.resolve(traversed), path.join(path.dirname(stateDir), "evil"));
-  assert.equal(path.resolve(traversed).startsWith(`${expectedRoot}${path.sep}`), false);
+test("rejects traversal and non-canonical global tool names", () => {
+  assert.throws(() => getToolStateDir("../../evil"), /Invalid tool name/);
+  assert.throws(() => getToolStateDir("-invalid"), /Invalid tool name/);
 });
 
 test("creates POSIX IPC socket paths under the state directory", () => {

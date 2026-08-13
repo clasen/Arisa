@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtemp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, mkdir, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
@@ -38,7 +38,8 @@ const {
   readJson,
   stopManagedDaemon,
   unregisterManagedDaemon,
-  writeDaemonStatus
+  writeDaemonStatus,
+  writeJson
 } = await import("../src/core/tools/daemon-processes.js");
 const {
   createDaemonRuntime,
@@ -98,6 +99,61 @@ test("runs health through the queue before accepting jobs", async () => {
   assert.equal(failedStatus.lastSuccessfulJobAt, status.lastSuccessfulJobAt);
   assert.equal(failedStatus.lastError.phase, "job");
 
+  await runtime.stop();
+});
+
+test("streams ordered daemon events and persists the terminal result", async () => {
+  const runtime = runtimeFor({ type: "global" });
+  const events = [];
+  const output = await runtime.submit({ action: "stream", value: "done" }, {
+    timeoutMs: 1_000,
+    onEvent: (event) => events.push(event)
+  });
+
+  assert.deepEqual(output, { echo: "done" });
+  assert.deepEqual(events.map((event) => event.type), ["accepted", "progress", "chunk", "completed"]);
+  assert.deepEqual(events.map((event) => event.sequence), [1, 2, 3, 4]);
+  assert.ok((await readdir(runtime.paths.commandsDir)).some((file) => file.endsWith(".result.json")));
+  await runtime.stop();
+});
+
+test("deduplicates repeated notifications for one durable job id", async () => {
+  const runtime = runtimeFor({ type: "global" });
+  const jobId = "job-deduplicated";
+  const [first, second] = await Promise.all([
+    runtime.submit({ action: "count" }, { timeoutMs: 1_000, jobId }),
+    runtime.submit({ action: "count" }, { timeoutMs: 1_000, jobId })
+  ]);
+
+  assert.deepEqual(first, { count: 1 });
+  assert.deepEqual(second, { count: 1 });
+  assert.deepEqual(await readJson(path.join(runtime.paths.root, "effects.json"), {}), { count: 1 });
+  await runtime.stop();
+});
+
+test("recovers queued and accepted journal records after daemon start", async () => {
+  const runtime = runtimeFor({ type: "global" });
+  await runtime.ensure();
+  await writeJson(path.join(runtime.paths.commandsDir, "job-recovered.request.json"), {
+    id: "job-recovered",
+    status: "queued",
+    queuedAt: new Date().toISOString(),
+    payload: { value: "queued" }
+  });
+  await writeJson(path.join(runtime.paths.commandsDir, "job-accepted.processing.json"), {
+    id: "job-accepted",
+    status: "accepted",
+    queuedAt: new Date().toISOString(),
+    acceptedAt: new Date().toISOString(),
+    payload: { value: "accepted" }
+  });
+
+  const [queued, accepted] = await Promise.all([
+    runtime.submit({ value: "ignored" }, { timeoutMs: 1_000, jobId: "job-recovered" }),
+    runtime.submit({ value: "ignored" }, { timeoutMs: 1_000, jobId: "job-accepted" })
+  ]);
+  assert.deepEqual(queued, { echo: "queued" });
+  assert.deepEqual(accepted, { echo: "accepted" });
   await runtime.stop();
 });
 

@@ -103,6 +103,31 @@ Per chat (`~/.arisa/chats/<chatId>/`):
 
 Managed daemons become ready only after their tool-defined health operation succeeds through the normal command queue. Arisa records heartbeats, successful jobs, errors, and standard lifecycle states, then retries recovery or recreates an unhealthy process with its persisted scope and startup context.
 
+Daemon tools may opt into the `arisa-daemon-v1` local protocol for immediate
+multiplexed jobs and incremental NDJSON events over a capability-protected local
+socket. The runtime persists request, accepted and terminal records so a restart
+can recover queued work and will not silently repeat an accepted effect. Legacy
+daemon tools continue to use the existing request-file contract.
+
+### Arisa Master and Slave
+
+The official `master-slave` daemon tool lets one normal Arisa installation act
+as Master for deterministic headless Slave hosts. Master keeps Telegram and Pi;
+Slave runs only the IPC host, daemon supervisor and installed tools. Connections
+are authenticated, encrypted, initiated by Slave and restricted by per-Slave
+roots and capability grants.
+
+Linux with systemd is the first supported Slave target. Bootstrap uses a
+single-use URL issued by Master:
+
+```bash
+npm i -g arisa && arisa slave tcp://198.51.100.12:4719/arisa_secret_v1_<secret>
+```
+
+The URL is sensitive and may remain in shell history. `arisa slave status`,
+`log`, `tools`, `start`, `stop`, `restart` and `unpair` operate the isolated
+headless service without starting Telegram or Pi Agent.
+
 Pi authentication can use either:
 - an API key entered during bootstrap
 - or Pi's existing OAuth login when supported, such as `openai-codex`

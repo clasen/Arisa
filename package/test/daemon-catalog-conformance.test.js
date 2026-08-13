@@ -10,7 +10,8 @@ const expected = {
   "whatsapp-web": { scope: "chat", autoStart: false },
   "roster-sites": { scope: "global", autoStart: true },
   "turn-server": { scope: "global", autoStart: true },
-  "signaling-server": { scope: "global", autoStart: true }
+  "signaling-server": { scope: "global", autoStart: true },
+  "master-slave": { scope: "global", autoStart: true, protocol: "arisa-daemon-v1" }
 };
 
 for (const [toolName, daemon] of Object.entries(expected)) {
@@ -22,6 +23,7 @@ for (const [toolName, daemon] of Object.entries(expected)) {
     assert.equal(manifest.daemon.scope, daemon.scope);
     assert.equal(manifest.daemon.autoStart, daemon.autoStart);
     assert.equal(manifest.daemon.health, "internal");
+    if (daemon.protocol) assert.equal(manifest.daemon.protocol, daemon.protocol);
     assert.match(source, /createDaemonRuntime/);
     assert.match(source, /healthCheck/);
   });

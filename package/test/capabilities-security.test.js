@@ -238,6 +238,35 @@ test("rejects missing artifact input before running a tool", async () => {
   assert.equal(calls.length, 0);
 });
 
+test("requires exact confirmation before installing a bundled official tool", async () => {
+  const calls = [];
+  const toolRegistry = { load: async () => calls.push("reload") };
+  const capabilities = createArisaCapabilities({
+    artifactStore: createFakeArtifactStore(),
+    taskStore: createFakeTaskStore(),
+    toolRegistry,
+    installOfficialTool: async (name) => {
+      calls.push(name);
+      return { toolName: name, installed: true };
+    }
+  });
+
+  await assert.rejects(() => capabilities.dispatch({
+    method: "tools.installOfficial",
+    toolName: "master-slave",
+    params: { name: "fixture", confirmName: "other" }
+  }), /confirmName equal to name/);
+  assert.deepEqual(calls, []);
+
+  const result = await capabilities.dispatch({
+    method: "tools.installOfficial",
+    toolName: "master-slave",
+    params: { name: "fixture", confirmName: "fixture" }
+  });
+  assert.deepEqual(result, { toolName: "fixture", installed: true });
+  assert.deepEqual(calls, ["fixture", "reload"]);
+});
+
 test("normalizes list limits for artifact reads", async () => {
   const observedLimits = [];
   const artifactStore = {

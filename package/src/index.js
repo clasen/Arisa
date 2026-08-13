@@ -4,10 +4,12 @@ import { bootstrapIfNeeded } from "./runtime/bootstrap.js";
 import { applyRuntimeOverrides, createApp } from "./runtime/create-app.js";
 import { loadConfig } from "./core/config/config-store.js";
 import { createLogger } from "./runtime/logger.js";
-import { getServiceStatus, handoffServiceRestart, registerServiceProcess, restartService, startService, stopService, unregisterServiceProcess } from "./runtime/service-manager.js";
+import { getServiceStatus, handoffServiceRestart, registerServiceProcess, restartService, serviceEntryFile, startService, stopService, unregisterServiceProcess } from "./runtime/service-manager.js";
 import { flushArisaHome } from "./runtime/flush.js";
 import { readPackageVersion, showServiceLogs } from "./runtime/log-viewer.js";
 import { arisaPackageDir } from "./runtime/paths.js";
+import { runSlaveCli } from "./runtime/slave-cli.js";
+import { unregisterSlaveServiceProcess } from "./runtime/slave-service.js";
 
 process.env.ARISA_PACKAGE_DIR = arisaPackageDir;
 
@@ -17,6 +19,8 @@ const command = cli.positionals[0] || "run";
 const forceBootstrap = Boolean(cli.flags.bootstrap);
 const verbose = !cli.flags.silent;
 const serviceRunner = Boolean(cli.flags["service-runner"]);
+const slaveCommand = command === "slave";
+const slaveServiceRunner = slaveCommand && serviceRunner;
 const runtimeOverrides = toNestedOverrides(cli.nestedFlags);
 const logger = createLogger({ verbose });
 let activeApp = null;
@@ -99,7 +103,10 @@ async function shutdown(exitCode = 0) {
     logger.error("app", `shutdown failed: ${error instanceof Error ? error.message : String(error)}`);
     exitCode = exitCode || 1;
   }
-  if (serviceRunner) {
+  if (slaveServiceRunner) {
+    const slavePaths = activeApp?.slavePaths;
+    if (slavePaths) await unregisterSlaveServiceProcess(slavePaths);
+  } else if (serviceRunner) {
     await unregisterServiceProcess();
   }
   process.exit(exitCode);
@@ -208,6 +215,22 @@ async function runForeground() {
 }
 
 async function main() {
+  if (slaveCommand) {
+    const result = await runSlaveCli({
+      positionals: cli.positionals.slice(1),
+      flags: cli.flags,
+      logger,
+      entryFile: serviceEntryFile
+    });
+    if (result?.serviceRunner) {
+      activeApp = {
+        slavePaths: result.paths,
+        stop: async () => result.app.stop()
+      };
+    }
+    return;
+  }
+
   if (serviceRunner) {
     await registerServiceProcess();
     await runForeground();

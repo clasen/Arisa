@@ -6,6 +6,7 @@ import {
   getToolTmpDir
 } from "./paths.js";
 import { ToolResourceNoteStore } from "../core/tools/tool-resource-note-store.js";
+import { installBundledOfficialTool } from "../core/tools/official-tool-installer.js";
 
 function requireToolName(toolName) {
   if (typeof toolName !== "string" || !toolName.trim()) {
@@ -42,7 +43,14 @@ function normalizeLimit(limit) {
   return Math.min(value, 100);
 }
 
-export function createArisaCapabilities({ artifactStore, taskStore, toolRegistry, agentManager, resourceNotes = new ToolResourceNoteStore() } = {}) {
+export function createArisaCapabilities({
+  artifactStore,
+  taskStore,
+  toolRegistry,
+  agentManager,
+  resourceNotes = new ToolResourceNoteStore(),
+  installOfficialTool = installBundledOfficialTool
+} = {}) {
   async function dispatch({ method, toolName, chatId = null, params = {} } = {}) {
     const scopedToolName = requireToolName(toolName);
 
@@ -114,6 +122,16 @@ export function createArisaCapabilities({ artifactStore, taskStore, toolRegistry
         },
         chatId: scopedChatId
       });
+    }
+
+    if (method === "tools.installOfficial") {
+      const name = requireString(params.name, "name");
+      if (params.confirmName !== name) {
+        throw new Error("tools.installOfficial requires confirmName equal to name");
+      }
+      const installed = await installOfficialTool(name);
+      await toolRegistry.load();
+      return installed;
     }
 
     if (method === "artifacts.createText") {

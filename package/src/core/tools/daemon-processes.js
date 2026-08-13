@@ -1,7 +1,7 @@
 import { spawn } from "node:child_process";
 import crypto from "node:crypto";
 import { closeSync, openSync } from "node:fs";
-import { mkdir, readFile, readdir, rename, rm, writeFile } from "node:fs/promises";
+import { chmod, mkdir, readFile, readdir, rename, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 import {
   chatsDir,
@@ -35,6 +35,7 @@ function daemonIdentity(toolNameOrOptions, scope) {
 export function daemonPaths(toolNameOrOptions, scope) {
   const identity = daemonIdentity(toolNameOrOptions, scope);
   const root = getDaemonInstanceDir(identity.toolName, identity.scope);
+  const localSocket = path.join(root, "daemon.sock");
   return {
     ...identity,
     instanceId: getDaemonInstanceId(identity.scope),
@@ -44,7 +45,13 @@ export function daemonPaths(toolNameOrOptions, scope) {
     metaFile: path.join(root, "daemon.meta.json"),
     statusFile: path.join(root, "status.json"),
     logFile: path.join(root, "daemon.log"),
-    startLockFile: path.join(root, "daemon.start.lock")
+    startLockFile: path.join(root, "daemon.start.lock"),
+    socketFile: process.platform === "win32"
+      ? `\\\\.\\pipe\\arisa-daemon-${crypto.createHash("sha256").update(root).digest("hex").slice(0, 16)}`
+      : Buffer.byteLength(localSocket) <= 96
+        ? localSocket
+        : path.join("/tmp", `arisa-daemon-${crypto.createHash("sha256").update(root).digest("hex").slice(0, 24)}.sock`),
+    capabilityFile: path.join(root, "daemon.capability")
   };
 }
 
@@ -61,6 +68,25 @@ export async function writeJson(file, value) {
   const temporary = `${file}.${process.pid}.${crypto.randomUUID()}.tmp`;
   await writeFile(temporary, `${JSON.stringify(value, null, 2)}\n`, "utf8");
   await rename(temporary, file);
+}
+
+export async function ensureDaemonCapability(pathsOrIdentity) {
+  const paths = pathsOrIdentity.capabilityFile ? pathsOrIdentity : daemonPaths(pathsOrIdentity);
+  await mkdir(paths.root, { recursive: true });
+  try {
+    const existing = (await readFile(paths.capabilityFile, "utf8")).trim();
+    if (existing) return existing;
+  } catch {}
+  const token = crypto.randomBytes(32).toString("base64url");
+  try {
+    await writeFile(paths.capabilityFile, `${token}\n`, { encoding: "utf8", mode: 0o600, flag: "wx" });
+    return token;
+  } catch (error) {
+    if (error?.code !== "EEXIST") throw error;
+    const existing = (await readFile(paths.capabilityFile, "utf8")).trim();
+    if (!existing) throw new Error(`Invalid daemon capability file for ${paths.toolName}`);
+    return existing;
+  }
 }
 
 export function isProcessAlive(pid) {
@@ -232,6 +258,8 @@ export async function unregisterManagedDaemon(toolNameOrOptions, { scope } = {})
     rm(paths.pidFile, { force: true }),
     rm(paths.statusFile, { force: true }),
     rm(paths.startLockFile, { force: true }),
+    rm(paths.capabilityFile, { force: true }),
+    process.platform === "win32" ? Promise.resolve() : rm(paths.socketFile, { force: true }),
     rm(paths.commandsDir, { recursive: true, force: true })
   ]);
   return { toolName: paths.toolName, scope: paths.scope, instanceId: paths.instanceId };
@@ -311,8 +339,9 @@ export async function startManagedDaemon({
       return current.pid;
     }
     await rm(paths.pidFile, { force: true });
-    await rm(paths.commandsDir, { recursive: true, force: true });
     await mkdir(paths.commandsDir, { recursive: true });
+    const capabilityToken = await ensureDaemonCapability(paths);
+    if (process.platform !== "win32") await chmod(paths.capabilityFile, 0o600);
     if (beforeStart) await beforeStart();
 
     const startedAt = new Date().toISOString();
@@ -344,7 +373,8 @@ export async function startManagedDaemon({
         env: {
           ...process.env,
           ARISA_DAEMON_META_FILE: paths.metaFile,
-          ARISA_DAEMON_INSTANCE_ID: paths.instanceId
+          ARISA_DAEMON_INSTANCE_ID: paths.instanceId,
+          ARISA_DAEMON_CAPABILITY: capabilityToken
         }
       });
       await new Promise((resolve, reject) => {
@@ -411,7 +441,13 @@ async function listGlobalDaemonRecords() {
   const records = [];
   for (const entry of entries) {
     if (!entry.isDirectory()) continue;
-    const meta = await readJson(daemonPaths(entry.name).metaFile, null);
+    let paths;
+    try {
+      paths = daemonPaths(entry.name);
+    } catch {
+      continue;
+    }
+    const meta = await readJson(paths.metaFile, null);
     if (meta?.toolName && meta?.entryPath) records.push(meta);
   }
   return records;
@@ -437,7 +473,13 @@ async function listChatDaemonRecords() {
     const toolEntries = await readdir(toolsRoot, { withFileTypes: true }).catch(() => []);
     for (const toolEntry of toolEntries) {
       if (!toolEntry.isDirectory()) continue;
-      const meta = await readJson(daemonPaths({ toolName: toolEntry.name, scope }).metaFile, null);
+      let paths;
+      try {
+        paths = daemonPaths({ toolName: toolEntry.name, scope });
+      } catch {
+        continue;
+      }
+      const meta = await readJson(paths.metaFile, null);
       if (meta?.toolName && meta?.entryPath) records.push(meta);
     }
   }
