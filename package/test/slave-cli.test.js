@@ -176,6 +176,26 @@ test("validates before effects and keeps the bootstrap secret out of service met
   assert.deepEqual(calls, []);
 });
 
+test("explains an incomplete Master pairing handshake", async (t) => {
+  const home = await mkdtemp(path.join(os.tmpdir(), "arisa-slave-handshake-"));
+  t.after(() => rm(home, { recursive: true, force: true }));
+  await assert.rejects(
+    () => runSlaveBootstrap(`tcp://198.51.100.12:4719/${secret}`, {
+      paths: getSlavePaths(home),
+      entryFile: "/opt/arisa/src/index.js",
+      platform: "linux",
+      selectAccount: async () => ({ scope: "user", user: "tester", root: false, dedicated: false }),
+      ensureTool: async () => {},
+      installService: async () => assert.fail("service must not be installed after a failed handshake"),
+      invokeTool: async () => {
+        throw new Error("Socket closed before the protocol completed");
+      },
+      output: { log: () => {} }
+    }),
+    /bootstrap URL may be expired, rotated, already used, or invalid.*before it expires/i
+  );
+});
+
 test("ships an immutable verified master-slave bootstrap lock", async (t) => {
   const home = await mkdtemp(path.join(os.tmpdir(), "arisa-slave-lock-"));
   t.after(() => rm(home, { recursive: true, force: true }));

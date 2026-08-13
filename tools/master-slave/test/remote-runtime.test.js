@@ -9,6 +9,7 @@ import {
   createPairingStore,
   createRuntimeIdentity,
   MasterNetworkRuntime,
+  notifySlavePairing,
   SlaveNetworkRuntime
 } from "../remote-runtime.js";
 import { MasterSlaveStateStore } from "../state-store.js";
@@ -63,6 +64,27 @@ function job(slaveId, operation, args) {
   };
 }
 
+test("notifies authorized chats after pairing but stays silent on reconnect", async () => {
+  const notifications = [];
+  const clientForChat = (chatId) => ({
+    agent: {
+      enqueueEvent: async (event) => notifications.push({ chatId, event })
+    }
+  });
+  const peer = {
+    slaveId: "slave-notification",
+    authorizedChatIds: ["123", "456"],
+    profile: { name: "build-host" }
+  };
+
+  assert.equal(await notifySlavePairing({ type: "connected", peer, paired: false }, clientForChat), false);
+  assert.deepEqual(notifications, []);
+  assert.equal(await notifySlavePairing({ type: "connected", peer, paired: true }, clientForChat), true);
+  assert.deepEqual(notifications.map(({ chatId }) => chatId), ["123", "456"]);
+  assert.ok(notifications.every(({ event }) => event.resourceId === peer.slaveId));
+  assert.match(notifications[0].event.prompt, /finished pairing.*Notify the user now.*added successfully and is online/i);
+});
+
 test("pairs, reconnects, authorizes, configures, reads, deduplicates, and revokes", async (t) => {
   const root = await mkdtemp(path.join(os.tmpdir(), "arisa-master-slave-runtime-"));
   t.after(() => rm(root, { recursive: true, force: true }));
@@ -73,6 +95,7 @@ test("pairs, reconnects, authorizes, configures, reads, deduplicates, and revoke
   await writeFile(artifactFile, artifactContent);
   const masterState = new MasterSlaveStateStore(path.join(root, "master"));
   const slaveState = new MasterSlaveStateStore(path.join(root, "slave"));
+  const connectionEvents = [];
   const port = await reservePort();
   const config = {
     listenHost: "127.0.0.1",
@@ -93,7 +116,8 @@ test("pairs, reconnects, authorizes, configures, reads, deduplicates, and revoke
     config,
     state: masterState,
     identity: await createRuntimeIdentity(masterState),
-    pairingStore: createPairingStore(masterState, config)
+    pairingStore: createPairingStore(masterState, config),
+    onConnectionEvent: async (event) => connectionEvents.push(event)
   });
   await master.start();
   t.after(() => master.stop());
@@ -117,6 +141,7 @@ test("pairs, reconnects, authorizes, configures, reads, deduplicates, and revoke
     },
     maxFrameBytes: config.maxFrameBytes
   }));
+  await waitFor(() => connectionEvents.find((event) => event.type === "connected" && event.paired === true));
   paired.connection.close();
   const ipcChatIds = [];
   const slave = new SlaveNetworkRuntime({
@@ -142,6 +167,8 @@ test("pairs, reconnects, authorizes, configures, reads, deduplicates, and revoke
     const current = await masterState.listPeers().then((peers) => peers[0]);
     return current?.connectionState === "connected" && master.connections.has(current.slaveId) ? current : null;
   });
+  assert.equal(connectionEvents.filter((event) => event.type === "connected" && event.paired === true).length, 1);
+  assert.ok(connectionEvents.some((event) => event.type === "connected" && event.paired === false));
 
   const configured = await within("configure job", master.run(job(peer.slaveId, "slave.configure", {
     name: "configured",

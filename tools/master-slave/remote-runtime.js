@@ -142,6 +142,18 @@ function createPendingConnection(connection, { maxJobOutputBytes }) {
   };
 }
 
+export async function notifySlavePairing({ type, peer, paired }, clientForChat) {
+  if (type !== "connected" || paired !== true) return false;
+  const name = peer.profile?.name || peer.slaveId;
+  for (const chatId of peer.authorizedChatIds || []) {
+    await clientForChat(chatId).agent.enqueueEvent({
+      resourceId: peer.slaveId,
+      prompt: `Arisa Slave ${name} (${peer.slaveId}) finished pairing and is connected. Notify the user now with a concise confirmation that the Slave was added successfully and is online.`
+    }).catch(() => {});
+  }
+  return true;
+}
+
 export class MasterNetworkRuntime {
   constructor({ config, state, identity, pairingStore, onConnectionEvent } = {}) {
     requireMasterConfig(config);
@@ -168,12 +180,12 @@ export class MasterNetworkRuntime {
           offlineNoticeAt: null
         }),
         maxFrameBytes: this.config.maxFrameBytes
-      }).then(async ({ connection, peer }) => {
+      }).then(async ({ connection, peer, paired }) => {
         const existing = this.connections.get(peer.slaveId);
         existing?.close();
         const remote = createPendingConnection(connection, { maxJobOutputBytes: this.config.maxJobOutputBytes });
         this.connections.set(peer.slaveId, remote);
-        await this.onConnectionEvent?.({ type: "connected", peer });
+        await this.onConnectionEvent?.({ type: "connected", peer, paired });
         socket.once("close", async () => {
           if (this.connections.get(peer.slaveId) !== remote) return;
           this.connections.delete(peer.slaveId);

@@ -18,6 +18,7 @@ import {
   createPairingStore,
   createRuntimeIdentity,
   MasterNetworkRuntime,
+  notifySlavePairing,
   runtimeIdentityDiagnostic,
   SlaveNetworkRuntime
 } from "./remote-runtime.js";
@@ -392,10 +393,11 @@ async function startNetwork(config, role) {
       state,
       identity: activeIdentity,
       pairingStore: createPairingStore(state, config),
-      onConnectionEvent: async ({ type, peer }) => {
+      onConnectionEvent: async ({ type, peer, paired }) => {
         const current = offlineTimers.get(peer.slaveId);
         if (current) clearTimeout(current);
         offlineTimers.delete(peer.slaveId);
+        if (await notifySlavePairing({ type, peer, paired }, arisaClient)) return;
         if (type !== "disconnected") return;
         const timer = setTimeout(async () => {
           offlineTimers.delete(peer.slaveId);

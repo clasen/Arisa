@@ -165,6 +165,14 @@ export function formatSlaveStatus({ systemd, diagnostic }) {
   ].join("\n");
 }
 
+function explainSlaveBootstrapError(error) {
+  if (error?.message !== "Socket closed before the protocol completed") return error;
+  return new Error(
+    "Master ended the pairing handshake before it completed. The bootstrap URL may be expired, rotated, already used, or invalid. Generate a new bootstrap URL on Master and retry before it expires.",
+    { cause: error }
+  );
+}
+
 export async function runSlaveBootstrap(url, {
   paths = getSlavePaths(resolveSlaveHome()),
   ask = askFromTerminal,
@@ -181,11 +189,16 @@ export async function runSlaveBootstrap(url, {
   const account = await selectAccount({ ask });
   await ensureSlaveConfig(paths);
   await ensureTool(paths);
-  const result = await withSecureRequestFile({
-    directory: paths.tmpDir,
-    prefix: "bootstrap",
-    value: { url }
-  }, (bootstrapFile) => invokeTool(paths, { action: "slave.bootstrap", bootstrapFile }));
+  let result;
+  try {
+    result = await withSecureRequestFile({
+      directory: paths.tmpDir,
+      prefix: "bootstrap",
+      value: { url }
+    }, (bootstrapFile) => invokeTool(paths, { action: "slave.bootstrap", bootstrapFile }));
+  } catch (error) {
+    throw explainSlaveBootstrapError(error);
+  }
   await installService({ account, slaveHome: paths.home, entryFile });
   await writeSlaveServiceDescriptor(paths, { version: 1, account, installedAt: new Date().toISOString() });
   output.log(`Arisa Slave paired and running as ${account.user}${account.root ? " (root)" : ""}.`);
