@@ -402,13 +402,18 @@ function nextQueries(catalog, cursor, count) {
   return Array.from({ length: limit }, (_, offset) => catalog[(Number(cursor || 0) + offset) % catalog.length]);
 }
 
+function activeQueries(catalog, state) {
+  const archived = state.archivedQueries || {};
+  return catalog.filter((query) => !archived[query]);
+}
+
 function nextDiscoveryQueries(settings, state) {
-  return nextQueries(queryCatalog(settings), state.cursor, settings.queryBudgetPerRun || settings.queriesPerRun || 2);
+  return nextQueries(activeQueries(queryCatalog(settings), state), state.cursor, settings.queryBudgetPerRun || settings.queriesPerRun || 2);
 }
 
 function nextCreativeQueries(settings, state) {
   const creative = settings.creativeDiscovery || {};
-  return nextQueries(creativeQueryCatalog(settings), state.creativeCursor, creative.queryBudgetPerRun || settings.queryBudgetPerRun || 4);
+  return nextQueries(activeQueries(creativeQueryCatalog(settings), state), state.creativeCursor, creative.queryBudgetPerRun || settings.queryBudgetPerRun || 4);
 }
 
 function seenUrlRecently(seenUrls, url, cooldownDays) {
@@ -438,7 +443,7 @@ async function discoverContacts(arisa, chatId, profile, allContacts, draftRecipi
   const { file, data: state } = await readDiscoveryState(chatId);
   const creativeMode = options.mode === "creative";
   const creativeSettings = settings.creativeDiscovery || {};
-  const catalog = creativeMode ? creativeQueryCatalog(settings) : queryCatalog(settings);
+  const catalog = activeQueries(creativeMode ? creativeQueryCatalog(settings) : queryCatalog(settings), state);
   const queries = creativeMode ? nextCreativeQueries(settings, state) : nextDiscoveryQueries(settings, state);
   const cursorKey = creativeMode ? "creativeCursor" : "cursor";
   const oldSeen = Array.isArray(state.seenUrls)
@@ -448,6 +453,8 @@ async function discoverContacts(arisa, chatId, profile, allContacts, draftRecipi
   const cooldownDays = Math.max(1, Number((creativeMode ? creativeSettings.urlCooldownDays : null) || settings.urlCooldownDays || 45));
   const pageBudget = Math.max(1, Number((creativeMode ? creativeSettings.pageBudgetPerRun : null) || settings.pageBudgetPerRun || 30));
   const queryStats = state.queryStats || {};
+  const archivedQueries = state.archivedQueries || {};
+  const archivedThisRun = [];
   const added = [];
   let pagesOpened = 0;
   let searches = 0;
@@ -458,13 +465,16 @@ async function discoverContacts(arisa, chatId, profile, allContacts, draftRecipi
   for (const query of queries) {
     if (added.length >= needed || pagesOpened >= pageBudget) break;
     const stats = queryStats[query] || { runs: 0, results: 0, prospects: 0, errors: 0 };
+    const prospectsBefore = Number(stats.prospects || 0);
+    const errorsBefore = Number(stats.errors || 0);
     stats.runs += 1;
     stats.lastRunAt = new Date().toISOString();
     let results = [];
     try {
       const search = await runTool(arisa, webTool, { mode: "search", maxResults: String(settings.maxResults || 8) }, Number(settings.timeoutMs || 90_000), query);
       searches += 1;
-      results = parseSearchResults(search.text).filter((result) => discoveryResultAllowed(result, settings));
+      const rawResults = parseSearchResults(search.text);
+      results = rawResults.filter((result) => discoveryResultAllowed(result, settings));
       stats.results += results.length;
     } catch (error) {
       stats.errors += 1;
@@ -562,6 +572,15 @@ async function discoverContacts(arisa, chatId, profile, allContacts, draftRecipi
       added.push({ email: prospect.email, outlet, sourceUrl: result.url, query, dryRun });
       stats.prospects += 1;
     }
+    if (settings.archiveEmptyQueries !== false
+        && Number(stats.prospects || 0) === prospectsBefore
+        && Number(stats.errors || 0) === errorsBefore) {
+      const archivedAt = new Date().toISOString();
+      archivedQueries[query] = { archivedAt, reason: "no-eligible-prospect", mode: creativeMode ? "creative" : "standard" };
+      stats.archivedAt = archivedAt;
+      stats.archiveReason = "no-eligible-prospect";
+      archivedThisRun.push(query);
+    }
     queryStats[query] = stats;
   }
 
@@ -569,6 +588,7 @@ async function discoverContacts(arisa, chatId, profile, allContacts, draftRecipi
     state[cursorKey] = (Number(state[cursorKey] || 0) + queries.length) % Math.max(1, catalog.length);
     state.seenUrls = compactSeenUrls(seenUrls, Number(settings.seenUrlLimit || 3000));
     state.queryStats = queryStats;
+    state.archivedQueries = archivedQueries;
     state.runs = [...(state.runs || []), {
       at: new Date().toISOString(), mode: creativeMode ? "creative" : "standard",
       queries, searches, pagesOpened, found: added.length,
@@ -577,7 +597,7 @@ async function discoverContacts(arisa, chatId, profile, allContacts, draftRecipi
     state.updatedAt = new Date().toISOString();
     await saveDiscoveryState(file, state);
   }
-  return { mode: creativeMode ? "creative" : "standard", queries, searches, pagesOpened, found: added.length, added, skippedUsed, skippedSeen, rejectedEmails, dryRun };
+  return { mode: creativeMode ? "creative" : "standard", queries, searches, pagesOpened, found: added.length, added, skippedUsed, skippedSeen, rejectedEmails, archivedQueries: archivedThisRun, dryRun };
 }
 function researchTitleUsable(value) {
   const title = decodeHtmlEntities(value).replace(/[\r\n]+/g, " ").trim();

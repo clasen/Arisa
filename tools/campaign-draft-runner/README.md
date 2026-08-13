@@ -54,6 +54,7 @@ Minimal profile structure:
     "enabled": true,
     "webTool": "web-browser",
     "minEligiblePool": 1,
+    "archiveEmptyQueries": true,
     "queryBudgetPerRun": 1,
     "pageBudgetPerRun": 3,
     "timeoutMs": 15000,
@@ -110,5 +111,7 @@ Use `action: "reconcile-sent"` to run the same synchronization without discovery
 Set `untilDrafted: "true"` on a non-dry run to retry discovery with rotating queries until at least one new draft is created. `retryDelaySeconds` controls the pause between attempts; `maxAttempts` and `maxRuntimeSeconds` bound the retry loop. The runner stops after one empty normal and creative discovery pass instead of repeating the same zero-yield work.
 
 When the normal pass leaves no eligible candidates, `discovery.creativeDiscovery` provides a bounded fallback. It builds and rotates queries from comparable titles (`seeds`), adjacent audience ideas (`themes`), outlet types (`audiences`), contact intents, and templates. The fallback has its own persistent cursor, query budget, page budget, and optional URL cooldown, so repeated zero-result runs explore new combinations rather than repeating the same searches. Existing email verification, provenance, deduplication, exclusions, and draft-only safeguards still apply.
+
+With `discovery.archiveEmptyQueries` enabled (the default), a completed query that yields no eligible contact is archived in chat-scoped discovery state and omitted from later rotations. Queries with search or page errors are not archived, so temporary provider failures remain retryable.
 
 Research source URLs are omitted from personalized openings by default so outreach contains only the campaign link. Set `personalization.includeSourceUrl: true` only when a profile explicitly needs the source URL in the email.
