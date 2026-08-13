@@ -1,6 +1,6 @@
 ﻿import test from "node:test";
 import assert from "node:assert/strict";
-import { availableCandidates, candidateScore, greetingNameFor, handleFromXUrl, hasGroundedCoverageEvidence, isUncertainDeliveryError, parseSearchResults, pendingApproval, renderMessage, sha256 } from "../index.js";
+import { availableCandidates, candidateScore, greetingNameFor, handleFromXUrl, hasGroundedCoverageEvidence, isUncertainDeliveryError, parseSearchResults, pendingApproval, renderMessage, sha256, targetBoundGreeting } from "../index.js";
 
 test("extracts only real X profile handles", () => {
   assert.equal(handleFromXUrl("https://x.com/Good_Handle/status/123"), "Good_Handle");
@@ -108,4 +108,10 @@ test("first-name greetings require verified identity or profile-seed overrides",
 test("display-name greetings do not require a verified personal first name", () => {
   const profile = { message: { greetingMode: "display-name" } };
   assert.equal(greetingNameFor({ username: "Studio", displayName: "Studio Account" }, profile), "Studio Account");
+});
+
+test("revised greetings must remain grounded in the verified target identity", () => {
+  const candidate = { username: "NorbezJones", verifiedDisplayName: "Bez: Interactive Fiction, Visual Novels, & Writing" };
+  assert.equal(targetBoundGreeting(candidate, "Bez"), "Bez");
+  assert.throws(() => targetBoundGreeting(candidate, "Alex"), /grounded in the verified target identity/);
 });

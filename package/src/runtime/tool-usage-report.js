@@ -12,7 +12,7 @@ export function formatToolUsageReport(tools) {
   for (const tool of sortedTools) {
     const name = String(tool.name).padEnd(nameWidth);
     const count = String(tool.count).padStart(countWidth);
-    lines.push(`• ${name} ${count}`);
+    lines.push(`- ${name}  ${count}`);
   }
   return renderTextReport(lines);
 }

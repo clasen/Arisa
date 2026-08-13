@@ -28,6 +28,7 @@ Actions:
   prepare-next Discover if needed, validate candidates through x-dm, personalize one message, and persist one approval. args: profile?, maxChecks?
   send-approved Send exactly the persisted approval. args: profile?, approvalId, messageHash, confirm=true, dryRun=false
   skip         Skip one pending approval. args: profile?, approvalId, reason?
+  revise-greeting Replace a malformed target-bound greeting and persist a fresh approval. args: profile?, approvalId, greetingName
   reconcile    Reconcile a manual-review approval from x-dm history without sending. args: profile?, approvalId
   assume-sent  Mark an uncertain approval as sent without retrying. args: profile?, approvalId, confirm=true, reason?
   resolve-not-sent Reopen a candidate only after x-dm records human-confirmed non-delivery. args: profile?, approvalId
@@ -427,6 +428,16 @@ function verifiedGreetingFor(candidate, profile, target = null) {
   return verifiedPersonalFirstName(target.displayName);
 }
 
+function targetBoundGreeting(candidate, value) {
+  const greeting = clean(value).slice(0, 50);
+  if (!greeting) throw new Error("greetingName is required.");
+  const identity = clean(candidate.verifiedDisplayName || candidate.displayName || candidate.username);
+  if (!identity.toLocaleLowerCase().includes(greeting.toLocaleLowerCase())) {
+    throw new Error("greetingName must be grounded in the verified target identity.");
+  }
+  return greeting;
+}
+
 function greetingNameFor(candidate, profile) {
   const greeting = clean(candidate.verifiedGreetingName || (candidate.source === "profile-seed" ? candidate.greetingName : ""));
   if (profile.message?.greetingMode === "first-name" && !greeting) {
@@ -718,6 +729,49 @@ async function handleSkip(request, args) {
   } finally { await release(); }
 }
 
+async function handleReviseGreeting(request, args) {
+  const release = await acquireRunLock(request.chatId);
+  try {
+    const name = profileName(args);
+    const { profile, stateDir } = await loadProfile(request.chatId, name);
+    const { file, state } = await loadState(stateDir, name);
+    const priorApproval = state.approval;
+    if (!priorApproval || priorApproval.id !== clean(args.approvalId)) throw new Error("No matching approval exists for revision.");
+    if (!["pending", "skipped"].includes(priorApproval.status)) throw new Error("Only pending or skipped approvals can have their greeting revised.");
+    const candidate = state.candidates.find((item) => normalizedHandle(item.username) === normalizedHandle(priorApproval.username));
+    if (!candidate) throw new Error("Approval candidate was not found.");
+
+    const greetingName = targetBoundGreeting(candidate, args.greetingName);
+    candidate.verifiedGreetingName = greetingName;
+    const message = renderMessage(candidate, profile);
+    const createdAt = new Date().toISOString();
+    const ttlHours = Math.max(1, Math.min(intArg(profile.message?.approvalTtlHours, 24), 168));
+    const approval = {
+      ...priorApproval,
+      id: crypto.randomUUID(),
+      profileDigest: sha256(JSON.stringify(profile)),
+      greetingName,
+      message,
+      messageHash: sha256(message),
+      idempotencyKey: `${profile.campaignId}:${normalizedHandle(candidate.username)}:${sha256(message).slice(0, 16)}`,
+      createdAt,
+      expiresAt: new Date(Date.parse(createdAt) + ttlHours * 3600_000).toISOString(),
+      status: "pending",
+      revisedFromApprovalId: priorApproval.id
+    };
+    delete approval.skippedAt;
+    delete approval.skipReason;
+    candidate.status = "awaiting-approval";
+    candidate.proposedAt = createdAt;
+    candidate.proposedMessageHash = approval.messageHash;
+    state.approval = approval;
+    state.runs = [...state.runs, runRecord("revise-greeting", { approvalId: approval.id, revisedFromApprovalId: priorApproval.id, username: approval.username })].slice(-200);
+    state.updatedAt = createdAt;
+    await writeJson(file, state);
+    return toolOk({ text: `Prepared revised approval ${approval.id} for @${approval.username}; nothing was sent.`, json: { profile: name, approval } });
+  } finally { await release(); }
+}
+
 async function handleReconcile(request, args) {
   const release = await acquireRunLock(request.chatId);
   try {
@@ -814,6 +868,7 @@ async function execute(requestFile) {
   if (action === "prepare-next") return handlePrepareNext(request, args);
   if (action === "send-approved") return handleSendApproved(request, args);
   if (action === "skip") return handleSkip(request, args);
+  if (action === "revise-greeting") return handleReviseGreeting(request, args);
   if (action === "reconcile") return handleReconcile(request, args);
   if (action === "assume-sent") return handleAssumeSent(request, args);
   if (action === "resolve-not-sent") return handleResolveNotSent(request, args);
@@ -832,4 +887,4 @@ async function main(cliArgs = process.argv.slice(2)) {
 const isCli = process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url);
 if (isCli) await main();
 
-export { availableCandidates, candidateScore, greetingNameFor, handleFromXUrl, hasGroundedCoverageEvidence, isUncertainDeliveryError, parseSearchResults, pendingApproval, renderMessage, sha256, synthesizedCreativeQueries, verifiedPersonalFirstName };
+export { availableCandidates, candidateScore, greetingNameFor, handleFromXUrl, hasGroundedCoverageEvidence, isUncertainDeliveryError, parseSearchResults, pendingApproval, renderMessage, sha256, synthesizedCreativeQueries, targetBoundGreeting, verifiedPersonalFirstName };

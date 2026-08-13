@@ -31,12 +31,12 @@ test("formats narrow tool usage counts with bullets and right-aligned numbers", 
     { name: "gmail-workspace", count: 3 },
     { name: "campaign-draft-runner", count: 12 }
   ]);
-  assert.match(report, /• campaign-draft-runner 12/);
-  assert.match(report, /• gmail-workspace\s+3/);
-  const rows = report.split("\n").filter((line) => line.startsWith("• "));
+  assert.match(report, /- campaign-draft-runner  12/);
+  assert.match(report, /- gmail-workspace\s+3/);
+  const rows = report.split("\n").filter((line) => line.startsWith("- "));
   assert.match(rows[0], /campaign-draft-runner/);
   assert.match(rows[1], /gmail-workspace/);
-  assert.deepEqual(rows.map((line) => line.match(/\d+$/).index + line.match(/\d+$/)[0].length), [26, 26]);
-  assert.deepEqual(rows.map((line) => line.length), [26, 26]);
+  assert.deepEqual(rows.map((line) => line.match(/\d+$/).index + line.match(/\d+$/)[0].length), [27, 27]);
+  assert.deepEqual(rows.map((line) => line.length), [27, 27]);
   assert.ok(report.split("\n").every((line) => [...line].length <= 35));
 });
