@@ -38,6 +38,38 @@ function normalizeKeywords(keywords) {
     .filter(Boolean))];
 }
 
+function searchableToolText(tool) {
+  return [
+    tool.name,
+    tool.description,
+    tool.category,
+    ...(tool.keywords || []),
+    ...(tool.input || []),
+    ...(tool.output || [])
+  ].filter(Boolean).join(" ").toLowerCase();
+}
+
+export function rankToolMatches(tools, query) {
+  const terms = String(query || "").toLowerCase().match(/[\p{L}\p{N}_-]+/gu) || [];
+  if (!terms.length) return [];
+  return tools.map((tool) => {
+    const name = String(tool.name || "").toLowerCase();
+    const category = String(tool.category || "").toLowerCase();
+    const keywords = (tool.keywords || []).map((keyword) => String(keyword).toLowerCase());
+    const haystack = searchableToolText(tool);
+    let score = 0;
+    for (const term of terms) {
+      if (keywords.includes(term)) score += 12;
+      else if (name === term) score += 10;
+      else if (name.includes(term)) score += 7;
+      else if (category === term) score += 6;
+      else if (haystack.includes(term)) score += 2;
+    }
+    return { tool, score };
+  }).filter((match) => match.score > 0)
+    .sort((left, right) => right.score - left.score || left.tool.name.localeCompare(right.tool.name));
+}
+
 function formatSemanticMetadata(tool) {
   return [
     "Semantic metadata:",
@@ -107,6 +139,10 @@ export class ToolRegistry {
       keywords: tool.keywords || [],
       skillHints: tool.skillHints || []
     }));
+  }
+
+  search(query) {
+    return rankToolMatches(this.list(), query).map(({ tool, score }) => ({ ...tool, score }));
   }
 
   async listWithRuntime(chatId = null) {

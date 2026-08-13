@@ -11,6 +11,7 @@ import { createSystemShellTool } from "./system-shell-tool.js";
 import { clampModelThinkingLevel } from "./pi-runtime.js";
 import { clampModelSpeed, createModelSpeedController } from "./model-speed.js";
 import { arisaHomeDir, getChatPiSessionsDir } from "../../runtime/paths.js";
+import { searchOfficialToolCatalog } from "../tools/official-tool-catalog.js";
 
 const piValidationTimeoutMs = 60_000;
 const arisaToolNames = [
@@ -551,9 +552,9 @@ export class AgentManager {
       defineTool({
         name: "list_tools",
         label: "List tools",
-        description: "List Arisa core, native shell, and modular CLI tools with their capabilities and daemon diagnostics.",
-        parameters: Type.Object({}),
-        execute: async () => {
+        description: "List Arisa tools, or search installed tool metadata by capability with automatic official-catalog fallback.",
+        parameters: Type.Object({ query: Type.Optional(Type.String()) }),
+        execute: async (_id, params) => {
           await this.toolRegistry.load();
           const coreTools = getCoreCodingTools({
             tools: policy.tools,
@@ -567,17 +568,35 @@ export class AgentManager {
             shell: policy.shell.shellPath || (process.platform === "win32" ? "powershell" : "sh"),
             enabled: !(policy.excludeTools || []).includes("system_shell")
           }];
-          const cliTools = (await this.toolRegistry.listWithRuntime(chatId)).map((tool) => ({
-            ...tool,
-            source: "arisa-modular",
-            invocation: "run_tool"
-          }));
+          const query = params.query?.trim() || "";
+          let catalogFallback = null;
+          const cliTools = query
+            ? this.toolRegistry.search(query).map((tool) => ({
+              ...tool,
+              source: "arisa-modular",
+              invocation: "run_tool"
+            }))
+            : (await this.toolRegistry.listWithRuntime(chatId)).map((tool) => ({
+              ...tool,
+              source: "arisa-modular",
+              invocation: "run_tool"
+            }));
+          if (query && cliTools.length === 0) {
+            try {
+              catalogFallback = await searchOfficialToolCatalog(query);
+            } catch (error) {
+              catalogFallback = { unavailable: true, error: error?.message || String(error), matches: [] };
+            }
+          }
           const result = {
+            query: query || null,
             workspaceDir: policy.workspaceDir,
-            coreTools,
-            nativeTools,
+            coreTools: query ? [] : coreTools,
+            nativeTools: query ? [] : nativeTools,
             cliTools,
-            tools: [...coreTools.filter((tool) => tool.enabled), ...nativeTools.filter((tool) => tool.enabled), ...cliTools]
+            officialCatalogMatches: Array.isArray(catalogFallback) ? catalogFallback : catalogFallback?.matches || [],
+            catalogFallback: catalogFallback && !Array.isArray(catalogFallback) ? catalogFallback : null,
+            tools: query ? cliTools : [...coreTools.filter((tool) => tool.enabled), ...nativeTools.filter((tool) => tool.enabled), ...cliTools]
           };
           return {
             content: [{ type: "text", text: JSON.stringify(result, null, 2) }],
