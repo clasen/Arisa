@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { compareVersions, formatUpdateReport } from "../src/runtime/update-manager.js";
+import { compareVersions, formatUpdateReport, installCoreUpdate, updateOfficialTools } from "../src/runtime/update-manager.js";
 
 test("compares semantic versions", () => {
   assert.equal(compareVersions("5.0.2", "5.0.3"), -1);
@@ -84,4 +84,60 @@ test("shortens long review status labels", () => {
   assert.match(report, /audio-extractor\n    \[local\]/);
   assert.match(report, /campaign-draft-runner\n    \[untracked\]/);
   assert.ok(report.split("\n").every((line) => [...line].length <= 35));
+});
+
+test("installs only the currently published core update and verifies it", async () => {
+  const calls = [];
+  const versions = ["5.0.2", "5.1.0"];
+  const result = await installCoreUpdate({ targetVersion: "5.1.0" }, {
+    readVersion: async () => versions.shift(),
+    fetchVersion: async () => "5.1.0",
+    execute: async (...args) => { calls.push(args); }
+  });
+
+  assert.deepEqual(calls, [["npm", ["install", "--global", "arisa@5.1.0"]]]);
+  assert.deepEqual(result, {
+    updated: true,
+    previousVersion: "5.0.2",
+    currentVersion: "5.1.0"
+  });
+});
+
+test("refuses a stale core update button", async () => {
+  await assert.rejects(
+    installCoreUpdate({ targetVersion: "5.1.0" }, {
+      readVersion: async () => "5.0.2",
+      fetchVersion: async () => "5.1.1",
+      execute: async () => assert.fail("must not install a stale target")
+    }),
+    /Run \/update again/
+  );
+});
+
+test("updates only safe official tools and reloads the registry", async () => {
+  const calls = [];
+  const toolRegistry = {
+    async run(request) {
+      calls.push(request);
+      return {
+        ok: true,
+        output: {
+          json: {
+            updates: [{ name: "context-vault", action: "updated" }],
+            skipped: [{ name: "customized", status: "locally-modified" }]
+          }
+        }
+      };
+    },
+    async load() { calls.push("load"); }
+  };
+
+  assert.deepEqual(await updateOfficialTools({ chatId: 42, toolRegistry }), {
+    updated: ["context-vault"],
+    skipped: [{ name: "customized", status: "locally-modified" }]
+  });
+  assert.deepEqual(calls, [
+    { name: "official-tool-sync", chatId: 42, request: { args: { action: "update-safe" } } },
+    "load"
+  ]);
 });

@@ -11,7 +11,7 @@ import { createIpcServer } from "./ipc/ipc-server.js";
 import { getAgentConfig } from "../core/agent/model-selection.js";
 import { normalizeModelSpeed } from "../core/agent/model-speed.js";
 import { runDoctor } from "./doctor.js";
-import { checkForUpdates, formatUpdateReport } from "./update-manager.js";
+import { checkForUpdates, installCoreUpdate, updateOfficialTools } from "./update-manager.js";
 
 function normalizeString(value) {
   const text = String(value ?? "").trim();
@@ -146,7 +146,9 @@ export async function createApp({ logger, runtimeOverrides, requestRestart } = {
       },
       logger
     }),
-    checkUpdates: async (chatId) => formatUpdateReport(await checkForUpdates({ chatId, toolRegistry })),
+    checkUpdates: async (chatId) => checkForUpdates({ chatId, toolRegistry }),
+    updateCore: async (targetVersion) => installCoreUpdate({ targetVersion }),
+    updateTools: async (chatId) => updateOfficialTools({ chatId, toolRegistry }),
     requestRestart,
     logger
   });

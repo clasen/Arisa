@@ -58,6 +58,32 @@ async function fetchLatestVersion() {
   return version;
 }
 
+export async function installCoreUpdate({ targetVersion }, {
+  readVersion = readCurrentVersion,
+  fetchVersion = fetchLatestVersion,
+  execute = runCommand
+} = {}) {
+  if (!parseSemver(targetVersion)) throw new Error("Invalid Arisa update version");
+  const [currentVersion, latestVersion] = await Promise.all([readVersion(), fetchVersion()]);
+  if (targetVersion !== latestVersion) {
+    throw new Error(`Arisa ${latestVersion} is now the latest version. Run /update again.`);
+  }
+  if (compareVersions(currentVersion, latestVersion) !== -1) {
+    return { updated: false, currentVersion, latestVersion };
+  }
+
+  await execute("npm", ["install", "--global", `arisa@${latestVersion}`]);
+  const installedVersion = await readVersion();
+  if (installedVersion !== latestVersion) {
+    throw new Error(`npm completed, but Arisa is still ${installedVersion} instead of ${latestVersion}`);
+  }
+  return {
+    updated: true,
+    previousVersion: currentVersion,
+    currentVersion: installedVersion
+  };
+}
+
 async function cloneCatalog(scratchRoot) {
   const repoDir = path.join(scratchRoot, "repo");
   await runCommand("git", ["clone", "--depth", "1", "--branch", defaultBranch, "--", defaultRepoUrl, repoDir], { cwd: scratchRoot, timeoutMs: 180_000 });
@@ -154,6 +180,23 @@ export async function checkForUpdates({ chatId, toolRegistry }) {
     bootstrapInstalled: bootstrapped.installed,
     tools: summarizeTools(sync, toolRegistry.list())
   };
+}
+
+export async function updateOfficialTools({ chatId, toolRegistry }) {
+  try {
+    const result = await toolRegistry.run({
+      name: "official-tool-sync",
+      chatId,
+      request: { args: { action: "update-safe" } }
+    });
+    const sync = parseToolSyncOutput(result);
+    return {
+      updated: (sync.updates || []).filter((item) => item.action === "updated").map((item) => item.name),
+      skipped: (sync.skipped || []).map(({ name, status }) => ({ name, status }))
+    };
+  } finally {
+    await toolRegistry.load();
+  }
 }
 
 function shortToolStatus(status) {

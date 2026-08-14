@@ -16,6 +16,8 @@ import { ConversationHistoryStore } from "../../core/conversation/conversation-h
 import { formatDoctorReport } from "../../runtime/doctor.js";
 import { formatToolUsageReport } from "../../runtime/tool-usage-report.js";
 import { ToolResourceNoteStore } from "../../core/tools/tool-resource-note-store.js";
+import { formatUpdateReport } from "../../runtime/update-manager.js";
+import { buildUpdatePicker, createTelegramUpdateCallbackHandler } from "./update-command.js";
 
 const slowPromptNoticeMs = 300_000;
 
@@ -23,7 +25,7 @@ export const telegramCommands = Object.freeze([
   { command: "new", description: "New chat context" },
   { command: "restart", description: "Restart Arisa" },
   { command: "doctor", description: "Check runtime health" },
-  { command: "update", description: "Check for updates" },
+  { command: "update", description: "Check and apply updates" },
   { command: "tools", description: "Tool usage counts" },
   { command: "model", description: "Choose chat model" },
   { command: "effort", description: "Choose reasoning effort" },
@@ -568,7 +570,7 @@ export async function closeModelPicker(ctx, { messageText, callbackText }) {
   await ctx.answerCallbackQuery({ text: callbackText });
 }
 
-export async function createTelegramBot({ config, artifactStore, toolRegistry, taskStore, agentManager, saveConfig, updateConfig, doctor, checkUpdates, requestRestart, logger }) {
+export async function createTelegramBot({ config, artifactStore, toolRegistry, taskStore, agentManager, saveConfig, updateConfig, doctor, checkUpdates, updateCore, updateTools, requestRestart, logger }) {
   const resourceNotes = new ToolResourceNoteStore();
   const bot = new Bot(config.telegram.token);
   const perChatState = createChatStateStore();
@@ -585,6 +587,18 @@ export async function createTelegramBot({ config, artifactStore, toolRegistry, t
       saveConfig,
       chatMeta: getIncomingChatMeta(ctx)
     }),
+    requestRestart,
+    logger
+  });
+  const handleUpdateCallback = createTelegramUpdateCallbackHandler({
+    authorize: (ctx) => authorizeChat({
+      config,
+      chatId: ctx.chat.id,
+      saveConfig,
+      chatMeta: getIncomingChatMeta(ctx)
+    }),
+    updateCore,
+    updateTools,
     requestRestart,
     logger
   });
@@ -1272,11 +1286,13 @@ export async function createTelegramBot({ config, artifactStore, toolRegistry, t
     if (!auth.ok) return;
     const pending = await ctx.reply(renderTelegramHtml("```text\nChecking Arisa and official tool updates…\n```"), { parse_mode: "HTML" });
     try {
+      const report = await checkUpdates(ctx.chat.id);
+      const picker = buildUpdatePicker(report);
       await ctx.api.editMessageText(
         ctx.chat.id,
         pending.message_id,
-        renderTelegramHtml(await checkUpdates(ctx.chat.id)),
-        { parse_mode: "HTML" }
+        renderTelegramHtml(formatUpdateReport(report)),
+        { parse_mode: "HTML", reply_markup: picker.replyMarkup }
       );
     } catch (error) {
       logger?.error("update", `update check failed: ${getErrorMessage(error)}`);
@@ -1342,6 +1358,7 @@ export async function createTelegramBot({ config, artifactStore, toolRegistry, t
   });
 
   bot.on("callback_query:data", async (ctx, next) => {
+    if (await handleUpdateCallback(ctx)) return;
     const modelAction = parseModelPickerAction(ctx.callbackQuery.data);
     const effortAction = modelAction ? null : parseEffortPickerAction(ctx.callbackQuery.data);
     const speedAction = modelAction || effortAction ? null : parseSpeedPickerAction(ctx.callbackQuery.data);
