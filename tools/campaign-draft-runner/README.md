@@ -44,6 +44,7 @@ Minimal profile structure:
     "incrementalMaxResults": 500
   },
   "selection": {
+    "agentDecidesEligibility": false,
     "includeKeywords": ["topic"],
     "excludeKeywords": ["advertising", "jobs"],
     "dedupeByOutlet": true,
@@ -107,6 +108,8 @@ Use `action: "status"` to reconcile Gmail Sent, then inspect campaign and Gmail 
 Use `action: "reconcile-sent"` to run the same synchronization without discovery or drafting. `gmail-workspace` paginates sent mail, fetches message metadata concurrently, and passes recipients, subjects, timestamps, and Gmail message IDs to `pr-campaign` in one batch.
 
 `minEligiblePool` controls the unused-contact backlog. Keep recurring one-draft jobs bounded with small query and page budgets. A pool target of 1, one normal query, one creative query, three pages per mode, and a 15-second web timeout prevent long zero-yield cycles.
+
+Set `selection.agentDecidesEligibility: true` when the calling agent reviews and adds contacts itself. In this mode, positive `includeKeywords` and `requiredKeywordGroups` do not reject agent-approved contacts, and the runner skips its own web discovery. Negative exclusions, email validation, source rules, prior-recipient checks, outlet deduplication, bounces, and opt-outs remain enforced.
 
 Set `untilDrafted: "true"` on a non-dry run to retry discovery with rotating queries until at least one new draft is created. `retryDelaySeconds` controls the pause between attempts; `maxAttempts` and `maxRuntimeSeconds` bound the retry loop. The runner stops after one empty normal and creative discovery pass instead of repeating the same zero-yield work.
 

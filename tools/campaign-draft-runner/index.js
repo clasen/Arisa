@@ -78,6 +78,7 @@ function isSelectable(contact, profile) {
   const exclude = profile.selection?.excludeKeywords || [];
   const allowedLanguages = profile.selection?.allowedLanguages || [];
   const requiredKeywordGroups = profile.selection?.requiredKeywordGroups || [];
+  const agentDecidesEligibility = profile.selection?.agentDecidesEligibility === true;
   if (!isPlausibleEmail(contact.email)) return false;
   const approvedCrossDomainEmails = (profile.selection?.approvedCrossDomainEmails || []).map(normalizedEmail);
   if (
@@ -85,8 +86,8 @@ function isSelectable(contact, profile) {
     && !approvedCrossDomainEmails.includes(normalizedEmail(contact.email))
     && !contactEmailFitsSource(contact)
   ) return false;
-  if (include.length && !matchesAny(text, include)) return false;
-  if (requiredKeywordGroups.some((patterns) => !matchesAny(text, patterns))) return false;
+  if (!agentDecidesEligibility && include.length && !matchesAny(text, include)) return false;
+  if (!agentDecidesEligibility && requiredKeywordGroups.some((patterns) => !matchesAny(text, patterns))) return false;
   if (exclude.length && matchesAny(text, exclude)) return false;
   if (allowedLanguages.length && !allowedLanguages.includes(detectLanguage(contact, profile))) return false;
   return true;
@@ -431,8 +432,12 @@ function compactSeenUrls(seenUrls, limit = 3000) {
 async function discoverContacts(arisa, chatId, profile, allContacts, draftRecipients, needed, options = {}) {
   const settings = profile.discovery;
   const dryRun = Boolean(options.dryRun);
+  const emptyResult = { queries: [], searches: 0, pagesOpened: 0, found: 0, added: [], skippedUsed: 0, skippedSeen: 0, rejectedEmails: 0 };
+  if (profile.selection?.agentDecidesEligibility === true) {
+    return { ...emptyResult, skipped: "agent-review-required" };
+  }
   if (!settings?.enabled || needed < 1) {
-    return { queries: [], searches: 0, pagesOpened: 0, found: 0, added: [], skippedUsed: 0, skippedSeen: 0, rejectedEmails: 0 };
+    return emptyResult;
   }
 
   const campaignTool = profile.campaignTool || defaults.CAMPAIGN_TOOL;
@@ -1019,4 +1024,7 @@ async function main() {
   }
 }
 
-main();
+const isDirectRun = process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url);
+if (isDirectRun) main();
+
+export { discoverContacts, isSelectable };
