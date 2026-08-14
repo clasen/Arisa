@@ -435,16 +435,30 @@ function sanitizeSessionHandoff(text) {
   return `${sanitized.slice(0, 3997).trim()}...`;
 }
 
-async function withTyping(ctx, work) {
-  await ctx.api.sendChatAction(ctx.chat.id, "typing");
+export async function startTelegramTyping(ctx) {
+  await ctx.api.sendChatAction(ctx.chat.id, "typing").catch(() => {});
   const timer = setInterval(() => {
     ctx.api.sendChatAction(ctx.chat.id, "typing").catch(() => {});
   }, 4000);
+  return () => clearInterval(timer);
+}
 
+export async function ensureQueuedTelegramTyping(chatState, ctx) {
+  if (chatState.stopQueuedTyping) return;
+  chatState.stopQueuedTyping = await startTelegramTyping(ctx);
+}
+
+export function stopQueuedTelegramTyping(chatState) {
+  chatState.stopQueuedTyping?.();
+  chatState.stopQueuedTyping = null;
+}
+
+async function withTyping(ctx, work) {
+  const stopTyping = await startTelegramTyping(ctx);
   try {
     return await work();
   } finally {
-    clearInterval(timer);
+    stopTyping();
   }
 }
 
@@ -460,7 +474,8 @@ export function createChatStateStore() {
       beforeNextPrompt: null,
       activeSession: null,
       activeSteers: [],
-      assistantMessages: new Map()
+      assistantMessages: new Map(),
+      stopQueuedTyping: null
     };
     states.set(String(chatId), state);
     return state;
@@ -559,6 +574,7 @@ export async function drainChatPromptQueue({
       chatState.continueAfterClose = false;
     }
   } finally {
+    stopQueuedTelegramTyping(chatState);
     chatState.processing = false;
     chatState.activeSession = null;
     chatState.activeSteers = [];
@@ -1069,6 +1085,7 @@ export async function createTelegramBot({ config, artifactStore, toolRegistry, t
     const chatState = getChatState(ctx.chat.id);
 
     if (chatState.processing) {
+      await ensureQueuedTelegramTyping(chatState, ctx);
       const incomingPrompt = await buildIncomingPrompt(ctx);
       const busyMessageMode = typeof ctx.message?.text === "string"
         ? resolveTelegramBusyMessageMode(config, ctx.chat.id)

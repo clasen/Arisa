@@ -4,12 +4,37 @@ import {
   collectText,
   createChatStateStore,
   drainChatPromptQueue,
+  ensureQueuedTelegramTyping,
   isSilentReply,
   queueChatPrompt,
   resolveTelegramBusyMessageMode,
-  routeBusyPrompt
+  routeBusyPrompt,
+  stopQueuedTelegramTyping
 } from "../src/transport/telegram/bot.js";
 import { selectScheduledTasks } from "../src/core/agent/agent-manager.js";
+
+test("queued Telegram prompts start typing immediately and share one indicator", async () => {
+  let actions = 0;
+  const chatState = { stopQueuedTyping: null };
+  const ctx = {
+    chat: { id: 879964957 },
+    api: {
+      async sendChatAction(chatId, action) {
+        assert.equal(chatId, 879964957);
+        assert.equal(action, "typing");
+        actions += 1;
+      }
+    }
+  };
+
+  await ensureQueuedTelegramTyping(chatState, ctx);
+  await ensureQueuedTelegramTyping(chatState, ctx);
+  assert.equal(actions, 1);
+  assert.equal(typeof chatState.stopQueuedTyping, "function");
+
+  stopQueuedTelegramTyping(chatState);
+  assert.equal(chatState.stopQueuedTyping, null);
+});
 
 function createSession(events) {
   const listeners = new Set();
@@ -134,7 +159,8 @@ test("chat state uses one queue for numeric and string chat IDs", () => {
     beforeNextPrompt: null,
     activeSession: null,
     activeSteers: [],
-    assistantMessages: new Map()
+    assistantMessages: new Map(),
+    stopQueuedTyping: null
   });
 });
 
