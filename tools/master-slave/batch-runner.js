@@ -11,6 +11,14 @@ function terminalBatchStatus(summary) {
   return "completed";
 }
 
+function processOutput(chunks, channel) {
+  return chunks
+    .filter((chunk) => chunk?.channel === channel)
+    .sort((left, right) => left.sequence - right.sequence)
+    .map((chunk) => String(chunk.data || ""))
+    .join("");
+}
+
 export class SlaveBatchRunner {
   constructor({ concurrency, persistBatch, executeJob, onEvent } = {}) {
     this.concurrency = positiveConcurrency(concurrency);
@@ -46,21 +54,29 @@ export class SlaveBatchRunner {
         job.status = "accepted";
         job.acceptedAt = new Date().toISOString();
         await this.persistBatch(state.batch);
+        const processChunks = [];
         try {
           const result = await this.executeJob(job, {
             signal: controller.signal,
-            onChunk: async (chunk) => this.onEvent?.({
-              type: "chunk",
-              batchId: state.batch.batchId,
-              jobId: job.jobId,
-              slaveId: job.slaveId,
-              slaveName: job.slaveName || job.slaveId,
-              sequence: chunk.sequence,
-              payload: chunk
-            })
+            onChunk: async (chunk) => {
+              if (["stdout", "stderr"].includes(chunk?.channel)) processChunks.push(chunk);
+              await this.onEvent?.({
+                type: "chunk",
+                batchId: state.batch.batchId,
+                jobId: job.jobId,
+                slaveId: job.slaveId,
+                slaveName: job.slaveName || job.slaveId,
+                sequence: chunk.sequence,
+                payload: chunk
+              });
+            }
           });
           job.status = result.status || "completed";
-          job.result = result;
+          job.result = job.operation === "process.exec" ? {
+            ...result,
+            stdout: processOutput(processChunks, "stdout"),
+            stderr: processOutput(processChunks, "stderr")
+          } : result;
         } catch (error) {
           job.status = controller.signal.aborted ? "cancelled" : "failed";
           job.error = { message: error?.message || String(error), code: error?.code || null };

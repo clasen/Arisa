@@ -66,6 +66,31 @@ test("tags interleaved chunks with the correct Slave and sequence", async () => 
   assert.ok(events.every((event) => event.slaveName.startsWith("node-")));
 });
 
+test("returns process stdout and stderr in the completed batch", async () => {
+  const processBatch = batch(1);
+  processBatch.jobs[0].operation = "process.exec";
+  const runner = new SlaveBatchRunner({
+    concurrency: 1,
+    persistBatch: async () => {},
+    executeJob: async (_job, { onChunk }) => {
+      await onChunk({ sequence: 2, channel: "stderr", data: "warning\n" });
+      await onChunk({ sequence: 1, channel: "stdout", data: "first\n" });
+      await onChunk({ sequence: 3, channel: "stdout", data: "second\n" });
+      return { status: "completed", code: 0, signal: null };
+    }
+  });
+
+  const result = await runner.run(processBatch);
+
+  assert.deepEqual(result.jobs[0].result, {
+    status: "completed",
+    code: 0,
+    signal: null,
+    stdout: "first\nsecond\n",
+    stderr: "warning\n"
+  });
+});
+
 test("cancelling a batch aborts active jobs and never starts pending jobs", async () => {
   const started = [];
   let runner;

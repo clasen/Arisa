@@ -29,6 +29,8 @@ profile, and executes only deterministic operations allowed by its stored policy
 - Accepted jobs are persisted before effects. Repeated job IDs return the stored
   terminal result, while interrupted accepted jobs fail closed instead of being
   executed again.
+- Completed command results include bounded UTF-8 `stdout` and `stderr` assembled
+  from the authenticated output stream, avoiding a second remote file read.
 
 ## Roles and configuration
 
