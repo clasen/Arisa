@@ -1,8 +1,6 @@
 import { spawn } from "node:child_process";
 import { access, mkdir, readFile, readdir, writeFile } from "node:fs/promises";
 import path from "node:path";
-import readline from "node:readline/promises";
-import { stdin, stdout } from "node:process";
 import { applyConfigDefaults } from "../core/config/config-defaults.js";
 import { installLockedOfficialTool } from "../core/tools/official-tool-installer.js";
 import { createHeadlessApp } from "./create-headless-app.js";
@@ -100,15 +98,6 @@ export async function invokeSlaveTool(paths, args, { run = runProcess } = {}) {
   });
 }
 
-async function askFromTerminal(prompt) {
-  const terminal = readline.createInterface({ input: stdin, output: stdout });
-  try {
-    return await terminal.question(`${prompt}: `);
-  } finally {
-    terminal.close();
-  }
-}
-
 async function listSlaveTools(paths) {
   const entries = await readdir(paths.toolsDir, { withFileTypes: true }).catch(() => []);
   const tools = [];
@@ -175,7 +164,6 @@ function explainSlaveBootstrapError(error) {
 
 export async function runSlaveBootstrap(url, {
   paths = getSlavePaths(resolveSlaveHome()),
-  ask = askFromTerminal,
   selectAccount = selectSlaveServiceAccount,
   ensureTool = ensureMasterSlaveTool,
   installService = installSlaveSystemdService,
@@ -186,7 +174,7 @@ export async function runSlaveBootstrap(url, {
 } = {}) {
   parseSlaveBootstrapUrl(url);
   if (platform !== "linux") throw new Error("Arisa Slave service installation currently requires Linux with systemd");
-  const account = await selectAccount({ ask });
+  const account = await selectAccount();
   await ensureSlaveConfig(paths);
   await ensureTool(paths);
   let result;

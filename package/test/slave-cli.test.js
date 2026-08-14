@@ -58,16 +58,21 @@ test("hands one-shot requests through a 0600 file and removes it", async (t) => 
   await assert.rejects(() => access(handedFile), { code: "ENOENT" });
 });
 
-test("never selects root without an explicit second confirmation", async () => {
-  await assert.rejects(() => selectSlaveServiceAccount({ euid: 0 }), /explicit account selection/);
-  const rejectedAnswers = ["3", "yes"];
-  await assert.rejects(
-    () => selectSlaveServiceAccount({ euid: 0, ask: async () => rejectedAnswers.shift() }),
-    /Root execution was not confirmed/
-  );
-  const acceptedAnswers = ["3", "RUN AS ROOT"];
+test("selects the invoking service account without prompting", async () => {
   assert.deepEqual(
-    await selectSlaveServiceAccount({ euid: 0, ask: async () => acceptedAnswers.shift() }),
+    await selectSlaveServiceAccount({ euid: 1000, currentUser: "storybot", environment: {} }),
+    { scope: "user", user: "storybot", root: false, dedicated: false }
+  );
+  assert.deepEqual(
+    await selectSlaveServiceAccount({
+      euid: 0,
+      currentUser: "root",
+      environment: { SUDO_USER: "storybot" }
+    }),
+    { scope: "system", user: "storybot", root: false, dedicated: false }
+  );
+  assert.deepEqual(
+    await selectSlaveServiceAccount({ euid: 0, currentUser: "root", environment: {} }),
     { scope: "system", user: "root", root: true, dedicated: false }
   );
 });
@@ -109,7 +114,7 @@ test("refuses to replace the PID of an active Slave host", async (t) => {
   await assert.rejects(() => registerSlaveServiceProcess(paths), /already running/);
 });
 
-test("installs the dedicated Linux systemd target without silently selecting root", async (t) => {
+test("installs and restarts the Linux systemd target after pairing", async (t) => {
   const root = await mkdtemp(path.join(os.tmpdir(), "arisa-slave-systemd-"));
   t.after(() => rm(root, { recursive: true, force: true }));
   const calls = [];
@@ -132,7 +137,11 @@ test("installs the dedicated Linux systemd target without silently selecting roo
   assert.equal(result.account.root, false);
   assert.equal(await access(result.unitFile).then(() => true, () => false), true);
   assert.ok(calls.some(([command]) => command === "useradd"));
-  assert.ok(calls.some(([command, args]) => command === "systemctl" && args.includes("enable") && args.includes("--now")));
+  assert.deepEqual(calls.filter(([command]) => command === "systemctl"), [
+    ["systemctl", ["daemon-reload"]],
+    ["systemctl", ["enable", "arisa-slave.service"]],
+    ["systemctl", ["restart", "arisa-slave.service"]]
+  ]);
 });
 
 test("validates before effects and keeps the bootstrap secret out of service metadata", async (t) => {
@@ -144,7 +153,10 @@ test("validates before effects and keeps the bootstrap secret out of service met
     paths,
     entryFile: "/opt/arisa/src/index.js",
     platform: "linux",
-    selectAccount: async () => ({ scope: "user", user: "tester", root: false, dedicated: false }),
+    selectAccount: async (...args) => {
+      assert.deepEqual(args, []);
+      return { scope: "user", user: "tester", root: false, dedicated: false };
+    },
     ensureTool: async () => { calls.push("tool"); },
     installService: async () => { calls.push("service"); },
     invokeTool: async (_paths, args) => {

@@ -39,29 +39,13 @@ export function getSlavePaths(slaveHome) {
 export async function selectSlaveServiceAccount({
   euid = process.geteuid?.(),
   currentUser = os.userInfo().username,
-  ask
+  environment = process.env
 } = {}) {
   if (euid !== 0) {
     return { scope: "user", user: requireAccountName(currentUser), root: false, dedicated: false };
   }
-  if (typeof ask !== "function") throw new Error("Running Arisa Slave as UID 0 requires an explicit account selection");
-  const choice = String(await ask([
-    "Run Arisa Slave as:",
-    "1. dedicated user arisa-slave (recommended)",
-    "2. another existing user",
-    "3. root",
-    "Selection"
-  ].join("\n"))).trim();
-  if (choice === "1") return { scope: "system", user: "arisa-slave", root: false, dedicated: true };
-  if (choice === "2") {
-    return { scope: "system", user: requireAccountName(await ask("Existing service user")), root: false, dedicated: false };
-  }
-  if (choice === "3") {
-    const confirmation = String(await ask("Type RUN AS ROOT to confirm full root authority")).trim();
-    if (confirmation !== "RUN AS ROOT") throw new Error("Root execution was not confirmed");
-    return { scope: "system", user: "root", root: true, dedicated: false };
-  }
-  throw new Error("Invalid Arisa Slave service account selection");
+  const user = requireAccountName(environment.SUDO_USER || currentUser);
+  return { scope: "system", user, root: user === "root", dedicated: false };
 }
 
 function quoteSystemd(value) {
@@ -166,7 +150,8 @@ export async function installSlaveSystemdService({
   }
   const systemctlArgs = account.scope === "user" ? ["--user"] : [];
   await execute("systemctl", [...systemctlArgs, "daemon-reload"], { env: environment });
-  await execute("systemctl", [...systemctlArgs, "enable", "--now", slaveServiceName], { env: environment });
+  await execute("systemctl", [...systemctlArgs, "enable", slaveServiceName], { env: environment });
+  await execute("systemctl", [...systemctlArgs, "restart", slaveServiceName], { env: environment });
   return { unitFile, serviceName: slaveServiceName, account, paths };
 }
 
