@@ -3,6 +3,7 @@ import crypto from "node:crypto";
 import { cp, mkdir, mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 import test from "node:test";
 import {
   installBundledOfficialTool,
@@ -57,6 +58,16 @@ test("verifies the exact file set and digests", async (t) => {
   assert.deepEqual(await verifyOfficialToolTree(source, files), { files: 3 });
   await writeFile(path.join(source, "extra.js"), "unexpected\n");
   await assert.rejects(() => verifyOfficialToolTree(source, files), /unexpected=extra.js/);
+});
+
+test("bundled master-slave lock matches the catalog source", async () => {
+  const lock = JSON.parse(await readFile(new URL("../src/official-tools.lock.json", import.meta.url), "utf8"));
+  const source = fileURLToPath(new URL("../../tools/master-slave/", import.meta.url));
+
+  assert.deepEqual(
+    await verifyOfficialToolTree(source, lock.tools["master-slave"].files),
+    { files: Object.keys(lock.tools["master-slave"].files).length }
+  );
 });
 
 test("rejects symbolic links before deployment", async (t) => {
