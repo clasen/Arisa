@@ -59,6 +59,44 @@ test("collectText preserves the final assistant error", async () => {
   await assert.rejects(() => collectText(session, "hello"), /terminal failure/);
 });
 
+test("collectText drops a standalone silent event reply before a steered response", async () => {
+  const session = createSession([
+    { type: "message_start", message: { role: "assistant" } },
+    {
+      type: "message_update",
+      message: { role: "assistant" },
+      assistantMessageEvent: { type: "text_delta", delta: "NO_REPLY" }
+    },
+    { type: "message_end", message: { role: "assistant", stopReason: "stop" } },
+    { type: "message_start", message: { role: "assistant" } },
+    {
+      type: "message_update",
+      message: { role: "assistant" },
+      assistantMessageEvent: { type: "text_delta", delta: "The useful Telegram response." }
+    },
+    { type: "message_end", message: { role: "assistant", stopReason: "stop" } }
+  ]);
+
+  assert.equal(await collectText(session, "event followed by a Telegram steer"), "The useful Telegram response.");
+});
+
+test("collectText preserves useful text in the same message as a silent marker", async () => {
+  const session = createSession([
+    { type: "message_start", message: { role: "assistant" } },
+    {
+      type: "message_update",
+      message: { role: "assistant" },
+      assistantMessageEvent: { type: "text_delta", delta: "NO_REPLY\n\nThis text belongs to the same response." }
+    },
+    { type: "message_end", message: { role: "assistant", stopReason: "stop" } }
+  ]);
+
+  assert.equal(
+    await collectText(session, "one response that mentions the marker"),
+    "NO_REPLY\n\nThis text belongs to the same response."
+  );
+});
+
 test("recognizes standalone silent reply markers", () => {
   assert.equal(isSilentReply("NO_REPLY"), true);
   assert.equal(isSilentReply("No reply needed."), true);

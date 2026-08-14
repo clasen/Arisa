@@ -354,21 +354,23 @@ function buildStartupMessage(chatMeta = {}) {
 }
 
 export async function collectText(session, prompt, { logger, chatId, onSlowPrompt } = {}) {
-  let text = "";
+  const assistantMessages = [];
+  let assistantMessage = "";
   let assistantErrorMessage = "";
-  let shouldSeparateAssistantMessage = false;
   let slowPromptTimer = null;
+  const finishAssistantMessage = () => {
+    if (assistantMessage && !isSilentReply(assistantMessage)) {
+      assistantMessages.push(assistantMessage);
+    }
+    assistantMessage = "";
+  };
   const unsubscribe = session.subscribe((event) => {
     if (event.arisaPromptScoped === false) return;
     if (event.type === "message_start" && event.message.role === "assistant") {
-      shouldSeparateAssistantMessage = text.trim().length > 0;
+      finishAssistantMessage();
     }
     if (event.type === "message_update" && event.assistantMessageEvent.type === "text_delta") {
-      if (shouldSeparateAssistantMessage && event.assistantMessageEvent.delta) {
-        text += "\n\n";
-        shouldSeparateAssistantMessage = false;
-      }
-      text += event.assistantMessageEvent.delta;
+      assistantMessage += event.assistantMessageEvent.delta;
     }
     if (event.type === "message_end" && event.message?.role === "assistant") {
       if (event.message.stopReason === "error") {
@@ -377,6 +379,7 @@ export async function collectText(session, prompt, { logger, chatId, onSlowPromp
         // Auto-compaction and retry can emit a transient error before a successful continuation.
         assistantErrorMessage = "";
       }
+      finishAssistantMessage();
     }
     const logMessage = sessionEventLogMessage(event);
     if (logMessage) logger?.log("agent", `chat ${chatId} ${logMessage}`);
@@ -402,7 +405,8 @@ export async function collectText(session, prompt, { logger, chatId, onSlowPromp
     throw new Error(assistantErrorMessage);
   }
 
-  return text.trim();
+  finishAssistantMessage();
+  return assistantMessages.join("\n\n").trim();
 }
 
 export function isSilentReply(text) {
