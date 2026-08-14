@@ -11,6 +11,36 @@ import { buildSafeSlaveProfile, buildSafeToolCatalog } from "./lib/profile-catal
 import { acceptMasterHandshake, connectSlaveHandshake, MESSAGE_TYPES } from "./network-session.js";
 import { listSlavePath, readSlaveFile, SlaveProcessExecutor } from "./slave-operations.js";
 
+const ROOT_DEFAULT_CAPABILITIES = Object.freeze(["inspect", "read", "tool.run", "tool.install", "exec"]);
+
+export function resolveSlavePolicy({ policy = null, config, root = process.geteuid?.() === 0 } = {}) {
+  if (!config || !Array.isArray(config.roots) || !Array.isArray(config.capabilities)) {
+    throw new Error("Slave policy requires configured roots and capabilities");
+  }
+  if (policy) {
+    if (!Array.isArray(policy.roots) || !Array.isArray(policy.capabilities)) {
+      throw new Error("Stored Slave policy requires roots and capabilities");
+    }
+    return {
+      roots: policy.roots,
+      capabilities: policy.capabilities,
+      fullHost: policy.fullHost === true
+    };
+  }
+  if (root && config.roots.length === 0 && config.capabilities.length === 0) {
+    return {
+      roots: ["/"],
+      capabilities: [...ROOT_DEFAULT_CAPABILITIES],
+      fullHost: true
+    };
+  }
+  return {
+    roots: config.roots,
+    capabilities: config.capabilities,
+    fullHost: config.fullHost === true
+  };
+}
+
 function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
@@ -296,7 +326,11 @@ export async function bootstrapSlaveConnection({ url, state, identity, profile, 
 
 async function loadProfile({ state, arisa, config, arisaVersion }) {
   const slave = await state.readSlave();
-  const policy = slave?.policy || {};
+  const policy = resolveSlavePolicy({
+    policy: slave?.policy,
+    config,
+    root: process.geteuid?.() === 0
+  });
   const client = typeof arisa === "function" ? arisa(null) : arisa;
   const tools = buildSafeToolCatalog((await client.tools.list()).slice(0, config.maxCatalogTools));
   return buildSafeSlaveProfile({
@@ -311,10 +345,10 @@ async function loadProfile({ state, arisa, config, arisaVersion }) {
     privilege: {
       user: os.userInfo().username,
       root: process.geteuid?.() === 0,
-      scope: policy.fullHost || config.fullHost ? "full-host" : "restricted"
+      scope: policy.fullHost ? "full-host" : "restricted"
     },
-    roots: policy.roots || config.roots,
-    capabilities: policy.capabilities || config.capabilities
+    roots: policy.roots,
+    capabilities: policy.capabilities
   }, { tools });
 }
 
@@ -359,11 +393,11 @@ export class SlaveNetworkRuntime {
       throw Object.assign(new Error("Remote job chat is not authorized for this Slave"), { code: "NOT_AUTHORIZED" });
     }
     if (Date.parse(job.expiresAt) <= Date.now()) return { status: "expired", error: { message: "Remote job expired" } };
-    const policy = {
-      roots: slaveState?.policy?.roots || this.config.roots,
-      capabilities: slaveState?.policy?.capabilities || this.config.capabilities,
-      fullHost: Boolean(slaveState?.policy?.fullHost || this.config.fullHost)
-    };
+    const policy = resolveSlavePolicy({
+      policy: slaveState?.policy,
+      config: this.config,
+      root: process.geteuid?.() === 0
+    });
     const jobArisa = () => typeof this.arisa === "function" ? this.arisa(job.requestedByChatId) : this.arisa;
     const requiredCapability = {
       "slave.inspect": "inspect",

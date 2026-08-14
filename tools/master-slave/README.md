@@ -37,6 +37,9 @@ requires an IP-literal `listenHost`, a valid `listenPort`, and a canonical publi
 `tcp://IP:port` endpoint. There are no implicit network defaults. Operational
 TTLs, limits, concurrency, reconnect timing, roots and capabilities live in
 `config.js` and may be overridden by the installed tool configuration.
+An unconfigured Slave running as root defaults to full-host access at `/` with
+all v1 remote capabilities, including `process.exec`. A policy explicitly saved
+through `configure_slave` replaces that root default.
 
 The supported Slave service target is Linux with systemd. Use the Arisa CLI to
 bootstrap and operate it:

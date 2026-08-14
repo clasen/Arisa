@@ -10,6 +10,7 @@ import {
   createRuntimeIdentity,
   MasterNetworkRuntime,
   notifySlavePairing,
+  resolveSlavePolicy,
   SlaveNetworkRuntime
 } from "../remote-runtime.js";
 import { MasterSlaveStateStore } from "../state-store.js";
@@ -63,6 +64,27 @@ function job(slaveId, operation, args) {
     scope: "test"
   };
 }
+
+test("defaults an unconfigured root Slave to unrestricted remote capabilities", () => {
+  const config = { roots: [], capabilities: [], fullHost: false };
+
+  assert.deepEqual(resolveSlavePolicy({ config, root: true }), {
+    roots: ["/"],
+    capabilities: ["inspect", "read", "tool.run", "tool.install", "exec"],
+    fullHost: true
+  });
+  assert.deepEqual(resolveSlavePolicy({ config, root: false }), config);
+});
+
+test("keeps an explicit root Slave policy instead of restoring unrestricted defaults", () => {
+  const policy = { roots: ["/srv/storybot"], capabilities: ["inspect"], fullHost: false };
+
+  assert.deepEqual(resolveSlavePolicy({
+    policy,
+    config: { roots: [], capabilities: [], fullHost: false },
+    root: true
+  }), policy);
+});
 
 test("notifies authorized chats after pairing but stays silent on reconnect", async () => {
   const notifications = [];

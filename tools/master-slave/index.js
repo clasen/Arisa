@@ -19,6 +19,7 @@ import {
   createRuntimeIdentity,
   MasterNetworkRuntime,
   notifySlavePairing,
+  resolveSlavePolicy,
   runtimeIdentityDiagnostic,
   SlaveNetworkRuntime
 } from "./remote-runtime.js";
@@ -346,6 +347,8 @@ async function runDirectBootstrap(request) {
   const bootstrap = JSON.parse(await readFile(bootstrapFile, "utf8"));
   const config = await loadToolConfig(toolName, defaults);
   const identity = await createRuntimeIdentity(state);
+  const root = process.geteuid?.() === 0;
+  const policy = resolveSlavePolicy({ config, root });
   const profile = {
     slaveId: "",
     name: os.hostname(),
@@ -357,11 +360,11 @@ async function runDirectBootstrap(request) {
     masterEndpoint: "",
     privilege: {
       user: os.userInfo().username,
-      root: process.geteuid?.() === 0,
-      scope: "restricted"
+      root,
+      scope: policy.fullHost ? "full-host" : "restricted"
     },
-    roots: config.roots,
-    capabilities: config.capabilities,
+    roots: policy.roots,
+    capabilities: policy.capabilities,
     tools: []
   };
   const result = await bootstrapSlaveConnection({

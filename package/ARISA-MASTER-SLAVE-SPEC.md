@@ -76,7 +76,9 @@ el protocolo, la CLI y la documentación.
 - Linux con systemd es la primera plataforma operativa soportada. Master y Slave
   pueden coexistir en un host mediante homes, sockets, PID y logs separados.
 - El usuario dedicado es la opción recomendada. El usuario actual está
-  permitido y root requiere siempre una elección y confirmación explícitas.
+  permitido y root requiere una elección explícita durante la instalación.
+  Una Slave elegida como root queda por defecto en modo host completo con todas
+  las capacidades v1; una política guardada posteriormente reemplaza ese default.
 - Los jobs dirigidos a Slaves offline se rechazan en v1.
 - La instalación remota acepta sólo tools del catálogo verificado y requiere
   confirmación. Nunca se instala código silenciosamente como root.
@@ -565,9 +567,10 @@ Ejecutar Arisa Slave como:
 ```
 
 Se admite elegir `root`. El perfil resultante y todos los informes de Master
-deben mostrar que Slave tiene autoridad root. El modo root restringido puede
-seguir aplicando las raíces y operaciones configuradas en la capa de aplicación.
-El modo root con host completo requiere otra confirmación explícita.
+deben mostrar que Slave tiene autoridad root. Elegir root instala por defecto un
+perfil de host completo con raíz `/` y todas las capacidades v1, incluida
+`process.exec`. Una política persistida después puede volver a restringir las
+raíces y operaciones en la capa de aplicación.
 
 Las restricciones de aplicación reducen el uso accidental, pero dejan de ser
 una frontera de seguridad si el propio proceso de Slave resulta comprometido:
