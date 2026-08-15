@@ -1132,6 +1132,13 @@ export async function createTelegramBot({ config, artifactStore, toolRegistry, t
     timer.unref?.();
   }
 
+  async function enqueueAsyncPrompt({ chatId, prompt, label }) {
+    const ctx = { chat: { id: chatId }, api: bot.api };
+    const chatState = getChatState(chatId);
+    if (chatState.processing) await ensureQueuedTelegramTyping(chatState, ctx);
+    return enqueuePrompt({ chatId, prompt, label, ctx });
+  }
+
   async function dispatchTask(task) {
     const chatId = task.payload?.chatId;
     if (!chatId) {
@@ -1145,7 +1152,7 @@ export async function createTelegramBot({ config, artifactStore, toolRegistry, t
         return;
       }
       logger?.log("tasks", `running task ${task.id} for chat ${chatId}`);
-      await enqueuePrompt({
+      await enqueueAsyncPrompt({
         chatId,
         prompt: await buildAsyncTaskPrompt({ task, artifactStore, toolRegistry, resourceNotes, logger }),
         label: `scheduled task ${task.id}`
@@ -1156,7 +1163,7 @@ export async function createTelegramBot({ config, artifactStore, toolRegistry, t
 
     if (task.kind === "agent_event") {
       logger?.log("tasks", `agent event ${task.id} for chat ${chatId}`);
-      await enqueuePrompt({
+      await enqueueAsyncPrompt({
         chatId,
         prompt: await buildAsyncEventPrompt(task, resourceNotes),
         label: `agent event ${task.id}`
