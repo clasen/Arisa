@@ -21,6 +21,7 @@ async function importArisa(relativePath) {
 
 const { loadToolConfig } = await importArisa("core/tools/tool-config.js");
 const { createDaemonRuntime } = await importArisa("core/tools/daemon-runtime.js");
+const { createArisaClient } = await importArisa("core/tools/ipc-client.js");
 const { toolError, toolOk } = await importArisa("core/tools/tool-result.js");
 const { getChatToolStateDir, getChatToolTmpDir } = await importArisa("runtime/paths.js");
 
@@ -50,6 +51,24 @@ Actions via args.action:
 
 The extension shares only cookies applicable to the active tab. Setup links expire and are consumed after one successful activation.
 `);
+}
+
+function arisaClient(chatId) {
+  return createArisaClient({ toolName, chatId: String(chatId) });
+}
+
+async function notifyDeviceActivated(event) {
+  await arisaClient(event.chatId).agent.enqueueEvent({
+    resourceId: event.deviceId,
+    prompt: `Browser profile ${event.label} (${event.deviceId}) finished secure bridge authorization. Notify the user now with a concise confirmation. Do not wait for them to say it connected.`
+  });
+}
+
+async function notifySessionImported(event) {
+  await arisaClient(event.chatId).agent.enqueueEvent({
+    resourceId: event.resourceId,
+    prompt: `The user explicitly shared an authenticated browser session for ${event.resourceId} through ${event.label || "Arisa Session Bridge"}. The bridge received ${event.cookieCount} domain-scoped cookies at ${event.receivedAt}. If a pending task was waiting for this authorization, continue it now without asking the user to confirm. Otherwise acknowledge only when useful.`
+  });
 }
 
 function positiveInteger(value, fallback, min, max) {
@@ -195,7 +214,9 @@ async function runDaemon() {
     devicesDir,
     maxBodyBytes: positiveInteger(config.MAX_BODY_BYTES, 1048576, 16384, 4194304),
     maxCookies: positiveInteger(config.MAX_COOKIES, 500, 1, 2000),
-    stateDirForChat: (chatId) => getChatToolStateDir(String(chatId), toolName)
+    stateDirForChat: (chatId) => getChatToolStateDir(String(chatId), toolName),
+    onDeviceActivated: notifyDeviceActivated,
+    onSessionImported: notifySessionImported
   });
 
   await daemon.workLoop({

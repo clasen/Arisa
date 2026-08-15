@@ -138,12 +138,20 @@ async function activateDevice({ enrollmentsDir, devicesDir, envelope }) {
   const file = credentialFile(devicesDir, record.deviceId);
   await writeFile(file, `${JSON.stringify(record)}\n`, { mode: 0o600 });
   await chmod(file, 0o600);
-  return encryptEnvelope(enrollment.activationSecret, {
-    version: 1,
-    deviceId: record.deviceId,
-    secret: record.secret,
-    label: record.label
-  });
+  return {
+    response: encryptEnvelope(enrollment.activationSecret, {
+      version: 1,
+      deviceId: record.deviceId,
+      secret: record.secret,
+      label: record.label
+    }),
+    event: {
+      chatId: record.chatId,
+      deviceId: record.deviceId,
+      label: record.label,
+      createdAt: record.createdAt
+    }
+  };
 }
 
 export async function listDevices(devicesDir, chatId) {
@@ -179,7 +187,7 @@ async function recordDeviceUse(file, record) {
   await chmod(file, 0o600);
 }
 
-export function startBridgeServer({ host, port, pairingsDir, enrollmentsDir, devicesDir, maxBodyBytes, maxCookies, stateDirForChat }) {
+export function startBridgeServer({ host, port, pairingsDir, enrollmentsDir, devicesDir, maxBodyBytes, maxCookies, stateDirForChat, onDeviceActivated, onSessionImported }) {
   const recentDeviceUses = new Map();
   const server = http.createServer(async (request, response) => {
     if (request.method === "OPTIONS") return jsonResponse(response, 204, {});
@@ -190,8 +198,9 @@ export function startBridgeServer({ host, port, pairingsDir, enrollmentsDir, dev
     try {
       const envelope = await readJsonBody(request, maxBodyBytes);
       if (request.url === "/v1/activate-device") {
-        const encryptedDevice = await activateDevice({ enrollmentsDir, devicesDir, envelope });
-        return jsonResponse(response, 200, { ok: true, ...encryptedDevice });
+        const activated = await activateDevice({ enrollmentsDir, devicesDir, envelope });
+        await onDeviceActivated?.(activated.event).catch(() => {});
+        return jsonResponse(response, 200, { ok: true, ...activated.response });
       }
       let credential;
       let device = null;
@@ -218,6 +227,15 @@ export function startBridgeServer({ host, port, pairingsDir, enrollmentsDir, dev
         recentDeviceUses.set(envelope.deviceId, Date.now());
         await recordDeviceUse(device.file, device.record);
       }
+      await onSessionImported?.({
+        chatId: String(credential.chatId),
+        deviceId: device?.record?.deviceId || null,
+        label: device?.record?.label || null,
+        resourceId: session.resourceId,
+        sourceUrl: session.sourceUrl,
+        cookieCount: session.cookies.length,
+        receivedAt: session.receivedAt
+      }).catch(() => {});
       return jsonResponse(response, 200, {
         ok: true,
         resourceId: session.resourceId,

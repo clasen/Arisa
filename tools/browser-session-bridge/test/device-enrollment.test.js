@@ -19,6 +19,8 @@ test("activates a short-lived device enrollment exactly once", async (t) => {
   const enrollmentsDir = path.join(root, "enrollments");
   const devicesDir = path.join(root, "devices");
   const stateDir = path.join(root, "chat");
+  const deviceEvents = [];
+  const sessionEvents = [];
   const server = await startBridgeServer({
     host: "127.0.0.1",
     port: 0,
@@ -27,7 +29,9 @@ test("activates a short-lived device enrollment exactly once", async (t) => {
     devicesDir,
     maxBodyBytes: 1_048_576,
     maxCookies: 500,
-    stateDirForChat: () => stateDir
+    stateDirForChat: () => stateDir,
+    onDeviceActivated: async (event) => { deviceEvents.push(event); },
+    onSessionImported: async (event) => { sessionEvents.push(event); }
   });
   t.after(() => new Promise((resolve) => server.close(resolve)));
   const port = server.address().port;
@@ -56,12 +60,42 @@ test("activates a short-lived device enrollment exactly once", async (t) => {
   const device = decryptEnvelope(setup.activationSecret, body);
   assert.ok(device.deviceId);
   assert.ok(device.secret);
+  assert.deepEqual(deviceEvents, [{
+    chatId: "chat-1",
+    deviceId: device.deviceId,
+    label: "Arisa profile",
+    createdAt: enrollment.createdAt
+  }]);
   assert.deepEqual(await listDevices(devicesDir, "chat-1"), [{
     deviceId: device.deviceId,
     label: "Arisa profile",
     createdAt: enrollment.createdAt,
     lastUsedAt: null
   }]);
+
+  const imported = encryptEnvelope(device.secret, {
+    version: 1,
+    resourceId: "example.com",
+    sourceUrl: "https://example.com/private",
+    capturedAt: new Date().toISOString(),
+    cookies: [{ name: "sid", value: "secret", domain: ".example.com", path: "/", secure: true, httpOnly: true, sameSite: "lax", session: true }]
+  });
+  const importResponse = await fetch(`${endpoint}/v1/import-device`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ deviceId: device.deviceId, ...imported })
+  });
+  assert.equal(importResponse.status, 200);
+  assert.equal(sessionEvents.length, 1);
+  assert.deepEqual(sessionEvents[0], {
+    chatId: "chat-1",
+    deviceId: device.deviceId,
+    label: "Arisa profile",
+    resourceId: "example.com",
+    sourceUrl: "https://example.com",
+    cookieCount: 1,
+    receivedAt: sessionEvents[0].receivedAt
+  });
 
   const repeated = await fetch(`${endpoint}/v1/activate-device`, {
     method: "POST",
