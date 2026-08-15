@@ -1,5 +1,6 @@
-import { readFile, stat } from "node:fs/promises";
+import { copyFile, mkdir, readFile, stat } from "node:fs/promises";
 import path from "node:path";
+import { pathToFileURL } from "node:url";
 import { chromium } from "playwright";
 
 function playwrightSameSite(value) {
@@ -64,6 +65,180 @@ async function selectPackage(page, zipPath) {
 function itemIdentifier(url) {
   const match = url.pathname.match(/\/items\/([a-z]{32})(?:\/|$)/i);
   return match?.[1] || null;
+}
+
+export async function createChromeWebStoreAssets({ extensionDir, outputDir }) {
+  await mkdir(outputDir, { recursive: true });
+  const iconPath = path.join(outputDir, "store-icon-128.png");
+  const screenshotPath = path.join(outputDir, "store-screenshot-1280x800.png");
+  await copyFile(path.join(extensionDir, "icons", "icon-128.png"), iconPath);
+  const browser = await chromium.launch({ headless: true });
+  try {
+    const page = await browser.newPage({ viewport: { width: 1280, height: 800 } });
+    await page.goto(pathToFileURL(path.join(extensionDir, "popup.html")).href, { waitUntil: "domcontentloaded" });
+    await page.evaluate(() => {
+      document.querySelector("#setup")?.classList.add("hidden");
+      document.querySelector("#connected")?.classList.remove("hidden");
+      const label = document.querySelector("#device-label");
+      const site = document.querySelector("#site");
+      const status = document.querySelector("#status");
+      if (label) label.textContent = "bridge.arisa.sh";
+      if (site) site.textContent = "current site: chrome.google.com";
+      if (status) { status.textContent = "session ready to send"; status.className = "success"; }
+    });
+    await page.addStyleTag({ content: "html,body{width:1280px!important;height:800px!important}body{display:grid!important;place-items:center!important}main{width:380px!important;border:1px solid #44475a!important;box-shadow:0 24px 80px rgba(0,0,0,.38)!important}" });
+    await page.screenshot({ path: screenshotPath, type: "png", omitBackground: false });
+  } finally {
+    await browser.close();
+  }
+  return { iconPath, screenshotPath };
+}
+
+async function chooseStoreOption(page, placeholder, option) {
+  const labelled = page.getByLabel(placeholder, { exact: true });
+  if (await labelled.count()) await labelled.first().click();
+  else await page.getByText(placeholder, { exact: true }).first().click();
+  await page.waitForTimeout(250);
+  const exact = page.getByRole("option", { name: option, exact: true }).last();
+  if (!(await exact.count())) throw new Error(`Chrome Web Store option not found: ${option}`);
+  await exact.click();
+}
+
+export async function fillChromeWebStoreListing({ stateDir, resourceId = "chrome.google.com", draftUrl, description, category, language, homepageUrl, supportUrl, iconPath, screenshotPath }) {
+  const url = validateDashboardUrl(draftUrl);
+  const browser = await chromium.launch({ headless: true });
+  try {
+    const context = await authenticatedContext(stateDir, resourceId, browser);
+    const page = await context.newPage();
+    await page.goto(url.href, { waitUntil: "domcontentloaded", timeout: 60000 });
+    await page.waitForTimeout(2500);
+    if (page.url().includes("accounts.google.com")) throw new Error("Chrome Web Store session is not authenticated");
+    await page.locator("textarea").first().fill(description);
+    await chooseStoreOption(page, "Select a category", category);
+    await chooseStoreOption(page, "Select a language", language);
+    const files = page.locator('input[type="file"]');
+    if ((await files.count()) < 2) throw new Error("Chrome Web Store asset controls were not found");
+    await files.nth(0).setInputFiles(iconPath);
+    await page.waitForTimeout(800);
+    await files.nth(1).setInputFiles(screenshotPath);
+    await page.getByPlaceholder("Homepage URL").fill(homepageUrl);
+    await page.getByPlaceholder("Support URL").fill(supportUrl);
+    await page.getByText("Save draft", { exact: true }).click();
+    await page.waitForTimeout(2500);
+    return {
+      saved: true,
+      submittedForReview: false,
+      url: page.url(),
+      descriptionLength: (await page.locator("textarea").first().inputValue()).length,
+      category,
+      language,
+      iconUploaded: true,
+      screenshotUploaded: true,
+      homepageUrl: await page.getByPlaceholder("Homepage URL").inputValue(),
+      supportUrl: await page.getByPlaceholder("Support URL").inputValue(),
+      visibleText: (await page.locator("body").innerText()).slice(0, 8000)
+    };
+  } finally {
+    await browser.close();
+  }
+}
+
+export async function fillChromeWebStorePrivacy({ stateDir, resourceId = "chrome.google.com", privacyUrl, fields }) {
+  const url = validateDashboardUrl(privacyUrl);
+  const browser = await chromium.launch({ headless: true });
+  try {
+    const context = await authenticatedContext(stateDir, resourceId, browser);
+    const page = await context.newPage();
+    await page.goto(url.href, { waitUntil: "domcontentloaded", timeout: 60000 });
+    await page.waitForTimeout(2500);
+    if (page.url().includes("accounts.google.com")) throw new Error("Chrome Web Store session is not authenticated");
+    const textareas = page.locator("textarea");
+    if ((await textareas.count()) < 5) throw new Error("Chrome Web Store privacy controls were not found");
+    await textareas.nth(0).fill(fields.singlePurpose);
+    await textareas.nth(1).fill(fields.activeTab);
+    await textareas.nth(2).fill(fields.cookies);
+    await textareas.nth(3).fill(fields.storage);
+    await page.locator('input[type="radio"]').first().check();
+    for (const label of fields.dataTypes) await page.getByLabel(label, { exact: true }).check();
+    await page.getByLabel(/I do not sell or transfer user data/i).check();
+    await page.getByLabel(/I do not use or transfer user data for purposes/i).check();
+    await page.getByLabel(/I do not use or transfer user data to determine creditworthiness/i).check();
+    await page.locator('input[type="text"]').last().fill(fields.privacyPolicyUrl);
+    await page.getByText("Save draft", { exact: true }).click();
+    await page.waitForTimeout(2500);
+    return {
+      saved: true,
+      submittedForReview: false,
+      url: page.url(),
+      remoteCode: false,
+      dataTypes: fields.dataTypes,
+      privacyPolicyUrl: await page.locator('input[type="text"]').last().inputValue(),
+      visibleText: (await page.locator("body").innerText()).slice(0, 8000)
+    };
+  } finally {
+    await browser.close();
+  }
+}
+
+export async function fillChromeWebStoreDistribution({ stateDir, resourceId = "chrome.google.com", distributionUrl }) {
+  const url = validateDashboardUrl(distributionUrl);
+  const browser = await chromium.launch({ headless: true });
+  try {
+    const context = await authenticatedContext(stateDir, resourceId, browser);
+    const page = await context.newPage();
+    await page.goto(url.href, { waitUntil: "domcontentloaded", timeout: 60000 });
+    await page.waitForTimeout(2500);
+    if (page.url().includes("accounts.google.com")) throw new Error("Chrome Web Store session is not authenticated");
+    const radios = page.locator('input[type="radio"]');
+    if ((await radios.count()) < 5) throw new Error("Chrome Web Store distribution controls were not found");
+    await radios.nth(0).check();
+    await radios.nth(2).check();
+    const allRegions = page.getByRole("option", { name: "All regions", exact: true });
+    const regionCheckbox = allRegions.locator('input[type="checkbox"]');
+    if (await regionCheckbox.count()) await regionCheckbox.check();
+    else await page.locator('input[type="checkbox"]').first().check();
+    await page.getByText("Save draft", { exact: true }).click();
+    await page.waitForTimeout(2500);
+    return {
+      saved: true,
+      submittedForReview: false,
+      payment: "free",
+      visibility: "public",
+      regions: "all",
+      url: page.url(),
+      visibleText: (await page.locator("body").innerText()).slice(0, 6000)
+    };
+  } finally {
+    await browser.close();
+  }
+}
+
+export async function inspectChromeWebStoreDraft({ stateDir, resourceId = "chrome.google.com", draftUrl }) {
+  const url = validateDashboardUrl(draftUrl);
+  const browser = await chromium.launch({ headless: true });
+  try {
+    const context = await authenticatedContext(stateDir, resourceId, browser);
+    const page = await context.newPage();
+    await page.goto(url.href, { waitUntil: "domcontentloaded", timeout: 60000 });
+    await page.waitForTimeout(2500);
+    const controls = await page.locator("input, textarea, select, button, [role=combobox], [role=option]").evaluateAll((elements) => elements.map((element, index) => ({
+      index,
+      tag: element.tagName.toLowerCase(),
+      type: element.getAttribute("type"),
+      name: element.getAttribute("name"),
+      ariaLabel: element.getAttribute("aria-label"),
+      placeholder: element.getAttribute("placeholder"),
+      accept: element.getAttribute("accept"),
+      role: element.getAttribute("role"),
+      disabled: element.getAttribute("aria-disabled"),
+      value: element.getAttribute("data-value"),
+      text: element.textContent?.trim().slice(0, 120) || null
+    })));
+    const links = await page.locator("a").evaluateAll((elements) => elements.map((element) => ({ text: element.textContent?.trim().replace(/\s+/g, " ").slice(0, 120), href: element.href })).filter((item) => /Access|Test instructions|Privacy|Distribution|Store listing/i.test(item.text || "")));
+    return { url: page.url(), title: await page.title(), controls, links };
+  } finally {
+    await browser.close();
+  }
 }
 
 export async function uploadChromeWebStoreDraft({ stateDir, resourceId = "chrome.google.com", dashboardUrl, zipPath }) {

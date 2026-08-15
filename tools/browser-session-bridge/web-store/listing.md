@@ -29,7 +29,7 @@ A separate browser profile is strongly recommended because a shared session gran
 
 ## Category
 
-Productivity
+Tools
 
 ## Language
 

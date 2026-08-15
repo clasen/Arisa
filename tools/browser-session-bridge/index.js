@@ -5,7 +5,7 @@ import os from "node:os";
 import path from "node:path";
 import defaults from "./config.js";
 import { createDevice, createPairing, listDevices, probeBridge, revokeDevice, startBridgeServer } from "./bridge-server.js";
-import { uploadChromeWebStoreDraft } from "./chrome-web-store.js";
+import { createChromeWebStoreAssets, fillChromeWebStoreDistribution, fillChromeWebStoreListing, fillChromeWebStorePrivacy, inspectChromeWebStoreDraft, uploadChromeWebStoreDraft } from "./chrome-web-store.js";
 import { openWithSession } from "./session-browser.js";
 
 const toolName = "browser-session-bridge";
@@ -48,7 +48,11 @@ Actions via args.action:
   pair           Create a legacy encrypted one-time pairing code.
   list           List stored browser sessions without exposing cookie values.
   open                     Open one same-site URL with a stored session. args: resourceId, url, maxChars?.
-  chrome-web-store-upload  Upload an extension ZIP as a new draft without submitting it. ZIP artifact required; args: dashboardUrl.
+  chrome-web-store-inspect      Inspect non-secret controls in one existing draft. args: draftUrl.
+  chrome-web-store-fill-listing Complete and save the listing fields without submitting. args: draftUrl, description, category, language, homepageUrl, supportUrl.
+  chrome-web-store-fill-privacy Complete and save accurate privacy disclosures without submitting. args: privacyUrl, privacyPolicyUrl.
+  chrome-web-store-fill-distribution Save free, public, all-region distribution without submitting. args: distributionUrl.
+  chrome-web-store-upload       Upload an extension ZIP as a new draft without submitting it. ZIP artifact required; args: dashboardUrl.
   delete                   Delete one session. args: resourceId.
 
 The extension shares only cookies applicable to the active tab. Setup links expire and are consumed after one successful activation.
@@ -168,6 +172,54 @@ async function handleRequest(request) {
       maxChars: positiveInteger(request.args?.maxChars, 30000, 1000, 100000)
     });
     return toolOk({ text: `Page: ${opened.url}\nTitle: ${opened.title}\n\n${opened.text}`, json: opened, mimeType: "application/json" });
+  }
+  if (action === "chrome-web-store-fill-distribution") {
+    const distribution = await fillChromeWebStoreDistribution({
+      stateDir: getChatToolStateDir(chatId, toolName),
+      distributionUrl: request.args?.distributionUrl
+    });
+    return toolOk({ text: "Chrome Web Store distribution saved as a draft. It was not submitted for review.", json: distribution, mimeType: "application/json" });
+  }
+  if (action === "chrome-web-store-fill-privacy") {
+    const privacy = await fillChromeWebStorePrivacy({
+      stateDir: getChatToolStateDir(chatId, toolName),
+      privacyUrl: request.args?.privacyUrl,
+      fields: {
+        singlePurpose: "Let a user explicitly share the active site's applicable browser session cookies with an Arisa instance they control.",
+        activeTab: "Identifies the site selected by the user when they open the extension popup and choose to send that site's session.",
+        cookies: "Reads only cookies applicable to the active site after the user explicitly chooses Send current session. Those cookies are encrypted before transfer to the paired Arisa bridge.",
+        storage: "Stores the paired bridge endpoint and revocable device credential locally in the dedicated browser profile so the user does not need to reconnect for every session share.",
+        dataTypes: ["Authentication information", "Web history"],
+        privacyPolicyUrl: request.args?.privacyPolicyUrl
+      }
+    });
+    return toolOk({ text: "Chrome Web Store privacy disclosures saved as a draft. It was not submitted for review.", json: privacy, mimeType: "application/json" });
+  }
+  if (action === "chrome-web-store-fill-listing") {
+    const description = String(request.args?.description || "").trim();
+    if (!description) throw new Error("A listing description is required");
+    const assets = await createChromeWebStoreAssets({
+      extensionDir: path.join(toolDir, "extension"),
+      outputDir: path.join(getChatToolTmpDir(chatId, toolName), "chrome-web-store-assets")
+    });
+    const filled = await fillChromeWebStoreListing({
+      stateDir: getChatToolStateDir(chatId, toolName),
+      draftUrl: request.args?.draftUrl,
+      description,
+      category: request.args?.category || "Productivity",
+      language: request.args?.language || "English",
+      homepageUrl: request.args?.homepageUrl || "https://arisa.sh/",
+      supportUrl: request.args?.supportUrl || "https://github.com/clasen/Arisa/issues",
+      ...assets
+    });
+    return toolOk({ text: "Chrome Web Store listing saved as a draft. It was not submitted for review.", json: filled, mimeType: "application/json" });
+  }
+  if (action === "chrome-web-store-inspect") {
+    const inspected = await inspectChromeWebStoreDraft({
+      stateDir: getChatToolStateDir(chatId, toolName),
+      draftUrl: request.args?.draftUrl
+    });
+    return toolOk({ text: "Chrome Web Store draft controls inspected", json: inspected, mimeType: "application/json" });
   }
   if (action === "chrome-web-store-upload") {
     if (!request.artifact?.path) throw new Error("A ZIP artifact is required");
