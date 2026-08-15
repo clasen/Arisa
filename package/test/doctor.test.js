@@ -87,6 +87,29 @@ test("reports Pi context size and retained-content inefficiency", async () => {
   assert.ok(formatted.split("\n").every((line) => [...line].length <= 35));
 });
 
+test("lists each checked daemon with its scope and state", async () => {
+  const { report } = await run({
+    repairs: [
+      {
+        record: { toolName: "master-slave", instanceId: "global", scope: { type: "global" } },
+        diagnostic: { state: "ready" },
+        outcome: "healthy"
+      },
+      {
+        record: { toolName: "context-vault", instanceId: "chat-1", scope: { type: "chat" } },
+        diagnostic: { state: "stopped" },
+        outcome: "stopped"
+      }
+    ]
+  });
+
+  const formatted = formatDoctorReport(report);
+  assert.match(formatted, /Daemons\n  Checked    2/);
+  assert.match(formatted, /- context-vault \[chat\]: stopped/);
+  assert.match(formatted, /- master-slave \[global\]: ready/);
+  assert.ok(formatted.split("\n").every((line) => [...line].length <= 35));
+});
+
 test("stops only a registered duplicate Arisa service with verified identity", async () => {
   const duplicatePid = 321;
   const { report, stopped } = await run({

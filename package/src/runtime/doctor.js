@@ -87,16 +87,30 @@ function daemonLabel(record) {
   return `${record.toolName} (${record.instanceId || "global"})`;
 }
 
+function daemonState(result) {
+  return result.diagnostic?.state || result.outcome;
+}
+
 function daemonResultSummary(results) {
   const states = new Map();
   for (const result of results) {
-    const state = result.diagnostic?.state || result.outcome;
+    const state = daemonState(result);
     states.set(state, (states.get(state) || 0) + 1);
   }
   return [...states.entries()]
     .sort(([left], [right]) => left.localeCompare(right))
     .map(([state, count]) => `${count} ${state}`)
     .join(", ");
+}
+
+function daemonReportLines(results) {
+  return [...results]
+    .sort((left, right) => daemonLabel(left.record).localeCompare(daemonLabel(right.record)))
+    .flatMap((result) => {
+      const scope = result.record.scope?.type || (result.record.instanceId === "global" ? "global" : "chat");
+      const text = `${result.record.toolName} [${scope}]: ${daemonState(result)}`;
+      return wrapReportText(text, { firstPrefix: "  - ", nextPrefix: "    " });
+    });
 }
 
 function formatTokenCount(tokens) {
@@ -223,7 +237,10 @@ export function formatDoctorReport(report) {
   if (measured.length) lines.push(...reportRow("Max", `${Math.max(...measured.map((context) => context.percent)).toFixed(1)}%`));
   lines.push("", "Daemons");
   lines.push(...reportRow("Checked", report.daemons.length));
-  if (report.daemons.length) lines.push(...reportRow("Status", daemonResultSummary(report.daemons)));
+  if (report.daemons.length) {
+    lines.push(...reportRow("Status", daemonResultSummary(report.daemons)));
+    lines.push(...daemonReportLines(report.daemons));
+  }
   if (report.infrastructure) {
     lines.push("", "Master/Slave");
     if (report.infrastructure.error) {
