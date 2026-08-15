@@ -142,6 +142,27 @@ test("requires chatId for chat-scoped IPC methods", async () => {
   }
 });
 
+test("agent events preserve a bounded immediate acknowledgement", async () => {
+  const capabilities = createCapabilities();
+  const created = await capabilities.dispatch({
+    method: "agent.enqueueEvent",
+    toolName: "browser-session-bridge",
+    chatId: "chat-a",
+    params: {
+      prompt: "Continue the pending authorization flow",
+      acknowledgement: "Authorization received. Continuing now."
+    }
+  });
+
+  assert.equal(created.payload.acknowledgement, "Authorization received. Continuing now.");
+  await assert.rejects(() => capabilities.dispatch({
+    method: "agent.enqueueEvent",
+    toolName: "browser-session-bridge",
+    chatId: "chat-a",
+    params: { prompt: "Continue", acknowledgement: "x".repeat(501) }
+  }), /at most 500 characters/);
+});
+
 test("delivers only artifacts resolved from the requesting chat", async () => {
   const artifact = { id: "artifact-1", chatId: "chat-a", path: "/safe/chat-a/file.txt" };
   const deliveries = [];

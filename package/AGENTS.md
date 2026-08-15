@@ -78,6 +78,8 @@ const result = await arisa.tools.run({
 
 The IPC channel is a local socket under `~/.arisa/state`. Every request must include `toolName`; chat-scoped capabilities also require `chatId`. Exposed capabilities are explicit: tools (`list`, `help`, `skills`, `setConfig`, `setResourceNote`, `getResourceNote`, `run`), artifacts (`createText`, `listRecent`, `get`, `deliver`), tasks (`add`, `list`, `cancel`, `cancelAll`), agent events (`enqueueEvent`), and runtime paths (`getChatToolStateDir`, `getToolStateDir`, `getChatToolTmpDir`, `getToolTmpDir`, `getChatArtifactsDir`). Do not expose raw `agentManager`, `taskStore`, `artifactStore`, or `toolRegistry` access.
 
+`agent.enqueueEvent` may include an optional `acknowledgement` of at most 500 characters. Telegram delivers it before the event enters agent reasoning, so explicit authorization receipts cannot be delayed behind follow-up work. Keep it deterministic, concise, and free of credentials; the event prompt must not repeat it.
+
 ## Tool resource notes
 A tool resource may have one deterministic chat-scoped operational note of at most 200 characters, keyed by the exact pair `toolName:resourceId`. Notes live in the chat state file returned by `getChatToolResourceNotesFile(chatId)`. They are separate from semantic memory and contain no credentials.
 

@@ -67,14 +67,16 @@ function arisaClient(chatId) {
 async function notifyDeviceActivated(event) {
   await arisaClient(event.chatId).agent.enqueueEvent({
     resourceId: event.deviceId,
-    prompt: `Browser profile ${event.label} (${event.deviceId}) finished secure bridge authorization. Notify the user now with a concise confirmation. Do not wait for them to say it connected.`
+    acknowledgement: `Browser profile ${event.label} is connected.`,
+    prompt: `Browser profile ${event.label} (${event.deviceId}) finished secure bridge authorization. The transport already acknowledged it. Continue any pending setup work now; do not repeat the acknowledgement.`
   });
 }
 
 async function notifySessionImported(event) {
   await arisaClient(event.chatId).agent.enqueueEvent({
     resourceId: event.resourceId,
-    prompt: `The user explicitly shared an authenticated browser session for ${event.resourceId} through ${event.label || "Arisa Session Bridge"}. The bridge received ${event.cookieCount} domain-scoped cookies at ${event.receivedAt}. If a pending task was waiting for this authorization, continue it now without asking the user to confirm. Otherwise acknowledge only when useful.`
+    acknowledgement: `Authorization received for ${event.resourceId}. Continuing now.`,
+    prompt: `The user explicitly shared an authenticated browser session for ${event.resourceId} through ${event.label || "Arisa Session Bridge"}. The bridge received ${event.cookieCount} domain-scoped cookies at ${event.receivedAt}. The transport already acknowledged it. If a pending task was waiting for this authorization, continue it now without asking the user to confirm; otherwise stay silent.`
   });
 }
 

@@ -4,7 +4,7 @@ A Chrome/Brave Manifest V3 extension and Arisa tool for intentionally sharing th
 
 ## Recommended profile
 
-Create a separate Chrome or Brave profile named **Arisa**. Install the extension and log in to sites only inside that profile. This keeps personal browsing separate from sessions intentionally shared with Arisa.
+Create a separate Chrome or Brave profile named **Arisa**. Install the extension and log in to sites only inside that profile. Whenever possible, use dedicated, non-personal accounts with only the access Arisa needs. This keeps personal browsing separate and limits the scope of sessions intentionally shared with Arisa.
 
 ## Normal installation
 
@@ -31,6 +31,8 @@ The setup link expires, is consumed after one activation, and keeps its temporar
 1. Open an authenticated site in the dedicated profile.
 2. Open the extension.
 3. Choose **Send current session**.
+
+Arisa immediately confirms receipt before continuing any pending browser work.
 
 The extension uses `activeTab` for the selected site rather than permanent access to every site. When the user sends a session, it requests host access for that active site only while reading its applicable cookies, then removes access. Persistent host permission is retained only for the configured bridge endpoint. Session payloads use AES-256-GCM, remain chat-scoped, and never expose cookie values in tool output.
 

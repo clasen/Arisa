@@ -43,6 +43,13 @@ function normalizeLimit(limit) {
   return Math.min(value, 100);
 }
 
+function normalizeAcknowledgement(value) {
+  if (value == null || value === "") return "";
+  const acknowledgement = requireString(value, "acknowledgement").trim();
+  if (acknowledgement.length > 500) throw new Error("acknowledgement must be at most 500 characters");
+  return acknowledgement;
+}
+
 export function createArisaCapabilities({
   artifactStore,
   taskStore,
@@ -206,7 +213,11 @@ export function createArisaCapabilities({
       const resourceId = String(params.resourceId || "").trim();
       return taskStore.add({
         kind: "agent_event",
-        payload: { prompt: requireString(params.prompt, "prompt"), resourceId }
+        payload: {
+          prompt: requireString(params.prompt, "prompt"),
+          resourceId,
+          acknowledgement: normalizeAcknowledgement(params.acknowledgement)
+        }
       }, {
         payload: { chatId: scopedChatId },
         source: { type: "tool", toolName: scopedToolName, chatId: scopedChatId, resourceId }

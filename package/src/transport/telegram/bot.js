@@ -1163,6 +1163,14 @@ export async function createTelegramBot({ config, artifactStore, toolRegistry, t
 
     if (task.kind === "agent_event") {
       logger?.log("tasks", `agent event ${task.id} for chat ${chatId}`);
+      const acknowledgement = String(task.payload?.acknowledgement || "").trim();
+      if (acknowledgement) {
+        try {
+          await bot.api.sendMessage(chatId, acknowledgement);
+        } catch (error) {
+          logger?.log("telegram", `agent event acknowledgement failed for chat ${chatId}: ${error instanceof Error ? error.message : String(error)}`);
+        }
+      }
       await enqueueAsyncPrompt({
         chatId,
         prompt: await buildAsyncEventPrompt(task, resourceNotes),
