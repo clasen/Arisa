@@ -1,0 +1,39 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Arisa Session Bridge</title>
+  <link rel="stylesheet" href="popup.css">
+</head>
+<body>
+  <main>
+    <header>
+      <span class="mark">A</span>
+      <div>
+        <h1>Session Bridge</h1>
+        <p>Dedicated browser profile</p>
+      </div>
+    </header>
+
+    <section id="setup" class="hidden">
+      <label for="setup-code">Setup link detected automatically, or paste its code</label>
+      <textarea id="setup-code" rows="3" spellcheck="false" placeholder="arisa-enroll://…"></textarea>
+      <button id="connect" class="primary">Connect this profile</button>
+    </section>
+
+    <section id="connected" class="hidden">
+      <div class="panel connection">
+        <span><strong>Connected to Arisa</strong><small id="device-label"></small></span>
+        <button id="forget" class="link">Forget</button>
+      </div>
+      <div id="site" class="panel muted">Open the site you want to share.</div>
+      <button id="send" class="primary">Send current session</button>
+      <p class="warning">This sends cookies for the active site only. Use this extension in a dedicated Arisa browser profile.</p>
+    </section>
+
+    <p id="status" role="status"></p>
+  </main>
+  <script src="popup.js"></script>
+</body>
+</html>

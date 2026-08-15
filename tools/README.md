@@ -17,6 +17,18 @@ Extract and normalize audio from video or audio media with ffmpeg.
 - **Setup:** ffmpeg and ffprobe
 - **Install footprint:** **Medium**, external binaries and no npm dependencies
 
+### [`browser-session-bridge`](./browser-session-bridge/)
+
+Receive explicitly shared, domain-scoped Chrome or Brave sessions through a temporary encrypted setup link and a revocable dedicated browser profile.
+
+- **Category:** `web`
+- **Tags:** `browser` · `chrome` · `brave` · `cookies` · `extension` · `session` · `playwright` · `authentication`
+- **Accepts:** `text/plain`, `application/json`
+- **Produces:** `application/json`, `application/zip`
+- **Setup:** public bridge endpoint and the Chrome/Brave extension
+- **Runtime:** global on-demand daemon
+- **Install footprint:** **High**, Playwright browser dependency, public endpoint, extension installation, and a daemon
+
 ### [`campaign-draft-runner`](./campaign-draft-runner/)
 
 Run profile-driven outreach batches that discover public editorial contacts, filter prior recipients, verify domains, research coverage, and create Gmail drafts. It never sends mail.

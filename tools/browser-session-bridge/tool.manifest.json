@@ -1,0 +1,31 @@
+{
+  "name": "browser-session-bridge",
+  "description": "Receive explicitly shared, domain-scoped Chrome or Brave sessions through a temporary encrypted setup link and store them per chat.",
+  "entry": "index.js",
+  "daemon": {
+    "scope": "global",
+    "autoStart": false,
+    "health": "internal"
+  },
+  "input": ["text/plain", "application/json"],
+  "output": ["application/json", "application/zip"],
+  "category": "web",
+  "keywords": ["browser", "chrome", "brave", "cookies", "extension", "session", "playwright", "authentication"],
+  "configSchema": {
+    "PUBLIC_BASE_URL": {
+      "type": "string",
+      "required": true,
+      "prompt": "Public HTTP(S) base URL where the browser extension can reach the bridge, for example https://bridge.example.com."
+    },
+    "CHROME_WEB_STORE_URL": {
+      "type": "string",
+      "required": false,
+      "prompt": "Published Chrome Web Store URL for one-click extension installation."
+    },
+    "PAIR_TTL_SECONDS": {
+      "type": "number",
+      "required": false,
+      "prompt": "Lifetime of a one-time pairing code in seconds."
+    }
+  }
+}

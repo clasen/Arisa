@@ -1,0 +1,22 @@
+{
+  "manifest_version": 3,
+  "name": "Arisa Session Bridge",
+  "version": "1.2.0",
+  "description": "Send the active site session from a dedicated Chrome or Brave profile to Arisa.",
+  "permissions": ["activeTab", "cookies", "storage"],
+  "optional_host_permissions": ["http://*/*", "https://*/*"],
+  "icons": {
+    "16": "icons/icon-16.png",
+    "32": "icons/icon-32.png",
+    "48": "icons/icon-48.png",
+    "128": "icons/icon-128.png"
+  },
+  "action": {
+    "default_title": "Send this site session to Arisa",
+    "default_popup": "popup.html",
+    "default_icon": {
+      "16": "icons/icon-16.png",
+      "32": "icons/icon-32.png"
+    }
+  }
+}
