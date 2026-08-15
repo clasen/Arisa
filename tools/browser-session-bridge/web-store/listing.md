@@ -18,7 +18,8 @@ The extension:
 
 - acts only after you open its popup and choose an action
 - uses active-tab access for the selected site
-- requests persistent host access only for your configured Arisa bridge endpoint
+- requests temporary host access to the active site only when sending, then removes it
+- retains persistent host access only for your configured Arisa bridge endpoint
 - encrypts session payloads with AES-256-GCM
 - never displays or returns cookie values through Arisa tool output
 - supports local and server-side device revocation
@@ -36,7 +37,7 @@ English
 
 ## Permission justifications
 
-- `activeTab`: identify the site selected by the user and temporarily access only that site after the extension action is invoked
+- `activeTab`: identify the site selected by the user after the extension action is invoked
 - `cookies`: read cookies applicable to the selected site when the user chooses **Send current session**
 - `storage`: retain the revocable bridge-device credential in the dedicated browser profile
-- optional HTTP/HTTPS host access: communicate with the exact bridge endpoint approved during initial setup; the extension requests only that origin
+- optional HTTP/HTTPS host access: temporarily read cookies for the active site and communicate with the exact bridge endpoint approved during initial setup; active-site access is removed after the read, while only the bridge origin remains persistent

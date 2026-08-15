@@ -82,6 +82,25 @@ async function ensureEndpointPermission(endpoint) {
   if (!(await chrome.permissions.request({ origins }))) throw new Error("Bridge endpoint permission was not granted");
 }
 
+function temporarySiteOrigins(url) {
+  const origins = [`${url.protocol}//${url.hostname}/*`];
+  if (url.hostname === "google.com" || url.hostname.endsWith(".google.com")) origins.push(`${url.protocol}//*.google.com/*`);
+  return [...new Set(origins)];
+}
+
+async function withTemporarySitePermission(url, operation) {
+  const origins = temporarySiteOrigins(url);
+  const alreadyGranted = await chrome.permissions.contains({ origins });
+  if (!alreadyGranted && !(await chrome.permissions.request({ origins }))) {
+    throw new Error("Temporary access to the active site was not granted");
+  }
+  try {
+    return await operation();
+  } finally {
+    if (!alreadyGranted) await chrome.permissions.remove({ origins }).catch(() => {});
+  }
+}
+
 function showMode() {
   setupSection.classList.toggle("hidden", Boolean(device));
   connectedSection.classList.toggle("hidden", !device);
@@ -172,9 +191,9 @@ async function sendCurrentSession() {
   try {
     await ensureEndpointPermission(device.endpoint);
     const { url } = await activeWebTab();
-    const cookies = (await chrome.cookies.getAll({ url: url.href }))
+    const cookies = await withTemporarySitePermission(url, async () => (await chrome.cookies.getAll({ url: url.href }))
       .filter((cookie) => !cookie.expirationDate || cookie.expirationDate * 1000 > Date.now())
-      .map(serializableCookie);
+      .map(serializableCookie));
     if (!cookies.length) throw new Error("No cookies are available for this site");
     const result = await postEncrypted("/v1/import-device", {
       version: 1,
