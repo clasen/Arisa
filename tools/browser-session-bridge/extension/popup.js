@@ -170,6 +170,7 @@ async function sendCurrentSession() {
   setStatus("");
   sendButton.disabled = true;
   try {
+    await ensureEndpointPermission(device.endpoint);
     const { url } = await activeWebTab();
     const cookies = (await chrome.cookies.getAll({ url: url.href }))
       .filter((cookie) => !cookie.expirationDate || cookie.expirationDate * 1000 > Date.now())
