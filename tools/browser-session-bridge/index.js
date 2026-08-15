@@ -29,7 +29,7 @@ const { getChatToolStateDir, getChatToolTmpDir } = await importArisa("runtime/pa
 const daemon = createDaemonRuntime({
   toolName,
   entryPath: fileURLToPath(import.meta.url),
-  autoStart: false
+  autoStart: true
 });
 
 function printHelp() {
@@ -76,6 +76,11 @@ async function notifySessionImported(event) {
 function positiveInteger(value, fallback, min, max) {
   const parsed = Number.parseInt(String(value ?? ""), 10);
   return Number.isFinite(parsed) ? Math.min(max, Math.max(min, parsed)) : fallback;
+}
+
+function nonNegativeInteger(value, fallback, max) {
+  const parsed = Number.parseInt(String(value ?? ""), 10);
+  return Number.isFinite(parsed) ? Math.min(max, Math.max(0, parsed)) : fallback;
 }
 
 function runProcess(command, args, options = {}) {
@@ -235,7 +240,7 @@ async function runDaemon() {
   });
 
   await daemon.workLoop({
-    idleTimeoutMs: positiveInteger(config.IDLE_TIMEOUT_MS, 1800000, 60000, 86400000),
+    idleTimeoutMs: nonNegativeInteger(config.IDLE_TIMEOUT_MS, 0, 86400000),
     processJob: async (job) => {
       if (job.action === "pair") return createPairing({ pairingsDir, chatId: job.chatId, endpoint: job.endpoint, ttlSeconds: job.ttlSeconds });
       if (job.action === "device-pair") return createDevice({ enrollmentsDir, chatId: job.chatId, endpoint: job.endpoint, label: job.label, ttlSeconds: job.ttlSeconds });

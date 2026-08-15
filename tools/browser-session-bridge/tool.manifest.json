@@ -4,7 +4,7 @@
   "entry": "index.js",
   "daemon": {
     "scope": "global",
-    "autoStart": false,
+    "autoStart": true,
     "health": "internal"
   },
   "input": ["text/plain", "application/json", "application/zip"],
