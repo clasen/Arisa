@@ -103,9 +103,23 @@ test("lists each checked daemon with its scope and state", async () => {
     ]
   });
 
+  report.infrastructure = {
+    role: "master",
+    daemon: { state: "ready" },
+    endpoint: "tcp://198.74.61.48:4719",
+    paired: null,
+    identityFingerprint: "unnecessarily-long-fingerprint",
+    toolCount: 0,
+    jobs: { active: 0, queued: 0, failed: 0 },
+    pendingSecrets: 0
+  };
   const formatted = formatDoctorReport(report);
   assert.match(formatted, /Daemons \(2\)\n  Ready \(1\)\n  - master-slave \[global\]/);
   assert.match(formatted, /  Stopped \(1\)\n  - context-vault \[chat\]/);
+  assert.match(formatted, /Master\/Slave\n  Mode       master · ready/);
+  assert.match(formatted, /Endpoint   198\.74\.61\.48:4719/);
+  assert.match(formatted, /Activity   idle/);
+  assert.doesNotMatch(formatted, /Identity|fingerprint|Paired/);
   assert.ok(formatted.split("\n").every((line) => [...line].length <= 35));
 });
 

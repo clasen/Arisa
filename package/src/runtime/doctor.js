@@ -150,6 +150,24 @@ function formatUptime(seconds) {
   return [days ? `${days}d` : "", hours ? `${hours}h` : "", `${minutes}m`].filter(Boolean).join(" ");
 }
 
+function masterSlaveMode(infrastructure) {
+  const parts = [infrastructure.role || "unknown", infrastructure.daemon?.state || "unknown"];
+  if (infrastructure.paired != null) parts.push(infrastructure.paired ? "paired" : "unpaired");
+  return parts.join(" · ");
+}
+
+function masterSlaveActivity(jobs) {
+  const active = jobs?.active;
+  const queued = jobs?.queued;
+  const failed = jobs?.failed;
+  if ([active, queued, failed].every((value) => value === 0)) return "idle";
+  return `${active ?? "?"} active · ${queued ?? "?"} queued · ${failed ?? "?"} failed`;
+}
+
+function compactEndpoint(endpoint) {
+  return String(endpoint || "not configured").replace(/^tcp:\/\//, "");
+}
+
 export async function inspectSystemResources({ diskPath = arisaHomeDir } = {}) {
   const [load1, load5, load15] = os.loadavg();
   const memoryTotal = os.totalmem();
@@ -255,14 +273,11 @@ export function formatDoctorReport(report) {
     if (report.infrastructure.error) {
       lines.push(...reportRow("Status", `unavailable: ${report.infrastructure.error}`));
     } else {
-      lines.push(...reportRow("Role", report.infrastructure.role || "unknown"));
-      lines.push(...reportRow("Daemon", report.infrastructure.daemon?.state || "unknown"));
-      lines.push(...reportRow("Endpoint", report.infrastructure.endpoint || "not configured"));
-      lines.push(...reportRow("Identity", report.infrastructure.identityFingerprint || "not configured"));
-      lines.push(...reportRow("Paired", report.infrastructure.paired == null ? "n/a" : report.infrastructure.paired ? "yes" : "no"));
+      lines.push(...reportRow("Mode", masterSlaveMode(report.infrastructure)));
+      lines.push(...reportRow("Endpoint", compactEndpoint(report.infrastructure.endpoint)));
+      lines.push(...reportRow("Activity", masterSlaveActivity(report.infrastructure.jobs)));
       lines.push(...reportRow("Tools", report.infrastructure.toolCount ?? "unknown"));
-      lines.push(...reportRow("Jobs", `active=${report.infrastructure.jobs?.active ?? "unknown"}, queued=${report.infrastructure.jobs?.queued ?? "unknown"}, failed=${report.infrastructure.jobs?.failed ?? "unknown"}`));
-      lines.push(...reportRow("Pending secrets", report.infrastructure.pendingSecrets ?? "unknown"));
+      lines.push(...reportRow("Secrets", `${report.infrastructure.pendingSecrets ?? "unknown"} pending`));
     }
   }
   if (report.system) {
