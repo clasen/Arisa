@@ -27,6 +27,8 @@ The extension:
 
 A separate browser profile is strongly recommended because a shared session grants Arisa the same access as that browser session.
 
+Whenever possible, connect dedicated, non-personal accounts created for Arisa and grant them only the access Arisa needs. This limits the data and permissions exposed by a shared session.
+
 ## Category
 
 Tools

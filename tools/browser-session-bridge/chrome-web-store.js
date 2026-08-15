@@ -94,13 +94,30 @@ export async function createChromeWebStoreAssets({ extensionDir, outputDir }) {
   return { iconPath, screenshotPath };
 }
 
+async function firstVisible(locators) {
+  for (const locator of locators) {
+    for (let index = 0; index < await locator.count(); index += 1) {
+      const candidate = locator.nth(index);
+      if (await candidate.isVisible()) return candidate;
+    }
+  }
+  return null;
+}
+
 async function chooseStoreOption(page, placeholder, option) {
-  const labelled = page.getByLabel(placeholder, { exact: true });
-  if (await labelled.count()) await labelled.first().click();
-  else await page.getByText(placeholder, { exact: true }).first().click();
+  const trigger = await firstVisible([
+    page.getByLabel(placeholder, { exact: true }),
+    page.getByText(placeholder, { exact: true })
+  ]);
+  if (!trigger) {
+    const selected = await firstVisible([page.getByText(option, { exact: true })]);
+    if (selected) return;
+    throw new Error(`Chrome Web Store selector not found: ${placeholder}`);
+  }
+  await trigger.click();
   await page.waitForTimeout(250);
-  const exact = page.getByRole("option", { name: option, exact: true }).last();
-  if (!(await exact.count())) throw new Error(`Chrome Web Store option not found: ${option}`);
+  const exact = await firstVisible([page.getByRole("option", { name: option, exact: true })]);
+  if (!exact) throw new Error(`Chrome Web Store option not found: ${option}`);
   await exact.click();
 }
 
