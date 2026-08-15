@@ -178,7 +178,7 @@ test("runs a registered tool process with an enriched request and cleans up requ
   });
   assert.equal(result.output.env.ARISA_PACKAGE_DIR, arisaPackageDir);
   assert.equal(result.output.env.ARISA_IPC_SOCKET, arisaIpcSocketFile);
-  assert.deepEqual(await registry.usage("chat-1"), [{ name: "fake-tool", count: 1 }]);
+  assert.deepEqual(await registry.usage("chat-1"), [{ name: "fake-tool", count: 1, official: false }]);
 
   const requestFile = result.output.requestFile;
   await assert.rejects(() => access(requestFile), { code: "ENOENT" });

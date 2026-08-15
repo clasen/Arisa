@@ -2,7 +2,7 @@ import { mkdir, readdir, readFile, rmdir, unlink, writeFile } from "node:fs/prom
 import path from "node:path";
 import { spawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
-import { arisaIpcSocketFile, arisaPackageDir, getToolConfigPath, getToolTmpDir, getChatToolTmpDir, toolsDir as userToolsRoot } from "../../runtime/paths.js";
+import { arisaIpcSocketFile, arisaPackageDir, getToolConfigPath, getToolStateDir, getToolTmpDir, getChatToolTmpDir, toolsDir as userToolsRoot } from "../../runtime/paths.js";
 import { loadToolConfig, parseConfigModule, writeToolConfig } from "./tool-config.js";
 import { normalizeToolResult } from "./tool-result.js";
 import { readDaemonDiagnostic } from "./daemon-processes.js";
@@ -203,12 +203,26 @@ function formatSemanticMetadata(tool) {
   ].join("\n");
 }
 
+async function readOfficialToolNames() {
+  const baselinesDir = path.join(getToolStateDir("official-tool-sync"), "baselines");
+  try {
+    const entries = await readdir(baselinesDir, { withFileTypes: true });
+    return new Set(entries
+      .filter((entry) => entry.isFile() && entry.name.endsWith(".json"))
+      .map((entry) => entry.name.slice(0, -5)));
+  } catch (error) {
+    if (error?.code === "ENOENT") return new Set();
+    throw error;
+  }
+}
+
 export class ToolRegistry {
-  constructor({ logger, usageStore = new ToolUsageStore() } = {}) {
+  constructor({ logger, usageStore = new ToolUsageStore(), resolveOfficialToolNames = readOfficialToolNames } = {}) {
     this.logger = logger;
     this.tools = new Map();
     this.skillRegistry = new SkillRegistry();
     this.usageStore = usageStore;
+    this.resolveOfficialToolNames = resolveOfficialToolNames;
   }
 
   async load() {
@@ -361,13 +375,16 @@ export class ToolRegistry {
   }
 
   async usage(chatId) {
-    const counts = await this.usageStore.counts(chatId);
+    const [counts, officialNames] = await Promise.all([
+      this.usageStore.counts(chatId),
+      this.resolveOfficialToolNames()
+    ]);
     const names = new Set([
       ...this.list().map((tool) => tool.name),
       ...Object.keys(counts)
     ]);
     return [...names]
-      .map((name) => ({ name, count: counts[name] || 0 }))
+      .map((name) => ({ name, count: counts[name] || 0, official: officialNames.has(name) }))
       .sort((left, right) => left.name.localeCompare(right.name));
   }
 

@@ -1,18 +1,33 @@
 import { renderTextReport } from "./report-format.js";
 
-export function formatToolUsageReport(tools) {
-  const lines = ["Arisa tools", "===========", "Usage count"];
-  if (!tools.length) lines.push("  (none installed)");
-
-  const sortedTools = [...tools].sort((left, right) =>
+function sortedTools(tools) {
+  return [...tools].sort((left, right) =>
     Number(right.count) - Number(left.count) || String(left.name).localeCompare(String(right.name))
   );
-  const nameWidth = Math.max(0, ...sortedTools.map((tool) => String(tool.name).length));
-  const countWidth = Math.max(1, ...sortedTools.map((tool) => String(tool.count).length));
-  for (const tool of sortedTools) {
+}
+
+function usageRows(tools, nameWidth, countWidth) {
+  if (!tools.length) return ["  (none)"];
+  return sortedTools(tools).map((tool) => {
     const name = String(tool.name).padEnd(nameWidth);
     const count = String(tool.count).padStart(countWidth);
-    lines.push(`- ${name}  ${count}`);
-  }
+    return `- ${name}  ${count}`;
+  });
+}
+
+export function formatToolUsageReport(tools) {
+  const official = tools.filter((tool) => tool.official);
+  const local = tools.filter((tool) => !tool.official);
+  const nameWidth = Math.max(0, ...tools.map((tool) => String(tool.name).length));
+  const countWidth = Math.max(1, ...tools.map((tool) => String(tool.count).length));
+  const lines = [
+    "Arisa tools",
+    "===========",
+    "Official",
+    ...usageRows(official, nameWidth, countWidth),
+    "",
+    "Local",
+    ...usageRows(local, nameWidth, countWidth)
+  ];
   return renderTextReport(lines);
 }
