@@ -72,6 +72,6 @@ test("activates a short-lived device enrollment exactly once", async (t) => {
 
   const page = await fetch(`${endpoint}/connect`);
   assert.equal(page.status, 200);
-  assert.match(await page.text(), /Connect to Arisa/);
+  assert.match(await page.text(), /arisa<span>\.session<\/span>/);
   assert.equal(page.headers.get("referrer-policy"), "no-referrer");
 });

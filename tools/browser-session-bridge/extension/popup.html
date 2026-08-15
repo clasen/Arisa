@@ -9,30 +9,35 @@
 <body>
   <main>
     <header>
-      <span class="mark">A</span>
-      <div>
-        <h1>Session Bridge</h1>
-        <p>Dedicated browser profile</p>
+      <img class="mark" src="icons/icon-48.png" width="42" height="42" alt="Arisa">
+      <div class="brand-copy">
+        <h1>arisa<span>.session</span></h1>
+        <p>browser bridge</p>
       </div>
+      <span class="profile">dedicated profile</span>
     </header>
 
     <section id="setup" class="hidden">
-      <label for="setup-code">Setup link detected automatically, or paste its code</label>
+      <div class="section-title"><span>&gt;</span> connect profile</div>
+      <label for="setup-code">setup link detected automatically, or paste its code</label>
       <textarea id="setup-code" rows="3" spellcheck="false" placeholder="arisa-enroll://…"></textarea>
-      <button id="connect" class="primary">Connect this profile</button>
+      <button id="connect" class="primary">connect this profile</button>
     </section>
 
     <section id="connected" class="hidden">
-      <div class="panel connection">
-        <span><strong>Connected to Arisa</strong><small id="device-label"></small></span>
-        <button id="forget" class="link">Forget</button>
+      <div class="connection">
+        <div>
+          <span class="state">connected</span>
+          <small id="device-label"></small>
+        </div>
+        <button id="forget" class="link">forget</button>
       </div>
-      <div id="site" class="panel muted">Open the site you want to share.</div>
-      <button id="send" class="primary">Send current session</button>
-      <p class="warning">This sends cookies for the active site only. Use this extension in a dedicated Arisa browser profile.</p>
+      <div id="site" class="site">open the site you want to share</div>
+      <button id="send" class="primary">send current session</button>
+      <p class="warning">only cookies for the active site are sent. use this extension in the dedicated arisa browser profile</p>
     </section>
 
-    <p id="status" role="status"></p>
+    <p id="status" role="status" aria-live="polite"></p>
   </main>
   <script src="popup.js"></script>
 </body>
