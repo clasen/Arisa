@@ -79,6 +79,67 @@ export function validateSessionPayload(payload, maxCookies = 500) {
   };
 }
 
+function extensionSameSite(value) {
+  if (value === "Strict") return "strict";
+  if (value === "Lax") return "lax";
+  if (value === "None") return "no_restriction";
+  return "unspecified";
+}
+
+export function refreshedSession(session, browserCookies, refreshedAt = new Date().toISOString()) {
+  const resourceId = String(session?.resourceId || "").toLowerCase();
+  const applicableCookies = (browserCookies || []).filter((cookie) => {
+    try {
+      return cookieAppliesToHost(normalizedDomain(cookie.domain || resourceId), resourceId);
+    } catch {
+      return false;
+    }
+  }).map((cookie) => ({
+    name: cookie.name,
+    value: cookie.value,
+    domain: cookie.domain,
+    path: cookie.path || "/",
+    secure: cookie.secure,
+    httpOnly: cookie.httpOnly,
+    sameSite: extensionSameSite(cookie.sameSite),
+    session: !Number.isFinite(cookie.expires) || cookie.expires < 0,
+    ...(Number.isFinite(cookie.expires) && cookie.expires >= 0 ? { expirationDate: cookie.expires } : {})
+  }));
+  if (!applicableCookies.length) return null;
+  const normalized = validateSessionPayload({
+    version: 1,
+    resourceId,
+    sourceUrl: session.sourceUrl,
+    capturedAt: session.capturedAt,
+    cookies: applicableCookies
+  });
+  return { ...session, cookies: normalized.cookies, refreshedAt };
+}
+
+export async function persistRefreshedSession(stateDir, session, browserCookies) {
+  const refreshed = refreshedSession(session, browserCookies);
+  if (!refreshed) return false;
+  await persistSession(stateDir, refreshed);
+  return true;
+}
+
+export function refreshSessionOnBrowserClose({ browser, context, stateDir, session }) {
+  const closeBrowser = browser.close.bind(browser);
+  let closing = null;
+  browser.close = () => {
+    if (!closing) {
+      closing = (async () => {
+        try {
+          await persistRefreshedSession(stateDir, session, await context.cookies());
+        } finally {
+          await closeBrowser();
+        }
+      })();
+    }
+    return closing;
+  };
+}
+
 export async function consumePairing(pairingsDir, token) {
   if (!/^[a-zA-Z0-9_-]{20,100}$/.test(String(token || ""))) throw new Error("Invalid pairing token");
   const source = path.join(pairingsDir, `${token}.json`);

@@ -1,6 +1,7 @@
 import { readFile } from "node:fs/promises";
 import path from "node:path";
 import { chromium } from "playwright";
+import { refreshSessionOnBrowserClose } from "./session-store.js";
 
 function assertResourceId(value) {
   const resourceId = String(value || "").toLowerCase();
@@ -51,6 +52,7 @@ export async function openWithSession({ stateDir, resourceId: rawResourceId, url
   try {
     const context = await browser.newContext();
     await context.addCookies(session.cookies.map(toPlaywrightCookie));
+    refreshSessionOnBrowserClose({ browser, context, stateDir, session });
     const page = await context.newPage();
     await page.goto(url.href, { waitUntil: "domcontentloaded", timeout: 60000 });
     await page.waitForTimeout(2500);

@@ -2,6 +2,7 @@ import { copyFile, mkdir, readFile, stat } from "node:fs/promises";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
 import { chromium } from "playwright";
+import { refreshSessionOnBrowserClose } from "./session-store.js";
 
 function playwrightSameSite(value) {
   if (value === "strict") return "Strict";
@@ -46,6 +47,7 @@ async function authenticatedContext(stateDir, resourceId, browser) {
   if (!Array.isArray(session.cookies) || !session.cookies.length) throw new Error("Stored Chrome Web Store session has no cookies");
   const context = await browser.newContext();
   await context.addCookies(session.cookies.map(toPlaywrightCookie));
+  refreshSessionOnBrowserClose({ browser, context, stateDir, session });
   return context;
 }
 
