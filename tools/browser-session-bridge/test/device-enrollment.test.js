@@ -3,7 +3,7 @@ import { mkdtemp, rm } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
-import { createDevice, listDevices, startBridgeServer } from "../bridge-server.js";
+import { createDevice, createReviewerAccess, listDevices, revokeReviewerAccess, startBridgeServer } from "../bridge-server.js";
 import { decryptEnvelope, encryptEnvelope } from "../session-store.js";
 
 function decodeEnrollment(code) {
@@ -18,6 +18,7 @@ test("activates a short-lived device enrollment exactly once", async (t) => {
   const pairingsDir = path.join(root, "pairings");
   const enrollmentsDir = path.join(root, "enrollments");
   const devicesDir = path.join(root, "devices");
+  const reviewersDir = path.join(root, "reviewers");
   const stateDir = path.join(root, "chat");
   const deviceEvents = [];
   const sessionEvents = [];
@@ -27,6 +28,7 @@ test("activates a short-lived device enrollment exactly once", async (t) => {
     pairingsDir,
     enrollmentsDir,
     devicesDir,
+    reviewersDir,
     maxBodyBytes: 1_048_576,
     maxCookies: 500,
     stateDirForChat: () => stateDir,
@@ -108,4 +110,49 @@ test("activates a short-lived device enrollment exactly once", async (t) => {
   assert.equal(page.status, 200);
   assert.match(await page.text(), /arisa<span>\.session<\/span>/);
   assert.equal(page.headers.get("referrer-policy"), "no-referrer");
+});
+
+test("mints short-lived enrollments from one durable revocable reviewer credential", async (t) => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "arisa-bridge-reviewer-"));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  const enrollmentsDir = path.join(root, "enrollments");
+  const reviewersDir = path.join(root, "reviewers");
+  const server = await startBridgeServer({
+    host: "127.0.0.1",
+    port: 0,
+    pairingsDir: path.join(root, "pairings"),
+    enrollmentsDir,
+    devicesDir: path.join(root, "devices"),
+    reviewersDir,
+    maxBodyBytes: 1_048_576,
+    maxCookies: 500,
+    stateDirForChat: () => path.join(root, "chat")
+  });
+  t.after(() => new Promise((resolve) => server.close(resolve)));
+  const endpoint = `http://127.0.0.1:${server.address().port}`;
+  const reviewer = await createReviewerAccess({ reviewersDir, chatId: "chat-1", endpoint });
+  const token = new URL(reviewer.reviewerUrl).hash.slice(1);
+
+  const page = await fetch(`${endpoint}/reviewer`);
+  assert.equal(page.status, 200);
+  assert.equal(page.headers.get("referrer-policy"), "no-referrer");
+
+  const enrollment = await fetch(`${endpoint}/v1/reviewer-enrollment`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ token })
+  });
+  assert.equal(enrollment.status, 200);
+  const body = await enrollment.json();
+  assert.ok(body.setupUrl.startsWith(`${endpoint}/connect#`));
+  assert.ok(new Date(body.expiresAt).getTime() > Date.now());
+
+  assert.equal(await revokeReviewerAccess(reviewersDir, "chat-1"), 1);
+  await new Promise((resolve) => setTimeout(resolve, 5100));
+  const revoked = await fetch(`${endpoint}/v1/reviewer-enrollment`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ token })
+  });
+  assert.equal(revoked.status, 400);
 });

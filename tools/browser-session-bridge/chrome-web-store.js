@@ -43,7 +43,12 @@ async function validateZip(filePath) {
 async function authenticatedContext(stateDir, resourceId, browser) {
   if (resourceId !== "chrome.google.com") throw new Error("The chrome.google.com browser session is required");
   const sessionPath = path.join(stateDir, "sessions", `${resourceId}.json`);
-  const session = JSON.parse(await readFile(sessionPath, "utf8"));
+  let session;
+  try {
+    session = JSON.parse(await readFile(sessionPath, "utf8"));
+  } catch (error) {
+    throw new Error(`Stored Chrome Web Store session is invalid: ${error.message || String(error)}`);
+  }
   if (!Array.isArray(session.cookies) || !session.cookies.length) throw new Error("Stored Chrome Web Store session has no cookies");
   const context = await browser.newContext();
   await context.addCookies(session.cookies.map(toPlaywrightCookie));
@@ -57,10 +62,27 @@ async function selectPackage(page, zipPath) {
     await input.first().setInputFiles(zipPath);
     return;
   }
-  const chooserPromise = page.waitForEvent("filechooser", { timeout: 5000 });
-  const browse = page.getByText(/browse files|choose file|select file/i).first();
+  const browse = await firstVisible([
+    page.getByText(/upload new package|browse files|choose file|select file/i),
+    page.getByRole("button", { name: /upload new package|browse files|choose file|select file/i })
+  ]);
+  if (!browse) throw new Error("Chrome Web Store package upload control was not found");
   await browse.click();
-  const chooser = await chooserPromise;
+  await page.waitForTimeout(500);
+  const revealedInput = page.locator('input[type="file"]');
+  if (await revealedInput.count()) {
+    await revealedInput.last().setInputFiles(zipPath);
+    return;
+  }
+  const revealedBrowse = await firstVisible([
+    page.getByText(/browse files|choose file|select file/i),
+    page.getByRole("button", { name: /browse files|choose file|select file/i })
+  ]);
+  if (!revealedBrowse) throw new Error("Chrome Web Store package file control was not found");
+  const [chooser] = await Promise.all([
+    page.waitForEvent("filechooser", { timeout: 10000 }),
+    revealedBrowse.click()
+  ]);
   await chooser.setFiles(zipPath);
 }
 
@@ -291,6 +313,92 @@ export async function inspectChromeWebStoreDraft({ stateDir, resourceId = "chrom
     })));
     const links = await page.locator("a").evaluateAll((elements) => elements.map((element) => ({ text: element.textContent?.trim().replace(/\s+/g, " ").slice(0, 120), href: element.href })).filter((item) => /Access|Test instructions|Privacy|Distribution|Store listing|Settings/i.test(item.text || "")));
     return { url: page.url(), title: await page.title(), controls, links };
+  } finally {
+    await browser.close();
+  }
+}
+
+export async function fillChromeWebStoreTestInstructions({ stateDir, resourceId = "chrome.google.com", testInstructionsUrl, instructions }) {
+  const url = validateDashboardUrl(testInstructionsUrl);
+  const text = String(instructions || "").trim();
+  if (!text || text.length > 500) throw new Error("Chrome Web Store test instructions must be 1 to 500 characters");
+  const browser = await chromium.launch({ headless: true });
+  try {
+    const context = await authenticatedContext(stateDir, resourceId, browser);
+    const page = await context.newPage();
+    await page.goto(url.href, { waitUntil: "domcontentloaded", timeout: 60000 });
+    await page.waitForTimeout(2500);
+    if (page.url().includes("accounts.google.com")) throw new Error("Chrome Web Store session is not authenticated");
+    const textarea = page.locator("textarea").last();
+    await textarea.fill(text);
+    await page.getByText("Save changes", { exact: true }).click();
+    await page.waitForTimeout(2000);
+    if ((await textarea.inputValue()) !== text) throw new Error("Chrome Web Store did not retain the test instructions");
+    return { saved: true, submittedForReview: false, instructionLength: text.length, url: page.url() };
+  } finally {
+    await browser.close();
+  }
+}
+
+export async function replaceChromeWebStorePackage({ stateDir, resourceId = "chrome.google.com", packageUrl, zipPath }) {
+  const url = validateDashboardUrl(packageUrl);
+  await validateZip(zipPath);
+  const browser = await chromium.launch({ headless: true });
+  try {
+    const context = await authenticatedContext(stateDir, resourceId, browser);
+    const page = await context.newPage();
+    await page.goto(url.href, { waitUntil: "domcontentloaded", timeout: 60000 });
+    await page.waitForTimeout(2500);
+    if (page.url().includes("accounts.google.com")) throw new Error("Chrome Web Store session is not authenticated");
+    const before = await page.locator("body").innerText();
+    if (!/Status:\s*Draft/i.test(before)) throw new Error("Chrome Web Store item must be a draft before replacing its package");
+    await selectPackage(page, zipPath);
+    await page.waitForTimeout(6000);
+    const body = await page.locator("body").innerText();
+    if (/error|failed|invalid package/i.test(body)) throw new Error(body.match(/(?:error|failed|invalid package)[^\n]{0,300}/i)?.[0] || "Chrome Web Store package replacement failed");
+    return { uploaded: true, submittedForReview: false, url: page.url(), visibleText: body.slice(0, 8000) };
+  } finally {
+    await browser.close();
+  }
+}
+
+export async function withdrawChromeWebStoreReview({ stateDir, resourceId = "chrome.google.com", itemUrl }) {
+  const url = validateDashboardUrl(itemUrl);
+  const browser = await chromium.launch({ headless: true });
+  try {
+    const context = await authenticatedContext(stateDir, resourceId, browser);
+    const page = await context.newPage();
+    await page.goto(url.href, { waitUntil: "domcontentloaded", timeout: 60000 });
+    await page.waitForTimeout(2500);
+    if (page.url().includes("accounts.google.com")) throw new Error("Chrome Web Store session is not authenticated");
+    const initialText = await page.locator("body").innerText();
+    if (!/Status:\s*Pending review/i.test(initialText)) {
+      if (/Status:\s*Draft/i.test(initialText)) return { withdrawn: false, alreadyDraft: true, status: "Draft", url: page.url() };
+      throw new Error("Chrome Web Store item is not pending review");
+    }
+    await page.getByLabel("View more menu options", { exact: true }).click();
+    const withdraw = await firstVisible([
+      page.getByRole("menuitem", { name: /cancel submission|withdraw from review|cancel review/i }),
+      page.getByText(/cancel submission|withdraw from review|cancel review/i)
+    ]);
+    if (!withdraw) throw new Error("Chrome Web Store review withdrawal control was not found");
+    await withdraw.click();
+    await page.waitForTimeout(500);
+    const dialog = page.getByRole("dialog").last();
+    if (await dialog.isVisible().catch(() => false)) {
+      const confirm = await firstVisible([
+        dialog.getByRole("button", { name: /withdraw|cancel submission|cancel review|confirm/i }),
+        dialog.getByText(/withdraw|cancel submission|cancel review|confirm/i)
+      ]);
+      if (!confirm) throw new Error(`Chrome Web Store review withdrawal confirmation was not found: ${(await dialog.innerText()).trim().slice(0, 500)}`);
+      await confirm.click();
+    }
+    await page.waitForTimeout(2500);
+    await page.reload({ waitUntil: "domcontentloaded", timeout: 60000 });
+    await page.waitForTimeout(1500);
+    const body = await page.locator("body").innerText();
+    if (!/Status:\s*Draft/i.test(body)) throw Object.assign(new Error("Chrome Web Store review withdrawal result is uncertain"), { uncertain: true });
+    return { withdrawn: true, alreadyDraft: false, status: "Draft", url: page.url() };
   } finally {
     await browser.close();
   }

@@ -4,8 +4,8 @@ import { mkdir, readFile, readdir, rm, stat } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import defaults from "./config.js";
-import { createDevice, createPairing, listDevices, probeBridge, revokeDevice, startBridgeServer } from "./bridge-server.js";
-import { createChromeWebStoreAssets, fillChromeWebStoreDistribution, fillChromeWebStoreListing, fillChromeWebStorePrivacy, fillChromeWebStorePublisherContact, inspectChromeWebStoreDraft, uploadChromeWebStoreDraft } from "./chrome-web-store.js";
+import { createDevice, createPairing, createReviewerAccess, listDevices, probeBridge, revokeDevice, revokeReviewerAccess, startBridgeServer } from "./bridge-server.js";
+import { createChromeWebStoreAssets, fillChromeWebStoreDistribution, fillChromeWebStoreListing, fillChromeWebStorePrivacy, fillChromeWebStorePublisherContact, fillChromeWebStoreTestInstructions, inspectChromeWebStoreDraft, replaceChromeWebStorePackage, uploadChromeWebStoreDraft, withdrawChromeWebStoreReview } from "./chrome-web-store.js";
 import { openWithSession } from "./session-browser.js";
 
 const toolName = "browser-session-bridge";
@@ -45,6 +45,8 @@ Actions via args.action:
   device-pair    Create a short-lived setup link for a persistent, revocable browser profile. args: label?, ttlSeconds?.
   devices        List paired browser profiles without exposing secrets.
   revoke-device  Revoke one browser profile. args: deviceId.
+  reviewer-setup Create one durable, revocable Chrome Web Store reviewer setup URL.
+  reviewer-revoke Revoke the Chrome Web Store reviewer setup URL.
   pair           Create a legacy encrypted one-time pairing code.
   list           List stored browser sessions without exposing cookie values.
   open                     Open one same-site URL with a stored session. args: resourceId, url, maxChars?.
@@ -54,6 +56,9 @@ Actions via args.action:
   chrome-web-store-fill-distribution Save free, public, all-region distribution without submitting. args: distributionUrl.
   chrome-web-store-publisher-contact Add the publisher contact email and start verification. args: settingsUrl, contactEmail.
   chrome-web-store-upload       Upload an extension ZIP as a new draft without submitting it. ZIP artifact required; args: dashboardUrl.
+  chrome-web-store-replace-package Replace a draft item's ZIP package. ZIP artifact required; args: packageUrl.
+  chrome-web-store-test-instructions Save durable reviewer instructions without submitting. args: testInstructionsUrl, instructions.
+  chrome-web-store-withdraw     Withdraw one pending review back to Draft. args: itemUrl.
   delete                   Delete one session. args: resourceId.
 
 The extension shares only cookies applicable to the active tab. Setup links expire and are consumed after one successful activation.
@@ -107,8 +112,8 @@ function normalizedEndpoint(value) {
   if (!["http:", "https:"].includes(endpoint.protocol) || endpoint.username || endpoint.password || endpoint.search || endpoint.hash) {
     throw new Error("PUBLIC_BASE_URL must be a plain HTTP(S) origin");
   }
-  if (endpoint.pathname !== "/") throw new Error("PUBLIC_BASE_URL paths are not supported");
-  return endpoint.origin;
+  const pathname = endpoint.pathname.replace(/\/+$/, "");
+  return `${endpoint.origin}${pathname === "/" ? "" : pathname}`;
 }
 
 async function buildExtension(chatId) {
@@ -165,6 +170,16 @@ async function handleRequest(request) {
   if (action === "revoke-device") {
     const deviceId = await revokeDevice(path.join(daemon.paths.root, "devices"), chatId, request.args?.deviceId);
     return toolOk({ text: `Revoked browser profile ${deviceId}`, json: { revoked: deviceId }, mimeType: "application/json" });
+  }
+  if (action === "reviewer-revoke") {
+    const revoked = await revokeReviewerAccess(path.join(daemon.paths.root, "reviewers"), chatId);
+    return toolOk({ text: "Revoked Chrome Web Store reviewer access", json: { revoked }, mimeType: "application/json" });
+  }
+  if (action === "reviewer-setup") {
+    const config = await loadToolConfig(toolName, defaults, chatId);
+    const endpoint = normalizedEndpoint(request.args?.publicBaseUrl || config.PUBLIC_BASE_URL);
+    const output = await daemon.submit({ action, chatId, endpoint, label: "Chrome Web Store reviewer" }, { timeoutMs: 15000, readyTimeoutMs: 15000 });
+    return toolOk({ text: "Chrome Web Store reviewer setup is ready", json: output, mimeType: "application/json" });
   }
   if (action === "list") return toolOk({ text: "Stored browser sessions", json: { sessions: await listSessions(chatId) }, mimeType: "application/json" });
   if (action === "open") {
@@ -232,6 +247,30 @@ async function handleRequest(request) {
     });
     return toolOk({ text: "Chrome Web Store draft controls inspected", json: inspected, mimeType: "application/json" });
   }
+  if (action === "chrome-web-store-test-instructions") {
+    const saved = await fillChromeWebStoreTestInstructions({
+      stateDir: getChatToolStateDir(chatId, toolName),
+      testInstructionsUrl: request.args?.testInstructionsUrl,
+      instructions: request.args?.instructions
+    });
+    return toolOk({ text: "Chrome Web Store reviewer instructions saved. The extension was not submitted for review.", json: saved, mimeType: "application/json" });
+  }
+  if (action === "chrome-web-store-replace-package") {
+    if (!request.artifact?.path) throw new Error("A ZIP artifact is required");
+    const replaced = await replaceChromeWebStorePackage({
+      stateDir: getChatToolStateDir(chatId, toolName),
+      packageUrl: request.args?.packageUrl,
+      zipPath: request.artifact.path
+    });
+    return toolOk({ text: "Chrome Web Store draft package replaced. The extension was not submitted for review.", json: replaced, mimeType: "application/json" });
+  }
+  if (action === "chrome-web-store-withdraw") {
+    const withdrawn = await withdrawChromeWebStoreReview({
+      stateDir: getChatToolStateDir(chatId, toolName),
+      itemUrl: request.args?.itemUrl
+    });
+    return toolOk({ text: withdrawn.withdrawn ? "Chrome Web Store review withdrawn. The item is now a draft." : "Chrome Web Store item was already a draft.", json: withdrawn, mimeType: "application/json" });
+  }
   if (action === "chrome-web-store-upload") {
     if (!request.artifact?.path) throw new Error("A ZIP artifact is required");
     const uploaded = await uploadChromeWebStoreDraft({
@@ -289,12 +328,14 @@ async function runDaemon() {
   const pairingsDir = path.join(daemon.paths.root, "pairings");
   const enrollmentsDir = path.join(daemon.paths.root, "device-enrollments");
   const devicesDir = path.join(daemon.paths.root, "devices");
+  const reviewersDir = path.join(daemon.paths.root, "reviewers");
   const server = await startBridgeServer({
     host: config.LISTEN_HOST || "0.0.0.0",
     port,
     pairingsDir,
     enrollmentsDir,
     devicesDir,
+    reviewersDir,
     maxBodyBytes: positiveInteger(config.MAX_BODY_BYTES, 1048576, 16384, 4194304),
     maxCookies: positiveInteger(config.MAX_COOKIES, 500, 1, 2000),
     stateDirForChat: (chatId) => getChatToolStateDir(String(chatId), toolName),
@@ -307,6 +348,7 @@ async function runDaemon() {
     processJob: async (job) => {
       if (job.action === "pair") return createPairing({ pairingsDir, chatId: job.chatId, endpoint: job.endpoint, ttlSeconds: job.ttlSeconds });
       if (job.action === "device-pair") return createDevice({ enrollmentsDir, chatId: job.chatId, endpoint: job.endpoint, label: job.label, ttlSeconds: job.ttlSeconds });
+      if (job.action === "reviewer-setup") return createReviewerAccess({ reviewersDir, chatId: job.chatId, endpoint: job.endpoint, label: job.label });
       throw new Error("Unsupported daemon action");
     },
     healthCheck: () => probeBridge(port),

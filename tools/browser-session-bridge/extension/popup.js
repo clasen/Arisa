@@ -34,10 +34,11 @@ function decodedCode(raw, prefix) {
 
 function validatedEndpoint(value) {
   const endpoint = new URL(value);
-  if (!["http:", "https:"].includes(endpoint.protocol) || endpoint.username || endpoint.password || endpoint.pathname !== "/" || endpoint.search || endpoint.hash) {
+  if (!["http:", "https:"].includes(endpoint.protocol) || endpoint.username || endpoint.password || endpoint.search || endpoint.hash || endpoint.pathname.includes("..")) {
     throw new Error("Invalid bridge endpoint");
   }
-  return endpoint.origin;
+  const pathname = endpoint.pathname.replace(/\/+$/, "");
+  return `${endpoint.origin}${pathname === "/" ? "" : pathname}`;
 }
 
 function parseSetupCode(raw) {
@@ -63,11 +64,13 @@ async function activeWebTab() {
 }
 
 function setupCodeFromUrl(url) {
-  if (url.pathname !== "/connect" || !url.hash) return "";
+  if (!url.hash) return "";
   const code = decodeURIComponent(url.hash.slice(1));
   if (!code.startsWith("arisa-enroll://")) return "";
   const enrollment = parseSetupCode(code);
-  if (new URL(enrollment.endpoint).origin !== url.origin) throw new Error("Setup link and bridge endpoint do not match");
+  const endpoint = new URL(enrollment.endpoint);
+  const connectPath = `${endpoint.pathname.replace(/\/+$/, "")}/connect`;
+  if (endpoint.origin !== url.origin || url.pathname !== connectPath) throw new Error("Setup link and bridge endpoint do not match");
   return code;
 }
 

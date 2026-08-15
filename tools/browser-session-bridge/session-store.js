@@ -158,7 +158,13 @@ export async function persistSession(stateDir, session) {
   const sessionsDir = path.join(stateDir, "sessions");
   await mkdir(sessionsDir, { recursive: true, mode: 0o700 });
   const file = path.join(sessionsDir, `${session.resourceId}.json`);
-  await writeFile(file, `${JSON.stringify(session, null, 2)}\n`, { mode: 0o600 });
-  await chmod(file, 0o600);
-  return file;
+  const temporary = `${file}.${crypto.randomUUID()}.tmp`;
+  try {
+    await writeFile(temporary, `${JSON.stringify(session, null, 2)}\n`, { mode: 0o600 });
+    await chmod(temporary, 0o600);
+    await rename(temporary, file);
+    return file;
+  } finally {
+    await rm(temporary, { force: true });
+  }
 }

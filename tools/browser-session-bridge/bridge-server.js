@@ -32,6 +32,15 @@ function connectPage(response) {
   response.end(encoded);
 }
 
+function reviewerPage(response) {
+  const encoded = Buffer.from(`<!doctype html><html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="referrer" content="no-referrer"><title>Arisa reviewer setup</title><style>:root{color-scheme:dark}body{max-width:560px;margin:12vh auto;padding:24px;background:#1f2130;color:#f8f8f2;font:15px/1.6 ui-monospace,monospace}main{border:1px solid #44475a;border-radius:7px;padding:28px;background:#282a36}h1{color:#ffb86c}p{color:#a6add5}.ok{color:#50fa7b}.error{color:#ff5555}</style></head><body><main><h1>arisa.session reviewer</h1><p id="status">creating a temporary, single-use reviewer setup…</p></main><script>(async()=>{const status=document.querySelector('#status');try{const token=decodeURIComponent(location.hash.slice(1));if(!token)throw new Error('reviewer credential is missing');history.replaceState(null,'',location.pathname);const base=location.pathname.replace(/\/reviewer\/?$/,'');const response=await fetch(base+'/v1/reviewer-enrollment',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({token})});const result=await response.json();if(!response.ok)throw new Error(result.error||'setup failed');status.textContent='setup ready, redirecting…';status.className='ok';location.replace(result.setupUrl)}catch(error){status.textContent=error.message||String(error);status.className='error'}})()</script></body></html>`, "utf8");
+  response.writeHead(200, {
+    ...commonHeaders("text/html; charset=UTF-8", encoded.length),
+    "Content-Security-Policy": "default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; connect-src 'self'; base-uri 'none'; frame-ancestors 'none'"
+  });
+  response.end(encoded);
+}
+
 async function readJsonBody(request, maxBytes) {
   const chunks = [];
   let size = 0;
@@ -106,6 +115,56 @@ export async function createDevice({ enrollmentsDir, chatId, endpoint, label, tt
     code,
     setupUrl: `${endpoint}/connect#${encodeURIComponent(code)}`
   };
+}
+
+function reviewerCredentialId(token) {
+  if (!/^[a-zA-Z0-9_-]{32,100}$/.test(String(token || ""))) throw new Error("Invalid reviewer credential");
+  return crypto.createHash("sha256").update(token).digest("hex");
+}
+
+export async function createReviewerAccess({ reviewersDir, chatId, endpoint, label = "Chrome Web Store reviewer" }) {
+  await mkdir(reviewersDir, { recursive: true, mode: 0o700 });
+  const files = await readdir(reviewersDir).catch(() => []);
+  await Promise.all(files.filter((file) => file.endsWith(".json")).map(async (file) => {
+    const target = path.join(reviewersDir, file);
+    try {
+      const record = JSON.parse(await readFile(target, "utf8"));
+      if (String(record.chatId) === String(chatId)) await rm(target, { force: true });
+    } catch {}
+  }));
+  const token = crypto.randomBytes(32).toString("base64url");
+  const id = reviewerCredentialId(token);
+  const record = { version: 1, chatId: String(chatId), endpoint, label: String(label).slice(0, 80), createdAt: new Date().toISOString() };
+  await writeFile(credentialFile(reviewersDir, id), `${JSON.stringify(record)}\n`, { mode: 0o600 });
+  return { reviewerUrl: `${endpoint}/reviewer#${token}`, createdAt: record.createdAt, label: record.label };
+}
+
+export async function revokeReviewerAccess(reviewersDir, chatId) {
+  const files = await readdir(reviewersDir).catch(() => []);
+  let revoked = 0;
+  for (const file of files.filter((name) => name.endsWith(".json"))) {
+    const target = path.join(reviewersDir, file);
+    try {
+      const record = JSON.parse(await readFile(target, "utf8"));
+      if (String(record.chatId) !== String(chatId)) continue;
+      await rm(target, { force: true });
+      revoked += 1;
+    } catch {}
+  }
+  return revoked;
+}
+
+async function reviewerEnrollment({ reviewersDir, enrollmentsDir, token }) {
+  const id = reviewerCredentialId(token);
+  const record = JSON.parse(await readFile(credentialFile(reviewersDir, id), "utf8"));
+  if (!record.chatId || !record.endpoint) throw new Error("Invalid reviewer credential");
+  return createDevice({
+    enrollmentsDir,
+    chatId: record.chatId,
+    endpoint: record.endpoint,
+    label: record.label,
+    ttlSeconds: 600
+  });
 }
 
 async function consumeDeviceEnrollment(enrollmentsDir, token) {
@@ -187,16 +246,26 @@ async function recordDeviceUse(file, record) {
   await chmod(file, 0o600);
 }
 
-export function startBridgeServer({ host, port, pairingsDir, enrollmentsDir, devicesDir, maxBodyBytes, maxCookies, stateDirForChat, onDeviceActivated, onSessionImported }) {
+export function startBridgeServer({ host, port, pairingsDir, enrollmentsDir, devicesDir, reviewersDir, maxBodyBytes, maxCookies, stateDirForChat, onDeviceActivated, onSessionImported }) {
   const recentDeviceUses = new Map();
+  const recentReviewerUses = new Map();
   const server = http.createServer(async (request, response) => {
     if (request.method === "OPTIONS") return jsonResponse(response, 204, {});
     if (request.method === "GET" && request.url === "/health") return jsonResponse(response, 200, { ok: true });
     if (request.method === "GET" && request.url === "/connect") return connectPage(response);
-    if (request.method !== "POST" || !["/v1/activate-device", "/v1/import", "/v1/import-device", "/v1/revoke-device"].includes(request.url)) return jsonResponse(response, 404, { ok: false, error: "Not found" });
+    if (request.method === "GET" && request.url === "/reviewer") return reviewerPage(response);
+    if (request.method !== "POST" || !["/v1/activate-device", "/v1/import", "/v1/import-device", "/v1/revoke-device", "/v1/reviewer-enrollment"].includes(request.url)) return jsonResponse(response, 404, { ok: false, error: "Not found" });
 
     try {
       const envelope = await readJsonBody(request, maxBodyBytes);
+      if (request.url === "/v1/reviewer-enrollment") {
+        const reviewerId = reviewerCredentialId(envelope.token);
+        const lastUsed = recentReviewerUses.get(reviewerId) || 0;
+        if (Date.now() - lastUsed < 5000) throw Object.assign(new Error("Please wait before creating another reviewer setup"), { statusCode: 429 });
+        const enrollment = await reviewerEnrollment({ reviewersDir, enrollmentsDir, token: envelope.token });
+        recentReviewerUses.set(reviewerId, Date.now());
+        return jsonResponse(response, 200, { ok: true, setupUrl: enrollment.setupUrl, expiresAt: enrollment.expiresAt });
+      }
       if (request.url === "/v1/activate-device") {
         const activated = await activateDevice({ enrollmentsDir, devicesDir, envelope });
         await onDeviceActivated?.(activated.event).catch(() => {});

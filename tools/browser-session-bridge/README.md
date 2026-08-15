@@ -15,7 +15,7 @@ The intended release path is the Chrome Web Store, which also works in Brave and
 3. Open the extension and choose **Connect this profile**.
 4. Approve access to the bridge endpoint once.
 
-The setup link expires, is consumed after one activation, and keeps its temporary activation credential in the URL fragment so it is not sent in HTTP requests or referrers. The permanent profile credential is returned inside an AES-256-GCM encrypted response and is never present in the setup URL.
+The setup link expires, is consumed after one activation, and keeps its temporary activation credential in the URL fragment so it is not sent in HTTP requests or referrers. The permanent profile credential is returned inside an AES-256-GCM encrypted response and is never present in the setup URL. Bridge endpoints may use a scoped HTTPS base path, such as `https://example.com/session-bridge`, when deployed behind a reverse proxy.
 
 ## Development fallback
 
@@ -39,6 +39,10 @@ The extension uses `activeTab` for the selected site rather than permanent acces
 After an authenticated browser action, the bridge stores refreshed cookie values only when they still apply to the originally shared site. It never expands the session to sibling hosts or unrelated domains. This can extend a session but cannot override provider-controlled expiry or reauthentication.
 
 Sharing grants Arisa the same access as the selected browser session. Log out, use **Forget**, or ask Arisa to delete the stored session and revoke the browser profile. The bridge does not bypass login, CAPTCHA, verification, approval, or anti-bot controls.
+
+## Chrome Web Store reviewer access
+
+The `reviewer-setup` action creates one durable, revocable reviewer URL for confidential Chrome Web Store test instructions. Its credential remains in the URL fragment. Opening it mints a normal 10-minute, single-use enrollment and redirects to the regular connection page. Creating a new reviewer URL replaces the previous one; `reviewer-revoke` invalidates it without affecting paired user profiles.
 
 ## Daemon availability
 
