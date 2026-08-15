@@ -197,6 +197,42 @@ export async function fillChromeWebStorePrivacy({ stateDir, resourceId = "chrome
   }
 }
 
+export async function fillChromeWebStorePublisherContact({ stateDir, resourceId = "chrome.google.com", settingsUrl, contactEmail }) {
+  const url = validateDashboardUrl(settingsUrl);
+  const email = String(contactEmail || "").trim().toLowerCase();
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) throw new Error("A valid publisher contact email is required");
+  const browser = await chromium.launch({ headless: true });
+  try {
+    const context = await authenticatedContext(stateDir, resourceId, browser);
+    const page = await context.newPage();
+    await page.goto(url.href, { waitUntil: "domcontentloaded", timeout: 60000 });
+    await page.waitForTimeout(2500);
+    if (page.url().includes("accounts.google.com")) throw new Error("Chrome Web Store session is not authenticated");
+    await page.getByText("Add email", { exact: true }).click();
+    const dialog = page.getByRole("dialog").last();
+    await dialog.waitFor({ state: "visible", timeout: 10000 });
+    const emailInput = dialog.locator('input[type="email"], input[type="text"]').first();
+    await emailInput.fill(email);
+    const submit = dialog.getByRole("button", { name: /add email|send verification|verify|save/i }).last();
+    if (!(await submit.count())) throw new Error("Chrome Web Store contact-email confirmation control was not found");
+    await submit.click();
+    await page.waitForTimeout(2500);
+    const body = (await page.locator("body").innerText()).trim();
+    const verificationStarted = /verify|verification/i.test(body) && body.toLowerCase().includes(email);
+    if (!body.toLowerCase().includes(email)) throw new Error("Chrome Web Store did not retain the publisher contact email");
+    return {
+      saved: true,
+      submittedForReview: false,
+      contactEmail: email,
+      verificationStarted,
+      url: page.url(),
+      visibleText: body.slice(0, 8000)
+    };
+  } finally {
+    await browser.close();
+  }
+}
+
 export async function fillChromeWebStoreDistribution({ stateDir, resourceId = "chrome.google.com", distributionUrl }) {
   const url = validateDashboardUrl(distributionUrl);
   const browser = await chromium.launch({ headless: true });
@@ -251,7 +287,7 @@ export async function inspectChromeWebStoreDraft({ stateDir, resourceId = "chrom
       value: element.getAttribute("data-value"),
       text: element.textContent?.trim().slice(0, 120) || null
     })));
-    const links = await page.locator("a").evaluateAll((elements) => elements.map((element) => ({ text: element.textContent?.trim().replace(/\s+/g, " ").slice(0, 120), href: element.href })).filter((item) => /Access|Test instructions|Privacy|Distribution|Store listing/i.test(item.text || "")));
+    const links = await page.locator("a").evaluateAll((elements) => elements.map((element) => ({ text: element.textContent?.trim().replace(/\s+/g, " ").slice(0, 120), href: element.href })).filter((item) => /Access|Test instructions|Privacy|Distribution|Store listing|Settings/i.test(item.text || "")));
     return { url: page.url(), title: await page.title(), controls, links };
   } finally {
     await browser.close();

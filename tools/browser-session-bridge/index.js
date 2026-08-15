@@ -5,7 +5,7 @@ import os from "node:os";
 import path from "node:path";
 import defaults from "./config.js";
 import { createDevice, createPairing, listDevices, probeBridge, revokeDevice, startBridgeServer } from "./bridge-server.js";
-import { createChromeWebStoreAssets, fillChromeWebStoreDistribution, fillChromeWebStoreListing, fillChromeWebStorePrivacy, inspectChromeWebStoreDraft, uploadChromeWebStoreDraft } from "./chrome-web-store.js";
+import { createChromeWebStoreAssets, fillChromeWebStoreDistribution, fillChromeWebStoreListing, fillChromeWebStorePrivacy, fillChromeWebStorePublisherContact, inspectChromeWebStoreDraft, uploadChromeWebStoreDraft } from "./chrome-web-store.js";
 import { openWithSession } from "./session-browser.js";
 
 const toolName = "browser-session-bridge";
@@ -52,6 +52,7 @@ Actions via args.action:
   chrome-web-store-fill-listing Complete and save the listing fields without submitting. args: draftUrl, description, category, language, homepageUrl, supportUrl.
   chrome-web-store-fill-privacy Complete and save accurate privacy disclosures without submitting. args: privacyUrl, privacyPolicyUrl.
   chrome-web-store-fill-distribution Save free, public, all-region distribution without submitting. args: distributionUrl.
+  chrome-web-store-publisher-contact Add the publisher contact email and start verification. args: settingsUrl, contactEmail.
   chrome-web-store-upload       Upload an extension ZIP as a new draft without submitting it. ZIP artifact required; args: dashboardUrl.
   delete                   Delete one session. args: resourceId.
 
@@ -172,6 +173,14 @@ async function handleRequest(request) {
       maxChars: positiveInteger(request.args?.maxChars, 30000, 1000, 100000)
     });
     return toolOk({ text: `Page: ${opened.url}\nTitle: ${opened.title}\n\n${opened.text}`, json: opened, mimeType: "application/json" });
+  }
+  if (action === "chrome-web-store-publisher-contact") {
+    const publisher = await fillChromeWebStorePublisherContact({
+      stateDir: getChatToolStateDir(chatId, toolName),
+      settingsUrl: request.args?.settingsUrl,
+      contactEmail: request.args?.contactEmail
+    });
+    return toolOk({ text: "Chrome Web Store publisher contact email saved and verification started. The extension was not submitted for review.", json: publisher, mimeType: "application/json" });
   }
   if (action === "chrome-web-store-fill-distribution") {
     const distribution = await fillChromeWebStoreDistribution({
