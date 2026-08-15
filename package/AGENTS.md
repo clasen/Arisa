@@ -130,6 +130,7 @@ When such a tool is built, implement it with the shared daemon runtime instead o
 - expose normal CLI behavior through `run --request-file`; callers should not manage daemon internals
 - use the runtime for `daemon.pid`, `daemon.log`, `status.json`, and `commands/*.request|processing|result.json`
 - keep one daemon owner per tool/session and avoid opening a second client over the same resource
+- daemons that receive unsolicited external traffic (webhooks, bridge imports, persistent sockets, or active watchers) must use `daemon.autoStart: true` and disable idle shutdown while ingress is expected; idle shutdown is only for capabilities that can be restarted by the request initiating their next use
 - use `beforeStart` only for tool-specific cleanup such as stale browser locks, without deleting persistent session/model data
 - keep daemon tools headless/server-safe by default when they are meant to run on VPS machines
 - if the daemon exposes an HTTP server, keep that server inside the tool; Arisa core does not discover or mount tool routes

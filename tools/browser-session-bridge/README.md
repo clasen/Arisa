@@ -35,3 +35,7 @@ The setup link expires, is consumed after one activation, and keeps its temporar
 The extension uses `activeTab` for the selected site rather than permanent access to every site. When the user sends a session, it requests host access for that active site only while reading its applicable cookies, then removes access. Persistent host permission is retained only for the configured bridge endpoint. Session payloads use AES-256-GCM, remain chat-scoped, and never expose cookie values in tool output.
 
 Sharing grants Arisa the same access as the selected browser session. Log out, use **Forget**, or ask Arisa to delete the stored session and revoke the browser profile. The bridge does not bypass login, CAPTCHA, verification, approval, or anti-bot controls.
+
+## Daemon availability
+
+The bridge receives browser imports without a preceding Arisa tool request, so its managed daemon auto-starts and does not use idle shutdown. Runtime infrastructure stays global while imported sessions remain chat-scoped.
