@@ -7,7 +7,7 @@
     "autoStart": false,
     "health": "internal"
   },
-  "input": ["text/plain", "application/json"],
+  "input": ["text/plain", "application/json", "application/zip"],
   "output": ["application/json", "application/zip"],
   "category": "web",
   "keywords": ["browser", "chrome", "brave", "cookies", "extension", "session", "playwright", "authentication"],

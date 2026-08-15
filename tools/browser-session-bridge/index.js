@@ -5,6 +5,7 @@ import os from "node:os";
 import path from "node:path";
 import defaults from "./config.js";
 import { createDevice, createPairing, listDevices, probeBridge, revokeDevice, startBridgeServer } from "./bridge-server.js";
+import { uploadChromeWebStoreDraft } from "./chrome-web-store.js";
 import { openWithSession } from "./session-browser.js";
 
 const toolName = "browser-session-bridge";
@@ -46,8 +47,9 @@ Actions via args.action:
   revoke-device  Revoke one browser profile. args: deviceId.
   pair           Create a legacy encrypted one-time pairing code.
   list           List stored browser sessions without exposing cookie values.
-  open           Open one same-site URL with a stored session. args: resourceId, url, maxChars?.
-  delete         Delete one session. args: resourceId.
+  open                     Open one same-site URL with a stored session. args: resourceId, url, maxChars?.
+  chrome-web-store-upload  Upload an extension ZIP as a new draft without submitting it. ZIP artifact required; args: dashboardUrl.
+  delete                   Delete one session. args: resourceId.
 
 The extension shares only cookies applicable to the active tab. Setup links expire and are consumed after one successful activation.
 `);
@@ -161,6 +163,19 @@ async function handleRequest(request) {
       maxChars: positiveInteger(request.args?.maxChars, 30000, 1000, 100000)
     });
     return toolOk({ text: `Page: ${opened.url}\nTitle: ${opened.title}\n\n${opened.text}`, json: opened, mimeType: "application/json" });
+  }
+  if (action === "chrome-web-store-upload") {
+    if (!request.artifact?.path) throw new Error("A ZIP artifact is required");
+    const uploaded = await uploadChromeWebStoreDraft({
+      stateDir: getChatToolStateDir(chatId, toolName),
+      dashboardUrl: request.args?.dashboardUrl,
+      zipPath: request.artifact.path
+    });
+    return toolOk({
+      text: `Chrome Web Store draft uploaded${uploaded.itemId ? `: ${uploaded.itemId}` : ""}. It was not submitted for review.`,
+      json: uploaded,
+      mimeType: "application/json"
+    });
   }
   if (action === "delete") {
     const resourceId = await deleteSession(chatId, request.args?.resourceId);
