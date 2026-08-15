@@ -91,26 +91,39 @@ function daemonState(result) {
   return result.diagnostic?.state || result.outcome;
 }
 
-function daemonResultSummary(results) {
-  const states = new Map();
-  for (const result of results) {
-    const state = daemonState(result);
-    states.set(state, (states.get(state) || 0) + 1);
-  }
-  return [...states.entries()]
-    .sort(([left], [right]) => left.localeCompare(right))
-    .map(([state, count]) => `${count} ${state}`)
-    .join(", ");
+function daemonStateLabel(state) {
+  return String(state || "unknown")
+    .split("-")
+    .map((part) => part ? `${part[0].toUpperCase()}${part.slice(1)}` : part)
+    .join(" ");
 }
 
 function daemonReportLines(results) {
-  return [...results]
-    .sort((left, right) => daemonLabel(left.record).localeCompare(daemonLabel(right.record)))
-    .flatMap((result) => {
+  const priority = ["ready", "starting", "degraded", "unhealthy", "restarting", "stopped", "failed"];
+  const groups = new Map();
+  for (const result of results) {
+    const state = daemonState(result);
+    if (!groups.has(state)) groups.set(state, []);
+    groups.get(state).push(result);
+  }
+  const states = [...groups.keys()].sort((left, right) => {
+    const leftIndex = priority.indexOf(left);
+    const rightIndex = priority.indexOf(right);
+    if (leftIndex === -1 && rightIndex === -1) return left.localeCompare(right);
+    if (leftIndex === -1) return 1;
+    if (rightIndex === -1) return -1;
+    return leftIndex - rightIndex;
+  });
+  const lines = [];
+  for (const state of states) {
+    const group = groups.get(state);
+    lines.push(`  ${daemonStateLabel(state)} (${group.length})`);
+    for (const result of group.sort((left, right) => daemonLabel(left.record).localeCompare(daemonLabel(right.record)))) {
       const scope = result.record.scope?.type || (result.record.instanceId === "global" ? "global" : "chat");
-      const text = `${result.record.toolName} [${scope}]: ${daemonState(result)}`;
-      return wrapReportText(text, { firstPrefix: "  - ", nextPrefix: "    " });
-    });
+      lines.push(...wrapReportText(`${result.record.toolName} [${scope}]`, { firstPrefix: "  - ", nextPrefix: "    " }));
+    }
+  }
+  return lines;
 }
 
 function formatTokenCount(tokens) {
@@ -235,12 +248,8 @@ export function formatDoctorReport(report) {
   lines.push(...reportRow("Large", large));
   lines.push(...reportRow("Ineff.", inefficient));
   if (measured.length) lines.push(...reportRow("Max", `${Math.max(...measured.map((context) => context.percent)).toFixed(1)}%`));
-  lines.push("", "Daemons");
-  lines.push(...reportRow("Checked", report.daemons.length));
-  if (report.daemons.length) {
-    lines.push(...reportRow("Status", daemonResultSummary(report.daemons)));
-    lines.push(...daemonReportLines(report.daemons));
-  }
+  lines.push("", `Daemons (${report.daemons.length})`);
+  if (report.daemons.length) lines.push(...daemonReportLines(report.daemons));
   if (report.infrastructure) {
     lines.push("", "Master/Slave");
     if (report.infrastructure.error) {

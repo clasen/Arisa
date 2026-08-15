@@ -104,9 +104,8 @@ test("lists each checked daemon with its scope and state", async () => {
   });
 
   const formatted = formatDoctorReport(report);
-  assert.match(formatted, /Daemons\n  Checked    2/);
-  assert.match(formatted, /- context-vault \[chat\]: stopped/);
-  assert.match(formatted, /- master-slave \[global\]: ready/);
+  assert.match(formatted, /Daemons \(2\)\n  Ready \(1\)\n  - master-slave \[global\]/);
+  assert.match(formatted, /  Stopped \(1\)\n  - context-vault \[chat\]/);
   assert.ok(formatted.split("\n").every((line) => [...line].length <= 35));
 });
 
