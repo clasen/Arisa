@@ -3,6 +3,7 @@ import { mkdtemp, rm } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
+import { ToolRegistry } from "../src/core/tools/tool-registry.js";
 import { ToolUsageStore } from "../src/core/tools/tool-usage-store.js";
 import { formatToolUsageReport } from "../src/runtime/tool-usage-report.js";
 
@@ -24,6 +25,24 @@ test("counts concurrent tool uses per chat", async () => {
   } finally {
     await rm(root, { recursive: true, force: true });
   }
+});
+
+test("reports recorded usage for local tools not present in the startup registry", async () => {
+  const registry = new ToolRegistry({
+    usageStore: {
+      counts: async () => ({ "creator-scout": 4 })
+    }
+  });
+  registry.tools.set("gmail-workspace", {
+    name: "gmail-workspace",
+    input: ["application/json"],
+    output: ["application/json"]
+  });
+
+  assert.deepEqual(await registry.usage("chat-1"), [
+    { name: "creator-scout", count: 4 },
+    { name: "gmail-workspace", count: 0 }
+  ]);
 });
 
 test("formats narrow tool usage counts with bullets and right-aligned numbers", () => {

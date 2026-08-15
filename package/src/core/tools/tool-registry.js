@@ -362,8 +362,12 @@ export class ToolRegistry {
 
   async usage(chatId) {
     const counts = await this.usageStore.counts(chatId);
-    return this.list()
-      .map((tool) => ({ name: tool.name, count: counts[tool.name] || 0 }))
+    const names = new Set([
+      ...this.list().map((tool) => tool.name),
+      ...Object.keys(counts)
+    ]);
+    return [...names]
+      .map((name) => ({ name, count: counts[name] || 0 }))
       .sort((left, right) => left.name.localeCompare(right.name));
   }
 
