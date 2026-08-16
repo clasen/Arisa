@@ -85,15 +85,18 @@ test("installs a verified staged tree without overwriting an existing tool", asy
     await mkdir(path.join(checkoutDir, "tools"), { recursive: true });
     await cp(source, path.join(checkoutDir, "tools", "master-slave"), { recursive: true });
   };
+  const lifecycle = [];
   const result = await installLockedOfficialTool({
     toolName: "master-slave",
     lock: lock(files),
     destination,
     scratchRoot: root,
     checkout,
-    validate: async () => {}
+    installDependencies: async () => { lifecycle.push("dependencies"); },
+    validate: async () => { lifecycle.push("validate"); }
   });
   assert.equal(result.commit, "a".repeat(40));
+  assert.deepEqual(lifecycle, ["dependencies", "validate"]);
   assert.equal(await readFile(path.join(destination, "index.js"), "utf8"), "process.stdout.write('ok');\n");
   await assert.rejects(
     () => installLockedOfficialTool({ toolName: "master-slave", lock: lock(files), destination, scratchRoot: root, checkout }),

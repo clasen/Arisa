@@ -1,5 +1,7 @@
 {
   "name": "x-campaign-runner",
+  "version": "0.1.0",
+  "toolDependencies": { "x-dm": "^0.2.0" },
   "description": "Run profile-driven organic X outreach: discover relevant public candidates with source evidence, exclude prior recipients, score and validate DM availability, personalize one message, and propose or send at most one DM per run through x-dm.",
   "entry": "index.js",
   "input": [

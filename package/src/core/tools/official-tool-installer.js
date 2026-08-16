@@ -140,6 +140,24 @@ async function checkoutRepository({ repository, commit, checkoutDir }) {
   if (resolved !== commit) throw new Error(`Official tool checkout resolved ${resolved}, expected ${commit}`);
 }
 
+async function installPackageDependencies(toolDir) {
+  let packageJson;
+  try {
+    packageJson = JSON.parse(await readFile(path.join(toolDir, "package.json"), "utf8"));
+  } catch (error) {
+    if (error?.code === "ENOENT") return { installed: false };
+    throw error;
+  }
+  const dependencyCount = Object.keys(packageJson.dependencies || {}).length + Object.keys(packageJson.optionalDependencies || {}).length;
+  if (!dependencyCount) return { installed: false };
+  if (await exists(path.join(toolDir, "package-lock.json"))) {
+    await runCommand("npm", ["ci", "--omit=dev"], { cwd: toolDir });
+  } else {
+    await runCommand("npm", ["install", "--omit=dev"], { cwd: toolDir });
+  }
+  return { installed: true, dependencyCount };
+}
+
 async function validateEntrypoint(toolDir, toolName, locked) {
   const manifest = JSON.parse(await readFile(path.join(toolDir, "tool.manifest.json"), "utf8"));
   if (manifest.name !== toolName) {
@@ -165,6 +183,7 @@ export async function installLockedOfficialTool({
   destination,
   scratchRoot = os.tmpdir(),
   checkout = checkoutRepository,
+  installDependencies = installPackageDependencies,
   validate = validateEntrypoint
 }) {
   const locked = validateOfficialToolLock(lock, toolName);
@@ -179,6 +198,7 @@ export async function installLockedOfficialTool({
     const sourceDir = path.join(checkoutDir, "tools", toolName);
     await verifyOfficialToolTree(sourceDir, locked.files);
     await cp(sourceDir, stageDir, { recursive: true, errorOnExist: true, force: false });
+    await installDependencies(stageDir, toolName);
     await validate(stageDir, toolName, locked);
     await mkdir(path.dirname(destination), { recursive: true });
     await rename(stageDir, destination);
@@ -216,8 +236,8 @@ export async function installBundledOfficialTool(toolName, {
     if (name !== toolName) {
       const installedVersion = await resolveInstalledVersion(name);
       if (installedVersion !== undefined) {
-        const requiredRanges = [...entries.values()]
-          .map((entry) => entry.toolDependencies?.[name])
+        const requiredRanges = plan
+          .map((dependentName) => entries.get(dependentName)?.toolDependencies?.[name])
           .filter(Boolean);
         const incompatibleRange = requiredRanges.find((range) => !satisfiesToolVersion(installedVersion, range));
         if (incompatibleRange || (!requiredRanges.length && locked.toolVersion !== installedVersion)) {

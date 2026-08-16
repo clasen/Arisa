@@ -1,5 +1,7 @@
 {
   "name": "official-tool-sync",
+  "version": "1.0.0",
+  "toolDependencies": { "trash": "^1.0.0" },
   "description": "Compare installed Arisa tools with the official catalog, detect local divergence, and safely stage, validate, back up, and apply official updates without overwriting tool configuration.",
   "entry": "index.js",
   "input": [

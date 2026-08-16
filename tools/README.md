@@ -37,8 +37,9 @@ Run profile-driven outreach batches that discover public editorial contacts, fil
 - **Tags:** `campaign` · `contacts` · `discovery` · `drafts` · `gmail` · `polling` · `outreach` · `pr` · `research` · `personalization` · `configurable`
 - **Accepts:** `text/plain`, `application/json`
 - **Produces:** `application/json`, `text/plain`
-- **Setup:** `pr-campaign`, `gmail-workspace`, and optional `web-browser`
-- **Install footprint:** **Medium**, Gmail setup and no npm dependencies
+- **Setup:** optional `web-browser`; Gmail authorization is configured in `gmail-workspace`
+- **Tool dependencies:** `pr-campaign@^0.1.0`, `gmail-workspace@^0.1.0`
+- **Install footprint:** **Medium**, two tool dependencies and Gmail setup
 
 ### [`context-vault`](./context-vault/)
 
@@ -126,8 +127,9 @@ Compare installed official tools with the catalog and safely apply non-conflicti
 - **Tags:** `catalog` · `compare` · `developer` · `essential` · `official` · `sync` · `tools` · `update` · `upgrade`
 - **Accepts:** `text/plain`, `application/json`
 - **Produces:** `application/json`, `text/plain`
-- **Setup:** `trash`
-- **Install footprint:** **Low**, no npm dependencies
+- **Setup:** none
+- **Tool dependencies:** `trash@^1.0.0`
+- **Install footprint:** **Low**, one low-footprint tool dependency and no npm dependencies
 
 ### [`openai-transcribe`](./openai-transcribe/)
 
@@ -351,8 +353,9 @@ Run profile-driven organic X outreach. It discovers evidence-backed candidates, 
 - **Tags:** `x` · `twitter` · `dm` · `campaign` · `discovery` · `outreach` · `personalization` · `dedupe` · `research`
 - **Accepts:** `text/plain`, `application/json`
 - **Produces:** `application/json`, `text/plain`
-- **Setup:** `x-dm`, web research, and an X/Twitter session
-- **Install footprint:** **High**, browser-backed discovery and approval workflow
+- **Setup:** web research and an X/Twitter session
+- **Tool dependencies:** `x-dm@^0.2.0`
+- **Install footprint:** **High**, one browser-backed tool dependency and approval workflow
 
 ### [`x-dm`](./x-dm/)
 

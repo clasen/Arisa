@@ -1,5 +1,6 @@
 {
   "name": "trash",
+  "version": "1.0.0",
   "description": "Safely move local files and directories into chat-scoped recoverable trash, inspect storage pressure, restore mistakes, and explicitly purge retained content.",
   "entry": "index.js",
   "input": [

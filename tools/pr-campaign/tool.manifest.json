@@ -1,5 +1,6 @@
 {
   "name": "pr-campaign",
+  "version": "0.1.0",
   "description": "Manage small, personalized PR outreach campaigns with read-only contact deduplication, separate coverage and contact provenance, grounded openings, email validation, draft history, daily caps, and follow-up eligibility.",
   "entry": "index.js",
   "input": ["text/plain", "application/json"],
