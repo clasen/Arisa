@@ -60,14 +60,16 @@ test("verifies the exact file set and digests", async (t) => {
   await assert.rejects(() => verifyOfficialToolTree(source, files), /unexpected=extra.js/);
 });
 
-test("bundled master-slave lock matches the catalog source", async () => {
+test("every bundled official tool lock matches the catalog source", async () => {
   const lock = JSON.parse(await readFile(new URL("../src/official-tools.lock.json", import.meta.url), "utf8"));
-  const source = fileURLToPath(new URL("../../tools/master-slave/", import.meta.url));
-
-  assert.deepEqual(
-    await verifyOfficialToolTree(source, lock.tools["master-slave"].files),
-    { files: Object.keys(lock.tools["master-slave"].files).length }
-  );
+  for (const [name, entry] of Object.entries(lock.tools)) {
+    const source = fileURLToPath(new URL(`../../tools/${name}/`, import.meta.url));
+    assert.deepEqual(
+      await verifyOfficialToolTree(source, entry.files),
+      { files: Object.keys(entry.files).length },
+      name
+    );
+  }
 });
 
 test("rejects symbolic links before deployment", async (t) => {
