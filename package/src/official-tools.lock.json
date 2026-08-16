@@ -1,7 +1,7 @@
 {
   "version": 1,
   "repository": "https://github.com/clasen/Arisa.git",
-  "commit": "74c148a263eed25a7453d6b242e5f38e19f1cf1b",
+  "commit": "629da825a161107a73464221518cbd99d6a800b3",
   "tools": {
     "master-slave": {
       "files": {
@@ -70,6 +70,96 @@
         "state-store.js": "c3ee744509f7a6be251cd895406bd1c70827f53cbdc1ac9d1c2a6e48479bfe1e",
         "test/magnific-mcp.test.js": "c6345e70a7834a22df49abaf648c781f4da2e4d0790cbc13035c8af433c814c5",
         "tool.manifest.json": "bbb24f54814c67f1ca1e119e6767e59d48f8e0cbc7f92444cf8e22fcc2fe06ed"
+      }
+    },
+    "campaign-draft-runner": {
+      "version": "0.1.0",
+      "toolDependencies": {
+        "pr-campaign": "^0.1.0",
+        "gmail-workspace": "^0.1.0"
+      },
+      "files": {
+        "README.md": "4e97db605c55c31c5fdb3ad83973f7733cef7a689b71b6d014fe07df631a4f99",
+        "config.js": "3c0c252baa7170e0bf0a9d1a7ecdb4febcf19f7baf0fcd320c0b852008f41b63",
+        "index.js": "0fd4574c70e7d008714f17eb54ccc34bc703a1fee7ab7eae768d79f86d2e747c",
+        "package.json": "a25b7ed1dd2c30cd68c3c10feb8ee1752cac8cd55cd4344690ffad649e231ec1",
+        "test/selection-policy.test.js": "b1bc804ba2be210230e78d7e4cfa5469e07e75c6ee944f58d77e6d00e88561cd",
+        "tool.manifest.json": "2609869985fd78000c999a9ae03f4b251c0aa945d19eed97e630f70da97c72ce"
+      }
+    },
+    "pr-campaign": {
+      "version": "0.1.0",
+      "files": {
+        "config.js": "f265f3a15721d3b04fcfd259d62e33c62c35ed03d7cd33e432cd32b1c44ac84f",
+        "contact-dedupe.js": "00cec722c5987c40eced127b0528004a5c54c0c6463c27c04ba37daf51c13f25",
+        "index.js": "9e858aed2510d3a2e93f38f693f0e0b5d8b2cac6965c84872aad91f785754d0a",
+        "package.json": "3919118d382b80153aab2dade602eb7ebad632642997c8d20b3561c517b2b7a6",
+        "test/add-contact-dedupe.test.js": "7a8f8c097181d5c42697e4f4c15e6bd080b4c9304a9878fd20d4b4b6a8300340",
+        "test/contact-dedupe.test.js": "be636643881c10105c731c923d0ac07db62fc4a663d7ed3badb2649119223a32",
+        "tool.manifest.json": "9c68d89276996039b055c43b4b4f82499ea684edbb36d9bfedcc909a3a23a80f"
+      }
+    },
+    "gmail-workspace": {
+      "version": "0.1.0",
+      "files": {
+        "config.js": "6ad295ec4cedbc936835d8f86c7528e0939ef09d5792c003308d2ee85dc5eea4",
+        "index.js": "495b5cec129a71638ab9b2682cf575eb8659e9a100b2e70deb0c523e60b69886",
+        "package.json": "1e88d42180a8dacd08c7ad1aa84d783991f901bb3bca7f0dddc4efd919470bdc",
+        "secretary-state.js": "0c4ef04db0d990a92b4b49ef62135baea76b7e4d5c232dfbf2087c61d1ce1948",
+        "test/secretary-state.test.mjs": "d8e866400853b39dc26e4b4ec09880c3cb1dd0b0091b2d25097388adf38559e7",
+        "tool.manifest.json": "93583b8c3a5f417435e3b3e88b129d2c610f2f168788e510f4cb2c03d4aef3a4"
+      }
+    },
+    "x-campaign-runner": {
+      "version": "0.1.0",
+      "toolDependencies": {
+        "x-dm": "^0.2.0"
+      },
+      "files": {
+        "README.md": "7cb7264446b9bef41332da9634cd6c94130f55c740142d084cddec776cf703c8",
+        "config.js": "5eb3c5667d01705d48504a4bf711347262b8a440605cb6b75ec519dd56cb1309",
+        "index.js": "19ca6dd9aa62b15e62481c6c7ce65023af6a25a21ffc622527acae12ff0171ed",
+        "package.json": "7a2dd72ce45cb1f3946b2459362ed39b82478d6df622a78690a0cc483fa03043",
+        "test/x-campaign-runner.test.mjs": "cf62245bccc7d7b5804117ca02753130e7eec4f56fcc671af82757f922117389",
+        "tool.manifest.json": "ebde15ad3666ed985377ae8ff67264567f3d5db408b5ec0823617f386ef46140"
+      }
+    },
+    "x-dm": {
+      "version": "0.2.0",
+      "files": {
+        "README.md": "f02835c10d822ce906df121441761de8c6d61c3a4aac3f9aa9a6d9211b73a6ea",
+        "config.js": "69a2dcccd10aa2f1ddcc24d52f4ce8fe4a6f5f5a85be64abbdf9dc9e19de0cd4",
+        "index.js": "cf4f92e94b9f21f6fcfed7d8d2926105a11b4ad621e2121c762d9c1e67a91456",
+        "package.json": "3a76a921b1e78e91b1d2a5ae1926b298dfd6b4ee3f716d5382159b474ee400f4",
+        "test/x-dm.test.mjs": "06352996e14777358eb62ad5e5d757b0dab5c0696927ed54ff40a5b7cdefcfd0",
+        "tool.manifest.json": "f3b2e613562e4dd0f88d196c4e3caf525a425483133a54351300ce284a5836a9"
+      }
+    },
+    "official-tool-sync": {
+      "version": "1.0.0",
+      "toolDependencies": {
+        "trash": "^1.0.0"
+      },
+      "files": {
+        ".gitignore": "4d56952b0fb13bf8f9b6c13a6d4c34a075bac3af447636a1df4335d7576e2f97",
+        "config.js": "744c445b1d2ff65b77f38a5473c24e50a32f4288c4a08c25a874a478086c08c8",
+        "index.js": "fdd4167c63cd33c8e7640cb7ce09fd618dbd416030aa920407392e4591543e94",
+        "package.json": "4447cb5d4e0a04526604dfb9820c44af88349c27e208f27baa148686846559da",
+        "sync-lib.js": "c9f2cd7e19370088ab5fd10f6b2ada52c07d2e405674a356d0989f9a0f4984f6",
+        "sync-lib.test.js": "c97cf850d9f42f6b121a458863b048bdcaa6d7d0475642f20742c5862ebf7cc4",
+        "tool.manifest.json": "8e0f94ad786bdaf9edb1a65cd03438e26c1e9927e8db9a5a39e349e7ef3c6cd3"
+      }
+    },
+    "trash": {
+      "version": "1.0.0",
+      "files": {
+        ".gitignore": "4d56952b0fb13bf8f9b6c13a6d4c34a075bac3af447636a1df4335d7576e2f97",
+        "config.js": "ad76578e9dcc05c2e45854de9fa2cd41285fd8dcdb9a7d9ee2056e0f8b2d68d6",
+        "index.js": "d562d2466bddc93dd9a3bc5455962a3457c50368ee5dde0607cae3ff5a88578a",
+        "package.json": "18ec594d43b6595c587b16125b9ce0c9426fdf00a28d7e342834e31e360575f8",
+        "tool.manifest.json": "4f236d274c891b55e4445d459cff6a3337a5d13adc5e8aca7fb965ff6aba4e4d",
+        "trash-store.js": "1318e0f9539292684c0c2ec2f1b7189f066fdba42f78e07821b067792f40e8c9",
+        "trash-store.test.js": "5647edba4ab5e5492764ccf8ba3e674e42b63942623d779b0bf69465c5adb53f"
       }
     }
   }
