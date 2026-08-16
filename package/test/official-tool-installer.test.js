@@ -111,8 +111,31 @@ test("loads the bundled lock before selecting the canonical tool destination", a
       return { installed: true };
     }
   });
-  assert.deepEqual(result, { installed: true });
+  assert.deepEqual(result, { installed: true, dependencies: [] });
   assert.equal(calls[0].toolName, "master-slave");
   assert.deepEqual(calls[0].lock, lock(files));
   assert.match(calls[0].destination, /tools\/master-slave$/);
+});
+
+test("installs locked tool dependencies before the requested tool", async (t) => {
+  const { root, files } = await fixture(t);
+  const dependencyLock = lock(files);
+  dependencyLock.tools = {
+    "mcp-client": { version: "0.1.0", toolDependencies: {}, files },
+    "magnific-mcp": { version: "0.1.0", toolDependencies: { "mcp-client": "^0.1.0" }, files }
+  };
+  const lockFile = path.join(root, "dependency-lock.json");
+  await writeFile(lockFile, `${JSON.stringify(dependencyLock)}\n`);
+  const calls = [];
+  const result = await installBundledOfficialTool("magnific-mcp", {
+    lockFile,
+    resolveInstalledVersion: async () => undefined,
+    install: async ({ toolName }) => {
+      calls.push(toolName);
+      return { toolName, installed: true };
+    }
+  });
+  assert.deepEqual(calls, ["mcp-client", "magnific-mcp"]);
+  assert.equal(result.toolName, "magnific-mcp");
+  assert.deepEqual(result.dependencies, [{ name: "mcp-client", version: "0.1.0", status: "installed" }]);
 });

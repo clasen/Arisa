@@ -314,7 +314,8 @@ export async function runDoctor({
   stopDaemon = stopManagedDaemon,
   unregisterDaemon = unregisterManagedDaemon,
   inspectResources = inspectSystemResources,
-  inspectInfrastructure = null
+  inspectInfrastructure = null,
+  inspectToolDependencies = null
 }) {
   assertDoctorPolicy(doctorPolicy);
   const runtime = await agentManager.getRuntimeDiagnostic({
@@ -331,6 +332,16 @@ export async function runDoctor({
     infrastructure: null
   };
   addContextAttention(report);
+  if (inspectToolDependencies) {
+    try {
+      for (const issue of await inspectToolDependencies()) {
+        const installed = issue.installedVersion ? `; installed ${issue.installedVersion}` : "";
+        report.attention.push(`Tool dependency ${issue.type}: ${issue.tool} requires ${issue.dependency}@${issue.range || "valid"}${installed}.`);
+      }
+    } catch (error) {
+      report.attention.push(`Tool dependency inspection failed: ${error?.message || error}`);
+    }
+  }
   if (inspectInfrastructure) {
     try {
       report.infrastructure = await inspectInfrastructure();

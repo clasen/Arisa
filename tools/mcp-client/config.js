@@ -1,0 +1,5 @@
+export default {
+  REQUEST_TIMEOUT_MS: 120000,
+  MAX_RESULT_BYTES: 10485760,
+  ALLOW_PRIVATE_HOSTS: false
+};

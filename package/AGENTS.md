@@ -47,6 +47,7 @@ Each tool declares in `tool.manifest.json`:
 - `category`: optional broad capability bucket for discovery
 - `keywords`: optional intent tags for capability discovery
 - `skillHints`: optional skills to apply when using or editing the tool
+- `toolDependencies`: optional required Arisa tools mapped to exact or caret semantic versions; use this only for hard runtime dependencies
 
 ## Text encoding
 All textual content generated or sent by Arisa or its tools must use UTF-8.

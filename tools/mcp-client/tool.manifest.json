@@ -1,0 +1,15 @@
+{
+  "name": "mcp-client",
+  "version": "0.1.0",
+  "description": "Connect to allowlisted remote MCP servers over Streamable HTTP, discover their tools, complete OAuth device authorization, and make explicit confirmed tool calls with chat-scoped profiles.",
+  "entry": "index.js",
+  "input": ["text/plain", "application/json", "image/*", "application/pdf", "application/octet-stream"],
+  "output": ["application/json", "text/plain", "image/*", "application/octet-stream"],
+  "category": "integration",
+  "keywords": ["client", "integration", "mcp", "model-context-protocol", "oauth", "remote-tools", "streamable-http"],
+  "configSchema": {
+    "REQUEST_TIMEOUT_MS": { "type": "number", "required": false, "prompt": "Maximum duration of one MCP request in milliseconds." },
+    "MAX_RESULT_BYTES": { "type": "number", "required": false, "prompt": "Maximum accepted MCP result size in bytes." },
+    "ALLOW_PRIVATE_HOSTS": { "type": "boolean", "required": false, "prompt": "Allow private or loopback MCP server addresses. Keep false unless explicitly required." }
+  }
+}

@@ -104,6 +104,7 @@ test("loads and lists installed tools from the user tools directory", async () =
     version: null,
     packageDigest: null,
     requirements: [],
+    toolDependencies: {},
     description: "Fake test tool",
     input: ["text/plain"],
     output: ["text/plain"],
@@ -142,6 +143,23 @@ test("shows semantic metadata in tool help", async () => {
   assert.match(help, /Fake test tool help/);
   assert.match(help, /Semantic metadata:\n- category: memory\n- keywords: memory, essential/);
   assert.match(help, /Assigned skills:/);
+});
+
+test("reports dependency status in help and blocks a tool with a missing dependency", async () => {
+  await resetHome();
+  await createFakeTool("dependent-tool", {
+    version: "1.0.0",
+    toolDependencies: { "base-tool": "^1.0.0" }
+  });
+
+  const registry = new ToolRegistry();
+  await registry.load();
+
+  assert.match(await registry.help("dependent-tool"), /base-tool@\^1\.0\.0: missing/);
+  await assert.rejects(
+    () => registry.run({ name: "dependent-tool", request: { args: {} } }),
+    /Tool dependency missing/
+  );
 });
 
 test("runs a registered tool process with an enriched request and cleans up request files", async () => {

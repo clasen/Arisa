@@ -14,6 +14,7 @@ import {
 import os from "node:os";
 import path from "node:path";
 import { getToolDir } from "../../runtime/paths.js";
+import { normalizeToolDependencies, resolveToolDependencyPlan, satisfiesToolVersion } from "./tool-dependencies.js";
 
 const bundledLockFile = new URL("../../official-tools.lock.json", import.meta.url);
 
@@ -46,7 +47,8 @@ export function validateOfficialToolLock(lock, toolName) {
   if (!COMMIT_PATTERN.test(String(lock.commit || ""))) {
     throw new Error("Official tool lock requires an immutable 40-character commit");
   }
-  const files = lock.tools?.[toolName]?.files;
+  const entry = lock.tools?.[toolName];
+  const files = entry?.files;
   if (!files || typeof files !== "object" || Array.isArray(files) || !Object.keys(files).length) {
     throw new Error(`Official tool lock has no files for ${toolName}`);
   }
@@ -56,7 +58,12 @@ export function validateOfficialToolLock(lock, toolName) {
       throw new Error(`Invalid SHA-256 digest for ${toolName}/${file}`);
     }
   }
-  return { repository: lock.repository, commit: lock.commit, files };
+  const toolDependencies = normalizeToolDependencies(entry.toolDependencies);
+  const toolVersion = entry.version == null ? null : String(entry.version);
+  if (toolVersion && !satisfiesToolVersion(toolVersion, toolVersion)) {
+    throw new Error(`Invalid locked tool version for ${toolName}: ${toolVersion}`);
+  }
+  return { repository: lock.repository, commit: lock.commit, files, toolVersion, toolDependencies };
 }
 
 async function walkFiles(root, relative = "") {
@@ -133,10 +140,17 @@ async function checkoutRepository({ repository, commit, checkoutDir }) {
   if (resolved !== commit) throw new Error(`Official tool checkout resolved ${resolved}, expected ${commit}`);
 }
 
-async function validateEntrypoint(toolDir, toolName) {
+async function validateEntrypoint(toolDir, toolName, locked) {
   const manifest = JSON.parse(await readFile(path.join(toolDir, "tool.manifest.json"), "utf8"));
   if (manifest.name !== toolName) {
     throw new Error(`Official tool manifest mismatch: expected ${toolName}, got ${manifest.name || "missing"}`);
+  }
+  if (locked.toolVersion && manifest.version !== locked.toolVersion) {
+    throw new Error(`Official tool version mismatch: expected ${locked.toolVersion}, got ${manifest.version || "missing"}`);
+  }
+  const manifestDependencies = normalizeToolDependencies(manifest.toolDependencies);
+  if (JSON.stringify(manifestDependencies) !== JSON.stringify(locked.toolDependencies)) {
+    throw new Error(`Official tool dependency metadata mismatch: ${toolName}`);
   }
   const entry = manifest.entry || "index.js";
   const entryPath = path.join(toolDir, entry);
@@ -165,7 +179,7 @@ export async function installLockedOfficialTool({
     const sourceDir = path.join(checkoutDir, "tools", toolName);
     await verifyOfficialToolTree(sourceDir, locked.files);
     await cp(sourceDir, stageDir, { recursive: true, errorOnExist: true, force: false });
-    await validate(stageDir, toolName);
+    await validate(stageDir, toolName, locked);
     await mkdir(path.dirname(destination), { recursive: true });
     await rename(stageDir, destination);
     return { toolName, destination, commit: locked.commit, files: Object.keys(locked.files).length };
@@ -174,10 +188,48 @@ export async function installLockedOfficialTool({
   }
 }
 
+async function installedToolVersion(toolName) {
+  try {
+    const manifest = JSON.parse(await readFile(path.join(getToolDir(toolName), "tool.manifest.json"), "utf8"));
+    return typeof manifest.version === "string" ? manifest.version : null;
+  } catch (error) {
+    if (error?.code === "ENOENT") return undefined;
+    throw error;
+  }
+}
+
 export async function installBundledOfficialTool(toolName, {
   lockFile = bundledLockFile,
-  install = installLockedOfficialTool
+  install = installLockedOfficialTool,
+  resolveInstalledVersion = installedToolVersion
 } = {}) {
   const lock = JSON.parse(await readFile(lockFile, "utf8"));
-  return install({ toolName, lock, destination: getToolDir(toolName) });
+  const entries = new Map(Object.entries(lock.tools || {}).map(([name, entry]) => [name, {
+    version: entry.version || null,
+    toolDependencies: normalizeToolDependencies(entry.toolDependencies)
+  }]));
+  const plan = resolveToolDependencyPlan(entries, toolName);
+  const dependencies = [];
+  let result = null;
+  for (const name of plan) {
+    const locked = validateOfficialToolLock(lock, name);
+    if (name !== toolName) {
+      const installedVersion = await resolveInstalledVersion(name);
+      if (installedVersion !== undefined) {
+        const requiredRanges = [...entries.values()]
+          .map((entry) => entry.toolDependencies?.[name])
+          .filter(Boolean);
+        const incompatibleRange = requiredRanges.find((range) => !satisfiesToolVersion(installedVersion, range));
+        if (incompatibleRange || (!requiredRanges.length && locked.toolVersion !== installedVersion)) {
+          throw new Error(`Installed tool dependency is incompatible: ${name}@${installedVersion} does not satisfy ${incompatibleRange || locked.toolVersion || "locked version"}`);
+        }
+        dependencies.push({ name, version: installedVersion, status: "already-installed" });
+        continue;
+      }
+    }
+    const installed = await install({ toolName: name, lock, destination: getToolDir(name) });
+    if (name === toolName) result = installed;
+    else dependencies.push({ name, version: locked.toolVersion, status: "installed" });
+  }
+  return { ...result, dependencies };
 }

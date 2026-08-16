@@ -135,6 +135,7 @@ export async function createApp({ logger, runtimeOverrides, requestRestart } = {
       toolProcessSupervisor,
       daemonPolicy: config.daemons,
       doctorPolicy: config.doctor,
+      inspectToolDependencies: async () => toolRegistry.dependencyIssues(),
       inspectInfrastructure: async () => {
         const tool = toolRegistry.get("master-slave");
         if (!tool) return null;

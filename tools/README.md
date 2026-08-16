@@ -95,6 +95,29 @@ Convert Markdown to PDF with support for headings, emphasis, links, code, blockq
 - **Setup:** none
 - **Install footprint:** **Medium**, four npm dependencies
 
+### [`magnific-mcp`](./magnific-mcp/)
+
+Generate and upscale images directly through Magnific MCP, with interruption-safe completion monitoring and duplicate-safe artifact delivery.
+
+- **Category:** `image`
+- **Tags:** `artifact` · `generate` · `image` · `magnific` · `mcp` · `nano-banana` · `reactive` · `upscale`
+- **Accepts:** `image/jpeg`, `image/png`, `image/webp`, `application/json`, `text/plain`
+- **Produces:** images, `application/json`, `text/plain`
+- **Setup:** authenticated Magnific profile in `mcp-client`
+- **Tool dependencies:** `mcp-client@^0.1.0`
+- **Install footprint:** **Medium**, one tool dependency and a remote Magnific account
+
+### [`mcp-client`](./mcp-client/)
+
+Connect to allowlisted remote MCP servers over Streamable HTTP with chat-scoped profiles, OAuth device authorization, encrypted credentials, and bounded result handling.
+
+- **Category:** `integration`
+- **Tags:** `client` · `integration` · `mcp` · `oauth` · `remote-tools` · `streamable-http`
+- **Accepts:** text, JSON, images, PDF, and binary artifacts
+- **Produces:** `application/json`, `text/plain`, images, and binary artifacts
+- **Setup:** a public HTTPS MCP endpoint; OAuth when required by the server
+- **Install footprint:** **Medium**, one npm dependency and optional OAuth authorization
+
 ### [`official-tool-sync`](./official-tool-sync/)
 
 Compare installed official tools with the catalog and safely apply non-conflicting updates while preserving configuration and local additions.

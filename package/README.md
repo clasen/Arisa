@@ -76,6 +76,8 @@ Each tool folder contains:
 
 `tool.manifest.json` may also include optional `skillHints`; Arisa resolves installed skills and passes them into `run_tool` requests as `skills` guidance, not runtime dependencies.
 
+A tool that requires another Arisa tool declares a versioned `toolDependencies` map, for example `{ "mcp-client": "^0.1.0" }`. Official installation resolves these dependencies first, rejects missing or cyclic lock entries, and validates installed versions. The registry blocks execution when a required tool is missing or incompatible, and `/doctor` reports the issue.
+
 Each tool is isolated from the root project and from other tools.
 That isolation is part of the architecture:
 

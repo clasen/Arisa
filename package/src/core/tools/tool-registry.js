@@ -10,6 +10,7 @@ import { createDaemonRuntime, DAEMON_EVENT_TYPES, DAEMON_PROTOCOL_VERSION } from
 import { daemonConfigDefaults } from "../config/config-defaults.js";
 import { SkillRegistry } from "../skills/skill-registry.js";
 import { ToolUsageStore } from "./tool-usage-store.js";
+import { inspectToolDependencies, normalizeToolDependencies } from "./tool-dependencies.js";
 
 function toolEnv() {
   return { ...process.env, ARISA_PACKAGE_DIR: arisaPackageDir, ARISA_IPC_SOCKET: arisaIpcSocketFile };
@@ -203,6 +204,16 @@ function formatSemanticMetadata(tool) {
   ].join("\n");
 }
 
+function formatToolDependencies(tool, tools) {
+  const dependencies = Object.entries(tool.toolDependencies || {});
+  if (!dependencies.length) return null;
+  const lines = dependencies.map(([name, range]) => {
+    const issue = inspectToolDependencies(tools, tool.name).find((item) => item.dependency === name);
+    return `- ${name}@${range}: ${issue ? issue.type : "ready"}`;
+  });
+  return `Tool dependencies:\n${lines.join("\n")}`;
+}
+
 async function readOfficialToolNames() {
   const baselinesDir = path.join(getToolStateDir("official-tool-sync"), "baselines");
   try {
@@ -249,6 +260,7 @@ export class ToolRegistry {
         const skillHints = this.skillRegistry.normalizeHints(manifest);
         this.tools.set(manifest.name, {
           ...manifest,
+          toolDependencies: normalizeToolDependencies(manifest.toolDependencies),
           category: normalizeCategory(manifest.category),
           keywords: normalizeKeywords(manifest.keywords),
           skillHints,
@@ -273,6 +285,7 @@ export class ToolRegistry {
       version: typeof tool.version === "string" ? tool.version : null,
       packageDigest: typeof tool.packageDigest === "string" ? tool.packageDigest : null,
       requirements: requirementNames(tool.requirements),
+      toolDependencies: tool.toolDependencies || {},
       description: tool.description,
       input: tool.input,
       output: tool.output,
@@ -325,7 +338,8 @@ export class ToolRegistry {
     const skills = await this.resolveSkills(name);
     const sections = [
       help.trimEnd(),
-      formatSemanticMetadata(tool)
+      formatSemanticMetadata(tool),
+      formatToolDependencies(tool, this.tools)
     ];
     if (skills.length) {
       const skillHelp = skills.map((item) => [
@@ -374,6 +388,10 @@ export class ToolRegistry {
     return { ok: true, tool: name, field, configPath };
   }
 
+  dependencyIssues(name = null) {
+    return inspectToolDependencies(this.tools, name);
+  }
+
   async usage(chatId) {
     const [counts, officialNames] = await Promise.all([
       this.usageStore.counts(chatId),
@@ -391,6 +409,11 @@ export class ToolRegistry {
   async run({ name, request, chatId = null, onEvent = null }) {
     const tool = this.get(name);
     if (!tool) throw new Error(`Tool not found: ${name}`);
+    const dependencyIssue = this.dependencyIssues(name)[0];
+    if (dependencyIssue) {
+      const version = dependencyIssue.installedVersion ? `; installed ${dependencyIssue.installedVersion}` : "";
+      throw new Error(`Tool dependency ${dependencyIssue.type}: ${dependencyIssue.tool} requires ${dependencyIssue.dependency}@${dependencyIssue.range || "valid"}${version}`);
+    }
     await this.usageStore.record(chatId, name).catch((error) => {
       this.logger?.error("tools", `could not record ${name} usage: ${error?.message || String(error)}`);
     });

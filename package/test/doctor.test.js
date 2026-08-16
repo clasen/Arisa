@@ -123,6 +123,25 @@ test("lists each checked daemon with its scope and state", async () => {
   assert.ok(formatted.split("\n").every((line) => [...line].length <= 35));
 });
 
+test("reports missing tool dependencies as attention items", async () => {
+  const report = await runDoctor({
+    agentManager: { getRuntimeDiagnostic: async () => runtime() },
+    toolProcessSupervisor: { repair: async () => [] },
+    daemonPolicy,
+    doctorPolicy,
+    listProcesses: async () => [],
+    serviceStatus: async () => ({ running: false }),
+    inspectResources: async () => system,
+    inspectToolDependencies: async () => [{
+      tool: "magnific-mcp",
+      type: "missing",
+      dependency: "mcp-client",
+      range: "^0.1.0"
+    }]
+  });
+  assert.match(report.attention.join("\n"), /magnific-mcp requires mcp-client@\^0\.1\.0/);
+});
+
 test("stops only a registered duplicate Arisa service with verified identity", async () => {
   const duplicatePid = 321;
   const { report, stopped } = await run({
