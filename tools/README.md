@@ -139,6 +139,17 @@ Manage personalized PR outreach with contact history, email validation, DNS chec
 - **Setup:** `gmail-workspace` for Gmail draft and send actions
 - **Install footprint:** **Medium**, Gmail setup and no npm dependencies
 
+### [`process-retrospective`](./process-retrospective/)
+
+Run periodic evidence-based process reviews, rotate analytical focus after a bounded number of passes, stay silent when operations look healthy, and propose improvements without applying them automatically.
+
+- **Category:** `operations`
+- **Tags:** `analysis` · `continuous-improvement` · `evaluation` · `operations` · `reflection` · `retrospective` · `scheduler`
+- **Accepts:** `text/plain`, `application/json`
+- **Produces:** `application/json`, `text/plain`
+- **Setup:** none
+- **Install footprint:** **Low**, no npm dependencies
+
 ### [`roster-sites`](./roster-sites/)
 
 Manage and publish small HTTPS sites through a global RosterServer daemon.

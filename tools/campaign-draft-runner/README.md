@@ -118,3 +118,7 @@ When the normal pass leaves no eligible candidates, `discovery.creativeDiscovery
 With `discovery.archiveEmptyQueries` enabled (the default), a completed query that yields no eligible contact is archived in chat-scoped discovery state and omitted from later rotations. Queries with search or page errors are not archived, so temporary provider failures remain retryable.
 
 Research source URLs are omitted from personalized openings by default so outreach contains only the campaign link. Set `personalization.includeSourceUrl: true` only when a profile explicitly needs the source URL in the email.
+
+For reviewer-first workflows, store separate `coverageSourceUrl` and `contactSourceUrl` values on each contact. `coverageTitle`, `groundedOpening`, and an explicit `language` let the runner render the exact evidence already approved by the agent instead of trying to rediscover it. The legacy `sourceUrl` field remains an alias for `coverageSourceUrl`.
+
+Profiles can enforce these fields with `selection.requireCoverageSourceProvenance`, `selection.requireContactSourceProvenance`, and `selection.requireGroundedOpening`. A `draftValidation` block can independently require both sources, the exact coverage title, and the grounded opening before Gmail draft creation. `draftValidation.canonicalUrls` normalizes campaign links before the preflight. Failed preflights are reported as skipped contacts and do not create a draft.

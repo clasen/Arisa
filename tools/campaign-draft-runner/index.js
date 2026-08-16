@@ -55,8 +55,16 @@ function outletKey(contact) {
   return clean(contact.outlet).toLowerCase().replace(/\s*\/.*$/, "").replace(/\s*\(.*?\)\s*/g, "").replace(/[^a-z0-9가-힣]+/g, " ").trim();
 }
 
+function coverageSourceUrl(contact) {
+  return clean(contact.coverageSourceUrl || contact.sourceUrl);
+}
+
+function contactSourceUrl(contact) {
+  return clean(contact.contactSourceUrl);
+}
+
 function contactText(contact) {
-  return `${contact.email || ""} ${contact.name || ""} ${contact.outlet || ""} ${contact.angle || ""} ${contact.referenceGame || ""} ${contact.personalNote || ""} ${contact.market || ""} ${contact.sourceUrl || ""}`.toLowerCase();
+  return `${contact.email || ""} ${contact.name || ""} ${contact.outlet || ""} ${contact.angle || ""} ${contact.referenceGame || ""} ${contact.coverageTitle || ""} ${contact.personalNote || ""} ${contact.groundedOpening || ""} ${contact.market || ""} ${coverageSourceUrl(contact)} ${contactSourceUrl(contact)}`.toLowerCase();
 }
 
 function matchesAny(text, patterns = []) {
@@ -80,6 +88,9 @@ function isSelectable(contact, profile) {
   const requiredKeywordGroups = profile.selection?.requiredKeywordGroups || [];
   const agentDecidesEligibility = profile.selection?.agentDecidesEligibility === true;
   if (!isPlausibleEmail(contact.email)) return false;
+  if (profile.selection?.requireCoverageSourceProvenance === true && !coverageSourceUrl(contact)) return false;
+  if (profile.selection?.requireContactSourceProvenance === true && !contactSourceUrl(contact)) return false;
+  if (profile.selection?.requireGroundedOpening === true && !clean(contact.groundedOpening)) return false;
   const approvedCrossDomainEmails = (profile.selection?.approvedCrossDomainEmails || []).map(normalizedEmail);
   if (
     profile.selection?.requireSourceProvenance !== false
@@ -94,6 +105,8 @@ function isSelectable(contact, profile) {
 }
 
 function detectLanguage(contact, profile) {
+  const explicit = clean(contact.language || contact.preferredLanguage).toLowerCase();
+  if (explicit) return explicit;
   const text = contactText(contact);
   for (const rule of profile.languageDetection || []) {
     if (new RegExp(rule.match, "i").test(text)) return rule.language;
@@ -141,6 +154,8 @@ function render(template, contact, profile) {
     email: clean(contact.email),
     referenceGame: clean(contact.referenceGame),
     personalNote: clean(contact.personalNote),
+    coverageTitle: clean(contact.coverageTitle),
+    groundedOpening: clean(contact.groundedOpening),
     angle: clean(contact.angle),
     profile: clean(profile.name)
   };
@@ -160,7 +175,7 @@ function personalizationQuery(contact, settings) {
   const reference = clean(contact.referenceGame);
   const identity = [outlet, reference].filter(Boolean).join(" ");
   const suffix = clean(settings.querySuffix || "game review OR feature OR video");
-  const host = sourceHost(contact.sourceUrl);
+  const host = sourceHost(coverageSourceUrl(contact));
   if (host) return `site:${host} ${identity} ${suffix}`.trim();
   return `"${outlet}" ${reference} ${suffix}`.trim();
 }
@@ -217,7 +232,7 @@ function contactEmailFitsSource(contact) {
   const email = normalizedEmail(contact.email);
   if (!isPlausibleEmail(email)) return false;
   const domain = email.split("@")[1] || "";
-  const host = sourceHost(contact.sourceUrl);
+  const host = sourceHost(contactSourceUrl(contact) || coverageSourceUrl(contact));
   if (!domain || !host) return false;
   if (baseDomain(domain) === baseDomain(host)) return true;
   return /^(gmail|outlook|hotmail|yahoo|protonmail|icloud|gmx|mail)\./i.test(domain);
@@ -622,14 +637,14 @@ function isUsableResearchResult(result, contact) {
   try {
     const parsed = new URL(url);
     const host = parsed.hostname.replace(/^www\./i, "").toLowerCase();
-    const expectedHost = sourceHost(contact.sourceUrl).toLowerCase();
+    const expectedHost = sourceHost(coverageSourceUrl(contact)).toLowerCase();
     if (expectedHost && host !== expectedHost && !host.endsWith(`.${expectedHost}`) && !expectedHost.endsWith(`.${host}`)) return false;
     if (parsed.pathname.replace(/\/+$/, "") === "" && !parsed.search) return false;
   } catch {
     return false;
   }
   const normalizedUrl = url.toLowerCase();
-  const sourceUrl = clean(contact.sourceUrl).replace(/\/$/, "").toLowerCase();
+  const sourceUrl = coverageSourceUrl(contact).replace(/\/$/, "").toLowerCase();
   return !sourceUrl || normalizedUrl !== sourceUrl;
 }
 
@@ -676,6 +691,49 @@ function replaceOpeningParagraph(body, opening) {
   if (paragraphs.length < 2) return body;
   paragraphs[1] = opening;
   return paragraphs.join("\n\n");
+}
+
+function exactCoverageResearch(contact) {
+  const title = clean(contact.coverageTitle);
+  const url = coverageSourceUrl(contact);
+  return title && url ? { title, url, source: "contact" } : null;
+}
+
+function escapedRegExp(value) {
+  return String(value).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+function normalizeCanonicalUrls(body, canonicalUrls = {}) {
+  let normalized = String(body || "");
+  for (const [source, target] of Object.entries(canonicalUrls || {})) {
+    const from = clean(source).replace(/\/$/, "");
+    const to = clean(target);
+    if (!from || !to) continue;
+    normalized = normalized.replace(new RegExp(`${escapedRegExp(from)}(?!/)`, "g"), to);
+  }
+  return normalized;
+}
+
+function normalizedEvidenceText(value) {
+  return decodeHtmlEntities(clean(value)).toLowerCase().replace(/[“”„«»「」『』'\"`]/g, "").replace(/\s+/g, " ");
+}
+
+function validateDraftContent({ contact, language, body, profile }) {
+  const rules = profile.draftValidation || {};
+  const failures = [];
+  const normalizedBody = normalizedEvidenceText(body);
+  const groundedOpening = normalizedEvidenceText(contact.groundedOpening);
+  const coverageTitle = normalizedEvidenceText(contact.coverageTitle);
+  if (rules.requireCoverageSource === true && !coverageSourceUrl(contact)) failures.push("missing coverage source URL");
+  if (rules.requireContactSource === true && !contactSourceUrl(contact)) failures.push("missing public contact source URL");
+  if (rules.requireGroundedOpening === true && !groundedOpening) failures.push("missing grounded opening");
+  if (groundedOpening && !normalizedBody.includes(groundedOpening)) failures.push("grounded opening was not rendered");
+  if (rules.requireCoverageTitle === true && !coverageTitle) failures.push("missing exact coverage title");
+  if (coverageTitle && !normalizedBody.includes(coverageTitle)) failures.push("exact coverage title was not rendered");
+  const explicitLanguage = clean(contact.language || contact.preferredLanguage).toLowerCase();
+  if (explicitLanguage && explicitLanguage !== language) failures.push(`language mismatch: expected ${explicitLanguage}, got ${language}`);
+  if (failures.length) throw new Error(`Draft preflight failed: ${failures.join("; ")}`);
+  return true;
 }
 
 async function runTool(arisa, name, args, timeoutMs = 120_000, text = "") {
@@ -858,16 +916,21 @@ async function createDraft(arisa, profile, contact) {
   const template = profile.templates?.[language] || profile.templates?.[profile.defaultLanguage || "en"];
   if (!template) throw new Error(`No template found for language ${language}`);
   const campaignTool = profile.campaignTool || defaults.CAMPAIGN_TOOL;
-  const research = await researchContact(arisa, profile, contact);
+  const research = exactCoverageResearch(contact) || await researchContact(arisa, profile, contact);
   const subject = decodeHtmlEntities(render(template.subject, contact, profile));
   const renderedBody = decodeHtmlEntities(render(template.body, contact, profile));
-  const body = decodeHtmlEntities(replaceOpeningParagraph(renderedBody, personalizedOpening(language, research, profile)));
+  const opening = clean(contact.groundedOpening) || personalizedOpening(language, research, profile);
+  const body = normalizeCanonicalUrls(
+    decodeHtmlEntities(replaceOpeningParagraph(renderedBody, opening)),
+    profile.draftValidation?.canonicalUrls
+  );
+  validateDraftContent({ contact, language, body, profile });
   const data = await runTool(arisa, campaignTool, { action: "create-draft", email: contact.email, subject, body, type: profile.draftType || "first" });
   return {
     email: contact.email,
     outlet: contact.outlet,
     language,
-    personalized: Boolean(research),
+    personalized: Boolean(opening),
     referenceUrl: research?.url || null,
     draftId: data.draft?.id || null
   };
@@ -1027,4 +1090,4 @@ async function main() {
 const isDirectRun = process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url);
 if (isDirectRun) main();
 
-export { discoverContacts, isSelectable };
+export { discoverContacts, isSelectable, normalizeCanonicalUrls, validateDraftContent };

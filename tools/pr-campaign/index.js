@@ -21,7 +21,7 @@ Usage:
   node index.js run --request-file <json>
 
 Actions via args.action:
-  add-contact     Add a public business contact. args: name, email, outlet, angle?, referenceGame?, personalNote?, sourceUrl?, verify?
+  add-contact     Add a public business contact. args: name, email, outlet, angle?, referenceGame?, personalNote?, coverageTitle?, groundedOpening?, coverageSourceUrl? (sourceUrl alias), contactSourceUrl?, language?, verify?
   list-contacts   List contacts. args: status?, limit?
   verify-email    Check email syntax with npm email-validator and domain DNS deliverability. args: email
   verify-emails   Check multiple email addresses. args: emails array or comma/newline-separated string
@@ -65,6 +65,35 @@ function contactFor(state, email) { return state.contacts[normalizedEmail(email)
 function firstName(name) { return String(name || "there").trim().split(/\s+/)[0] || "there"; }
 function campaignText(value) { return String(value || "").replace(/\u2014/g, ","); }
 function truthy(value) { return value === true || value === "true" || value === "1" || value === 1 || value === "yes"; }
+function optionalHttpUrl(value, label) {
+  const cleaned = String(value || "").trim();
+  if (!cleaned) return "";
+  try {
+    const parsed = new URL(cleaned);
+    if (!/^https?:$/.test(parsed.protocol)) throw new Error();
+    return parsed.href;
+  } catch {
+    throw new Error(`${label} must be a valid HTTP(S) URL`);
+  }
+}
+function sourceHost(value) {
+  try { return new URL(String(value || "")).hostname.replace(/^www\./i, "").toLowerCase(); }
+  catch { return ""; }
+}
+function sourceDomainMatchesEmail(email, sourceUrl) {
+  const domain = emailDomain(email);
+  const host = sourceHost(sourceUrl);
+  return Boolean(domain && host && (domain === host || domain.endsWith(`.${host}`) || host.endsWith(`.${domain}`)));
+}
+function contactProvenance(contact) {
+  const coverageSourceUrl = String(contact.coverageSourceUrl || contact.sourceUrl || "").trim();
+  const contactSourceUrl = String(contact.contactSourceUrl || "").trim();
+  return {
+    coverage: Boolean(coverageSourceUrl),
+    contact: Boolean(contactSourceUrl || sourceDomainMatchesEmail(contact.email, coverageSourceUrl)),
+    complete: Boolean(coverageSourceUrl && (contactSourceUrl || sourceDomainMatchesEmail(contact.email, coverageSourceUrl)))
+  };
+}
 
 function emailDomain(email) {
   return normalizedEmail(email).split("@").at(1) || "";
@@ -253,19 +282,31 @@ async function handleRun(request) {
     const email = normalizedEmail(required(args.email, "email"));
     const existing = state.contacts[email];
     const emailCheck = truthy(args.verify) ? await verifyEmailAddress(email) : existing?.emailCheck;
+    const coverageSourceUrl = optionalHttpUrl(
+      args.coverageSourceUrl || args.sourceUrl || existing?.coverageSourceUrl || existing?.sourceUrl,
+      "coverageSourceUrl"
+    );
+    const contactSourceUrl = optionalHttpUrl(args.contactSourceUrl || existing?.contactSourceUrl, "contactSourceUrl");
     state.contacts[email] = {
+      ...existing,
       email,
       name: required(args.name, "name"),
       outlet: required(args.outlet, "outlet"),
-      angle: String(args.angle || "").trim(),
+      angle: String(args.angle || existing?.angle || "").trim(),
       referenceGame: String(args.referenceGame || existing?.referenceGame || "").trim(),
       personalNote: String(args.personalNote || existing?.personalNote || "").trim(),
-      sourceUrl: String(args.sourceUrl || "").trim(),
+      coverageTitle: String(args.coverageTitle || existing?.coverageTitle || "").trim(),
+      groundedOpening: String(args.groundedOpening || existing?.groundedOpening || "").trim(),
+      language: String(args.language || existing?.language || "").trim().toLowerCase(),
+      coverageSourceUrl,
+      contactSourceUrl,
+      sourceUrl: coverageSourceUrl,
       status: existing?.status || "new",
       ...(emailCheck ? { emailCheck } : {}),
       createdAt: existing?.createdAt || now(),
       updatedAt: now()
     };
+    state.contacts[email].provenance = contactProvenance(state.contacts[email]);
     await saveState(request.chatId, state);
     return { action, contact: state.contacts[email] };
   }

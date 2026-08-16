@@ -1,11 +1,11 @@
 {
   "name": "campaign-draft-runner",
-  "description": "Run configurable outreach draft batches from chat-scoped profiles. Discovers public editorial contacts, filters prior recipients, verifies email domains, optionally researches coverage, and creates Gmail drafts only; never sends mail.",
+  "description": "Run configurable outreach draft batches from chat-scoped profiles. Discovers public editorial contacts, keeps coverage and contact provenance separate, validates grounded personalization and language, and creates Gmail drafts only; never sends mail.",
   "entry": "index.js",
   "input": ["text/plain", "application/json"],
   "output": ["application/json", "text/plain"],
   "category": "communication",
-  "keywords": ["campaign", "contacts", "discovery", "drafts", "gmail", "polling", "outreach", "pr", "research", "personalization", "configurable"],
+  "keywords": ["campaign", "contacts", "discovery", "drafts", "gmail", "polling", "outreach", "pr", "research", "personalization", "provenance", "preflight", "configurable"],
   "configSchema": {
     "DEFAULT_LIMIT": { "type": "number", "required": false, "prompt": "Default number of drafts per batch." },
     "DEFAULT_PROFILE": { "type": "string", "required": false, "prompt": "Default profile name." }

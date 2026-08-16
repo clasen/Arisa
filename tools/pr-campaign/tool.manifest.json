@@ -1,6 +1,6 @@
 {
   "name": "pr-campaign",
-  "description": "Manage small, personalized PR outreach campaigns with contact history, email-validator syntax checks, DNS deliverability checks, drafts, daily caps, and follow-up eligibility.",
+  "description": "Manage small, personalized PR outreach campaigns with separate coverage and contact provenance, grounded openings, email validation, draft history, daily caps, and follow-up eligibility.",
   "entry": "index.js",
   "input": ["text/plain", "application/json"],
   "output": ["application/json", "text/plain"],
@@ -11,7 +11,7 @@
     "SENDER_EMAIL": { "type": "string", "required": false, "prompt": "Authorized sender email address." }
   },
   "category": "communication",
-  "keywords": ["campaign", "contacts", "deliverability", "email", "follow-up", "outreach", "pr", "press", "verification"],
+  "keywords": ["campaign", "contacts", "deliverability", "email", "follow-up", "outreach", "pr", "press", "provenance", "verification"],
   "skillHints": [
     { "name": "stop-slop", "when": "drafting personalized outreach emails" }
   ]

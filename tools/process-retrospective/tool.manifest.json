@@ -1,0 +1,50 @@
+{
+  "name": "process-retrospective",
+  "description": "Run periodic evidence-based process retrospectives, rotate analytical focus after a bounded number of passes, remain silent when operations look healthy, and propose improvements without applying them automatically.",
+  "entry": "index.js",
+  "input": [
+    "text/plain",
+    "application/json"
+  ],
+  "output": [
+    "application/json",
+    "text/plain"
+  ],
+  "configSchema": {
+    "INTERVAL_SECONDS": {
+      "type": "number",
+      "required": false,
+      "prompt": "Default seconds between retrospective passes. Minimum one hour."
+    },
+    "INITIAL_DELAY_SECONDS": {
+      "type": "number",
+      "required": false,
+      "prompt": "Default delay before the first retrospective pass."
+    },
+    "PASSES_PER_FOCUS": {
+      "type": "number",
+      "required": false,
+      "prompt": "Number of passes before rotating to another analytical focus."
+    },
+    "REVIEW_WINDOW_HOURS": {
+      "type": "number",
+      "required": false,
+      "prompt": "Recent activity window considered by each retrospective."
+    },
+    "MAX_PROPOSALS": {
+      "type": "number",
+      "required": false,
+      "prompt": "Maximum improvement proposals per retrospective."
+    }
+  },
+  "category": "operations",
+  "keywords": [
+    "analysis",
+    "continuous-improvement",
+    "evaluation",
+    "operations",
+    "reflection",
+    "retrospective",
+    "scheduler"
+  ]
+}
