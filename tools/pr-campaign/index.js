@@ -4,6 +4,7 @@ import emailValidator from "email-validator";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import defaults from "./config.js";
+import { canonicalContactEmail, checkContactDuplicate, normalizeContactEmail } from "./contact-dedupe.js";
 
 const toolName = "pr-campaign";
 const toolDir = path.dirname(fileURLToPath(import.meta.url));
@@ -21,7 +22,8 @@ Usage:
   node index.js run --request-file <json>
 
 Actions via args.action:
-  add-contact     Add a public business contact. args: name, email, outlet, angle?, referenceGame?, personalNote?, coverageTitle?, groundedOpening?, coverageSourceUrl? (sourceUrl alias), contactSourceUrl?, language?, verify?
+  check-contact   Read-only duplicate check by normalized email and domain. args: email
+  add-contact     Add a public business contact. Existing emails are a no-op unless updateExisting=true; same-domain contacts require allowSameDomain=true. args: name, email, outlet, angle?, referenceGame?, personalNote?, coverageTitle?, groundedOpening?, coverageSourceUrl? (sourceUrl alias), contactSourceUrl?, language?, verify?, updateExisting?, allowSameDomain?
   list-contacts   List contacts. args: status?, limit?
   verify-email    Check email syntax with npm email-validator and domain DNS deliverability. args: email
   verify-emails   Check multiple email addresses. args: emails array or comma/newline-separated string
@@ -59,7 +61,7 @@ async function saveState(chatId, state) {
 
 function now() { return new Date().toISOString(); }
 function today() { return now().slice(0, 10); }
-function normalizedEmail(value) { return String(value || "").trim().toLowerCase(); }
+const normalizedEmail = normalizeContactEmail;
 function required(value, label) { if (!String(value || "").trim()) throw new Error(`${label} is required`); return String(value).trim(); }
 function contactFor(state, email) { return state.contacts[normalizedEmail(email)]; }
 function firstName(name) { return String(name || "there").trim().split(/\s+/)[0] || "there"; }
@@ -278,9 +280,30 @@ async function handleRun(request) {
     return { action, recorded, scanned: listed.output?.json?.messages?.length || 0 };
   }
 
+  if (action === "check-contact") {
+    return { action, check: checkContactDuplicate(state, required(args.email, "email")), mutated: false };
+  }
+
   if (action === "add-contact") {
-    const email = normalizedEmail(required(args.email, "email"));
-    const existing = state.contacts[email];
+    const requestedEmail = normalizedEmail(required(args.email, "email"));
+    const duplicateCheck = checkContactDuplicate(state, requestedEmail);
+    const existingEntry = Object.entries(state.contacts).find(([storedEmail]) => (
+      canonicalContactEmail(storedEmail) === duplicateCheck.canonicalEmail
+    ));
+    const blockedExisting = duplicateCheck.duplicate && !truthy(args.updateExisting);
+    const blockedDomain = duplicateCheck.sameDomainReviewRequired && !truthy(args.allowSameDomain);
+    if (blockedExisting || blockedDomain) {
+      return {
+        action,
+        duplicate: duplicateCheck.duplicate,
+        sameDomainReviewRequired: duplicateCheck.sameDomainReviewRequired,
+        reason: blockedExisting ? "existing-email" : "same-domain-contact",
+        mutated: false,
+        check: duplicateCheck
+      };
+    }
+    const email = existingEntry?.[0] || requestedEmail;
+    const existing = existingEntry?.[1];
     const emailCheck = truthy(args.verify) ? await verifyEmailAddress(email) : existing?.emailCheck;
     const coverageSourceUrl = optionalHttpUrl(
       args.coverageSourceUrl || args.sourceUrl || existing?.coverageSourceUrl || existing?.sourceUrl,
