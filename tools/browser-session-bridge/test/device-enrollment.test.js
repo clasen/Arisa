@@ -110,6 +110,20 @@ test("activates a short-lived device enrollment exactly once", async (t) => {
   assert.equal(page.status, 200);
   assert.match(await page.text(), /arisa<span>\.session<\/span>/);
   assert.equal(page.headers.get("referrer-policy"), "no-referrer");
+
+  const privacy = await fetch(`${endpoint}/privacy`);
+  const privacyText = await privacy.text();
+  assert.equal(privacy.status, 200);
+  assert.equal(privacy.headers.get("content-type"), "text/html; charset=UTF-8");
+  assert.equal(privacy.headers.get("content-language"), "en");
+  assert.equal(privacy.headers.get("referrer-policy"), "no-referrer");
+  assert.match(privacyText, /Arisa Session Bridge Privacy Policy/);
+  assert.match(privacyText, /does not sell user data/);
+
+  const privacyHead = await fetch(`${endpoint}/privacy`, { method: "HEAD" });
+  assert.equal(privacyHead.status, 200);
+  assert.equal(privacyHead.headers.get("content-type"), "text/html; charset=UTF-8");
+  assert.equal(await privacyHead.text(), "");
 });
 
 test("mints short-lived enrollments from one durable revocable reviewer credential", async (t) => {

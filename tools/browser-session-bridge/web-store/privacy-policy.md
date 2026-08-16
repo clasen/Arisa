@@ -1,6 +1,6 @@
 # Arisa Session Bridge Privacy Policy
 
-Last updated: August 15, 2026
+Last updated: August 16, 2026
 
 Arisa Session Bridge has one purpose: to let a user intentionally share the active site's applicable browser cookies with an Arisa instance they control.
 

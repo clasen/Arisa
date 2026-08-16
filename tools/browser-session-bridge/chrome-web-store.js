@@ -40,18 +40,35 @@ async function validateZip(filePath) {
   if (!details.isFile() || details.size < 1 || details.size > 2_000_000_000) throw new Error("Invalid Chrome Web Store package size");
 }
 
+async function readStoredSession(stateDir, resourceId) {
+  const sessionPath = path.join(stateDir, "sessions", `${resourceId}.json`);
+  try {
+    return JSON.parse(await readFile(sessionPath, "utf8"));
+  } catch (error) {
+    throw new Error(`Stored ${resourceId} session is invalid: ${error.message || String(error)}`);
+  }
+}
+
+async function chromeWebStoreCookies(stateDir, session) {
+  const cookies = new Map(session.cookies.map((cookie) => [`${cookie.domain}\n${cookie.path || "/"}\n${cookie.name}`, cookie]));
+  try {
+    const accounts = await readStoredSession(stateDir, "accounts.google.com");
+    for (const cookie of accounts.cookies || []) {
+      cookies.set(`${cookie.domain}\n${cookie.path || "/"}\n${cookie.name}`, cookie);
+    }
+  } catch (error) {
+    if (!String(error?.message || error).includes("ENOENT")) throw error;
+  }
+  return [...cookies.values()];
+}
+
 async function authenticatedContext(stateDir, resourceId, browser) {
   if (resourceId !== "chrome.google.com") throw new Error("The chrome.google.com browser session is required");
-  const sessionPath = path.join(stateDir, "sessions", `${resourceId}.json`);
-  let session;
-  try {
-    session = JSON.parse(await readFile(sessionPath, "utf8"));
-  } catch (error) {
-    throw new Error(`Stored Chrome Web Store session is invalid: ${error.message || String(error)}`);
-  }
+  const session = await readStoredSession(stateDir, resourceId);
   if (!Array.isArray(session.cookies) || !session.cookies.length) throw new Error("Stored Chrome Web Store session has no cookies");
   const context = await browser.newContext();
-  await context.addCookies(session.cookies.map(toPlaywrightCookie));
+  const cookies = await chromeWebStoreCookies(stateDir, session);
+  await context.addCookies(cookies.map(toPlaywrightCookie));
   refreshSessionOnBrowserClose({ browser, context, stateDir, session });
   return context;
 }
