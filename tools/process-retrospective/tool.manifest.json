@@ -1,5 +1,6 @@
 {
   "name": "process-retrospective",
+  "version": "1.0.0",
   "description": "Run periodic evidence-based process retrospectives, rotate analytical focus after a bounded number of passes, remain silent when operations look healthy, and propose improvements without applying them automatically.",
   "entry": "index.js",
   "input": [
