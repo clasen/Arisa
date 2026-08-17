@@ -52,6 +52,17 @@ Store, search, update, and forget chat-scoped user context and preferences with 
 - **Setup:** none
 - **Install footprint:** **High**, local embedding model, native SQLite dependency, and chat-scoped daemon
 
+### [`creator-scout`](./creator-scout/)
+
+Search CreatorScout for YouTube and Twitch creators covering exact comparable games, with bounded public business-email discovery after title matching.
+
+- **Category:** `marketing`
+- **Tags:** `contacts` · `creators` · `email` · `exact-match` · `games` · `provenance` · `twitch` · `youtube`
+- **Accepts:** `text/plain`, `application/json`
+- **Produces:** `application/json`, `text/plain`
+- **Setup:** CreatorScout account email; optional `gmail-workspace` for magic-link authentication
+- **Install footprint:** **High**, Playwright browser dependency, external account, and interactive authentication
+
 ### [`file-document`](./file-document/)
 
 Return an existing local file as a document artifact.

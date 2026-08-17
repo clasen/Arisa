@@ -1,0 +1,7 @@
+export default {
+  EMAIL: "",
+  HEADLESS: true,
+  OPERATION_TIMEOUT_MS: 120000,
+  MAX_RESULTS: 20,
+  MAX_EMAIL_LOOKUPS: 3
+};
