@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { mkdtemp, rm } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
-import { assessSearchQuality, discoverContacts, getFactSheetStatus, isSelectable, normalizeCanonicalUrls, updateApprovedFacts, validateDraftContent } from "../index.js";
+import { assessSearchQuality, discoverContacts, getFactSheetStatus, isSelectable, normalizeCanonicalUrls, runTool, updateApprovedFacts, validateDraftContent } from "../index.js";
 
 const contact = {
   email: "actu@example.fr",
@@ -61,6 +61,29 @@ test("search quality switches from noisy discovery to source-directed fallback",
   assert.equal(healthy.quality, "healthy");
   assert.equal(healthy.relevantCoverageResults, 1);
   assert.equal(healthy.strategy, "coverage-expansion");
+});
+
+test("tool calls retry a transient registry miss without retrying other failures", async () => {
+  let attempts = 0;
+  const arisa = {
+    tools: {
+      async run() {
+        attempts += 1;
+        if (attempts === 1) throw new Error("Tool not found: pr-campaign");
+        return { ok: true, output: { json: { drafted: true } } };
+      }
+    }
+  };
+  assert.deepEqual(await runTool(arisa, "pr-campaign", { action: "status" }), { drafted: true });
+  assert.equal(attempts, 2);
+
+  attempts = 0;
+  arisa.tools.run = async () => {
+    attempts += 1;
+    throw new Error("pr-campaign failed preflight");
+  };
+  await assert.rejects(runTool(arisa, "pr-campaign", { action: "status" }), /failed preflight/);
+  assert.equal(attempts, 1);
 });
 
 test("agent eligibility bypasses positive keyword gates", () => {

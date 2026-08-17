@@ -740,10 +740,23 @@ function validateDraftContent({ contact, language, body, profile }) {
   return true;
 }
 
+function isTransientMissingTool(error, name) {
+  return String(error?.message || error).includes(`Tool not found: ${name}`);
+}
+
 async function runTool(arisa, name, args, timeoutMs = 120_000, text = "") {
   const request = { name, args };
   if (text) request.text = text;
-  const result = await arisa.tools.run(request, { timeoutMs });
+  let result;
+  for (let attempt = 1; attempt <= 3; attempt += 1) {
+    try {
+      result = await arisa.tools.run(request, { timeoutMs });
+      break;
+    } catch (error) {
+      if (!isTransientMissingTool(error, name) || attempt === 3) throw error;
+      await wait(attempt * 100);
+    }
+  }
   if (!result.ok) throw new Error(result.error || `${name} failed`);
   if (result.output?.json !== undefined) return result.output.json;
   const outputText = result.output?.text || "";
@@ -1117,4 +1130,4 @@ async function main() {
 const isDirectRun = process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url);
 if (isDirectRun) main();
 
-export { assessSearchQuality, discoverContacts, getFactSheetStatus, isSelectable, normalizeCanonicalUrls, updateApprovedFacts, validateDraftContent };
+export { assessSearchQuality, discoverContacts, getFactSheetStatus, isSelectable, normalizeCanonicalUrls, runTool, updateApprovedFacts, validateDraftContent };
