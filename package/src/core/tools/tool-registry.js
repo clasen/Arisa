@@ -236,9 +236,8 @@ export class ToolRegistry {
     this.resolveOfficialToolNames = resolveOfficialToolNames;
   }
 
-  async load() {
-    this.tools.clear();
-
+  async buildSnapshot() {
+    const snapshot = new Map();
     let entries = [];
     try {
       entries = await readdir(userToolsRoot, { withFileTypes: true });
@@ -253,12 +252,12 @@ export class ToolRegistry {
       const configPath = path.join(toolDir, "config.js");
       try {
         const manifest = JSON.parse(await readFile(manifestPath, "utf8"));
-        if (this.tools.has(manifest.name)) continue;
+        if (snapshot.has(manifest.name)) continue;
         const configSource = await readFile(configPath, "utf8");
         const defaults = parseConfigModule(configSource);
         const config = await loadToolConfig(manifest.name, defaults);
         const skillHints = this.skillRegistry.normalizeHints(manifest);
-        this.tools.set(manifest.name, {
+        snapshot.set(manifest.name, {
           ...manifest,
           toolDependencies: normalizeToolDependencies(manifest.toolDependencies),
           category: normalizeCategory(manifest.category),
@@ -275,8 +274,13 @@ export class ToolRegistry {
         // ignore invalid tool dirs in v1
       }
     }
+    return snapshot;
+  }
 
-    this.logger?.log("tools", `loaded ${this.tools.size} tool(s)`);
+  async load() {
+    const snapshot = await this.buildSnapshot();
+    this.tools = snapshot;
+    this.logger?.log("tools", `loaded ${snapshot.size} tool(s)`);
   }
 
   list() {

@@ -928,7 +928,41 @@ async function verifyContact(arisa, profile, contact) {
   return data.check;
 }
 
-async function createDraft(arisa, profile, contact) {
+function approvedFactStatements(profile, language, approvedFacts) {
+  const statements = profile.factSheet?.draftStatements?.[language];
+  if (!Array.isArray(statements) || statements.length === 0) {
+    throw new Error(`Draft preflight failed: missing approved fact statements for ${language}`);
+  }
+  return statements.map((statement, index) => {
+    const factKeys = Array.isArray(statement.factKeys) ? statement.factKeys.map(clean).filter(Boolean) : [];
+    const text = clean(statement.text);
+    if (!factKeys.length || !text) {
+      throw new Error(`Draft preflight failed: invalid approved fact statement ${index + 1} for ${language}`);
+    }
+    const missing = factKeys.filter((key) => !clean(approvedFacts?.[key]));
+    if (missing.length) {
+      throw new Error(`Draft preflight failed: unapproved facts ${missing.join(", ")}`);
+    }
+    return text;
+  });
+}
+
+function buildApprovedFactsBody({ renderedBody, opening, profile, language, approvedFacts }) {
+  const paragraphs = String(renderedBody || "").split(/\n\s*\n/).map(clean).filter(Boolean);
+  if (paragraphs.length < 3) throw new Error(`Draft preflight failed: incomplete template for ${language}`);
+  const greeting = paragraphs[0];
+  const closing = paragraphs.at(-2);
+  const signature = paragraphs.at(-1);
+  return [
+    greeting,
+    clean(opening),
+    ...approvedFactStatements(profile, language, approvedFacts),
+    closing,
+    signature
+  ].filter(Boolean).join("\n\n");
+}
+
+async function createDraft(arisa, profile, contact, approvedFacts = null) {
   const language = detectLanguage(contact, profile);
   const template = profile.templates?.[language] || profile.templates?.[profile.defaultLanguage || "en"];
   if (!template) throw new Error(`No template found for language ${language}`);
@@ -937,10 +971,10 @@ async function createDraft(arisa, profile, contact) {
   const subject = decodeHtmlEntities(render(template.subject, contact, profile));
   const renderedBody = decodeHtmlEntities(render(template.body, contact, profile));
   const opening = clean(contact.groundedOpening) || personalizedOpening(language, research, profile);
-  const body = normalizeCanonicalUrls(
-    decodeHtmlEntities(replaceOpeningParagraph(renderedBody, opening)),
-    profile.draftValidation?.canonicalUrls
-  );
+  const groundedBody = profile.factSheet
+    ? buildApprovedFactsBody({ renderedBody, opening, profile, language, approvedFacts })
+    : replaceOpeningParagraph(renderedBody, opening);
+  const body = normalizeCanonicalUrls(decodeHtmlEntities(groundedBody), profile.draftValidation?.canonicalUrls);
   validateDraftContent({ contact, language, body, profile });
   const data = await runTool(arisa, campaignTool, { action: "create-draft", email: contact.email, subject, body, type: profile.draftType || "first" });
   return {
@@ -1032,6 +1066,9 @@ async function handleRun(request) {
       }
     }
     const selected = eligiblePool.slice(0, Math.min(eligiblePool.length, limit * candidatesPerDraft));
+    const factStatus = profile.factSheet
+      ? await getFactSheetStatus(getChatToolStateDir(request.chatId, toolName), profile)
+      : null;
     const verified = [];
     const drafted = [];
     const skipped = [];
@@ -1051,7 +1088,7 @@ async function handleRun(request) {
             skipped.push({ email: contact.email, reason: "already present in Gmail drafts" });
             continue;
           }
-          drafted.push(await createDraft(arisa, profile, contact));
+          drafted.push(await createDraft(arisa, profile, contact, factStatus?.approvedFacts));
         }
       } catch (error) {
         skipped.push({ email: contact.email, reason: error?.message || String(error) });
@@ -1130,4 +1167,4 @@ async function main() {
 const isDirectRun = process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url);
 if (isDirectRun) main();
 
-export { assessSearchQuality, discoverContacts, getFactSheetStatus, isSelectable, normalizeCanonicalUrls, runTool, updateApprovedFacts, validateDraftContent };
+export { assessSearchQuality, buildApprovedFactsBody, discoverContacts, getFactSheetStatus, isSelectable, normalizeCanonicalUrls, runTool, updateApprovedFacts, validateDraftContent };

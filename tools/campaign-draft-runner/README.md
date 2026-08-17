@@ -1,4 +1,4 @@
-﻿# campaign-draft-runner
+# campaign-draft-runner
 
 Runs recurring, profile-driven outreach research and creates Gmail drafts. It never sends email.
 
@@ -10,7 +10,10 @@ The tool can:
 - reject previously used recipients and outlets;
 - verify email domains before drafting;
 - research coverage on the contact's own site;
-- render localized subject and body templates.
+- render localized subject and body templates;
+- replace legacy product copy with localized `factSheet.draftStatements` whose declared fact keys are present in the owner-approved fact sheet.
+
+For profiles with a `factSheet`, drafting fails closed unless the selected language has `factSheet.draftStatements`. Each statement declares `factKeys`; every key must have an approved value before the statement can enter a Gmail draft. Greeting, grounded opening, closing, and signature remain localized, while all legacy product paragraphs are discarded.
 
 ## Dependencies
 

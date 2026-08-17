@@ -117,6 +117,28 @@ test("loads and lists installed tools from the user tools directory", async () =
   }]);
 });
 
+test("keeps the previous complete snapshot visible while a reload is in progress", async () => {
+  const registry = new ToolRegistry();
+  const previous = { name: "stable-tool" };
+  const replacement = { name: "replacement-tool" };
+  registry.tools = new Map([[previous.name, previous]]);
+
+  let releaseSnapshot;
+  registry.buildSnapshot = () => new Promise((resolve) => {
+    releaseSnapshot = () => resolve(new Map([[replacement.name, replacement]]));
+  });
+
+  const loading = registry.load();
+  for (let attempt = 0; attempt < 1_000; attempt += 1) {
+    assert.equal(registry.get(previous.name), previous);
+  }
+  releaseSnapshot();
+  await loading;
+
+  assert.equal(registry.get(previous.name), null);
+  assert.equal(registry.get(replacement.name), replacement);
+});
+
 test("lists optional semantic metadata with stable defaults", async () => {
   await resetHome();
   await createFakeTool("fake-tool");

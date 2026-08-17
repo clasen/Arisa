@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { mkdtemp, rm } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
-import { assessSearchQuality, discoverContacts, getFactSheetStatus, isSelectable, normalizeCanonicalUrls, runTool, updateApprovedFacts, validateDraftContent } from "../index.js";
+import { assessSearchQuality, buildApprovedFactsBody, discoverContacts, getFactSheetStatus, isSelectable, normalizeCanonicalUrls, runTool, updateApprovedFacts, validateDraftContent } from "../index.js";
 
 const contact = {
   email: "actu@example.fr",
@@ -147,6 +147,32 @@ test("draft preflight accepts grounded evidence without requiring the verbatim c
     body: `${groundedContact.groundedOpening}\n\nThe full article title does not need to be repeated here.`,
     profile: { draftValidation: { requireCoverageSource: true, requireContactSource: true, requireGroundedOpening: true, requireCoverageTitle: true } }
   }), true);
+});
+
+test("fact-backed drafts discard legacy claims and require every declared approval", () => {
+  const factsProfile = {
+    factSheet: {
+      draftStatements: {
+        en: [{ factKeys: ["availability"], text: "The approved availability statement." }]
+      }
+    }
+  };
+  const body = buildApprovedFactsBody({
+    renderedBody: "Hi Example,\n\nUnapproved legacy product claim.\n\nPlease reply.\n\nArisa",
+    opening: "Grounded coverage opening.",
+    profile: factsProfile,
+    language: "en",
+    approvedFacts: { availability: "Approved source fact" }
+  });
+  assert.equal(body, "Hi Example,\n\nGrounded coverage opening.\n\nThe approved availability statement.\n\nPlease reply.\n\nArisa");
+  assert.doesNotMatch(body, /legacy product claim/);
+  assert.throws(() => buildApprovedFactsBody({
+    renderedBody: "Hi Example,\n\nOld claim.\n\nPlease reply.\n\nArisa",
+    opening: "Grounded coverage opening.",
+    profile: factsProfile,
+    language: "en",
+    approvedFacts: {}
+  }), /unapproved facts availability/);
 });
 
 test("canonical campaign URLs gain one trailing slash", () => {
