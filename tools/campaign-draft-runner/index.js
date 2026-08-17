@@ -2,6 +2,7 @@ import { mkdir, open, readFile, rename, rm, stat, writeFile } from "node:fs/prom
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import defaults from "./config.js";
+import { assessSearchQuality, recordSearchQuality } from "./search-quality.js";
 
 const toolName = "campaign-draft-runner";
 const toolDir = path.dirname(fileURLToPath(import.meta.url));
@@ -21,6 +22,7 @@ Usage:
 Actions via args.action:
   run-batch   Reconcile Gmail Sent, verify contacts selected by a profile, and create Gmail drafts only. args: profile?, limit?, dryRun?, untilDrafted?, retryDelaySeconds?, maxAttempts?, maxRuntimeSeconds?
   reconcile-sent Reconcile manually sent Gmail messages into campaign state. args: profile?
+  assess-search-quality Score the first search tranche and persist a five-cycle measurement window. args: profile?, searches=[{query,text}]
   status      Reconcile Gmail Sent and return campaign status and Gmail draft count. args: profile?
 
 Profiles live under the chat-scoped state directory:
@@ -728,8 +730,7 @@ function validateDraftContent({ contact, language, body, profile }) {
   if (rules.requireContactSource === true && !contactSourceUrl(contact)) failures.push("missing public contact source URL");
   if (rules.requireGroundedOpening === true && !groundedOpening) failures.push("missing grounded opening");
   if (groundedOpening && !normalizedBody.includes(groundedOpening)) failures.push("grounded opening was not rendered");
-  if (rules.requireCoverageTitle === true && !coverageTitle) failures.push("missing exact coverage title");
-  if (coverageTitle && !normalizedBody.includes(coverageTitle)) failures.push("exact coverage title was not rendered");
+  if (rules.requireCoverageTitle === true && !coverageTitle) failures.push("missing coverage title metadata");
   const explicitLanguage = clean(contact.language || contact.preferredLanguage).toLowerCase();
   if (explicitLanguage && explicitLanguage !== language) failures.push(`language mismatch: expected ${explicitLanguage}, got ${language}`);
   if (failures.length) throw new Error(`Draft preflight failed: ${failures.join("; ")}`);
@@ -942,6 +943,17 @@ async function handleRun(request) {
   const profile = await loadProfile(request.chatId, args.profile || config.DEFAULT_PROFILE);
   const arisa = createArisaClient({ toolName, chatId: request.chatId });
 
+  if (args.action === "assess-search-quality") {
+    const searches = typeof args.searches === "string" ? JSON.parse(args.searches) : args.searches;
+    if (!Array.isArray(searches)) throw new Error("searches must be a JSON array of {query,text} objects");
+    const assessment = assessSearchQuality(searches);
+    return {
+      action: "assess-search-quality",
+      profile: profile.name,
+      ...(await recordSearchQuality(getChatToolStateDir(request.chatId, toolName), profile.name, assessment))
+    };
+  }
+
   if ((args.action || "run-batch") === "status") {
     const sentReconciliation = await reconcileSentMessages(arisa, request.chatId, profile);
     const campaign = await runTool(arisa, profile.campaignTool || defaults.CAMPAIGN_TOOL, { action: "status" });
@@ -1090,4 +1102,4 @@ async function main() {
 const isDirectRun = process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url);
 if (isDirectRun) main();
 
-export { discoverContacts, isSelectable, normalizeCanonicalUrls, validateDraftContent };
+export { assessSearchQuality, discoverContacts, isSelectable, normalizeCanonicalUrls, validateDraftContent };

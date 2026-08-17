@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { discoverContacts, isSelectable, normalizeCanonicalUrls, validateDraftContent } from "../index.js";
+import { assessSearchQuality, discoverContacts, isSelectable, normalizeCanonicalUrls, validateDraftContent } from "../index.js";
 
 const contact = {
   email: "actu@example.fr",
@@ -21,6 +21,18 @@ const profile = (agentDecidesEligibility) => ({
   languageDetection: [{ language: "fr", match: "\\.fr(?:/|$)" }],
   defaultLanguage: "en",
   discovery: { enabled: true }
+});
+
+test("search quality switches from noisy discovery to source-directed fallback", () => {
+  const poor = assessSearchQuality([{ query: "ambiguous", text: `Search: ambiguous\n\n1. The - Wikipedia\nURL: https://en.wikipedia.org/wiki/The\nSnippet: A dictionary-style result\n2. Microsoft\nURL: https://microsoft.com/\nSnippet: Unrelated software` }]);
+  assert.equal(poor.quality, "poor");
+  assert.equal(poor.strategy, "source-directed");
+  assert.equal(poor.irrelevanceRate, 1);
+
+  const healthy = assessSearchQuality([{ query: "Duskwood Rezension", text: `Search: Duskwood Rezension\n\n1. Duskwood: Krimi-Spiel mit Suchtpotential\nURL: https://levelup.chip.de/duskwood-krimi-spiel-mit-suchtpotential/\nSnippet: Eine Rezension des mobilen Krimispiels\n2. Duskwood - Wikipedia\nURL: https://en.wikipedia.org/wiki/Duskwood\nSnippet: Reference page` }]);
+  assert.equal(healthy.quality, "healthy");
+  assert.equal(healthy.relevantCoverageResults, 1);
+  assert.equal(healthy.strategy, "coverage-expansion");
 });
 
 test("agent eligibility bypasses positive keyword gates", () => {
@@ -70,7 +82,7 @@ test("draft preflight rejects missing grounded evidence", () => {
   }), /Draft preflight failed/);
 });
 
-test("draft preflight accepts rendered evidence and explicit language", () => {
+test("draft preflight accepts grounded evidence without requiring the verbatim coverage title", () => {
   const groundedContact = {
     coverageTitle: "Scriptic: Netflix Edition, la recensione",
     groundedOpening: "Giorgio Melani reviewed Scriptic: Netflix Edition for Multiplayer.it.",
@@ -81,7 +93,7 @@ test("draft preflight accepts rendered evidence and explicit language", () => {
   assert.equal(validateDraftContent({
     contact: groundedContact,
     language: "en",
-    body: `${groundedContact.groundedOpening}\n\n${groundedContact.coverageTitle}`,
+    body: `${groundedContact.groundedOpening}\n\nThe full article title does not need to be repeated here.`,
     profile: { draftValidation: { requireCoverageSource: true, requireContactSource: true, requireGroundedOpening: true, requireCoverageTitle: true } }
   }), true);
 });

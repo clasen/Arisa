@@ -1,13 +1,13 @@
 {
   "name": "campaign-draft-runner",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "toolDependencies": { "pr-campaign": "^0.1.0", "gmail-workspace": "^0.1.0" },
-  "description": "Run configurable outreach draft batches from chat-scoped profiles. Discovers public editorial contacts, keeps coverage and contact provenance separate, validates grounded personalization and language, and creates Gmail drafts only; never sends mail.",
+  "description": "Run configurable outreach draft batches from chat-scoped profiles. Measures search quality, adapts reviewer-first discovery, keeps coverage and contact provenance separate, validates grounded personalization and language, and creates Gmail drafts only; never sends mail.",
   "entry": "index.js",
   "input": ["text/plain", "application/json"],
   "output": ["application/json", "text/plain"],
   "category": "communication",
-  "keywords": ["campaign", "contacts", "discovery", "drafts", "gmail", "polling", "outreach", "pr", "research", "personalization", "provenance", "preflight", "configurable"],
+  "keywords": ["campaign", "contacts", "discovery", "drafts", "gmail", "metrics", "outreach", "pr", "quality", "research", "personalization", "provenance", "preflight", "configurable"],
   "configSchema": {
     "DEFAULT_LIMIT": { "type": "number", "required": false, "prompt": "Default number of drafts per batch." },
     "DEFAULT_PROFILE": { "type": "string", "required": false, "prompt": "Default profile name." }

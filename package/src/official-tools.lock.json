@@ -74,18 +74,19 @@
       }
     },
     "campaign-draft-runner": {
-      "version": "0.1.0",
+      "version": "0.1.1",
       "toolDependencies": {
         "pr-campaign": "^0.1.0",
         "gmail-workspace": "^0.1.0"
       },
       "files": {
-        "README.md": "4e97db605c55c31c5fdb3ad83973f7733cef7a689b71b6d014fe07df631a4f99",
+        "README.md": "026b7f6360e7d41a28972ff6b00738cf9652868dc0c57ce64aca8f102c26e692",
         "config.js": "3c0c252baa7170e0bf0a9d1a7ecdb4febcf19f7baf0fcd320c0b852008f41b63",
-        "index.js": "0fd4574c70e7d008714f17eb54ccc34bc703a1fee7ab7eae768d79f86d2e747c",
+        "index.js": "4a107c2ec37182e400a733922c600b687853120886d4a8914037907871e76497",
         "package.json": "a25b7ed1dd2c30cd68c3c10feb8ee1752cac8cd55cd4344690ffad649e231ec1",
-        "test/selection-policy.test.js": "b1bc804ba2be210230e78d7e4cfa5469e07e75c6ee944f58d77e6d00e88561cd",
-        "tool.manifest.json": "2609869985fd78000c999a9ae03f4b251c0aa945d19eed97e630f70da97c72ce"
+        "search-quality.js": "ab5412d45d5144e976cccef52992e634c11aca0e21b73fd53f9dc2d489c56dd7",
+        "test/selection-policy.test.js": "e79209fac66dafbdf6ce24aafae062b4e4cb780b16d15ce93f71daabb58be2aa",
+        "tool.manifest.json": "535dca97c7ebb4ae89920c608a32351f8f573b443154ce62a42b3942a0c7e7f8"
       }
     },
     "pr-campaign": {
