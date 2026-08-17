@@ -1,5 +1,6 @@
-# Dependencies
+# Dependencies and local package-manager stores
 node_modules/
+.pnpm-store/
 
 # Runtime state, artifacts index, and downloaded media (see src/core/artifacts)
 data/
