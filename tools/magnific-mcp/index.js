@@ -5,6 +5,7 @@ import path from "node:path";
 import { pathToFileURL } from "node:url";
 import defaults from "./config.js";
 import { claimDelivery, deliveryClaimed } from "./delivery-claims.js";
+import { cancelPendingGenerationWatches, claimTerminalEvent } from "./generation-watch-close.js";
 import { generationWatchTasks } from "./generation-watch-plan.js";
 import { callMagnific, findAll, findFirst, findUpload } from "./magnific-api.js";
 import { transfer } from "./network.js";
@@ -220,17 +221,21 @@ async function mainRun(request) {
       job.status = statuses.some((status) => status !== "completed") ? "failed" : "ready";
       job.readyAt = new Date().toISOString();
     }
-    const lastNotification = Date.parse(job.lastNotificationAt || 0);
-    if (job.lastNotificationAt && Date.now() - lastNotification < 30000) {
-      await writeState(stateDir, state);
-      return toolOk({ json: { jobId, status: job.status, skipped: "notification-cooldown" }, mimeType: "application/json" });
-    }
+    const claimed = await claimTerminalEvent(stateDir, jobId, job.status);
+    if (!claimed) return toolOk({ json: { jobId, status: job.status, skipped: "terminal-event-claimed" }, mimeType: "application/json" });
     job.lastNotificationAt = new Date().toISOString();
     await writeState(stateDir, state);
+    let cancelledWatches = 0;
+    let watchCancellationFailed = false;
+    try {
+      cancelledWatches = await cancelPendingGenerationWatches(arisa, jobId, job.watchToken);
+    } catch {
+      watchCancellationFailed = true;
+    }
     const prompt = job.status === "failed"
       ? `Magnific generation job ${jobId} reached a failed terminal state. Tell the user briefly. Do not regenerate automatically.`
       : `Magnific generation job ${jobId} is ready. Deliver every undelivered image now by running magnific-mcp action collect-generation with jobId ${jobId} and each index in [${undelivered.join(",")}], using deliver=true. Do not regenerate. Each collect is fail-closed against uncertain duplicate delivery. After delivery, tell the user briefly that the images are ready.`;
-    return toolOk({ json: { jobId, status: job.status, undelivered }, mimeType: "application/json" }, {
+    return toolOk({ json: { jobId, status: job.status, undelivered, cancelledWatches, watchCancellationFailed }, mimeType: "application/json" }, {
       asyncTask: { kind: "agent_event", payload: { prompt } }
     });
   }

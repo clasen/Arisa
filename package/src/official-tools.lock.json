@@ -54,22 +54,23 @@
       }
     },
     "magnific-mcp": {
-      "version": "0.1.0",
+      "version": "0.1.1",
       "toolDependencies": {
         "mcp-client": "^0.1.0"
       },
       "files": {
-        "README.md": "00342fc9ae98f38716aeb332941524336c0e9ee4a5020104e52e7ed7b61882f9",
+        "README.md": "519b68d10c80112f475ab173394e937b0fc5930758415c1fc65ea2f5536b6371",
         "config.js": "98a629781a1b2541806050952aa78a1e6e1b1671a6f1df7ba36c70dd116936a7",
         "delivery-claims.js": "52f05a5bd1ece1ab21f7d9a49f362f9c55f101ef5723efd642dbecf0236921cd",
+        "generation-watch-close.js": "0dd780280eef870d2f11cb1800e6e9de19e5ead7b9d02b9983852cc8ddbdc79b",
         "generation-watch-plan.js": "eb60660341f254adc224181ca19dbbb969ef1d676aeaab60b71a8567f52648fe",
-        "index.js": "da7d35f2685fa0d5e716073f20725d7a5a4a0c477a1982b106a314662641b989",
+        "index.js": "0dcbd84ad03ab59919df57081d34a45c3a8d59b3c37ac31249409210ae7107e6",
         "magnific-api.js": "39fa9a122577029111965c3e8487565c88ce46b61dec5ca685acf1c76cd3b636",
         "network.js": "b45e43b49eea98ca7d80921ebfa6daf8b0a85d2079d4653f9eda682bc82101ae",
-        "package.json": "10ded9e89c13b500208717610984fd837e67e82ac3b31b21fe0058bd53c22a96",
+        "package.json": "9c44eb43a3555cf79bd327318f9a30d3060f22dd2fd534923e303cca1eed7de9",
         "state-store.js": "c3ee744509f7a6be251cd895406bd1c70827f53cbdc1ac9d1c2a6e48479bfe1e",
-        "test/magnific-mcp.test.js": "c6345e70a7834a22df49abaf648c781f4da2e4d0790cbc13035c8af433c814c5",
-        "tool.manifest.json": "bbb24f54814c67f1ca1e119e6767e59d48f8e0cbc7f92444cf8e22fcc2fe06ed"
+        "test/magnific-mcp.test.js": "7a61dd19a2f6f9f48213cabf0de6e87e0b6fb73a94f0ea9dbfe9c8568c2cc32d",
+        "tool.manifest.json": "ff886d95250d279eff097430e6f89405a2bdd488d5f0949277cbc3f57f918950"
       }
     },
     "campaign-draft-runner": {

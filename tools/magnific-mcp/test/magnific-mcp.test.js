@@ -4,6 +4,7 @@ import os from "node:os";
 import path from "node:path";
 import test from "node:test";
 import { claimDelivery, deliveryClaimed } from "../delivery-claims.js";
+import { cancelPendingGenerationWatches, claimTerminalEvent, terminalEventClaimed } from "../generation-watch-close.js";
 import { generationWatchTasks } from "../generation-watch-plan.js";
 import { findFirst, findUpload, mcpData } from "../magnific-api.js";
 import { publicHttpsUrl } from "../network.js";
@@ -32,6 +33,34 @@ test("plans independent generation checks bound to one job token", () => {
   assert.equal(tasks.every((task) => task.payload.args.jobId === "job-1"), true);
   assert.equal(tasks.every((task) => task.payload.args.watchToken === "token-1"), true);
   assert.equal(new Set(tasks.map((task) => task.runAt)).size, tasks.length);
+});
+
+test("claims one terminal event and cancels only matching pending watches", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "magnific-terminal-"));
+  try {
+    const claims = await Promise.all([
+      claimTerminalEvent(root, "job-1", "ready"),
+      claimTerminalEvent(root, "job-1", "ready")
+    ]);
+    assert.deepEqual(claims.sort(), [false, true]);
+    assert.equal(await terminalEventClaimed(root, "job-1"), true);
+
+    const cancelled = [];
+    const arisa = {
+      tasks: {
+        list: async () => [
+          { id: "matching", kind: "poll_tool", payload: { toolName: "magnific-mcp", args: { action: "watch-generation", jobId: "job-1", watchToken: "token-1" } } },
+          { id: "other-job", kind: "poll_tool", payload: { toolName: "magnific-mcp", args: { action: "watch-generation", jobId: "job-2", watchToken: "token-1" } } },
+          { id: "other-tool", kind: "poll_tool", payload: { toolName: "other", args: { action: "watch-generation", jobId: "job-1", watchToken: "token-1" } } }
+        ],
+        cancel: async ({ taskId }) => cancelled.push(taskId)
+      }
+    };
+    assert.equal(await cancelPendingGenerationWatches(arisa, "job-1", "token-1"), 1);
+    assert.deepEqual(cancelled, ["matching"]);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
 });
 
 test("atomically blocks concurrent duplicate delivery claims", async () => {

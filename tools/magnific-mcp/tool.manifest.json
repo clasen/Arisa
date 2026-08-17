@@ -1,8 +1,8 @@
 {
   "name": "magnific-mcp",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "toolDependencies": { "mcp-client": "^0.1.0" },
-  "description": "Generate and upscale images directly through Magnific MCP with interruption-safe reactive monitoring, duplicate-safe delivery attempts, and artifact output.",
+  "description": "Generate and upscale images directly through Magnific MCP with interruption-safe reactive monitoring, single terminal notifications, duplicate-safe delivery attempts, and artifact output.",
   "entry": "index.js",
   "input": ["image/jpeg", "image/png", "image/webp", "application/json", "text/plain"],
   "output": ["image/*", "application/json", "text/plain"],
