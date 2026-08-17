@@ -1,7 +1,7 @@
 {
   "version": 1,
   "repository": "https://github.com/clasen/Arisa.git",
-  "commit": "eff37798c546e33cc4386c878ee01baa5dbd701c",
+  "commit": "2d08f64c36050110ae7126b27ba476c8e54d0654",
   "tools": {
     "master-slave": {
       "files": {
@@ -103,14 +103,14 @@
       }
     },
     "gmail-workspace": {
-      "version": "0.1.0",
+      "version": "0.1.1",
       "files": {
         "config.js": "6ad295ec4cedbc936835d8f86c7528e0939ef09d5792c003308d2ee85dc5eea4",
-        "index.js": "495b5cec129a71638ab9b2682cf575eb8659e9a100b2e70deb0c523e60b69886",
-        "package.json": "1e88d42180a8dacd08c7ad1aa84d783991f901bb3bca7f0dddc4efd919470bdc",
-        "secretary-state.js": "0c4ef04db0d990a92b4b49ef62135baea76b7e4d5c232dfbf2087c61d1ce1948",
-        "test/secretary-state.test.mjs": "d8e866400853b39dc26e4b4ec09880c3cb1dd0b0091b2d25097388adf38559e7",
-        "tool.manifest.json": "93583b8c3a5f417435e3b3e88b129d2c610f2f168788e510f4cb2c03d4aef3a4"
+        "index.js": "c4b1c27a3c5d2309501b695058da73f6287e2a6239f6e2384c05daae8ee25d43",
+        "package.json": "ba87edd5a148da9e99af6b3ab71a0024b86e1a469d56f548c7eeb253bb431f5d",
+        "secretary-state.js": "afc27732670420bccf1ce56ce715676dd2266de9f2d36a92015a93842755094a",
+        "test/secretary-state.test.mjs": "3aea05524a4ad5ebcb79c6aa1db94fcd009ac8ae69414c8f950b32a32af94370",
+        "tool.manifest.json": "2860c5684b9b9532ab4675f5cc5b96238320209086b132a5eda74ba99b6c294a"
       }
     },
     "x-campaign-runner": {
