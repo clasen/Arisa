@@ -3,6 +3,7 @@ import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import defaults from "./config.js";
 import { assessSearchQuality, recordSearchQuality } from "./search-quality.js";
+import { getFactSheetStatus, updateApprovedFacts } from "./product-facts.js";
 
 const toolName = "campaign-draft-runner";
 const toolDir = path.dirname(fileURLToPath(import.meta.url));
@@ -23,6 +24,8 @@ Actions via args.action:
   run-batch   Reconcile Gmail Sent, verify contacts selected by a profile, and create Gmail drafts only. args: profile?, limit?, dryRun?, untilDrafted?, retryDelaySeconds?, maxAttempts?, maxRuntimeSeconds?
   reconcile-sent Reconcile manually sent Gmail messages into campaign state. args: profile?
   assess-search-quality Score the first search tranche and persist a five-cycle measurement window. args: profile?, searches=[{query,text}]
+  facts-status Return approved product facts and unresolved questions. args: profile?
+  facts-update Store owner-approved product facts. args: profile?, facts=<JSON object>, approvedBy
   status      Reconcile Gmail Sent and return campaign status and Gmail draft count. args: profile?
 
 Profiles live under the chat-scoped state directory:
@@ -954,6 +957,18 @@ async function handleRun(request) {
     };
   }
 
+  if (args.action === "facts-status") {
+    return { action: "facts-status", ...(await getFactSheetStatus(getChatToolStateDir(request.chatId, toolName), profile)) };
+  }
+
+  if (args.action === "facts-update") {
+    const facts = typeof args.facts === "string" ? JSON.parse(args.facts) : args.facts;
+    return {
+      action: "facts-update",
+      ...(await updateApprovedFacts(getChatToolStateDir(request.chatId, toolName), profile, facts, args.approvedBy))
+    };
+  }
+
   if ((args.action || "run-batch") === "status") {
     const sentReconciliation = await reconcileSentMessages(arisa, request.chatId, profile);
     const campaign = await runTool(arisa, profile.campaignTool || defaults.CAMPAIGN_TOOL, { action: "status" });
@@ -1102,4 +1117,4 @@ async function main() {
 const isDirectRun = process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url);
 if (isDirectRun) main();
 
-export { assessSearchQuality, discoverContacts, isSelectable, normalizeCanonicalUrls, validateDraftContent };
+export { assessSearchQuality, discoverContacts, getFactSheetStatus, isSelectable, normalizeCanonicalUrls, updateApprovedFacts, validateDraftContent };

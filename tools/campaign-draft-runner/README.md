@@ -117,6 +117,8 @@ When the normal pass leaves no eligible candidates, `discovery.creativeDiscovery
 
 With `discovery.archiveEmptyQueries` enabled (the default), a completed query that yields no eligible contact is archived in chat-scoped discovery state and omitted from later rotations. Queries with search or page errors are not archived, so temporary provider failures remain retryable.
 
+Profiles may define a dated, owner-bound `factSheet.fields` list for product claims. `facts-update` accepts only declared keys and records the approver and timestamp; `facts-status` returns approved facts separately from unresolved questions. Secretary and outreach workflows must use only `approvedFacts` and ask the owner instead of filling gaps. Facts are stored in the chat-scoped tool state, not in the installed package.
+
 For agent-reviewed discovery, run the first search tranche with simple native-language competitor and coverage terms, then call `assess-search-quality` with `searches` as a JSON array (or its JSON-string form through Arisa): `[{ "query": "...", "text": "..." }]`. The action classifies noisy store, dictionary, reference, directory, and unrelated results; recommends either source-directed fallback or broader coverage expansion; and persists a five-cycle metrics window without storing raw search payloads. When quality is poor, remove contact terms, open credible coverage first, and spend the remaining search budget on the identified outlet, author, localized title, or source domain.
 
 Research source URLs are omitted from personalized openings by default so outreach contains only the campaign link. Set `personalization.includeSourceUrl: true` only when a profile explicitly needs the source URL in the email.

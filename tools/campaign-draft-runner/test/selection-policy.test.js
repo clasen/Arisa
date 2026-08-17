@@ -1,6 +1,9 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { assessSearchQuality, discoverContacts, isSelectable, normalizeCanonicalUrls, validateDraftContent } from "../index.js";
+import { mkdtemp, rm } from "node:fs/promises";
+import os from "node:os";
+import path from "node:path";
+import { assessSearchQuality, discoverContacts, getFactSheetStatus, isSelectable, normalizeCanonicalUrls, updateApprovedFacts, validateDraftContent } from "../index.js";
 
 const contact = {
   email: "actu@example.fr",
@@ -21,6 +24,31 @@ const profile = (agentDecidesEligibility) => ({
   languageDetection: [{ language: "fr", match: "\\.fr(?:/|$)" }],
   defaultLanguage: "en",
   discovery: { enabled: true }
+});
+
+test("fact sheet exposes only approved facts and keeps unresolved questions explicit", async () => {
+  const directory = await mkdtemp(path.join(os.tmpdir(), "campaign-facts-"));
+  const factProfile = {
+    name: "example",
+    factSheet: {
+      owner: "owner",
+      fields: [
+        { key: "access", question: "How is access provided?" },
+        { key: "pricing", question: "What is the price?" }
+      ]
+    }
+  };
+  try {
+    const initial = await getFactSheetStatus(directory, factProfile);
+    assert.deepEqual(initial.approvedFacts, {});
+    assert.equal(initial.pendingQuestions.length, 2);
+    const updated = await updateApprovedFacts(directory, factProfile, { access: "Public download" }, "owner");
+    assert.equal(updated.approvedFacts.access, "Public download");
+    assert.deepEqual(updated.pendingQuestions.map((item) => item.key), ["pricing"]);
+    await assert.rejects(updateApprovedFacts(directory, factProfile, { invented: "no" }, "owner"), /Unknown fact keys/);
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
 });
 
 test("search quality switches from noisy discovery to source-directed fallback", () => {
