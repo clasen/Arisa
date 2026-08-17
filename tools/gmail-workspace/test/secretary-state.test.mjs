@@ -1,6 +1,6 @@
-﻿import test from "node:test";
+import test from "node:test";
 import assert from "node:assert/strict";
-import { acknowledgeSecretaryMessages, selectSecretaryWake } from "../secretary-state.js";
+import { acknowledgeSecretaryMessages, secretaryCorrectionStreak, selectSecretaryWake } from "../secretary-state.js";
 
 test("new messages wake and receive a retry lease", () => {
   const now = "2026-08-08T12:00:00.000Z";
@@ -50,4 +50,30 @@ test("a later reply in an acknowledged thread still wakes", () => {
     { id: "old", threadId: "thread" }
   ], previous, { now: "2026-08-09T12:00:00.000Z" });
   assert.deepEqual(result.selected.map((item) => item.id), ["new"]);
+});
+
+test("two consecutive corrective replies hard-stop the next thread wake", () => {
+  let state = acknowledgeSecretaryMessages({}, ["first"], "replied-with-correction", "2026-08-08T12:00:00.000Z").state;
+  state.messages.first.threadId = "thread";
+  state = acknowledgeSecretaryMessages(state, ["second"], "replied-with-final-corrections", "2026-08-08T13:00:00.000Z").state;
+  state.messages.second.threadId = "thread";
+
+  const result = selectSecretaryWake([{ id: "new", threadId: "thread" }], state, { now: "2026-08-08T14:00:00.000Z" });
+  assert.equal(secretaryCorrectionStreak(state, "thread"), 2);
+  assert.deepEqual(result.selected[0].correctionGate, {
+    blocked: true,
+    correctionReplyCount: 2,
+    threshold: 2
+  });
+});
+
+test("a non-corrective disposition resets the correction streak", () => {
+  let state = acknowledgeSecretaryMessages({}, ["first"], "replied-with-correction", "2026-08-08T12:00:00.000Z").state;
+  state.messages.first.threadId = "thread";
+  state = acknowledgeSecretaryMessages(state, ["second"], "intentionally-ignored-closing-courtesy", "2026-08-08T13:00:00.000Z").state;
+  state.messages.second.threadId = "thread";
+
+  const result = selectSecretaryWake([{ id: "new", threadId: "thread" }], state, { now: "2026-08-08T14:00:00.000Z" });
+  assert.equal(secretaryCorrectionStreak(state, "thread"), 0);
+  assert.equal(result.selected[0].correctionGate.blocked, false);
 });

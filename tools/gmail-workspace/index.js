@@ -1,4 +1,4 @@
-﻿import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
+import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
@@ -53,8 +53,8 @@ Actions via args.action:
   stop-watch      Stop Gmail push watch
   history         List changes since args.startHistoryId or saved watch historyId
   handle-pubsub   Decode Pub/Sub push payload and list changed message IDs. args: payload?
-  poll-secretary  Lease/retry callback for schedulers: wakes agent for matching mail until it is acknowledged, independent of read state
-  secretary-ack   Acknowledge handled or intentionally ignored monitor messages. args: ids, disposition?
+  poll-secretary  Lease/retry callback for schedulers: wakes agent for matching mail until it is acknowledged, independent of read state; hard-stops threads after two consecutive corrective replies
+  secretary-ack   Acknowledge handled or intentionally ignored monitor messages. Use a disposition containing correction when a corrective reply was sent. args: ids, disposition?
   raw             Run an allowed raw gws Gmail command. args.argv: ["gmail","users",...]
 
 Authentication uses Google Workspace CLI OAuth/API credentials, not browser cookies.
@@ -739,7 +739,8 @@ async function handle(request, config) {
     const data = await gwsJson(["gmail", "users", "messages", "list", "--params", JSON.stringify({ userId: uid, q: query, maxResults })], config);
     const selection = selectSecretaryWake(data.messages || [], current, {
       retrySeconds: Number(request.args?.retrySeconds || 600),
-      maxWake: Number(request.args?.maxWake || 20)
+      maxWake: Number(request.args?.maxWake || 20),
+      correctionGateThreshold: Number(request.args?.correctionGateThreshold || 2)
     });
     await writeJsonAtomic(monitorPath, selection.state);
     if (!selection.selected.length) {
@@ -747,10 +748,14 @@ async function handle(request, config) {
     }
 
     const ids = selection.selected.map((message) => message.id);
+    const blockedIds = selection.selected.filter((message) => message.correctionGate?.blocked).map((message) => message.id);
+    const correctionStop = blockedIds.length
+      ? `\n\nHard stop for message IDs ${blockedIds.join(", ")}: each thread already has at least two consecutive corrective replies. Read the message and inspect the thread, but do not send another external reply. Alert the user with a concise summary, wait for guidance, and acknowledge each exact ID with disposition actionable-thread-escalation-awaiting-user.`
+      : "";
     const basePrompt = request.args?.wakePrompt || "Review the exact Gmail messages listed below as the user's secretary. Read every message by id, handle genuine replies, classify bounces, and ignore unrelated mail safely.";
     const prompt = `${basePrompt}
 
-Exact Gmail message IDs for this wake: ${ids.join(", ")}. Read every ID even if Gmail already marks it read. Before replying, inspect the thread for a later outgoing answer so a retry never creates a duplicate. After each message is replied to, recorded as a bounce, found already answered, or intentionally ignored, call gmail-workspace action secretary-ack with that exact ID and a disposition. If this agent run fails before acknowledgement, the monitor will retry after its lease expires.`;
+Exact Gmail message IDs for this wake: ${ids.join(", ")}. Read every ID even if Gmail already marks it read. Before replying, inspect the thread for a later outgoing answer so a retry never creates a duplicate. When a corrective reply is sent, use a secretary-ack disposition containing correction so the thread safety gate remains deterministic. After each message is replied to, recorded as a bounce, found already answered, intentionally ignored, or escalated to the user, call gmail-workspace action secretary-ack with that exact ID and a disposition. If this agent run fails before acknowledgement, the monitor will retry after its lease expires.${correctionStop}`;
     return {
       text: `Wake agent: ${ids.length} due matching message(s).`,
       json: { shouldWakeAgent: true, query, messages: selection.selected },

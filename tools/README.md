@@ -87,7 +87,7 @@ Check GitHub token and repository access or star a repository through the GitHub
 
 ### [`gmail-workspace`](./gmail-workspace/)
 
-Read, search, send, and manage Gmail through Google Workspace CLI with OAuth or API credentials. Browser cookies are not accepted.
+Read, search, send, and manage Gmail through Google Workspace CLI with OAuth or API credentials, including lease-based secretary monitoring and deterministic escalation after repeated corrective replies. Browser cookies are not accepted.
 
 - **Category:** `communication`
 - **Tags:** `email` · `essential` · `gmail` · `inbox` · `polling` · `secretary` · `send` · `workspace`

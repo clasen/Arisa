@@ -1,7 +1,7 @@
 {
   "name": "gmail-workspace",
-  "version": "0.1.0",
-  "description": "Read, search, send, and manage Gmail via Google Workspace CLI using OAuth/API credentials. Does not accept browser cookies.",
+  "version": "0.1.1",
+  "description": "Read, search, send, and manage Gmail via Google Workspace CLI, with lease-based secretary monitoring and deterministic correction-loop escalation. Does not accept browser cookies.",
   "entry": "index.js",
   "input": [
     "text/plain",
