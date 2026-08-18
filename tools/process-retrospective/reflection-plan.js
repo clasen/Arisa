@@ -58,13 +58,15 @@ export function buildReflectionPrompt({ passNumber, passesPerFocus, reviewWindow
 
 Review only the last ${windowHours} hours of relevant chat activity, scheduled-task outcomes, tool results, user corrections, and persisted operational state that is safe and necessary to inspect. Do not expose credentials or private payloads. Do not modify code, configuration, schedules, drafts, messages, or external systems during this turn.
 
+Before drawing conclusions, reconstruct the whole review window rather than anchoring on the latest exchange. Build a private evidence inventory covering every explicit user correction, rejection, rewrite, or clarification; significant scheduled-task outcomes; meaningful tool successes or failures; and relevant state changes. Inspect activity from the beginning, middle, and end of the window when each exists. Do not show the inventory or private payloads to the user.
+
 Questions:
 - ${focus.questions[0]}
 - ${focus.questions[1]}
 
-Use concrete evidence. Separate temporary incidents from recurring process problems. Check whether an earlier safeguard or proposal already addresses the issue. Propose at most ${proposalLimit} small, testable improvements, each with evidence, expected benefit, risk, and a way to measure the result. Do not propose change for its own sake.
+Use concrete evidence from distinct activities or time points when available. Do not make every proposal a variation of one incident. Separate temporary incidents from recurring process problems. Check whether an earlier safeguard or proposal already addresses the issue. Do not propose change for its own sake.
 
-If the process looks healthy or there is not enough evidence for a useful improvement, remain silent. Otherwise send the user a concise retrospective and ask before any implementation.`;
+If the process looks healthy or the full window does not support ${proposalLimit} useful improvements, remain silent. Otherwise send a concise retrospective with exactly ${proposalLimit} small, testable improvements, ordered by expected impact. Each must include evidence, expected benefit, risk, and a way to measure the result. Ask before any implementation.`;
 }
 
 export function listFocuses() {

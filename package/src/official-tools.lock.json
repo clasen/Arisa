@@ -173,9 +173,9 @@
         "config.js": "30703e809f0a2c4b85ffb1e1f9cd7ee599224e9bc62c3bc19e71e271cbc72b5d",
         "index.js": "9bd1ae078293211387ee3035b4c4dc7cc5852d08503cd55cf5fb3187cf1ace34",
         "package.json": "e3978089354004e495b7c7f4b4edd9c0984b34f68229d0dfdafbb2e606d48c8d",
-        "reflection-plan.js": "ae78b47f5108993395fe9a6f1ff2eea0663a07ae1100780f9a63107fd6402314",
+        "reflection-plan.js": "78208b7316cf198213b3cc041154b1a46f1182a84c1bfc7c4474e9d609e3c708",
         "state-store.js": "6d0d39bff7e5e16558123c088eb8946bf3758596ae974598936b94424618c7cf",
-        "test/reflection-plan.test.js": "d4e960948fc76aaed03651652a592ee4b3109abbb91693d415945cbb79642237",
+        "test/reflection-plan.test.js": "1480f74323fe2bc4f38573c462046a81a1ea198dc0783fe8c8abbda8cdcb93e4",
         "tool.manifest.json": "4304208986be075c95c6d71aa97d301fd266af18fef1b6ddac4cf004e38427e7"
       }
     },
