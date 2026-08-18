@@ -25,6 +25,21 @@ test("general topic reuses the owner session while other topics stay separate", 
   );
 });
 
+test("general topic omits Telegram's non-addressable thread id for replies", async () => {
+  const route = await resolveTelegramWorkspaceRoute({
+    config: { telegram: { ownerWorkspaceGroups: { "-100123": { ownerChatId: 42, generalTopicId: 1 } } } },
+    api: api(),
+    ctx: {
+      chat: { id: -100123, type: "supergroup", is_forum: true },
+      from: { id: 42 },
+      message: { message_thread_id: 1 }
+    }
+  });
+  assert.equal(route.sessionId, "42");
+  assert.equal(route.topicThreadId, 1);
+  assert.equal(route.threadId, null);
+});
+
 test("owner workspace gate fails closed when another member joins", async () => {
   assert.deepEqual(
     await verifyOwnerWorkspaceGroup({ api: api({ count: 3 }), groupChatId: -100123, ownerChatId: 42, senderId: 42 }),

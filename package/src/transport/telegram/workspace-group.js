@@ -62,7 +62,8 @@ export async function resolveTelegramWorkspaceRoute({ config, api, ctx }) {
     senderId: ctx?.from?.id
   });
   if (!gate.ok) return { ...gate, workspace: true };
-  const threadId = telegramMessageThreadId(ctx);
+  const topicThreadId = telegramMessageThreadId(ctx);
+  const generalTopic = topicThreadId === configured.generalTopicId;
   return {
     ok: true,
     workspace: true,
@@ -70,12 +71,13 @@ export async function resolveTelegramWorkspaceRoute({ config, api, ctx }) {
     sessionId: topicSessionId({
       ownerChatId: configured.ownerChatId,
       groupChatId,
-      threadId,
+      threadId: topicThreadId,
       generalTopicId: configured.generalTopicId
     }),
     scopeChatId: configured.ownerChatId,
     transportChatId: groupChatId,
-    threadId,
+    threadId: generalTopic ? null : topicThreadId,
+    topicThreadId,
     generalTopicId: configured.generalTopicId
   };
 }
