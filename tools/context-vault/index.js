@@ -6,6 +6,7 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 import { mkdir, readFile, readdir } from "node:fs/promises";
 import DeepBase from "deepbase";
 import defaults from "./config.js";
+import { classifyContextTimeout } from "./operation-timeout.js";
 
 const toolName = "context-vault";
 const require = createRequire(import.meta.url);
@@ -48,6 +49,9 @@ Actions via args.action:
 DeepBase remains the source of truth. SeekMix 1.4 provides a derived multilingual
 semantic index in a warm chat-scoped daemon; recall reranks semantic candidates with
 lexical overlap, importance, and recency.
+
+Timed-out reads are marked retry-safe. Timed-out mutations return outcome_uncertain
+and must be checked before any retry.
 `);
 }
 
@@ -416,14 +420,19 @@ async function closeContext(context) {
 }
 
 async function runClient(requestFile) {
+  let request = null;
   try {
-    const request = JSON.parse((await readFile(requestFile, "utf8")).replace(/^\uFEFF/, ""));
+    request = JSON.parse((await readFile(requestFile, "utf8")).replace(/^\uFEFF/, ""));
     if (!request.chatId) throw new Error("chatId is required");
     const config = await loadToolConfig(toolName, defaults, request.chatId);
     const output = await runtimeFor(request.chatId).submit({ request }, { timeoutMs: asNumber(config.JOB_TIMEOUT_MS, defaults.JOB_TIMEOUT_MS), readyTimeoutMs: asNumber(config.READY_TIMEOUT_MS, defaults.READY_TIMEOUT_MS) });
     console.log(JSON.stringify(toolOk(output)));
   } catch (error) {
-    console.log(JSON.stringify(toolError(error.message || String(error))));
+    const action = String(request?.args?.action || "recall").toLowerCase();
+    const timeout = classifyContextTimeout(error, action);
+    console.log(JSON.stringify(timeout
+      ? toolError(timeout.error, timeout)
+      : toolError(error.message || String(error))));
   }
 }
 

@@ -1,8 +1,9 @@
 {
   "name": "context-vault",
-  "version": "1.1.0",
+  "version": "1.1.1",
   "type": "module",
   "private": true,
+  "scripts": { "test": "node --test test/*.test.js" },
   "dependencies": {
     "deepbase": "^3.6.9",
     "seekmix": "1.4.0"

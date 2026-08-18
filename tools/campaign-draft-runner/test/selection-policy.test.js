@@ -4,6 +4,7 @@ import { mkdtemp, rm } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { assessSearchQuality, buildApprovedFactsBody, checkExhaustedSources, discoverContacts, getFactSheetStatus, isSelectable, normalizeCanonicalUrls, recordExhaustedSources, runTool, updateApprovedFacts, validateDraftContent } from "../index.js";
+import { classifyToolTimeout } from "../operation-timeout.js";
 
 const contact = {
   email: "actu@example.fr",
@@ -104,6 +105,17 @@ test("tool calls retry a transient registry miss without retrying other failures
   };
   await assert.rejects(runTool(arisa, "pr-campaign", { action: "status" }), /failed preflight/);
   assert.equal(attempts, 1);
+});
+
+test("tool timeouts distinguish uncertain mutations from retry-safe reads", () => {
+  const mutation = classifyToolTimeout(new Error("Arisa IPC request timed out"), "pr-campaign", "create-draft");
+  assert.equal(mutation.status, "outcome_uncertain");
+  assert.equal(mutation.resolution.type, "check_operation_status");
+
+  const read = classifyToolTimeout(new Error("Arisa IPC request timed out"), "pr-campaign", "status");
+  assert.equal(read.status, "timed_out");
+  assert.equal(read.resolution.type, "retry_safe");
+  assert.equal(classifyToolTimeout(new Error("validation failed"), "pr-campaign", "create-draft"), null);
 });
 
 test("agent eligibility bypasses positive keyword gates", () => {

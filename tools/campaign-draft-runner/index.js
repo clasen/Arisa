@@ -5,6 +5,7 @@ import defaults from "./config.js";
 import { assessSearchQuality, recordSearchQuality } from "./search-quality.js";
 import { getFactSheetStatus, updateApprovedFacts } from "./product-facts.js";
 import { checkExhaustedSources, recordExhaustedSources } from "./source-exhaustion.js";
+import { classifyToolTimeout, toolOutcomeError } from "./operation-timeout.js";
 
 const toolName = "campaign-draft-runner";
 const toolDir = path.dirname(fileURLToPath(import.meta.url));
@@ -757,6 +758,8 @@ async function runTool(arisa, name, args, timeoutMs = 120_000, text = "") {
       result = await arisa.tools.run(request, { timeoutMs });
       break;
     } catch (error) {
+      const timeout = classifyToolTimeout(error, name, args?.action);
+      if (timeout) throw toolOutcomeError(timeout);
       if (!isTransientMissingTool(error, name) || attempt === 3) throw error;
       await wait(attempt * 100);
     }
@@ -1194,7 +1197,7 @@ async function main() {
     const output = await runRequest(request);
     console.log(JSON.stringify({ ok: true, output: { text: JSON.stringify(output, null, 2), json: output, mimeType: "application/json" } }));
   } catch (error) {
-    console.log(JSON.stringify({ ok: false, error: error?.message || String(error) }));
+    console.log(JSON.stringify(error?.toolResult || { ok: false, status: "failed", error: error?.message || String(error) }));
   }
 }
 
