@@ -46,9 +46,9 @@ export function formatLocationText(message) {
   return lines.join("\n");
 }
 
-export async function captureIncomingArtifact(ctx, artifactStore) {
+export async function captureIncomingArtifact(ctx, artifactStore, { storageChatId = ctx.chat.id } = {}) {
   const chatId = ctx.chat.id;
-  const store = artifactStore.forChat(chatId);
+  const store = artifactStore.forChat(storageChatId);
   const baseSource = {
     type: "telegram",
     chatId,

@@ -25,6 +25,7 @@ const arisaToolNames = [
   "list_scheduled_tasks",
   "cancel_scheduled_task",
   "cancel_all_scheduled_tasks",
+  "create_telegram_topic",
   "send_artifact"
 ];
 
@@ -100,6 +101,16 @@ function summarizeRetainedContext(messages = []) {
     toolResultPercent: estimatedTokens ? toolResultTokens / estimatedTokens * 100 : 0,
     largestMessagePercent: estimatedTokens ? largestMessageTokens / estimatedTokens * 100 : 0
   };
+}
+
+function guardTools(tools, accessGuard) {
+  return tools.map((tool) => ({
+    ...tool,
+    execute: async (...args) => {
+      await accessGuard();
+      return tool.execute(...args);
+    }
+  }));
 }
 
 function closeAgentSession(session) {
@@ -388,7 +399,7 @@ export class AgentManager {
     return this.validatePiAgent(config);
   }
 
-  async getSessionContext(chatId, telegram) {
+  async getSessionContext(chatId, telegram, { scopeChatId = chatId, accessGuard = async () => {} } = {}) {
     const sessionKey = String(chatId);
     const modelSelection = resolveChatModelSelection(this.config, sessionKey);
     const effectiveModelId = modelSelection.model;
@@ -406,6 +417,8 @@ export class AgentManager {
           this.logger?.log("agent", `updating speed for chat ${sessionKey}: ${existing.speedController.speed}x -> ${desiredSpeed}x`);
           existing.speedController.setSpeed(desiredSpeed);
         }
+        existing.telegramTarget.current = telegram;
+        existing.accessGuardTarget.current = accessGuard;
         this.logger?.log("agent", `reusing session for chat ${sessionKey}`);
         return existing;
       }
@@ -438,10 +451,17 @@ export class AgentManager {
     );
     const hasExistingSession = sessionManager.buildSessionContext().messages.length > 0;
     this.logger?.log("agent", `${hasExistingSession ? "resuming" : "creating"} session for chat ${sessionKey} with model ${effectiveModelId} effort ${thinkingLevel} speed ${speed}x`);
-    const customTools = [
-      ...this.createTools(telegram, chatId, policy),
+    const telegramTarget = { current: telegram };
+    const accessGuardTarget = { current: accessGuard };
+    const telegramProxy = {
+      sendMedia: (...args) => telegramTarget.current.sendMedia(...args),
+      createForumTopic: (...args) => telegramTarget.current.createForumTopic(...args)
+    };
+    const assertAccess = () => accessGuardTarget.current();
+    const customTools = guardTools([
+      ...this.createTools(telegramProxy, scopeChatId, policy),
       createSystemShellTool({ workspaceDir: policy.workspaceDir, shell: policy.shell })
-    ];
+    ], assertAccess);
     const settingsManager = createPiSettingsManager(this.config);
     const resourceLoader = await createArisaResourceLoader({
       cwd: policy.workspaceDir,
@@ -473,7 +493,14 @@ export class AgentManager {
       })}`);
     }
 
-    const ctx = { session, modelId: effectiveModelId, modelKey: effectiveModelKey, speedController };
+    const ctx = {
+      session,
+      modelId: effectiveModelId,
+      modelKey: effectiveModelKey,
+      speedController,
+      telegramTarget,
+      accessGuardTarget
+    };
     this.sessions.set(sessionKey, ctx);
     if (isNewSession) {
       this.pendingNewSessions.delete(sessionKey);
@@ -755,6 +782,20 @@ export class AgentManager {
             content: [{ type: "text", text: JSON.stringify({ ok: true, cancelled: tasks.length }, null, 2) }],
             details: { ok: true, tasks }
           };
+        }
+      }),
+      defineTool({
+        name: "create_telegram_topic",
+        label: "Create Telegram topic",
+        description: "Create a new topic in the current owner-only Telegram forum when the user asks for one. Topic names are dynamic, not predefined.",
+        parameters: Type.Object({ name: Type.String({ minLength: 1, maxLength: 128 }) }),
+        execute: async (_id, params) => {
+          if (typeof telegram.createForumTopic !== "function") {
+            const result = { ok: false, error: "Telegram topic creation is unavailable in this chat." };
+            return { content: [{ type: "text", text: JSON.stringify(result) }], details: result };
+          }
+          const result = await telegram.createForumTopic(params.name.trim());
+          return { content: [{ type: "text", text: JSON.stringify(result, null, 2) }], details: result };
         }
       }),
       defineTool({

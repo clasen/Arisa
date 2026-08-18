@@ -18,7 +18,8 @@ export const daemonConfigDefaults = Object.freeze({
 
 export const telegramConfigDefaults = Object.freeze({
   modelPickerPageSize: 8,
-  busyMessageMode: "steer"
+  busyMessageMode: "steer",
+  ownerWorkspaceGroups: Object.freeze({})
 });
 
 export const doctorConfigDefaults = Object.freeze({

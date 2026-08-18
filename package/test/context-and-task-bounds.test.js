@@ -154,6 +154,7 @@ test("chat state uses one queue for numeric and string chat IDs", () => {
   assert.deepEqual(resetState, {
     processing: false,
     pendingPrompts: [],
+    pendingPromptContexts: [],
     continueAfterClose: false,
     historyRevision: 0,
     beforeNextPrompt: null,

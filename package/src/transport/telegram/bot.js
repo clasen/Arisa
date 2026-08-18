@@ -18,6 +18,7 @@ import { formatToolUsageReport } from "../../runtime/tool-usage-report.js";
 import { ToolResourceNoteStore } from "../../core/tools/tool-resource-note-store.js";
 import { formatUpdateReport } from "../../runtime/update-manager.js";
 import { buildUpdatePicker, createTelegramUpdateCallbackHandler } from "./update-command.js";
+import { resolveTelegramWorkspaceRoute } from "./workspace-group.js";
 
 const slowPromptNoticeMs = 300_000;
 
@@ -469,6 +470,7 @@ export function createChatStateStore() {
     const state = {
       processing: false,
       pendingPrompts: [],
+      pendingPromptContexts: [],
       continueAfterClose: false,
       historyRevision: 0,
       beforeNextPrompt: null,
@@ -493,13 +495,21 @@ export function createChatStateStore() {
   };
 }
 
-export function queueChatPrompt(chatState, prompt, { replace = false } = {}) {
-  if (replace) chatState.pendingPrompts = [];
+export function queueChatPrompt(chatState, prompt, { replace = false, ctx = null } = {}) {
+  chatState.pendingPromptContexts ||= [];
+  if (replace) {
+    chatState.pendingPrompts = [];
+    chatState.pendingPromptContexts = [];
+  }
   chatState.pendingPrompts.push(prompt);
+  chatState.pendingPromptContexts.push(ctx);
 }
 
 function takeQueuedPrompt(chatState) {
-  return chatState.pendingPrompts.shift() || "";
+  return {
+    prompt: chatState.pendingPrompts.shift() || "",
+    ctx: (chatState.pendingPromptContexts ||= []).shift() || null
+  };
 }
 
 export function resolveTelegramBusyMessageMode(config, chatId) {
@@ -508,7 +518,7 @@ export function resolveTelegramBusyMessageMode(config, chatId) {
   return mode === "steer" ? "steer" : "queue";
 }
 
-export async function routeBusyPrompt({ chatState, prompt, mode = "queue", replaceQueued = false }) {
+export async function routeBusyPrompt({ chatState, prompt, mode = "queue", replaceQueued = false, ctx = null }) {
   const session = chatState.activeSession;
   if (
     mode === "steer"
@@ -523,12 +533,12 @@ export async function routeBusyPrompt({ chatState, prompt, mode = "queue", repla
       chatState.activeSteers.push(prompt);
       return { disposition: "steered" };
     } catch (error) {
-      queueChatPrompt(chatState, prompt);
+      queueChatPrompt(chatState, prompt, { ctx });
       return { disposition: "queued", steerError: error };
     }
   }
 
-  queueChatPrompt(chatState, prompt, { replace: replaceQueued });
+  queueChatPrompt(chatState, prompt, { replace: replaceQueued, ctx });
   return { disposition: "queued" };
 }
 
@@ -553,9 +563,10 @@ export async function drainChatPromptQueue({
         if (chatState.beforeNextPrompt === gate) chatState.beforeNextPrompt = null;
       }
       if (chatState.continueAfterClose && chatState.pendingPrompts.length) {
-        currentPrompt = takeQueuedPrompt(chatState);
+        const queued = takeQueuedPrompt(chatState);
+        currentPrompt = queued.prompt;
+        currentCtx = queued.ctx;
         chatState.continueAfterClose = false;
-        currentCtx = null;
       }
       try {
         await processPrompt({ prompt: currentPrompt, ctx: currentCtx });
@@ -570,7 +581,9 @@ export async function drainChatPromptQueue({
         currentCtx = null;
       }
 
-      currentPrompt = takeQueuedPrompt(chatState);
+      const queued = takeQueuedPrompt(chatState);
+      currentPrompt = queued.prompt;
+      currentCtx = queued.ctx;
       chatState.continueAfterClose = false;
     }
   } finally {
@@ -597,26 +610,18 @@ export async function createTelegramBot({ config, artifactStore, toolRegistry, t
   const conversationHistory = new ConversationHistoryStore();
   const notifiedPromptErrors = new WeakSet();
   const authRenewals = new Map();
+  const workspaceRoutes = new WeakMap();
+  const workspaceGateStates = new Map();
   let piAuthIssue = null;
   let taskTimer = null;
 
   const handleRestartCommand = createTelegramRestartHandler({
-    authorize: (ctx) => authorizeChat({
-      config,
-      chatId: ctx.chat.id,
-      saveConfig,
-      chatMeta: getIncomingChatMeta(ctx)
-    }),
+    authorize: authorizeContext,
     requestRestart,
     logger
   });
   const handleUpdateCallback = createTelegramUpdateCallbackHandler({
-    authorize: (ctx) => authorizeChat({
-      config,
-      chatId: ctx.chat.id,
-      saveConfig,
-      chatMeta: getIncomingChatMeta(ctx)
-    }),
+    authorize: authorizeContext,
     updateCore,
     updateTools,
     requestRestart,
@@ -743,6 +748,45 @@ export async function createTelegramBot({ config, artifactStore, toolRegistry, t
     };
   }
 
+  async function authorizeContext(ctx) {
+    const route = await resolveTelegramWorkspaceRoute({ config, api: ctx.api, ctx });
+    if (!route.workspace) {
+      const auth = await authorizeChat({ config, chatId: ctx.chat.id, saveConfig, chatMeta: getIncomingChatMeta(ctx) });
+      if (auth.ok) workspaceRoutes.set(ctx, route);
+      return auth;
+    }
+
+    const gateKey = String(ctx.chat.id);
+    const previous = workspaceGateStates.get(gateKey);
+    if (!route.ok) {
+      workspaceGateStates.set(gateKey, route.reason || "locked");
+      if (previous !== (route.reason || "locked")) {
+        await ctx.reply("Private workspace access is paused because this forum is no longer owner-only.").catch(() => {});
+      }
+      return { ok: false, reason: route.reason || "workspace-locked" };
+    }
+    if (!(config.telegram.authorizedChatIds || []).includes(route.ownerChatId)) {
+      return { ok: false, reason: "owner-not-authorized" };
+    }
+    workspaceRoutes.set(ctx, route);
+    workspaceGateStates.set(gateKey, "ready");
+    if (previous && previous !== "ready") {
+      await ctx.reply("Private workspace access restored.").catch(() => {});
+    }
+    return { ok: true, firstTime: false, workspace: true };
+  }
+
+  function contextRoute(ctx) {
+    return workspaceRoutes.get(ctx) || {
+      ok: true,
+      workspace: false,
+      sessionId: String(ctx.chat.id),
+      scopeChatId: ctx.chat.id,
+      transportChatId: ctx.chat.id,
+      threadId: null
+    };
+  }
+
   function getChatState(chatId) {
     return perChatState.get(chatId);
   }
@@ -756,13 +800,14 @@ export async function createTelegramBot({ config, artifactStore, toolRegistry, t
   }
 
   async function showModelPicker(ctx, page = 0) {
+    const route = contextRoute(ctx);
     const agentConfig = getAgentConfig(config);
     const picker = buildModelPicker({
       provider: agentConfig.provider,
-      models: await getProviderModels(ctx.chat.id),
-      selectedModelId: resolveChatModel(config, ctx.chat.id),
-      selectedThinkingLevel: resolveChatThinkingLevel(config, ctx.chat.id),
-      selectedSpeed: resolveChatSpeed(config, ctx.chat.id),
+      models: await getProviderModels(route.sessionId),
+      selectedModelId: resolveChatModel(config, route.sessionId),
+      selectedThinkingLevel: resolveChatThinkingLevel(config, route.sessionId),
+      selectedSpeed: resolveChatSpeed(config, route.sessionId),
       page,
       pageSize: config.telegram.modelPickerPageSize
     });
@@ -775,9 +820,10 @@ export async function createTelegramBot({ config, artifactStore, toolRegistry, t
   }
 
   async function showEffortPicker(ctx, { model, modelIndex, selectedThinkingLevel } = {}) {
+    const route = contextRoute(ctx);
     const agentConfig = getAgentConfig(config);
-    const models = await getProviderModels(ctx.chat.id);
-    const resolvedModel = model || models.find((item) => item.id === resolveChatModel(config, ctx.chat.id));
+    const models = await getProviderModels(route.sessionId);
+    const resolvedModel = model || models.find((item) => item.id === resolveChatModel(config, route.sessionId));
     if (!resolvedModel) {
       throw new Error(`Model not found for provider ${agentConfig.provider}`);
     }
@@ -794,7 +840,7 @@ export async function createTelegramBot({ config, artifactStore, toolRegistry, t
       modelId: resolvedModel.id,
       levels,
       selectedThinkingLevel: selectedThinkingLevel
-        ?? clampModelThinkingLevel(resolvedModel, resolveChatThinkingLevel(config, ctx.chat.id)),
+        ?? clampModelThinkingLevel(resolvedModel, resolveChatThinkingLevel(config, route.sessionId)),
       modelIndex
     });
     const extra = { reply_markup: picker.replyMarkup };
@@ -806,9 +852,10 @@ export async function createTelegramBot({ config, artifactStore, toolRegistry, t
   }
 
   async function showSpeedPicker(ctx) {
+    const route = contextRoute(ctx);
     const agentConfig = getAgentConfig(config);
-    const models = await getProviderModels(ctx.chat.id);
-    const model = models.find((item) => item.id === resolveChatModel(config, ctx.chat.id));
+    const models = await getProviderModels(route.sessionId);
+    const model = models.find((item) => item.id === resolveChatModel(config, route.sessionId));
     if (!model) throw new Error(`Model not found for provider ${agentConfig.provider}`);
     if (!modelSupportsSpeed(model)) {
       const text = `${model.provider}/${model.id} does not support speed 1.5x.`;
@@ -821,7 +868,7 @@ export async function createTelegramBot({ config, artifactStore, toolRegistry, t
       provider: model.provider,
       modelId: model.id,
       speeds: MODEL_SPEEDS,
-      selectedSpeed: resolveChatSpeed(config, ctx.chat.id)
+      selectedSpeed: resolveChatSpeed(config, route.sessionId)
     });
     const extra = { reply_markup: picker.replyMarkup };
     const messageId = ctx.callbackQuery?.message?.message_id;
@@ -896,21 +943,25 @@ export async function createTelegramBot({ config, artifactStore, toolRegistry, t
     return level;
   }
 
-  async function buildIncomingPrompt(ctx) {
-    const chatId = ctx.chat.id;
-    logger?.log("telegram", `message ${ctx.msg.message_id} in chat ${chatId}`);
-    const chatArtifactStore = artifactStore.forChat(chatId);
-    const artifact = await captureIncomingArtifact(ctx, artifactStore);
+  async function buildIncomingPrompt(ctx, route = contextRoute(ctx)) {
+    logger?.log("telegram", `message ${ctx.msg.message_id} in chat ${route.transportChatId} session ${route.sessionId}`);
+    const chatArtifactStore = artifactStore.forChat(route.scopeChatId);
+    const artifact = await captureIncomingArtifact(ctx, artifactStore, { storageChatId: route.scopeChatId });
     if (artifact) logger?.log("telegram", `captured artifact ${artifact.kind}${artifact.id ? ` ${artifact.id}` : ""}`);
-    const { transcript, toolResult } = await normalizeIncomingArtifact({ artifact, toolRegistry, chatArtifactStore, chatId });
+    const { transcript, toolResult } = await normalizeIncomingArtifact({
+      artifact,
+      toolRegistry,
+      chatArtifactStore,
+      chatId: route.scopeChatId
+    });
     if (transcript) logger?.log("telegram", `media transcribed to artifact ${transcript.id}`);
     if (shouldNormalizeArtifactToText(artifact) && !transcript) {
-      logger?.log("telegram", `media normalization unavailable for chat ${ctx.chat.id}: ${toolResult?.error || toolResult?.missingConfig?.join(", ") || "unknown error"}`);
+      logger?.log("telegram", `media normalization unavailable for chat ${route.transportChatId}: ${toolResult?.error || toolResult?.missingConfig?.join(", ") || "unknown error"}`);
     }
     return buildPrompt({ ctx, artifact, transcript, toolResult });
   }
 
-  async function sendTextReply({ sendText, sendDocument, chatId, text }) {
+  async function sendTextReply({ sendText, sendDocument, chatId, artifactChatId = chatId, text }) {
     const maxInlineReplyLength = 3500;
 
     if (isSilentReply(text)) {
@@ -920,7 +971,7 @@ export async function createTelegramBot({ config, artifactStore, toolRegistry, t
 
     if (text.length > maxInlineReplyLength) {
       logger?.log("telegram", `sending long reply as markdown attachment for chat ${chatId}`);
-      const chatArtifactStore = artifactStore.forChat(chatId);
+      const chatArtifactStore = artifactStore.forChat(artifactChatId);
       const artifact = await chatArtifactStore.createGeneratedFile({
         fileName: `reply-${Date.now()}.md`,
         content: text,
@@ -944,16 +995,47 @@ export async function createTelegramBot({ config, artifactStore, toolRegistry, t
     }
   }
 
-  function createTelegramSessionBridge(chatId) {
+  function createWorkspaceAccessGuard(route) {
+    return async () => {
+      if (!route.workspace) return;
+      const current = await resolveTelegramWorkspaceRoute({
+        config,
+        api: bot.api,
+        ctx: {
+          chat: { id: route.transportChatId, type: "supergroup", is_forum: true },
+          from: { id: route.ownerChatId },
+          message: { message_thread_id: route.threadId }
+        }
+      });
+      if (!current.ok) throw new Error("Owner-only workspace access is paused.");
+    };
+  }
+
+  function createTelegramSessionBridge(route) {
+    const messageOptions = (extra = {}) => route.workspace && route.threadId
+      ? { ...extra, message_thread_id: route.threadId }
+      : extra;
     return {
       sendMedia: async (filePath, { method = "audio", caption, filename } = {}) => {
-        logger?.log("telegram", `sending ${method} reply for chat ${chatId}`);
+        logger?.log("telegram", `sending ${method} reply for chat ${route.transportChatId}`);
         const input = new InputFile(filePath, filename || undefined);
-        if (method === "voice") return bot.api.sendVoice(chatId, input, { caption });
-        if (method === "document") return bot.api.sendDocument(chatId, input, { caption });
-        if (method === "photo" || method === "image") return bot.api.sendPhoto(chatId, input, { caption });
-        if (method === "video") return bot.api.sendVideo(chatId, input, { caption });
-        return bot.api.sendAudio(chatId, input, { caption });
+        const options = messageOptions({ caption });
+        if (method === "voice") return bot.api.sendVoice(route.transportChatId, input, options);
+        if (method === "document") return bot.api.sendDocument(route.transportChatId, input, options);
+        if (method === "photo" || method === "image") return bot.api.sendPhoto(route.transportChatId, input, options);
+        if (method === "video") return bot.api.sendVideo(route.transportChatId, input, options);
+        return bot.api.sendAudio(route.transportChatId, input, options);
+      },
+      createForumTopic: async (name) => {
+        if (!route.workspace) throw new Error("Telegram topic creation is only available from the owner workspace forum.");
+        await createWorkspaceAccessGuard(route)();
+        const topic = await bot.api.createForumTopic(route.transportChatId, name);
+        return {
+          ok: true,
+          chatId: route.transportChatId,
+          messageThreadId: topic.message_thread_id,
+          name: topic.name
+        };
       }
     };
   }
@@ -966,7 +1048,13 @@ export async function createTelegramBot({ config, artifactStore, toolRegistry, t
           : artifact.kind === "video" || artifact.mimeType?.startsWith("video/") ? "video"
             : "document");
     const safeCaption = caption && !/(^|\s)(\/[^\s]|[A-Za-z]:[\\/])/.test(caption) ? caption : undefined;
-    await createTelegramSessionBridge(chatId).sendMedia(artifact.path, {
+    await createTelegramSessionBridge({
+      workspace: false,
+      sessionId: String(chatId),
+      scopeChatId: chatId,
+      transportChatId: chatId,
+      threadId: null
+    }).sendMedia(artifact.path, {
       method: resolvedMethod,
       caption: safeCaption,
       filename: path.basename(artifact.path)
@@ -975,54 +1063,74 @@ export async function createTelegramBot({ config, artifactStore, toolRegistry, t
   });
 
   async function processPromptForChat({ chatId, prompt, ctx = null }) {
+    const route = ctx ? contextRoute(ctx) : {
+      workspace: false,
+      sessionId: String(chatId),
+      scopeChatId: chatId,
+      transportChatId: chatId,
+      threadId: null
+    };
+    const sessionId = route.sessionId;
+    const bridge = createTelegramSessionBridge(route);
+    const messageOptions = (extra = {}) => route.workspace && route.threadId
+      ? { ...extra, message_thread_id: route.threadId }
+      : extra;
     const work = async () => {
-      const { session, speedController } = await agentManager.getSessionContext(chatId, createTelegramSessionBridge(chatId));
-      const historyRevision = getChatState(chatId).historyRevision;
-      await conversationHistory.ensureSeed(chatId, {
+      const { session, speedController } = await agentManager.getSessionContext(sessionId, bridge, {
+        scopeChatId: route.scopeChatId,
+        accessGuard: createWorkspaceAccessGuard(route)
+      });
+      const historyRevision = getChatState(sessionId).historyRevision;
+      await conversationHistory.ensureSeed(sessionId, {
         runtime: "pi",
         history: formatPortableSessionHistory(session.messages)
       });
       let text = "";
       let steeredPrompts = [];
-      const chatState = getChatState(chatId);
+      const chatState = getChatState(sessionId);
       chatState.activeSession = session;
+      chatState.activeRoute = route;
       chatState.activeSteers = [];
       try {
         text = await withPromptSpeed({
           speedController,
           speed: isScheduledTaskPrompt(prompt) ? 1 : undefined,
-          restoreSpeed: () => clampModelSpeed(session.model, resolveChatSpeed(config, chatId))
+          restoreSpeed: () => clampModelSpeed(session.model, resolveChatSpeed(config, sessionId))
         }, () => collectText(session, prompt, {
           logger,
-          chatId,
+          chatId: sessionId,
           onSlowPrompt: () => bot.api.sendMessage(
-            chatId,
-            "This is taking longer than 5 minutes, so I will keep the current session running instead of starting over. Send /new if you want to abandon it and start fresh."
+            route.transportChatId,
+            "This is taking longer than 5 minutes, so I will keep the current session running instead of starting over. Send /new if you want to abandon it and start fresh.",
+            messageOptions()
           )
         }));
       } catch (error) {
-        agentManager.resetSession(chatId);
+        agentManager.resetSession(sessionId);
         throw error;
       } finally {
         steeredPrompts = [...chatState.activeSteers];
         if (chatState.activeSession === session) chatState.activeSession = null;
+        chatState.activeRoute = null;
         chatState.activeSteers = [];
       }
-      if (getChatState(chatId).historyRevision === historyRevision) {
+      if (getChatState(sessionId).historyRevision === historyRevision) {
         const historyPrompt = steeredPrompts.length
           ? [prompt, ...steeredPrompts.map((message) => `[Steering message]\n${message}`)].join("\n\n")
           : prompt;
-        await conversationHistory.appendTurn(chatId, {
+        await conversationHistory.appendTurn(sessionId, {
           runtime: "pi",
           prompt: historyPrompt,
           response: text
         });
       }
       if (text) {
+        await createWorkspaceAccessGuard(route)();
         await sendTextReply({
-          sendText: (message, extra) => bot.api.sendMessage(chatId, message, extra),
-          sendDocument: (file, extra) => bot.api.sendDocument(chatId, file, extra),
-          chatId,
+          sendText: (message, extra) => bot.api.sendMessage(route.transportChatId, message, messageOptions(extra)),
+          sendDocument: (file, extra) => bot.api.sendDocument(route.transportChatId, file, messageOptions(extra)),
+          chatId: sessionId,
+          artifactChatId: route.scopeChatId,
           text
         });
       }
@@ -1036,11 +1144,18 @@ export async function createTelegramBot({ config, artifactStore, toolRegistry, t
     const chatState = getChatState(chatId);
 
     if (chatState.processing) {
+      const incomingRoute = ctx ? contextRoute(ctx) : null;
+      const activeRoute = chatState.activeRoute;
+      const sameDelivery = !incomingRoute || !activeRoute || (
+        incomingRoute.transportChatId === activeRoute.transportChatId
+        && incomingRoute.threadId === activeRoute.threadId
+      );
       const routed = await routeBusyPrompt({
         chatState,
         prompt,
-        mode: busyMessageMode,
-        replaceQueued
+        mode: sameDelivery ? busyMessageMode : "queue",
+        replaceQueued,
+        ctx
       });
       if (routed.disposition === "steered") {
         logger?.log("telegram", `chat ${chatId} busy, steering ${label}`);
@@ -1082,25 +1197,27 @@ export async function createTelegramBot({ config, artifactStore, toolRegistry, t
   }
 
   async function enqueueOrProcess(ctx) {
-    const chatState = getChatState(ctx.chat.id);
+    const route = contextRoute(ctx);
+    const chatState = getChatState(route.sessionId);
 
     if (chatState.processing) {
       await ensureQueuedTelegramTyping(chatState, ctx);
-      const incomingPrompt = await buildIncomingPrompt(ctx);
+      const incomingPrompt = await buildIncomingPrompt(ctx, route);
       const busyMessageMode = typeof ctx.message?.text === "string"
-        ? resolveTelegramBusyMessageMode(config, ctx.chat.id)
+        ? resolveTelegramBusyMessageMode(config, route.sessionId)
         : "queue";
       return enqueuePrompt({
-        chatId: ctx.chat.id,
+        chatId: route.sessionId,
         prompt: incomingPrompt,
         label: `message ${ctx.msg.message_id}`,
-        busyMessageMode
+        busyMessageMode,
+        ctx
       });
     }
 
-    const incomingPrompt = await buildIncomingPrompt(ctx);
+    const incomingPrompt = await buildIncomingPrompt(ctx, route);
     return enqueuePrompt({
-      chatId: ctx.chat.id,
+      chatId: route.sessionId,
       prompt: incomingPrompt,
       label: `message ${ctx.msg.message_id}`,
       ctx
@@ -1214,9 +1331,18 @@ export async function createTelegramBot({ config, artifactStore, toolRegistry, t
     }
   }
 
-  async function summarizeSessionBeforeReset(chatId) {
+  async function summarizeSessionBeforeReset(chatId, route = {
+    workspace: false,
+    sessionId: String(chatId),
+    scopeChatId: chatId,
+    transportChatId: chatId,
+    threadId: null
+  }) {
     try {
-      const context = await agentManager.getSessionContext(chatId, createTelegramSessionBridge(chatId));
+      const context = await agentManager.getSessionContext(chatId, createTelegramSessionBridge(route), {
+        scopeChatId: route.scopeChatId,
+        accessGuard: createWorkspaceAccessGuard(route)
+      });
       const parentSession = context.session.sessionFile || "";
       if (!context.session.messages.length) return { handoff: "", parentSession: "" };
 
@@ -1229,19 +1355,21 @@ export async function createTelegramBot({ config, artifactStore, toolRegistry, t
   }
 
   async function handleNewCommand(ctx) {
-    const chatState = getChatState(ctx.chat.id);
+    const route = contextRoute(ctx);
+    const sessionId = route.sessionId;
+    const chatState = getChatState(sessionId);
     const wasProcessing = chatState.processing;
     chatState.historyRevision += 1;
     const commandRevision = chatState.historyRevision;
     const prompt = buildNewSessionPrompt(ctx);
 
     if (wasProcessing) {
-      logger?.log("telegram", `chat ${ctx.chat.id} busy, queueing new-session command`);
-      queueChatPrompt(chatState, prompt, { replace: true });
+      logger?.log("telegram", `chat ${sessionId} busy, queueing new-session command`);
+      queueChatPrompt(chatState, prompt, { replace: true, ctx });
       chatState.continueAfterClose = true;
       const reset = (async () => {
-        await conversationHistory.reset(ctx.chat.id, { runtime: "pi" });
-        agentManager.resetSession(ctx.chat.id);
+        await conversationHistory.reset(sessionId, { runtime: "pi" });
+        agentManager.resetSession(sessionId);
       })();
       chatState.beforeNextPrompt = reset;
       try {
@@ -1253,21 +1381,21 @@ export async function createTelegramBot({ config, artifactStore, toolRegistry, t
     }
 
     chatState.processing = true;
-    logger?.log("telegram", `processing new-session command in chat ${ctx.chat.id}`);
+    logger?.log("telegram", `processing new-session command in chat ${sessionId}`);
     await processChatPromptQueue({
-      chatId: ctx.chat.id,
+      chatId: sessionId,
       prompt,
       label: "new-session command",
       ctx,
       beforeInitialPrompt: async () => {
-        const handoff = await withTyping(ctx, () => summarizeSessionBeforeReset(ctx.chat.id));
+        const handoff = await withTyping(ctx, () => summarizeSessionBeforeReset(sessionId, route));
         if (chatState.historyRevision !== commandRevision) return;
-        await conversationHistory.reset(ctx.chat.id, {
+        await conversationHistory.reset(sessionId, {
           runtime: "pi",
           history: handoff.handoff
         });
         if (chatState.historyRevision !== commandRevision) return;
-        agentManager.resetSession(ctx.chat.id, handoff);
+        agentManager.resetSession(sessionId, handoff);
       }
     });
   }
@@ -1278,13 +1406,13 @@ export async function createTelegramBot({ config, artifactStore, toolRegistry, t
   });
 
   bot.command("start", async (ctx) => {
-    const auth = await authorizeChat({ config, chatId: ctx.chat.id, saveConfig, chatMeta: getIncomingChatMeta(ctx) });
+    const auth = await authorizeContext(ctx);
     if (!auth.ok) return;
     return ctx.reply(auth.firstTime ? "This chat is now authorized for Arisa." : "Arisa is ready.");
   });
 
   bot.command("new", async (ctx) => {
-    const auth = await authorizeChat({ config, chatId: ctx.chat.id, saveConfig, chatMeta: getIncomingChatMeta(ctx) });
+    const auth = await authorizeContext(ctx);
     if (!auth.ok) return;
     if (piAuthIssue) {
       await ctx.reply(buildPiAuthRecoveryBlockedMessage({
@@ -1301,7 +1429,7 @@ export async function createTelegramBot({ config, artifactStore, toolRegistry, t
   bot.command("restart", handleRestartCommand);
 
   bot.command("doctor", async (ctx) => {
-    const auth = await authorizeChat({ config, chatId: ctx.chat.id, saveConfig, chatMeta: getIncomingChatMeta(ctx) });
+    const auth = await authorizeContext(ctx);
     if (!auth.ok) return;
     const pending = await ctx.reply(renderTelegramHtml("```text\nRunning Arisa Doctor…\n```"), { parse_mode: "HTML" });
     try {
@@ -1318,11 +1446,11 @@ export async function createTelegramBot({ config, artifactStore, toolRegistry, t
   });
 
   bot.command("update", async (ctx) => {
-    const auth = await authorizeChat({ config, chatId: ctx.chat.id, saveConfig, chatMeta: getIncomingChatMeta(ctx) });
+    const auth = await authorizeContext(ctx);
     if (!auth.ok) return;
     const pending = await ctx.reply(renderTelegramHtml("```text\nChecking Arisa and official tool updates…\n```"), { parse_mode: "HTML" });
     try {
-      const report = await checkUpdates(ctx.chat.id);
+      const report = await checkUpdates(contextRoute(ctx).scopeChatId);
       const picker = buildUpdatePicker(report);
       await ctx.api.editMessageText(
         ctx.chat.id,
@@ -1337,31 +1465,31 @@ export async function createTelegramBot({ config, artifactStore, toolRegistry, t
   });
 
   bot.command("tools", async (ctx) => {
-    const auth = await authorizeChat({ config, chatId: ctx.chat.id, saveConfig, chatMeta: getIncomingChatMeta(ctx) });
+    const auth = await authorizeContext(ctx);
     if (!auth.ok) return;
-    await ctx.reply(renderTelegramHtml(formatToolUsageReport(await toolRegistry.usage(ctx.chat.id))), { parse_mode: "HTML" });
+    await ctx.reply(renderTelegramHtml(formatToolUsageReport(await toolRegistry.usage(contextRoute(ctx).scopeChatId))), { parse_mode: "HTML" });
   });
 
   bot.command("model", async (ctx) => {
-    const auth = await authorizeChat({ config, chatId: ctx.chat.id, saveConfig, chatMeta: getIncomingChatMeta(ctx) });
+    const auth = await authorizeContext(ctx);
     if (!auth.ok) return;
     await showModelPicker(ctx);
   });
 
   bot.command("effort", async (ctx) => {
-    const auth = await authorizeChat({ config, chatId: ctx.chat.id, saveConfig, chatMeta: getIncomingChatMeta(ctx) });
+    const auth = await authorizeContext(ctx);
     if (!auth.ok) return;
     await showEffortPicker(ctx);
   });
 
   bot.command("speed", async (ctx) => {
-    const auth = await authorizeChat({ config, chatId: ctx.chat.id, saveConfig, chatMeta: getIncomingChatMeta(ctx) });
+    const auth = await authorizeContext(ctx);
     if (!auth.ok) return;
     await showSpeedPicker(ctx);
   });
 
   bot.command("auth", async (ctx) => {
-    const auth = await authorizeChat({ config, chatId: ctx.chat.id, saveConfig, chatMeta: getIncomingChatMeta(ctx) });
+    const auth = await authorizeContext(ctx);
     if (!auth.ok) return;
 
     const status = getPiAuthStatus(config, ctx.chat.id);
@@ -1405,7 +1533,7 @@ export async function createTelegramBot({ config, artifactStore, toolRegistry, t
       return;
     }
 
-    const auth = await authorizeChat({ config, chatId: ctx.chat.id, saveConfig });
+    const auth = await authorizeContext(ctx);
     if (!auth.ok) {
       await ctx.answerCallbackQuery({ text: "This chat is not authorized.", show_alert: true });
       return;
@@ -1631,7 +1759,7 @@ export async function createTelegramBot({ config, artifactStore, toolRegistry, t
   });
 
   bot.on("message", async (ctx) => {
-    const auth = await authorizeChat({ config, chatId: ctx.chat.id, saveConfig, chatMeta: getIncomingChatMeta(ctx) });
+    const auth = await authorizeContext(ctx);
     if (!auth.ok) return;
 
     const command = getTelegramCommand(ctx);
