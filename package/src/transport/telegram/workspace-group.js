@@ -31,7 +31,7 @@ export async function verifyOwnerWorkspaceGroup({ api, groupChatId, ownerChatId,
   ]);
   const creator = administrators.find((member) => member.status === "creator");
   const bot = administrators.find((member) => member.user?.id === me.id);
-  const senderAllowed = senderId === ownerChatId || senderId === anonymousGroupBotId;
+  const senderAllowed = senderId === ownerChatId || senderId === me.id || senderId === anonymousGroupBotId;
   if (memberCount !== 2) return { ok: false, reason: "member-count", memberCount };
   if (creator?.user?.id !== ownerChatId) return { ok: false, reason: "owner-mismatch", memberCount };
   if (!bot) return { ok: false, reason: "bot-not-admin", memberCount };

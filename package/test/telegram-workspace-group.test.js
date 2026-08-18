@@ -40,9 +40,13 @@ test("general topic omits Telegram's non-addressable thread id for replies", asy
   assert.equal(route.threadId, null);
 });
 
-test("owner workspace gate fails closed when another member joins", async () => {
+test("owner workspace gate accepts bot service events but still blocks a third member", async () => {
   assert.deepEqual(
-    await verifyOwnerWorkspaceGroup({ api: api({ count: 3 }), groupChatId: -100123, ownerChatId: 42, senderId: 42 }),
+    await verifyOwnerWorkspaceGroup({ api: api(), groupChatId: -100123, ownerChatId: 42, senderId: 99 }),
+    { ok: true, memberCount: 2 }
+  );
+  assert.deepEqual(
+    await verifyOwnerWorkspaceGroup({ api: api({ count: 3 }), groupChatId: -100123, ownerChatId: 42, senderId: 99 }),
     { ok: false, reason: "member-count", memberCount: 3 }
   );
 });
