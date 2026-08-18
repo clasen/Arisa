@@ -74,20 +74,21 @@
       }
     },
     "campaign-draft-runner": {
-      "version": "0.3.0",
+      "version": "0.3.1",
       "toolDependencies": {
         "pr-campaign": "^0.1.0",
         "gmail-workspace": "^0.1.0"
       },
       "files": {
-        "README.md": "4263baa5dc528bdf04c86076eda3944891a3c68acf24c1e406de59bb3bf4af9e",
+        "README.md": "54db44bace62edb700e2acec08436c96094ce08c797a4b64ce0b9d32466a081e",
         "config.js": "3c0c252baa7170e0bf0a9d1a7ecdb4febcf19f7baf0fcd320c0b852008f41b63",
-        "index.js": "3949cc6ca5a71309dd7c0bdf393e0bfdefca1fe4f608caf0b2e8db86dd13dd53",
+        "index.js": "6fdb1d3d0b8d1c47951336460cb978a953a0524fa5cc76b9336bbd6e3bcb36fe",
         "package.json": "a25b7ed1dd2c30cd68c3c10feb8ee1752cac8cd55cd4344690ffad649e231ec1",
         "product-facts.js": "69339e20e7b70a6b9833878d72b10b70ea4ede4aa448097975d0961b6aaced59",
         "search-quality.js": "ab5412d45d5144e976cccef52992e634c11aca0e21b73fd53f9dc2d489c56dd7",
-        "test/selection-policy.test.js": "852c91834b4d02bf3cb4d33dcccdc489266dbf3946c06447cb37993e2f3fa5cd",
-        "tool.manifest.json": "4f99c6125d144ed3bf2f90e0029f70eff6683673ae27056c0ddcfcd88d6838ce"
+        "source-exhaustion.js": "407f940f5205eb01715a797672d0dad8bd0b0b897024b5fcb87052a062ecd054",
+        "test/selection-policy.test.js": "0c16a9c6d2bf279f6db90a0831ce80888220dd7ceffabfe104631a8932dd77a2",
+        "tool.manifest.json": "b4ffdc343b0810e9d13abb61b27b69c2884643029a71fe1fd574ce2649a66d88"
       }
     },
     "pr-campaign": {

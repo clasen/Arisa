@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { mkdtemp, rm } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
-import { assessSearchQuality, buildApprovedFactsBody, discoverContacts, getFactSheetStatus, isSelectable, normalizeCanonicalUrls, runTool, updateApprovedFacts, validateDraftContent } from "../index.js";
+import { assessSearchQuality, buildApprovedFactsBody, checkExhaustedSources, discoverContacts, getFactSheetStatus, isSelectable, normalizeCanonicalUrls, recordExhaustedSources, runTool, updateApprovedFacts, validateDraftContent } from "../index.js";
 
 const contact = {
   email: "actu@example.fr",
@@ -46,6 +46,26 @@ test("fact sheet exposes only approved facts and keeps unresolved questions expl
     assert.equal(updated.approvedFacts.access, "Public download");
     assert.deepEqual(updated.pendingQuestions.map((item) => item.key), ["pricing"]);
     await assert.rejects(updateApprovedFacts(directory, factProfile, { invented: "no" }, "owner"), /Unknown fact keys/);
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+test("exhausted sources are canonicalized, skipped for 30 days, and then revalidated", async () => {
+  const directory = await mkdtemp(path.join(os.tmpdir(), "campaign-sources-"));
+  const now = Date.parse("2026-08-18T00:00:00.000Z");
+  try {
+    const stored = await recordExhaustedSources(directory, "example", [{
+      url: "https://www.example.com/review/?utm_source=test#author",
+      reason: "no-public-email"
+    }], 30, now);
+    assert.equal(stored.recorded, 1);
+    const current = await checkExhaustedSources(directory, "example", ["https://example.com/review"], now + 29 * 86400000);
+    assert.equal(current.active.length, 1);
+    assert.deepEqual(current.available, []);
+    const expired = await checkExhaustedSources(directory, "example", ["https://example.com/review"], now + 31 * 86400000);
+    assert.equal(expired.active.length, 0);
+    assert.deepEqual(expired.available, ["https://example.com/review"]);
   } finally {
     await rm(directory, { recursive: true, force: true });
   }

@@ -4,6 +4,7 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 import defaults from "./config.js";
 import { assessSearchQuality, recordSearchQuality } from "./search-quality.js";
 import { getFactSheetStatus, updateApprovedFacts } from "./product-facts.js";
+import { checkExhaustedSources, recordExhaustedSources } from "./source-exhaustion.js";
 
 const toolName = "campaign-draft-runner";
 const toolDir = path.dirname(fileURLToPath(import.meta.url));
@@ -24,6 +25,9 @@ Actions via args.action:
   run-batch   Reconcile Gmail Sent, verify contacts selected by a profile, and create Gmail drafts only. args: profile?, limit?, dryRun?, untilDrafted?, retryDelaySeconds?, maxAttempts?, maxRuntimeSeconds?
   reconcile-sent Reconcile manually sent Gmail messages into campaign state. args: profile?
   assess-search-quality Score the first search tranche and persist a five-cycle measurement window. args: profile?, searches=[{query,text}]
+  sources-check Return which coverage/contact URLs remain exhausted within their 30-day window. args: profile?, urls=<JSON array>
+  sources-record Record reviewed URLs as exhausted for up to 30 days. args: profile?, sources=[{url,reason}], ttlDays?
+  sources-status Return the compact active exhausted-source ledger. args: profile?
   facts-status Return approved product facts and unresolved questions. args: profile?
   facts-update Store owner-approved product facts. args: profile?, facts=<JSON object>, approvedBy
   status      Reconcile Gmail Sent and return campaign status and Gmail draft count. args: profile?
@@ -1004,6 +1008,36 @@ async function handleRun(request) {
     };
   }
 
+  if (args.action === "sources-check" || args.action === "sources-status") {
+    const urls = args.action === "sources-status"
+      ? []
+      : (typeof args.urls === "string" ? JSON.parse(args.urls) : args.urls);
+    if (!Array.isArray(urls)) throw new Error("urls must be a JSON array");
+    const result = await checkExhaustedSources(getChatToolStateDir(request.chatId, toolName), profile.name, urls);
+    return {
+      action: args.action,
+      profile: profile.name,
+      active: args.action === "sources-status" ? result.records : result.active,
+      available: result.available,
+      revalidateAfterDays: 30
+    };
+  }
+
+  if (args.action === "sources-record") {
+    const sources = typeof args.sources === "string" ? JSON.parse(args.sources) : args.sources;
+    if (!Array.isArray(sources)) throw new Error("sources must be a JSON array of {url,reason} objects");
+    return {
+      action: "sources-record",
+      profile: profile.name,
+      ...(await recordExhaustedSources(
+        getChatToolStateDir(request.chatId, toolName),
+        profile.name,
+        sources,
+        args.ttlDays
+      ))
+    };
+  }
+
   if (args.action === "facts-status") {
     return { action: "facts-status", ...(await getFactSheetStatus(getChatToolStateDir(request.chatId, toolName), profile)) };
   }
@@ -1167,4 +1201,4 @@ async function main() {
 const isDirectRun = process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url);
 if (isDirectRun) main();
 
-export { assessSearchQuality, buildApprovedFactsBody, discoverContacts, getFactSheetStatus, isSelectable, normalizeCanonicalUrls, runTool, updateApprovedFacts, validateDraftContent };
+export { assessSearchQuality, buildApprovedFactsBody, checkExhaustedSources, discoverContacts, getFactSheetStatus, isSelectable, normalizeCanonicalUrls, recordExhaustedSources, runTool, updateApprovedFacts, validateDraftContent };
