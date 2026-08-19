@@ -50,6 +50,7 @@ test("acknowledges an agent event before queueing it", async () => {
   assert.deepEqual(calls[0], ["send", 123, "received"]);
   assert.equal(calls[1][0], "enqueue");
   assert.match(calls[1][1].prompt, /event: something happened/);
+  assert.match(calls[1][1].prompt, /return exactly NO_REPLY/);
   assert.deepEqual(calls[2], ["complete", "event-1"]);
 });
 

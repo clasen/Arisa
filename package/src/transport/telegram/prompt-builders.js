@@ -244,7 +244,7 @@ export async function buildAsyncEventPrompt(task, resourceNotes) {
     resourceNote ? `resourceNote: ${resourceNote}` : null,
     task.payload.prompt ? `event: ${task.payload.prompt}` : null,
     "A polling checker detected this external event. Evaluate it and decide the next action.",
-    "If it warrants no action, you may stay silent.",
+    "If it warrants no action, return exactly NO_REPLY so the transport suppresses the response.",
     "If needed, use read/write/edit, bash, system_shell, or Arisa modular tools via run_tool."
   ].filter(Boolean).join("\n");
 }
@@ -346,7 +346,7 @@ export async function collectText(session, prompt, { logger, chatId, onSlowPromp
 }
 
 export function isSilentReply(text) {
-  return /^(?:NO_REPLY|No reply needed\.|No action needed\.)(?:\s+(?:NO_REPLY|No reply needed\.|No action needed\.))*$/.test(String(text || "").trim());
+  return /^(?:NO_REPLY|SILENT_REPLY|No reply needed\.|No action needed\.)(?:\s+(?:NO_REPLY|SILENT_REPLY|No reply needed\.|No action needed\.))*$/.test(String(text || "").trim());
 }
 
 export function buildSessionHandoffPrompt() {

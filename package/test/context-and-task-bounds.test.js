@@ -126,6 +126,7 @@ test("collectText preserves useful text in the same message as a silent marker",
 
 test("recognizes standalone silent reply markers", () => {
   assert.equal(isSilentReply("NO_REPLY"), true);
+  assert.equal(isSilentReply("SILENT_REPLY"), true);
   assert.equal(isSilentReply("No reply needed."), true);
   assert.equal(isSilentReply("No action needed."), true);
   assert.equal(isSilentReply("\nNO_REPLY\n\nNO_REPLY\n"), true);
