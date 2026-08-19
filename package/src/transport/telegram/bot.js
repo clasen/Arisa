@@ -382,6 +382,25 @@ export async function createTelegramBot({ config, artifactStore, toolRegistry, t
     persistChatSpeed
   } = createTelegramModelControls({ config, saveConfig, agentManager, contextRoute });
 
+  function modelSelectionFor(chatId) {
+    const selection = config.pi.chatModels?.[chatKey(chatId)];
+    return selection?.provider === config.pi.provider ? selection : null;
+  }
+
+  async function ensureWorkspaceTopicModelSelection(route) {
+    if (!route.workspace || chatKey(route.sessionId) === chatKey(route.ownerChatId)) return;
+    if (modelSelectionFor(route.sessionId)) return;
+    const inherited = modelSelectionFor(route.scopeChatId) || modelSelectionFor(route.transportChatId);
+    if (!inherited) return;
+    config.pi.chatModels ||= {};
+    config.pi.chatModels[chatKey(route.sessionId)] = {
+      ...inherited,
+      sessionRevision: 0
+    };
+    await saveConfig(config);
+    logger?.log("telegram", `inherited model ${inherited.model} for workspace topic session ${route.sessionId}`);
+  }
+
   async function buildIncomingPrompt(ctx, route = contextRoute(ctx)) {
     logger?.log("telegram", `message ${ctx.msg.message_id} in chat ${route.transportChatId} session ${route.sessionId}`);
     const chatArtifactStore = artifactStore.forChat(route.scopeChatId);
@@ -549,6 +568,7 @@ export async function createTelegramBot({ config, artifactStore, toolRegistry, t
       ? { ...extra, message_thread_id: route.threadId }
       : extra;
     const work = async () => {
+      await ensureWorkspaceTopicModelSelection(route);
       if (route.workspace && route.threadId) {
         const handoff = await sessionSeeds.consume(sessionId);
         if (handoff) {
@@ -1021,6 +1041,9 @@ export async function createTelegramBot({ config, artifactStore, toolRegistry, t
       return;
     }
 
+    const route = contextRoute(ctx);
+    const modelChatId = route.sessionId;
+
     try {
       if (action.type === "page") {
         await showModelPicker(ctx, action.value);
@@ -1028,8 +1051,8 @@ export async function createTelegramBot({ config, artifactStore, toolRegistry, t
         return;
       }
 
-      const models = await getProviderModels(ctx.chat.id);
-      const chatBusy = getChatState(ctx.chat.id).processing;
+      const models = await getProviderModels(modelChatId);
+      const chatBusy = getChatState(modelChatId).processing;
 
       if (action.type === "select") {
         const model = models[action.value];
@@ -1046,7 +1069,7 @@ export async function createTelegramBot({ config, artifactStore, toolRegistry, t
           await showEffortPicker(ctx, {
             model,
             modelIndex: action.value,
-            selectedThinkingLevel: clampModelThinkingLevel(model, resolveChatThinkingLevel(config, ctx.chat.id))
+            selectedThinkingLevel: clampModelThinkingLevel(model, resolveChatThinkingLevel(config, modelChatId))
           });
           await ctx.answerCallbackQuery({ text: `Choose effort for ${model.id}.` });
           return;
@@ -1060,8 +1083,8 @@ export async function createTelegramBot({ config, artifactStore, toolRegistry, t
           return;
         }
 
-        const currentModelId = resolveChatModel(config, ctx.chat.id);
-        const currentEffort = resolveChatThinkingLevel(config, ctx.chat.id);
+        const currentModelId = resolveChatModel(config, modelChatId);
+        const currentEffort = resolveChatThinkingLevel(config, modelChatId);
         if (model.id === currentModelId && currentEffort === "off") {
           await closeModelPicker(ctx, {
             messageText: `Already using ${model.provider}/${model.id}.`,
@@ -1070,7 +1093,7 @@ export async function createTelegramBot({ config, artifactStore, toolRegistry, t
           return;
         }
 
-        await persistChatModel(ctx.chat.id, model, "off");
+        await persistChatModel(modelChatId, model, "off");
         await ctx.api.editMessageText(
           ctx.chat.id,
           ctx.callbackQuery.message.message_id,
@@ -1098,8 +1121,8 @@ export async function createTelegramBot({ config, artifactStore, toolRegistry, t
           return;
         }
 
-        const currentModelId = resolveChatModel(config, ctx.chat.id);
-        const currentEffort = resolveChatThinkingLevel(config, ctx.chat.id);
+        const currentModelId = resolveChatModel(config, modelChatId);
+        const currentEffort = resolveChatThinkingLevel(config, modelChatId);
         if (model.id === currentModelId && action.level === currentEffort) {
           await closeModelPicker(ctx, {
             messageText: `Already using ${model.provider}/${model.id} (effort: ${action.level}).`,
@@ -1110,7 +1133,7 @@ export async function createTelegramBot({ config, artifactStore, toolRegistry, t
 
         // Effort-only updates do not reset the session, so they are safe while busy.
         if (model.id === currentModelId) {
-          await persistChatEffort(ctx.chat.id, model, action.level);
+          await persistChatEffort(modelChatId, model, action.level);
           await ctx.api.editMessageText(
             ctx.chat.id,
             ctx.callbackQuery.message.message_id,
@@ -1128,7 +1151,7 @@ export async function createTelegramBot({ config, artifactStore, toolRegistry, t
           return;
         }
 
-        await persistChatModel(ctx.chat.id, model, action.level);
+        await persistChatModel(modelChatId, model, action.level);
         await ctx.api.editMessageText(
           ctx.chat.id,
           ctx.callbackQuery.message.message_id,
@@ -1139,7 +1162,7 @@ export async function createTelegramBot({ config, artifactStore, toolRegistry, t
       }
 
       if (action.type === "effort") {
-        const model = models.find((item) => item.id === resolveChatModel(config, ctx.chat.id));
+        const model = models.find((item) => item.id === resolveChatModel(config, modelChatId));
         if (!model) {
           await ctx.answerCallbackQuery({
             text: "Current model is unavailable. Run /model again.",
@@ -1162,7 +1185,7 @@ export async function createTelegramBot({ config, artifactStore, toolRegistry, t
           });
           return;
         }
-        const currentEffort = resolveChatThinkingLevel(config, ctx.chat.id);
+        const currentEffort = resolveChatThinkingLevel(config, modelChatId);
         if (action.level === currentEffort) {
           await closeModelPicker(ctx, {
             messageText: `Already using effort ${action.level} for ${model.provider}/${model.id}.`,
@@ -1170,7 +1193,7 @@ export async function createTelegramBot({ config, artifactStore, toolRegistry, t
           });
           return;
         }
-        await persistChatEffort(ctx.chat.id, model, action.level);
+        await persistChatEffort(modelChatId, model, action.level);
         await ctx.api.editMessageText(
           ctx.chat.id,
           ctx.callbackQuery.message.message_id,
@@ -1181,7 +1204,7 @@ export async function createTelegramBot({ config, artifactStore, toolRegistry, t
       }
 
       if (action.type === "speed") {
-        const model = models.find((item) => item.id === resolveChatModel(config, ctx.chat.id));
+        const model = models.find((item) => item.id === resolveChatModel(config, modelChatId));
         if (!model) {
           await ctx.answerCallbackQuery({
             text: "Current model is unavailable. Run /model again.",
@@ -1196,7 +1219,7 @@ export async function createTelegramBot({ config, artifactStore, toolRegistry, t
           });
           return;
         }
-        const currentSpeed = resolveChatSpeed(config, ctx.chat.id);
+        const currentSpeed = resolveChatSpeed(config, modelChatId);
         if (action.speed === currentSpeed) {
           await closeModelPicker(ctx, {
             messageText: `Already using speed ${action.speed.toFixed(1)}x for ${model.provider}/${model.id}.`,
@@ -1204,7 +1227,7 @@ export async function createTelegramBot({ config, artifactStore, toolRegistry, t
           });
           return;
         }
-        await persistChatSpeed(ctx.chat.id, model, action.speed);
+        await persistChatSpeed(modelChatId, model, action.speed);
         await ctx.api.editMessageText(
           ctx.chat.id,
           ctx.callbackQuery.message.message_id,
