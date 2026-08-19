@@ -16,7 +16,7 @@ It does not bypass login, CAPTCHAs, recipient restrictions, rate limits, or othe
 - `get-bio`: read the logged-in account bio without changing it.
 - `get-thread`: read one exact visible post and its currently loaded replies without publishing anything.
 - `update-bio`: replace the bio or append text with `appendText`; requires `confirm=true`, changes only the bio field, and verifies it after saving.
-- `create-post`: publish one exact post from the logged-in account; requires `confirm=true`, blocks exact duplicates, and verifies the CreateTweet receipt.
+- `create-post`: publish one exact post from the logged-in account through the X web composer; requires `confirm=true`, blocks exact duplicates, and verifies the CreateTweet receipt emitted by the UI.
 - `reply-post`: reply to one exact visible post; requires `confirm=true` and `dryRun=false`, forbids links, binds the receipt to the target post and exact text, and enforces per-post deduplication, cooldown, and a daily cap. Optional `targetText` enables a verified exact-post search fallback when X opens a nested thread without rendering the requested reply.
 - `relationship-status`: read the target-bound Follow/Following state without changing it.
 - `follow`: follow one profile with `confirm=true`; records whether the follow was tool-created or preexisting and verifies both the target DOM transition and a matching X receipt.
@@ -64,4 +64,4 @@ Legacy entries created before state version 2 remain visible as campaign `legacy
 
 ## Config
 
-`X_COOKIES` may be a JSON cookie array, Netscape cookies file, or raw Cookie header. If empty, the tool reuses chat-scoped `x-session-reader` cookies. Other settings are documented in `tool.manifest.json`.
+`browser-session-bridge` is the preferred way to share access: send the active `x.com` session through the bridge and `x-dm` will use it automatically. `X_COOKIES` remains an optional fallback as a JSON cookie array, Netscape cookies file, or raw Cookie header. If neither bridge nor `X_COOKIES` has a session, the tool reuses chat-scoped `x-session-reader` cookies. Other settings are documented in `tool.manifest.json`.

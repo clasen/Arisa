@@ -131,13 +131,16 @@
     },
     "x-dm": {
       "version": "0.2.0",
+      "toolDependencies": {
+        "browser-session-bridge": "^0.1.0"
+      },
       "files": {
-        "README.md": "f02835c10d822ce906df121441761de8c6d61c3a4aac3f9aa9a6d9211b73a6ea",
         "config.js": "69a2dcccd10aa2f1ddcc24d52f4ce8fe4a6f5f5a85be64abbdf9dc9e19de0cd4",
-        "index.js": "cf4f92e94b9f21f6fcfed7d8d2926105a11b4ad621e2121c762d9c1e67a91456",
+        "index.js": "83e3eb7fbeea8a5183303e0e56b1d6854ca7ccb800e4cd2ad689a5f13637380f",
         "package.json": "3a76a921b1e78e91b1d2a5ae1926b298dfd6b4ee3f716d5382159b474ee400f4",
+        "README.md": "503b0ed25ef9a8df3079523ea653178e6e029854b4d199cb8d20be82cc837f9e",
         "test/x-dm.test.mjs": "06352996e14777358eb62ad5e5d757b0dab5c0696927ed54ff40a5b7cdefcfd0",
-        "tool.manifest.json": "f3b2e613562e4dd0f88d196c4e3caf525a425483133a54351300ce284a5836a9"
+        "tool.manifest.json": "177e0abac770f89a0f06aa445363393fa38e7f05ad7cd773ea907fa56faed505"
       }
     },
     "official-tool-sync": {
@@ -191,6 +194,33 @@
         "reference-match.js": "762d822ad31f89c06cb5a40f84ba3f864436db486375ed30e48bde94de282c7c",
         "test/reference-match.test.js": "701ce83396126b1e42bd3a54e331ff011a1fc27646a0f3aa99ce1c3e576aff6d",
         "tool.manifest.json": "0617b0488035fd7f8a83a8e5a698558b3d0e956e7ea1e043e2e80bb224d4974f"
+      }
+    },
+    "browser-session-bridge": {
+      "version": "0.1.0",
+      "files": {
+        "bridge-server.js": "87f5a392bc99fd97899836c0731b4694402b04d5dfbe88e66bb4f496bfef351d",
+        "chrome-web-store.js": "a6bd9553f1490d5ccda3fe3044c30ee6fe243f422e69a5000bc844884e6d1e95",
+        "config.js": "45c8e9e9a159b9125d6ea3458c616926c2ba2b5327fdfd750aa05316d3ce5af8",
+        "extension/icons/icon-128.png": "a55af49bb570bd5471fc0a2e15a6bcaf3f76a2c5e7439f16bb1829682b343380",
+        "extension/icons/icon-16.png": "a4aedb49e2227222a68dc56455812a9e17938fd197b1f30268f02d6c9f7bf95e",
+        "extension/icons/icon-32.png": "2dfc9e6e7ec6b4e9feb9c1326d65116cda8e53306c65c84074c818c9e7f6a2a2",
+        "extension/icons/icon-48.png": "2f316f1f2fbc72227e7e1f14cf1ff1553a12fc9aab139799f1ee2970c0303deb",
+        "extension/manifest.json": "3e19d7b1c2a9521745b585fbbb3a6f4639d3056703fdbca17e8cd6dd80fc4c91",
+        "extension/popup.css": "138811e3e96e9c7741f064f8cf017be75973cd0942efa9668e96a584b7b52c1c",
+        "extension/popup.html": "9d7798efd04c57c534840a7966dd3818f9264022c52390f0fd1d462236a01d60",
+        "extension/popup.js": "60ea83f17e5d87f072d27c6540b903361f70e03925c3727983cca6beba9696d3",
+        "index.js": "4c92afffaec61910e3522f483535c760e8c660604158a23628d2807daa024934",
+        "package-lock.json": "e1081b8b48c2eaaeca73c63e64902519b33e8822ce351a45afe8509224776c12",
+        "package.json": "b54fad02442d9d09fb42d6c1fa01bb2e441e946babdf73dbc7e5767002a07b28",
+        "README.md": "fc2848472b48627838b757bf1a7be9564f31e483e8b673bd4ae95a11016f3309",
+        "session-browser.js": "d5544db5c6712327e76b8436cfabe02e34d8e043ff2d251c2c5ff3f00f1a9dd7",
+        "session-store.js": "56b33e1a342ba148cb4443e03435e5c728db60903ecd0ae87c05fbff3ca881ab",
+        "test/device-enrollment.test.js": "3dd36d37044eaf1043bd8b2e9f10ead9dc87479152a07237ab87d50146782f4c",
+        "test/session-refresh.test.js": "8f5facb81444f0d09928d48f22e82112d47bde21927afcd7fd830ce6832b9f79",
+        "tool.manifest.json": "40326de8bc08f2fd51ce51d4a20637b9af37de588d6cb97d27bc0b0d16304095",
+        "web-store/listing.md": "914e7c38bc67e19f3afbea86288c0cbc49afcb8941f4734fd3f786c5533861e7",
+        "web-store/privacy-policy.md": "c96e84f1a112e5949a3e7bd952fcf5ec794eaa5c4bee14a1dbe0c8e0f5888fb7"
       }
     }
   }

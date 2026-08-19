@@ -6,6 +6,7 @@ import { chromium } from "playwright";
 import defaults from "./config.js";
 
 const toolName = "x-dm";
+const bridgeToolName = "browser-session-bridge";
 const fallbackCookieToolName = "x-session-reader";
 const stateVersion = 3;
 const toolDir = path.dirname(fileURLToPath(import.meta.url));
@@ -48,7 +49,7 @@ Actions:
   get-posts Read recent visible posts from the logged-in account. args: maxResults?
   get-thread Read one exact visible X post and its loaded replies. args: postUrl, maxResults?
   update-bio Replace or append to the logged-in account bio. args: bio? or appendText?, confirm=true
-  create-post Publish one exact post from the logged-in account. args: post, confirm=true
+  create-post Publish one exact post from the logged-in account through the X web composer. args: post, confirm=true
   reply-post Reply once to an exact visible X post. args: postUrl, reply, targetText? (search fallback), campaignId?, confirm=true, dryRun=false
   relationship-status Read the target-bound Follow/Following state without changing it. args: username
   follow   Follow one target profile and record campaign metadata. args: username, campaignId?, unfollowIfNoResponse?, confirm=true
@@ -69,7 +70,7 @@ Safety and reliability:
   - state writes are atomic and campaign-scoped metadata is retained
 
 Config:
-  X_COOKIES                X/Twitter session cookies. Falls back to x-session-reader cookies.
+  X_COOKIES                X/Twitter session cookies. Prefers browser-session-bridge x.com sessions, then this value, then x-session-reader cookies.
   X_CHAT_PASSCODE          Optional secret passcode for encrypted X Chat history.
   CHROME_EXECUTABLE_PATH   Optional Chrome/Chromium executable.
   HEADLESS                 true|false.
@@ -170,8 +171,23 @@ function parseCookies(rawCookies) {
   }
 }
 
+async function loadBridgeCookies(chatId) {
+  if (chatId == null || chatId === "") return "";
+  const stateDir = getChatToolStateDir(chatId, bridgeToolName);
+  const sessionPath = path.join(stateDir, "sessions", "x.com.json");
+  try {
+    const session = JSON.parse((await readFile(sessionPath, "utf8")).replace(/^\uFEFF/, ""));
+    return Array.isArray(session.cookies) && session.cookies.length ? JSON.stringify(session.cookies) : "";
+  } catch (error) {
+    if (error?.code === "ENOENT") return "";
+    throw new Error(`Could not read ${bridgeToolName} x.com session: ${error.message || error}`);
+  }
+}
+
 async function loadConfig(request) {
   const config = await loadToolConfig(toolName, defaults, request.chatId ?? null);
+  const bridgeCookies = await loadBridgeCookies(request.chatId ?? null);
+  if (bridgeCookies) return { ...config, X_COOKIES: bridgeCookies };
   if (config.X_COOKIES) return config;
   const fallback = await loadToolConfig(fallbackCookieToolName, { X_COOKIES: "" }, request.chatId ?? null);
   return { ...config, X_COOKIES: fallback.X_COOKIES || "" };
@@ -764,101 +780,8 @@ function createTweetResultId(value) {
   return typeof result?.rest_id === "string" && /^\d{6,}$/.test(result.rest_id) ? result.rest_id : "";
 }
 
-function tweetIdForText(value, post) {
-  if (!value || typeof value !== "object") return "";
-  const restId = typeof value.rest_id === "string" && /^\d{6,}$/.test(value.rest_id) ? value.rest_id : "";
-  if (restId && nestedValueMatches(value.legacy || {}, post)) return restId;
-  for (const child of Object.values(value)) {
-    const nested = tweetIdForText(child, post);
-    if (nested) return nested;
-  }
-  return "";
-}
-
 function escapedRegex(value) {
   return String(value).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-}
-
-async function createPostViaGraphql(cookies, post, onSubmit = () => {}, { replyToTweetId = "" } = {}) {
-  const cookieHeader = cookies.map((cookie) => `${cookie.name}=${cookie.value}`).join("; ");
-  const requestHeaders = { "user-agent": "Mozilla/5.0", accept: "*/*", cookie: cookieHeader };
-  let homeResponse;
-  try {
-    homeResponse = await fetch("https://x.com/home", { headers: requestHeaders, signal: AbortSignal.timeout(30000) });
-  } catch { throw new Error("Fetching X web metadata failed."); }
-  const homeHtml = await homeResponse.text();
-  const mainUrlMatch = homeHtml.match(/<script[^>]+src="([^"]*\/main\.[^"]+\.js)"/i);
-  if (!mainUrlMatch) throw new Error("X web metadata did not expose its main client bundle.");
-  let mainResponse;
-  try {
-    mainResponse = await fetch(mainUrlMatch[1], { headers: { "user-agent": "Mozilla/5.0", accept: "*/*" }, signal: AbortSignal.timeout(30000) });
-  } catch { throw new Error("Fetching the X web client bundle failed."); }
-  const mainJs = await mainResponse.text();
-  const operation = mainJs.match(/queryId:"([^"]+)",operationName:"CreateTweet".*?featureSwitches:\[(.*?)\],fieldToggles:\[(.*?)\]/s);
-  if (!operation) throw new Error("X web metadata did not expose the CreateTweet operation.");
-  const featureNames = [...operation[2].matchAll(/"([^"]+)"/g)].map((match) => match[1]);
-  const toggleNames = [...operation[3].matchAll(/"([^"]+)"/g)].map((match) => match[1]);
-  const features = Object.fromEntries(featureNames.map((name) => {
-    const match = homeHtml.match(new RegExp(`${escapedRegex(name)}":\\{"value":(true|false)`));
-    return [name, match ? match[1] === "true" : false];
-  }));
-  const fieldToggles = Object.fromEntries(toggleNames.map((name) => [name, false]));
-  const bearerMatch = mainJs.match(/AAAAA[A-Za-z0-9%_-]{60,}/);
-  if (!bearerMatch) throw new Error("X web metadata did not expose its public web bearer token.");
-  const csrf = cookies.find((cookie) => cookie.name === "ct0")?.value || "";
-  if (!csrf) throw new Error("The authenticated X session did not expose a CSRF token.");
-  const url = `https://x.com/i/api/graphql/${operation[1]}/CreateTweet`;
-  onSubmit();
-  let response;
-  try {
-    response = await fetch(url, {
-      method: "POST",
-      signal: AbortSignal.timeout(45000),
-      headers: {
-        authorization: `Bearer ${decodeURIComponent(bearerMatch[0])}`,
-        "content-type": "application/json",
-        "x-csrf-token": csrf,
-        "x-twitter-active-user": "yes",
-        "x-twitter-auth-type": "OAuth2Session",
-        "x-twitter-client-language": "en",
-        origin: "https://x.com",
-        referer: "https://x.com/home",
-        cookie: cookieHeader,
-        "user-agent": "Mozilla/5.0"
-      },
-      body: JSON.stringify({
-        variables: {
-          tweet_text: post,
-          dark_request: false,
-          media: { media_entities: [], possibly_sensitive: false },
-          semantic_annotation_ids: [],
-          disallowed_reply_options: null,
-          ...(replyToTweetId ? { reply: { in_reply_to_tweet_id: replyToTweetId, exclude_reply_user_ids: [] } } : {})
-        },
-        features,
-        fieldToggles,
-        queryId: operation[1]
-      })
-    });
-  } catch { throw new Error("The X CreateTweet request failed before a verifiable response was received."); }
-  let responseJson = null;
-  try { responseJson = await response.json(); } catch {}
-  const tweetId = createTweetResultId(responseJson) || tweetIdForText(responseJson, post);
-  const noApplicationErrors = Boolean(responseJson) && !(Array.isArray(responseJson.errors) && responseJson.errors.length);
-  const receipt = {
-    valid: Boolean(response.ok && noApplicationErrors && tweetId),
-    endpoint: `/i/api/graphql/${operation[1]}/CreateTweet`,
-    status: response.status,
-    noApplicationErrors,
-    responseTextMatches: nestedValueMatches(responseJson, post),
-    tweetId: tweetId || null,
-    replyToTweetId: replyToTweetId || null
-  };
-  if (!receipt.valid) {
-    const messages = Array.isArray(responseJson?.errors) ? responseJson.errors.map((error) => String(error?.message || "X application error")).slice(0, 5) : [];
-    throw new Error(`X rejected the CreateTweet request (${receipt.status}).${messages.length ? ` ${messages.join("; ")}` : ""}`);
-  }
-  return receipt;
 }
 
 async function verifyPublishedPost(page, handle, post, tweetId) {
@@ -1541,6 +1464,21 @@ async function domDiagnostics(page, probeText = "") {
   }, probeText).catch((error) => ({ url: page.url(), error: error.message, elements: [], matches: [] }));
 }
 
+async function publishPostViaUi(page, handle, post) {
+  const opened = await openPostComposer(page, handle);
+  const composerPage = opened.page;
+  await composePost(composerPage, opened.composer, post, { force: true });
+  const sendButton = composerPage.locator('[data-testid="tweetButton"], [data-testid="tweetButtonInline"]').last();
+  await sendButton.waitFor({ state: "visible", timeout: 10000 });
+  if (await sendButton.isDisabled().catch(() => false)) throw new Error("X kept the Post button disabled.");
+  const responsePromise = composerPage.waitForResponse(isCandidatePostResponse, { timeout: 30000 });
+  await sendButton.click();
+  const response = await responsePromise;
+  const receipt = await buildPostReceipt(response, post);
+  if (!receipt.valid) throw new Error("X UI post receipt did not verify the exact text.");
+  return receipt;
+}
+
 async function createPostAction(request, args, stateDir, statePath, state, page, account, config) {
   const handle = cleanHandle(account.handle || config.EXPECTED_ACCOUNT_HANDLE);
   if (!handle) return toolError("Could not determine the logged-in X handle; refusing to create a post.");
@@ -1566,7 +1504,8 @@ Pass confirm=true to publish it.`,
   let clickStarted = false;
   let receipt = null;
   try {
-    receipt = await createPostViaGraphql(parseCookies(config.X_COOKIES), post, () => { clickStarted = true; });
+    clickStarted = true;
+    receipt = await publishPostViaUi(page, handle, post);
     const published = { verified: true, url: `https://x.com/${encodeURIComponent(handle)}/status/${receipt.tweetId}` };
     const record = {
       handle,
@@ -1576,7 +1515,7 @@ Pass confirm=true to publish it.`,
       url: published.url,
       publishedAt: new Date().toISOString(),
       deliveryVerified: true,
-      verificationMethod: "create-tweet-receipt",
+      verificationMethod: "web-composer-create-tweet-receipt",
       receipt
     };
     const release = await acquireStateLock(stateDir);

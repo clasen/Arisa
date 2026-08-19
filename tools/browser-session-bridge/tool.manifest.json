@@ -1,5 +1,6 @@
 {
   "name": "browser-session-bridge",
+  "version": "0.1.0",
   "description": "Receive explicitly shared, domain-scoped Chrome or Brave sessions through a temporary encrypted setup link and store them per chat.",
   "entry": "index.js",
   "daemon": {

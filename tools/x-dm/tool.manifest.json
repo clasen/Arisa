@@ -3,6 +3,9 @@
   "version": "0.2.0",
   "description": "Safely manage X/Twitter outreach, follows, the logged-in account bio, and explicitly confirmed posts with account pinning and post-change verification.",
   "entry": "index.js",
+  "toolDependencies": {
+    "browser-session-bridge": "^0.1.0"
+  },
   "input": [
     "text/plain",
     "application/json"
@@ -16,7 +19,7 @@
       "type": "string",
       "required": false,
       "secret": true,
-      "prompt": "Paste your X/Twitter cookies as a JSON array, Netscape cookies.txt, or raw Cookie header. If empty, the tool tries the chat's x-session-reader cookies."
+      "prompt": "Optional fallback X/Twitter cookies as a JSON array, Netscape cookies.txt, or raw Cookie header. The tool first tries the chat's browser-session-bridge x.com session, then this value, then x-session-reader cookies."
     },
     "X_CHAT_PASSCODE": {
       "type": "string",
