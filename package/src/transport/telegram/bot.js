@@ -16,10 +16,9 @@ import { cancelRestartReceipt, deliverRestartReceipt, prepareRestartReceipt } fr
 import { buildUpdatePicker, createTelegramUpdateCallbackHandler } from "./update-command.js";
 import { createTelegramModelControls } from "./model-controls.js";
 import { createTelegramModelCallbackHandler } from "./model-callback.js";
+import { createTelegramTaskDispatcher } from "./task-dispatcher.js";
 import { resolveTelegramWorkspaceRoute, topicSessionId } from "./workspace-group.js";
 import {
-  buildAsyncEventPrompt,
-  buildAsyncTaskPrompt,
   buildNewSessionPrompt,
   buildPrompt,
   buildReactionPrompt,
@@ -746,82 +745,16 @@ export async function createTelegramBot({ config, artifactStore, toolRegistry, t
     return enqueuePrompt({ chatId: route.sessionId, prompt, label, ctx });
   }
 
-  async function dispatchTask(task) {
-    const chatId = task.payload?.chatId;
-    if (!chatId) {
-      await taskStore.fail(task.id, `Task missing chatId: ${task.kind}`);
-      return;
-    }
-
-    if (task.kind === "agent_task") {
-      if (!task.payload.prompt) {
-        await taskStore.fail(task.id, "agent_task missing prompt");
-        return;
-      }
-      logger?.log("tasks", `running task ${task.id} for chat ${chatId}`);
-      await enqueueAsyncPrompt({
-        chatId,
-        prompt: await buildAsyncTaskPrompt({ task, artifactStore, toolRegistry, resourceNotes, logger }),
-        label: `scheduled task ${task.id}`,
-        telegramContext: task.payload.telegramContext
-      });
-      await taskStore.complete(task.id);
-      return;
-    }
-
-    if (task.kind === "agent_event") {
-      logger?.log("tasks", `agent event ${task.id} for chat ${chatId}`);
-      const acknowledgement = String(task.payload?.acknowledgement || "").trim();
-      if (acknowledgement) {
-        try {
-          await bot.api.sendMessage(chatId, acknowledgement);
-        } catch (error) {
-          logger?.log("telegram", `agent event acknowledgement failed for chat ${chatId}: ${error instanceof Error ? error.message : String(error)}`);
-        }
-      }
-      await enqueueAsyncPrompt({
-        chatId,
-        prompt: await buildAsyncEventPrompt(task, resourceNotes),
-        label: `agent event ${task.id}`,
-        telegramContext: task.payload.telegramContext
-      });
-      await taskStore.complete(task.id);
-      return;
-    }
-
-    if (task.kind === "poll_tool") {
-      const toolName = task.payload?.toolName;
-      if (!toolName) {
-        await taskStore.fail(task.id, "poll_tool missing toolName");
-        return;
-      }
-      logger?.log("tasks", `polling tool ${toolName} (task ${task.id}) for chat ${chatId}`);
-      try {
-        await agentManager.runTool({
-          name: toolName,
-          request: { args: task.payload.args || {} },
-          chatId
-        });
-      } catch (error) {
-        logger?.log("tasks", `poll_tool ${toolName} failed: ${error instanceof Error ? error.message : String(error)}`);
-      }
-      await taskStore.complete(task.id);
-      return;
-    }
-
-    await taskStore.fail(task.id, `Unsupported task: ${task.kind}`);
-  }
-
-  async function dispatchDueTasks() {
-    const tasks = await taskStore.claimDue(10);
-    for (const task of tasks) {
-      try {
-        await dispatchTask(task);
-      } catch (error) {
-        await taskStore.fail(task.id, error instanceof Error ? error.message : String(error));
-      }
-    }
-  }
+  const { dispatchDueTasks } = createTelegramTaskDispatcher({
+    taskStore,
+    sendMessage: (chatId, text) => bot.api.sendMessage(chatId, text),
+    enqueueAsyncPrompt,
+    artifactStore,
+    toolRegistry,
+    resourceNotes,
+    agentManager,
+    logger
+  });
 
   async function summarizeSessionBeforeReset(chatId, route = {
     workspace: false,
