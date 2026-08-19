@@ -1,4 +1,5 @@
 import path from "node:path";
+import { readFileSync } from "node:fs";
 import { readFile, stat, unlink } from "node:fs/promises";
 import { createAgentSession, DefaultResourceLoader, SessionManager, SettingsManager, defineTool } from "@earendil-works/pi-coding-agent";
 import { Type } from "@sinclair/typebox";
@@ -10,7 +11,7 @@ import { buildPiToolPolicy, getCoreCodingTools } from "./core-tools.js";
 import { createSystemShellTool } from "./system-shell-tool.js";
 import { clampModelThinkingLevel } from "./pi-runtime.js";
 import { clampModelSpeed, createModelSpeedController } from "./model-speed.js";
-import { arisaHomeDir, getChatPiSessionsDir } from "../../runtime/paths.js";
+import { arisaHomeDir, getChatPiSessionsDir, sessionStartOperationalNotesFile } from "../../runtime/paths.js";
 import { searchOfficialToolCatalog } from "../tools/official-tool-catalog.js";
 import { ToolResourceNoteStore } from "../tools/tool-resource-note-store.js";
 
@@ -54,6 +55,35 @@ export function formatPortableSessionHistory(messages = []) {
     })
     .filter(Boolean)
     .join("\n\n");
+}
+
+const operationalNoteMaxChars = 220;
+
+function normalizeOperationalNote(note) {
+  const text = typeof note === "string" ? note : note?.text;
+  const trimmed = String(text || "").replace(/\s+/g, " ").trim();
+  if (!trimmed) return "";
+  return trimmed.length <= operationalNoteMaxChars ? trimmed : `${trimmed.slice(0, operationalNoteMaxChars - 1).trim()}…`;
+}
+
+export function loadSessionStartOperationalNotes() {
+  try {
+    const raw = readFileSync(sessionStartOperationalNotesFile, "utf8");
+    const parsed = JSON.parse(raw);
+    const notes = Array.isArray(parsed) ? parsed : parsed?.notes;
+    if (!Array.isArray(notes)) return [];
+    return notes.map(normalizeOperationalNote).filter(Boolean).slice(0, 20);
+  } catch {
+    return [];
+  }
+}
+
+function formatSessionStartOperationalNotes(notes) {
+  if (!notes.length) return "";
+  return [
+    "Durable operating notes for this Arisa session:",
+    ...notes.map((note) => `- ${note}`)
+  ].join("\n");
 }
 
 const estimatedImageTokens = 1_200;
@@ -350,6 +380,15 @@ export class AgentManager {
         sessionDir,
         handoff?.parentSession ? { parentSession: handoff.parentSession } : undefined
       );
+      const operationalNotes = formatSessionStartOperationalNotes(loadSessionStartOperationalNotes());
+      if (operationalNotes) {
+        sessionManager.appendCustomMessageEntry(
+          "arisa-operational-notes",
+          operationalNotes,
+          false,
+          { source: "session-start" }
+        );
+      }
       if (handoff?.text) {
         sessionManager.appendCustomMessageEntry(
           "arisa-session-handoff",

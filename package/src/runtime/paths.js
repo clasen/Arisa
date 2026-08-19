@@ -14,6 +14,7 @@ export const piAuthFile = path.join(stateDir, "pi-auth.json");
 export const servicePidFile = path.join(stateDir, "arisa.pid");
 export const serviceLogFile = path.join(stateDir, "arisa.log");
 export const restartReceiptFile = path.join(stateDir, "restart-receipt.json");
+export const sessionStartOperationalNotesFile = path.join(stateDir, "session-start-operational-notes.json");
 export function createIpcSocketPath({ homeDir = arisaHomeDir, platform = process.platform } = {}) {
   if (platform === "win32") {
     const suffix = crypto.createHash("sha256").update(homeDir).digest("hex").slice(0, 16);

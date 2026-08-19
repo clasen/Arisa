@@ -3,8 +3,26 @@ import test from "node:test";
 import { mkdtemp, rm } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
-import { buildTopicInitializationHandoff, isProcessableTelegramMessage } from "../src/transport/telegram/bot.js";
+import { buildTopicInitializationHandoff, isProcessableTelegramMessage, startTelegramTyping } from "../src/transport/telegram/bot.js";
 import { ConversationHistoryStore } from "../src/core/conversation/conversation-history-store.js";
+
+test("Telegram typing action stays inside the message topic", async () => {
+  const calls = [];
+  const stop = await startTelegramTyping({
+    chat: { id: "chat-1" },
+    message: { message_thread_id: 42 },
+    api: {
+      sendChatAction: async (chatId, action, options) => {
+        calls.push({ chatId, action, options });
+      }
+    }
+  });
+  stop();
+
+  assert.deepEqual(calls, [
+    { chatId: "chat-1", action: "typing", options: { message_thread_id: 42 } }
+  ]);
+});
 
 test("Telegram service messages do not become empty agent prompts", () => {
   assert.equal(isProcessableTelegramMessage({ forum_topic_created: { name: "Stories" } }), false);

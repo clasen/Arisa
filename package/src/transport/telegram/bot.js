@@ -460,9 +460,12 @@ function sanitizeSessionHandoff(text) {
 }
 
 export async function startTelegramTyping(ctx) {
-  await ctx.api.sendChatAction(ctx.chat.id, "typing").catch(() => {});
+  const options = ctx.message?.message_thread_id
+    ? { message_thread_id: ctx.message.message_thread_id }
+    : undefined;
+  await ctx.api.sendChatAction(ctx.chat.id, "typing", options).catch(() => {});
   const timer = setInterval(() => {
-    ctx.api.sendChatAction(ctx.chat.id, "typing").catch(() => {});
+    ctx.api.sendChatAction(ctx.chat.id, "typing", options).catch(() => {});
   }, 4000);
   return () => clearInterval(timer);
 }
