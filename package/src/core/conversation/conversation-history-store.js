@@ -102,6 +102,20 @@ export class ConversationHistoryStore {
     });
   }
 
+  async consumeSeedHandoff(chatId) {
+    return this.withChatLock(chatId, async () => {
+      const records = await this.read(chatId);
+      const seed = records.find((record) => record.kind === "seed");
+      if (!seed || records.some((record) => record.kind === "seed-consumed")) return "";
+      await this.appendRecord(chatId, {
+        id: crypto.randomUUID(),
+        kind: "seed-consumed",
+        createdAt: new Date().toISOString()
+      });
+      return formatPortableConversation([seed]);
+    });
+  }
+
   async appendTurn(chatId, { runtime, prompt, response }) {
     const normalizedPrompt = normalizeText(prompt);
     const normalizedResponse = normalizeText(response);

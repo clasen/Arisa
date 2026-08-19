@@ -26,6 +26,7 @@ const arisaToolNames = [
   "cancel_scheduled_task",
   "cancel_all_scheduled_tasks",
   "create_telegram_topic",
+  "initialize_telegram_topic",
   "send_artifact"
 ];
 
@@ -455,7 +456,8 @@ export class AgentManager {
     const accessGuardTarget = { current: accessGuard };
     const telegramProxy = {
       sendMedia: (...args) => telegramTarget.current.sendMedia(...args),
-      createForumTopic: (...args) => telegramTarget.current.createForumTopic(...args)
+      createForumTopic: (...args) => telegramTarget.current.createForumTopic(...args),
+      initializeForumTopic: (...args) => telegramTarget.current.initializeForumTopic(...args)
     };
     const assertAccess = () => accessGuardTarget.current();
     const customTools = guardTools([
@@ -787,14 +789,39 @@ export class AgentManager {
       defineTool({
         name: "create_telegram_topic",
         label: "Create Telegram topic",
-        description: "Create a new topic in the current owner-only Telegram forum when the user asks for one. Topic names are dynamic, not predefined.",
-        parameters: Type.Object({ name: Type.String({ minLength: 1, maxLength: 128 }) }),
+        description: "Create and initialize a new topic in the current owner-only Telegram forum. Topic names are dynamic, and context seeds the isolated session without copying unrelated history.",
+        parameters: Type.Object({
+          name: Type.String({ minLength: 1, maxLength: 128 }),
+          context: Type.String({ minLength: 1, maxLength: 4000 })
+        }),
         execute: async (_id, params) => {
           if (typeof telegram.createForumTopic !== "function") {
             const result = { ok: false, error: "Telegram topic creation is unavailable in this chat." };
             return { content: [{ type: "text", text: JSON.stringify(result) }], details: result };
           }
-          const result = await telegram.createForumTopic(params.name.trim());
+          const result = await telegram.createForumTopic(params.name.trim(), params.context.trim());
+          return { content: [{ type: "text", text: JSON.stringify(result, null, 2) }], details: result };
+        }
+      }),
+      defineTool({
+        name: "initialize_telegram_topic",
+        label: "Initialize Telegram topic",
+        description: "Seed or replace the isolated context of an existing topic in the current owner-only Telegram forum.",
+        parameters: Type.Object({
+          messageThreadId: Type.Integer({ minimum: 2 }),
+          name: Type.String({ minLength: 1, maxLength: 128 }),
+          context: Type.String({ minLength: 1, maxLength: 4000 })
+        }),
+        execute: async (_id, params) => {
+          if (typeof telegram.initializeForumTopic !== "function") {
+            const result = { ok: false, error: "Telegram topic initialization is unavailable in this chat." };
+            return { content: [{ type: "text", text: JSON.stringify(result) }], details: result };
+          }
+          const result = await telegram.initializeForumTopic({
+            messageThreadId: params.messageThreadId,
+            name: params.name.trim(),
+            context: params.context.trim()
+          });
           return { content: [{ type: "text", text: JSON.stringify(result, null, 2) }], details: result };
         }
       }),

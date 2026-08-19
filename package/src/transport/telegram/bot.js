@@ -18,9 +18,31 @@ import { formatToolUsageReport } from "../../runtime/tool-usage-report.js";
 import { ToolResourceNoteStore } from "../../core/tools/tool-resource-note-store.js";
 import { formatUpdateReport } from "../../runtime/update-manager.js";
 import { buildUpdatePicker, createTelegramUpdateCallbackHandler } from "./update-command.js";
-import { resolveTelegramWorkspaceRoute } from "./workspace-group.js";
+import { resolveTelegramWorkspaceRoute, topicSessionId } from "./workspace-group.js";
 
 const slowPromptNoticeMs = 300_000;
+
+export function isProcessableTelegramMessage(message = {}) {
+  return Boolean(
+    String(message.text || "").trim()
+    || message.voice
+    || message.audio
+    || message.video
+    || message.document
+    || message.photo?.length
+    || message.location
+    || message.venue
+  );
+}
+
+export function buildTopicInitializationHandoff({ name, context }) {
+  return [
+    `Telegram topic: ${String(name || "").trim()}`,
+    "This topic has an isolated conversation session.",
+    "Use the following as background context. Do not repeat it unless the user asks.",
+    String(context || "").trim()
+  ].filter(Boolean).join("\n\n");
+}
 
 export const telegramCommands = Object.freeze([
   { command: "new", description: "New chat context" },
@@ -1015,6 +1037,31 @@ export async function createTelegramBot({ config, artifactStore, toolRegistry, t
     const messageOptions = (extra = {}) => route.workspace && route.threadId
       ? { ...extra, message_thread_id: route.threadId }
       : extra;
+    const initializeForumTopic = async ({ messageThreadId, name, context }) => {
+      if (!route.workspace) throw new Error("Telegram topic initialization is only available from the owner workspace forum.");
+      await createWorkspaceAccessGuard(route)();
+      const initializedSessionId = topicSessionId({
+        ownerChatId: route.ownerChatId,
+        groupChatId: route.transportChatId,
+        threadId: messageThreadId,
+        generalTopicId: route.generalTopicId
+      });
+      if (initializedSessionId === String(route.ownerChatId)) {
+        throw new Error("The General topic already uses the owner's private session and cannot be reinitialized here.");
+      }
+      const handoff = buildTopicInitializationHandoff({ name, context });
+      await conversationHistory.reset(initializedSessionId, { runtime: "pi", history: handoff });
+      agentManager.resetSession(initializedSessionId, { handoff });
+      await agentManager.waitForSessionClose(initializedSessionId);
+      return {
+        ok: true,
+        chatId: route.transportChatId,
+        messageThreadId,
+        sessionId: initializedSessionId,
+        name,
+        initialized: true
+      };
+    };
     return {
       sendMedia: async (filePath, { method = "audio", caption, filename } = {}) => {
         logger?.log("telegram", `sending ${method} reply for chat ${route.transportChatId}`);
@@ -1026,17 +1073,17 @@ export async function createTelegramBot({ config, artifactStore, toolRegistry, t
         if (method === "video") return bot.api.sendVideo(route.transportChatId, input, options);
         return bot.api.sendAudio(route.transportChatId, input, options);
       },
-      createForumTopic: async (name) => {
+      createForumTopic: async (name, context) => {
         if (!route.workspace) throw new Error("Telegram topic creation is only available from the owner workspace forum.");
         await createWorkspaceAccessGuard(route)();
         const topic = await bot.api.createForumTopic(route.transportChatId, name);
-        return {
-          ok: true,
-          chatId: route.transportChatId,
+        return initializeForumTopic({
           messageThreadId: topic.message_thread_id,
-          name: topic.name
-        };
-      }
+          name: topic.name,
+          context
+        });
+      },
+      initializeForumTopic
     };
   }
 
@@ -1076,6 +1123,13 @@ export async function createTelegramBot({ config, artifactStore, toolRegistry, t
       ? { ...extra, message_thread_id: route.threadId }
       : extra;
     const work = async () => {
+      if (route.workspace && route.threadId) {
+        const handoff = await conversationHistory.consumeSeedHandoff(sessionId);
+        if (handoff) {
+          agentManager.resetSession(sessionId, { handoff });
+          await agentManager.waitForSessionClose(sessionId);
+        }
+      }
       const { session, speedController } = await agentManager.getSessionContext(sessionId, bridge, {
         scopeChatId: route.scopeChatId,
         accessGuard: createWorkspaceAccessGuard(route)
@@ -1761,6 +1815,7 @@ export async function createTelegramBot({ config, artifactStore, toolRegistry, t
   bot.on("message", async (ctx) => {
     const auth = await authorizeContext(ctx);
     if (!auth.ok) return;
+    if (!isProcessableTelegramMessage(ctx.message)) return;
 
     const command = getTelegramCommand(ctx);
     if (command) return;
