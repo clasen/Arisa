@@ -81,6 +81,7 @@ Modes:
   login      Start this chat's WhatsApp session, enable watch, and return a QR code when needed.
   status     Show this chat's WhatsApp session status.
   send       Send one WhatsApp message from this chat's WhatsApp session. Enables watch by default. Supports humanized delay/typing.
+  set-profile-picture Set the current WhatsApp account profile picture from an image artifact.
   broadcast  Send one message to multiple recipients from this chat's session. Enables watch by default. Supports humanized delay/typing.
   inbox      Read/process received WhatsApp replies from this chat's local inbox.
   sync       Backfill recent messages from known chats/groups into the inbox.
@@ -99,6 +100,7 @@ Examples:
   { "chatId": "123456789", "args": { "mode": "send", "to": "+15551234567", "message": "Hello" } }
   { "chatId": "123456789", "args": { "mode": "send", "to": "+15551234567", "message": "Hello", "initialDelayMs": "10000", "typingMs": "30000" } }
   { "chatId": "123456789", "args": { "mode": "send", "to": "+15551234567", "message": "Replying", "quotedMessageId": "..." } }
+  { "chatId": "123456789", "artifact": { "path": "/tmp/avatar.jpg" }, "args": { "mode": "set-profile-picture" } }
   { "chatId": "123456789", "args": { "mode": "wait-reply", "from": "+15551234567" } }
   { "chatId": "123456789", "args": { "mode": "react", "messageId": "...", "emoji": "👀" } }
   { "chatId": "123456789", "args": { "mode": "reactions", "messageId": "..." } }
@@ -1127,6 +1129,21 @@ class SessionManager {
     return { synced, chats: ids.length };
   }
 
+  async setProfilePicture(chatId, job) {
+    const record = await this.ensureClient(chatId);
+    await this.waitReady(chatId, number(job.readyTimeoutMs, number(config.READY_TIMEOUT_MS, 120000)));
+    if (!job.mediaPath) throw new Error("An image artifact is required");
+    const media = MessageMedia.fromFilePath(job.mediaPath);
+    const updated = await withOperationTimeout(
+      () => record.client.setProfilePicture(media),
+      number(job.operationTimeoutMs, 45000),
+      "WhatsApp profile picture update"
+    );
+    if (!updated) throw new Error("WhatsApp did not confirm the profile picture update");
+    record.lastActivity = Date.now();
+    return { sessionChatId: normalizeChatId(chatId), updated: true };
+  }
+
   async send(chatId, job) {
     let record = await this.ensureClient(chatId);
     await this.waitReady(chatId, number(job.readyTimeoutMs, number(config.READY_TIMEOUT_MS, 120000)));
@@ -1296,6 +1313,9 @@ async function processJob(manager, job) {
   }
   if (job.payload.type === "send") {
     return manager.send(chatId, job.payload);
+  }
+  if (job.payload.type === "setProfilePicture") {
+    return manager.setProfilePicture(chatId, job.payload);
   }
   if (job.payload.type === "delete") {
     return manager.deleteRecentSent(chatId, job.payload);
@@ -1618,6 +1638,18 @@ async function run(requestFile) {
       const result = await sendOne(chatId, request.args?.to || request.args?.recipient, message, request.artifact, request.args);
       const watchNote = autoWatch ? " Watch is enabled for this chat; use wait-reply when you need the immediate answer." : " Watch is disabled by request; run watch or wait-reply to process replies.";
       console.log(JSON.stringify(toolOk({ text: `Message sent to ${result.chatId}.${watchNote}`, json: { ...result, watchEnabled: autoWatch } })));
+      return;
+    }
+
+    if (mode === "set-profile-picture") {
+      if (!request.artifact?.path) throw new Error("An image artifact is required");
+      const result = await submitChatJob(chatId, {
+        type: "setProfilePicture",
+        mediaPath: request.artifact.path,
+        readyTimeoutMs: number(config.READY_TIMEOUT_MS, 120000),
+        operationTimeoutMs: number(request.args?.timeoutMs, 45000)
+      }, { timeoutMs: number(config.JOB_TIMEOUT_MS, 120000) });
+      console.log(JSON.stringify(toolOk({ text: "WhatsApp profile picture updated.", json: result })));
       return;
     }
 
