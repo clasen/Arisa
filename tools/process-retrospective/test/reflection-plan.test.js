@@ -21,6 +21,8 @@ test("prompt is bounded and review-only", () => {
   assert.match(prompt, /creative alternatives and assumptions/);
   assert.match(prompt, /reconstruct the whole review window rather than anchoring on the latest exchange/);
   assert.match(prompt, /beginning, middle, and end of the window/);
+  assert.match(prompt, /Query telemetry-ledger with action report using 24 hours/);
+  assert.match(prompt, /correlated hypotheses—not proven causes/);
   assert.match(prompt, /exactly 3 small, testable improvements/);
   assert.match(prompt, /Do not make every proposal a variation of one incident/);
   assert.match(prompt, /Do not modify code, configuration, schedules, drafts, messages, or external systems/);

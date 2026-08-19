@@ -60,6 +60,8 @@ Review only the last ${windowHours} hours of relevant chat activity, scheduled-t
 
 Before drawing conclusions, reconstruct the whole review window rather than anchoring on the latest exchange. Build a private evidence inventory covering every explicit user correction, rejection, rewrite, or clarification; significant scheduled-task outcomes; meaningful tool successes or failures; and relevant state changes. Inspect activity from the beginning, middle, and end of the window when each exists. Do not show the inventory or private payloads to the user.
 
+Query telemetry-ledger with action report using ${windowHours} hours for both the current and immediately preceding baseline window. Group by only relevant bounded dimensions. Treat insufficient-data as no conclusion, use regressions and improvements as evidence, and describe dimension breakdowns only as correlated hypotheses—not proven causes. If telemetry-ledger is unavailable or has no useful samples, continue with the other evidence and say nothing about missing telemetry.
+
 Questions:
 - ${focus.questions[0]}
 - ${focus.questions[1]}

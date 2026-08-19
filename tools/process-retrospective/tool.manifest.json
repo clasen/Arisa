@@ -1,7 +1,7 @@
 {
   "name": "process-retrospective",
-  "version": "1.0.0",
-  "description": "Run periodic evidence-based process retrospectives, rotate analytical focus after a bounded number of passes, remain silent when operations look healthy, and propose improvements without applying them automatically.",
+  "version": "1.1.0",
+  "description": "Run periodic evidence-based process retrospectives, include telemetry window comparisons when available, rotate analytical focus, remain silent when operations look healthy, and propose improvements without applying them automatically.",
   "entry": "index.js",
   "input": [
     "text/plain",
@@ -46,6 +46,7 @@
     "operations",
     "reflection",
     "retrospective",
-    "scheduler"
+    "scheduler",
+    "telemetry"
   ]
 }

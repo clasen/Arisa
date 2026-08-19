@@ -2,7 +2,7 @@
 
 Schedules bounded, evidence-based reviews of recent Arisa operations.
 
-The tool uses a lightweight recurring `poll_tool`. Each poll increments a chat-scoped pass counter and emits an `agent_event` asking Arisa to inspect recent outcomes. The agent remains silent when there is no supported improvement and never applies a proposal automatically.
+The tool uses a lightweight recurring `poll_tool`. Each poll increments a chat-scoped pass counter and emits an `agent_event` asking Arisa to inspect recent outcomes. When telemetry samples exist, the review compares the current window with the immediately preceding baseline through `telemetry-ledger`; correlated dimensions remain hypotheses, not causal claims. The agent remains silent when there is no supported improvement and never applies a proposal automatically.
 
 ## Focus rotation
 
