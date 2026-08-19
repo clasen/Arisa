@@ -101,11 +101,3 @@ export function clampModelThinkingLevel(model, level) {
 export function modelSupportsThinking(model) {
   return listModelThinkingLevels(model).some((level) => level !== "off");
 }
-
-export function findPiModel({ provider, model, apiKey } = {}) {
-  const runtime = createPiRuntime({ provider, apiKey });
-  return {
-    ...runtime,
-    model: provider && model ? runtime.modelRegistry.find(provider, model) : null
-  };
-}
