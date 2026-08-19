@@ -5,6 +5,7 @@ import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import defaults from "./config.js";
 import { SlaveBatchRunner } from "./batch-runner.js";
+import { normalizeRemoteCommandRequest, resolveCommandArgv, resolveCommandTimeout } from "./command-arguments.js";
 import { ChatMasterSlaveStore } from "./chat-state-store.js";
 import {
   addSlavesToGroup,
@@ -64,6 +65,10 @@ Actions:
   install_slave_tool, cancel_slave_batch, revoke_slave
   configure_slave
   slave.bootstrap, slave.status, slave.unpair
+
+run_slave_command:
+  executable=<path-or-name> argvJson='["arg1","arg2"]'
+  argvJson is validated as a bounded JSON array of strings and runs without a shell.
 `);
 }
 
@@ -128,9 +133,9 @@ function actionOperation(action, args) {
     operation: "process.exec",
     remoteArgs: {
       executable: args.executable,
-      argv: args.argv || [],
+      argv: resolveCommandArgv(args),
       cwd: args.cwd,
-      timeoutMs: args.timeoutMs
+      timeoutMs: resolveCommandTimeout(args.timeoutMs)
     }
   };
   return null;
@@ -379,7 +384,7 @@ async function runDirectBootstrap(request) {
 }
 
 async function runCli(requestFile) {
-  const request = JSON.parse(await readFile(requestFile, "utf8"));
+  const request = normalizeRemoteCommandRequest(JSON.parse(await readFile(requestFile, "utf8")));
   const result = request.args?.action === "slave.bootstrap"
     ? await runDirectBootstrap(request)
     : await daemon.submit(request);

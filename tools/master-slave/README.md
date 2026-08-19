@@ -69,3 +69,9 @@ node index.js daemon
 The daemon entry remains the transport owner. Public `run --request-file` calls
 must submit through Arisa's managed daemon runtime rather than constructing a
 second listener or client.
+
+`run_slave_command` accepts structured `argv` arrays from direct CLI callers. For
+Arisa tool calls, where argument fields are strings, pass the same array as
+`argvJson`, for example `argvJson: '["logs","0","--nostream"]'`. The Master
+strictly validates a bounded array of UTF-8 strings, removes `argvJson`, and sends
+the normal structured `argv` over the existing protocol. It never invokes a shell.
