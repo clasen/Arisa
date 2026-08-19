@@ -108,6 +108,8 @@ Minimal profile structure:
 
 Use `action: "status"` to reconcile Gmail Sent, then inspect campaign and Gmail draft counts. The first reconciliation scans the configured sent-mail query. Later runs use the newest Gmail timestamp and persist message IDs in chat-scoped state. This records drafts sent manually as contacted without reopening them or changing terminal statuses such as bounced, opted-out, wrong-fit, and successful publication.
 
+When `TELEMETRY_ENABLED` is true and `telemetry-ledger` is installed, each run records business-operation latency and confirmed non-dry-run draft counts. Telemetry is optional and fail-open: recording failures never change the campaign result. The integration emits only bounded aggregate dimensions such as profile, action, and status; it never records addresses, copy, or source content.
+
 Use `action: "reconcile-sent"` to run the same synchronization without discovery or drafting. `gmail-workspace` paginates sent mail, fetches message metadata concurrently, and passes recipients, subjects, timestamps, and Gmail message IDs to `pr-campaign` in one batch.
 
 `minEligiblePool` controls the unused-contact backlog. Keep recurring one-draft jobs bounded with small query and page budgets. A pool target of 1, one normal query, one creative query, three pages per mode, and a 15-second web timeout prevent long zero-yield cycles.

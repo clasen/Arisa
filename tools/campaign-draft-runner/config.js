@@ -2,5 +2,7 @@ export default {
   DEFAULT_LIMIT: 10,
   CAMPAIGN_TOOL: "pr-campaign",
   GMAIL_TOOL: "gmail-workspace",
-  DEFAULT_PROFILE: "default"
+  DEFAULT_PROFILE: "default",
+  TELEMETRY_ENABLED: true,
+  TELEMETRY_TOOL: "telemetry-ledger"
 };

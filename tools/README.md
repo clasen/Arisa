@@ -254,6 +254,17 @@ Load the complete stop-slop writing guidance as editorial context for drafting a
 - **Setup:** none
 - **Install footprint:** **Low**, no npm dependencies
 
+### [`telemetry-ledger`](./telemetry-ledger/)
+
+Record chat-scoped operational metrics, summarize latency and counters, compare adjacent windows, and surface correlated regression hypotheses without claiming causality.
+
+- **Category:** `operations`
+- **Tags:** `analytics` · `compare` · `counter` · `latency` · `metrics` · `observability` · `regression` · `telemetry`
+- **Accepts:** `application/json`, `text/plain`
+- **Produces:** `application/json`, `text/plain`
+- **Setup:** none
+- **Install footprint:** **Low**, no npm dependencies
+
 ### [`tools-archive`](./tools-archive/)
 
 Create a review-before-sharing ZIP of installed tool source while excluding local configuration, credentials, dependencies, browser sessions, caches, and runtime data.

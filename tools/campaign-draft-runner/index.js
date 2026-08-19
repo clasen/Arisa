@@ -6,6 +6,7 @@ import { assessSearchQuality, recordSearchQuality } from "./search-quality.js";
 import { getFactSheetStatus, updateApprovedFacts } from "./product-facts.js";
 import { checkExhaustedSources, recordExhaustedSources } from "./source-exhaustion.js";
 import { classifyToolTimeout, toolOutcomeError } from "./operation-timeout.js";
+import { recordCampaignTelemetry } from "./telemetry.js";
 
 const toolName = "campaign-draft-runner";
 const toolDir = path.dirname(fileURLToPath(import.meta.url));
@@ -1192,11 +1193,34 @@ async function main() {
   const [command, flag, requestFile] = process.argv.slice(2);
   if (command === "--help" || command === "help" || !command) return printHelp();
   if (command !== "run" || flag !== "--request-file" || !requestFile) throw new Error("Usage: node index.js run --request-file <json>");
+  const startedAt = Date.now();
+  let request = null;
   try {
-    const request = JSON.parse(await readFile(requestFile, "utf8"));
+    request = JSON.parse(await readFile(requestFile, "utf8"));
     const output = await runRequest(request);
+    const telemetryConfig = await loadToolConfig(toolName, defaults, request.chatId);
+    await recordCampaignTelemetry({
+      arisa: createArisaClient({ toolName, chatId: request.chatId }),
+      request,
+      output,
+      elapsedMs: Date.now() - startedAt,
+      enabled: truthy(telemetryConfig.TELEMETRY_ENABLED),
+      telemetryTool: telemetryConfig.TELEMETRY_TOOL
+    });
     console.log(JSON.stringify({ ok: true, output: { text: JSON.stringify(output, null, 2), json: output, mimeType: "application/json" } }));
   } catch (error) {
+    if (request?.chatId) {
+      const telemetryConfig = await loadToolConfig(toolName, defaults, request.chatId).catch(() => defaults);
+      await recordCampaignTelemetry({
+        arisa: createArisaClient({ toolName, chatId: request.chatId }),
+        request,
+        output: null,
+        elapsedMs: Date.now() - startedAt,
+        status: "failed",
+        enabled: truthy(telemetryConfig.TELEMETRY_ENABLED),
+        telemetryTool: telemetryConfig.TELEMETRY_TOOL
+      });
+    }
     console.log(JSON.stringify(error?.toolResult || { ok: false, status: "failed", error: error?.message || String(error) }));
   }
 }

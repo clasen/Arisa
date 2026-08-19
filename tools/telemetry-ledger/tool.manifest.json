@@ -1,0 +1,17 @@
+{
+  "name": "telemetry-ledger",
+  "version": "0.1.0",
+  "description": "Record chat-scoped operational metrics, query latency and counters, compare time windows, and surface evidence-backed regression hypotheses without claiming causality.",
+  "entry": "index.js",
+  "input": ["application/json", "text/plain"],
+  "output": ["application/json", "text/plain"],
+  "configSchema": {
+    "RETENTION_DAYS": { "type": "number", "required": false, "prompt": "Days of telemetry events to retain." },
+    "MAX_QUERY_EVENTS": { "type": "number", "required": false, "prompt": "Maximum events loaded for one query." },
+    "MAX_RECORDS_PER_CALL": { "type": "number", "required": false, "prompt": "Maximum measurements accepted in one batch." },
+    "MIN_COMPARE_SAMPLES": { "type": "number", "required": false, "prompt": "Minimum samples in each window before classifying a change." },
+    "REGRESSION_THRESHOLD_PERCENT": { "type": "number", "required": false, "prompt": "Minimum percentage change classified as a regression or improvement." }
+  },
+  "category": "operations",
+  "keywords": ["analytics", "compare", "counter", "diagnostics", "latency", "metrics", "observability", "regression", "telemetry", "trends"]
+}
