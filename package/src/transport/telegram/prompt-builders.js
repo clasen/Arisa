@@ -158,6 +158,13 @@ export function buildNewSessionPrompt(ctx) {
   ].join("\n");
 }
 
+export function buildStartupMessage(chatMeta = {}) {
+  const languageCode = String(chatMeta.languageCode || "").toLowerCase();
+  if (languageCode.startsWith("es")) return "Arisa esta en linea de nuevo.";
+  if (languageCode.startsWith("pt")) return "Arisa esta online de novo.";
+  return "Arisa is back online.";
+}
+
 export function isScheduledTaskPrompt(prompt) {
   return String(prompt || "").startsWith("Scheduled task fired.\n");
 }
@@ -243,7 +250,8 @@ export async function buildAsyncEventPrompt(task, resourceNotes) {
 }
 
 export async function normalizeIncomingArtifact({ artifact, toolRegistry, chatArtifactStore, chatId }) {
-  if (!artifact) return { transcript: null, toolResult: null };
+  const normalizationRequired = Boolean(shouldNormalizeArtifactToText(artifact));
+  if (!artifact) return { transcript: null, toolResult: null, normalizationRequired };
   const { normalizedArtifact, toolResult } = await normalizeArtifactForReasoning({
     artifact,
     desiredMimeType: "text/plain",
@@ -251,7 +259,7 @@ export async function normalizeIncomingArtifact({ artifact, toolRegistry, chatAr
     chatArtifactStore,
     chatId
   });
-  return { transcript: normalizedArtifact, toolResult };
+  return { transcript: normalizedArtifact, toolResult, normalizationRequired };
 }
 
 function sessionEventLogMessage(event) {

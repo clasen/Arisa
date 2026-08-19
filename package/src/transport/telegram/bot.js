@@ -25,6 +25,7 @@ import {
   buildPrompt,
   buildReactionPrompt,
   buildSessionHandoffPrompt,
+  buildStartupMessage,
   collectText,
   getIncomingMessageText,
   isScheduledTaskPrompt,
@@ -527,14 +528,14 @@ export async function createTelegramBot({ config, artifactStore, toolRegistry, t
     const chatArtifactStore = artifactStore.forChat(route.scopeChatId);
     const artifact = await captureIncomingArtifact(ctx, artifactStore, { storageChatId: route.scopeChatId });
     if (artifact) logger?.log("telegram", `captured artifact ${artifact.kind}${artifact.id ? ` ${artifact.id}` : ""}`);
-    const { transcript, toolResult } = await normalizeIncomingArtifact({
+    const { transcript, toolResult, normalizationRequired } = await normalizeIncomingArtifact({
       artifact,
       toolRegistry,
       chatArtifactStore,
       chatId: route.scopeChatId
     });
     if (transcript) logger?.log("telegram", `media transcribed to artifact ${transcript.id}`);
-    if (shouldNormalizeArtifactToText(artifact) && !transcript) {
+    if (normalizationRequired && !transcript) {
       logger?.log("telegram", `media normalization unavailable for chat ${route.transportChatId}: ${toolResult?.error || toolResult?.missingConfig?.join(", ") || "unknown error"}`);
     }
     return buildPrompt({ ctx, artifact, transcript, toolResult });
