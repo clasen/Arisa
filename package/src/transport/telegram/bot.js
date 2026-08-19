@@ -30,6 +30,7 @@ import {
   isSilentReply,
   normalizeIncomingArtifact,
   sanitizeSessionHandoff,
+  scheduledPromptSpeedOptions,
   shouldIncludeArtifactReference,
   withPromptSpeed
 } from "./prompt-builders.js";
@@ -56,6 +57,7 @@ export {
   collectText,
   isScheduledTaskPrompt,
   isSilentReply,
+  scheduledPromptSpeedOptions,
   shouldIncludeArtifactReference,
   withPromptSpeed
 } from "./prompt-builders.js";
@@ -575,11 +577,12 @@ export async function createTelegramBot({ config, artifactStore, toolRegistry, t
       chatState.activeSession = session;
       chatState.activeRoute = route;
       try {
-        text = await withPromptSpeed({
+        text = await withPromptSpeed(scheduledPromptSpeedOptions({
+          prompt,
+          session,
           speedController,
-          speed: isScheduledTaskPrompt(prompt) ? 1 : undefined,
-          restoreSpeed: () => clampModelSpeed(session.model, resolveChatSpeed(config, sessionId))
-        }, () => collectText(session, prompt, {
+          configuredSpeed: resolveChatSpeed(config, sessionId)
+        }), () => collectText(session, prompt, {
           logger,
           chatId: sessionId,
           onSlowPrompt: () => bot.api.sendMessage(

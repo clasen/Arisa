@@ -1,5 +1,6 @@
 import { formatLocationText } from "./media.js";
 import { normalizeArtifactForReasoning, shouldNormalizeArtifactToText } from "../../core/artifacts/normalize-for-reasoning.js";
+import { clampModelSpeed } from "../../core/agent/model-speed.js";
 
 const slowPromptNoticeMs = 300_000;
 
@@ -167,6 +168,14 @@ export function buildStartupMessage(chatMeta = {}) {
 
 export function isScheduledTaskPrompt(prompt) {
   return String(prompt || "").startsWith("Scheduled task fired.\n");
+}
+
+export function scheduledPromptSpeedOptions({ prompt, session, speedController, configuredSpeed }) {
+  return {
+    speedController,
+    speed: isScheduledTaskPrompt(prompt) ? 1 : undefined,
+    restoreSpeed: () => clampModelSpeed(session.model, configuredSpeed)
+  };
 }
 
 export async function withPromptSpeed({ speedController, speed, restoreSpeed }, work) {

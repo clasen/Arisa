@@ -18,6 +18,8 @@ This owner instance evolves directly from the canonical checkout at `/root/.aris
 
 For core work: edit the checkout, run focused and full tests, bump the patch version, commit and push only the intended files, then restart once to load that exact commit. Verify the running package path, version, and commit after restart. Never wait for npm publication on this instance, never treat `arisa restart` as an installer, and never restart for a tool-only or lock-only change. npm releases remain immutable distribution artifacts for other installations.
 
+After changing Telegram scheduled-task dispatch or its prompt composition, enqueue one harmless one-off `agent_task` through the live task store after restart and verify that it reaches `done` without sending user-visible text. Unit tests alone do not prove the live composition is wired correctly.
+
 Official tool source belongs in `/root/.arisa/projects/Arisa/tools/<toolName>` and the live installed copy remains under `~/.arisa/tools/<toolName>`. Keep both synchronized; tools hot-reload without a core restart. Batch embedded official-lock refreshes into a later substantive core release instead of restarting solely for lock metadata.
 
 ## Runtime directory rules

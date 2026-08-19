@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { buildPrompt, buildReactionPrompt, isScheduledTaskPrompt, shouldIncludeArtifactReference, withPromptSpeed } from "../src/transport/telegram/bot.js";
+import { buildPrompt, buildReactionPrompt, isScheduledTaskPrompt, scheduledPromptSpeedOptions, shouldIncludeArtifactReference, withPromptSpeed } from "../src/transport/telegram/bot.js";
 import { captureIncomingArtifact } from "../src/transport/telegram/media.js";
 
 test("scheduled agent prompts use normal speed for one turn and restore chat speed", async () => {
@@ -11,7 +11,18 @@ test("scheduled agent prompts use normal speed for one turn and restore chat spe
   assert.equal(isScheduledTaskPrompt("Scheduled task fired.\ntaskId: one"), true);
   assert.equal(isScheduledTaskPrompt("Incoming Telegram message."), false);
 
-  await withPromptSpeed({ speedController, speed: 1, restoreSpeed: () => 1.5 }, async () => {
+  const speedOptions = scheduledPromptSpeedOptions({
+    prompt: "Scheduled task fired.\ntaskId: one",
+    session: {
+      model: { provider: "openai-codex", api: "openai-codex-responses", id: "gpt-5.5" }
+    },
+    speedController,
+    configuredSpeed: 1.5
+  });
+  assert.equal(speedOptions.speed, 1);
+  assert.equal(speedOptions.restoreSpeed(), 1.5);
+
+  await withPromptSpeed(speedOptions, async () => {
     assert.equal(speed, 1);
   });
   assert.equal(speed, 1.5);
