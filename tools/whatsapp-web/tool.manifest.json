@@ -1,6 +1,6 @@
 {
   "name": "whatsapp-web",
-  "version": "1.1.0",
+  "version": "1.2.0",
   "description": "Use isolated per-chat WhatsApp Web sessions to log in, send messages, set the account profile picture, and receive/process WhatsApp replies via whatsapp-web.js. Recommendation: use a dedicated auxiliary number because WhatsApp Web automation can risk Meta restrictions or bans.",
   "entry": "index.js",
   "daemon": {
