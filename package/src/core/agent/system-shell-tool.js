@@ -175,14 +175,15 @@ export function createSystemShellTool({ workspaceDir, shell = {}, beforeRestart,
     description: "Run a command in the active Arisa workspace using the native system shell: PowerShell on Windows, and sh/bash-compatible shell on Unix.",
     parameters: Type.Object({
       command: Type.String({ description: "Command to execute in the active workspace." }),
-      timeoutMs: Type.Optional(Type.Number({ description: "Optional timeout in milliseconds for this command." }))
+      timeoutMs: Type.Optional(Type.Number({ description: "Optional timeout in milliseconds for this command." })),
+      restartSummary: Type.Optional(Type.String({ maxLength: 500, description: "Concrete user-facing result to report after an arisa restart succeeds." }))
     }),
     execute: async (_id, params) => {
       const timeoutMs = Number.isFinite(Number(params.timeoutMs)) && Number(params.timeoutMs) > 0
         ? Math.floor(Number(params.timeoutMs))
         : (shell.timeoutMs || defaultTimeoutMs);
       const restartReceipt = isArisaRestartCommand(params.command) && typeof beforeRestart === "function"
-        ? await beforeRestart()
+        ? await beforeRestart(params.restartSummary)
         : null;
       const result = await runShellCommand({
         command: params.command,

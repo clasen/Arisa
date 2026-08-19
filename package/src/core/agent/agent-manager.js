@@ -468,7 +468,7 @@ export class AgentManager {
       createSystemShellTool({
         workspaceDir: policy.workspaceDir,
         shell: policy.shell,
-        beforeRestart: () => telegramProxy.prepareRestartReceipt(),
+        beforeRestart: (summary) => telegramProxy.prepareRestartReceipt(summary),
         cancelRestart: (receiptId) => telegramProxy.cancelRestartReceipt(receiptId)
       })
     ], assertAccess);

@@ -36,7 +36,7 @@ export async function prepareRestartReceipt(destination, { reason = "requested r
   const receipt = {
     id: crypto.randomUUID(),
     ...target,
-    reason: String(reason || "requested restart").slice(0, 200),
+    reason: String(reason || "requested restart").slice(0, 500),
     expectedVersion: identity.version,
     expectedCommit: identity.commit,
     requestedAt: new Date().toISOString()
@@ -75,11 +75,13 @@ export async function deliverRestartReceipt(sendMessage, {
   const actual = await getIdentity();
   const versionMatches = receipt.expectedVersion === actual.version;
   const commitMatches = !receipt.expectedCommit || receipt.expectedCommit === actual.commit;
+  const genericReasons = new Set(["requested restart", "Agent-requested restart", "Telegram restart", "Telegram /restart", "Telegram update restart"]);
+  const resultSummary = String(receipt.reason || "").trim();
   const lines = [
     versionMatches && commitMatches ? "Restart completed." : "Restart completed with an unexpected runtime identity.",
-    `Arisa ${actual.version} is running.`,
-    actual.commit ? `Commit: ${actual.commit}.` : null,
-    versionMatches && commitMatches ? "The requested runtime is active." : `Expected: ${receipt.expectedVersion}${receipt.expectedCommit ? ` at ${receipt.expectedCommit}` : ""}.`
+    resultSummary && !genericReasons.has(resultSummary) ? resultSummary : null,
+    `Arisa ${actual.version} is running${actual.commit ? ` at commit ${actual.commit}` : ""}.`,
+    versionMatches && commitMatches ? null : `Expected: ${receipt.expectedVersion}${receipt.expectedCommit ? ` at ${receipt.expectedCommit}` : ""}.`
   ].filter(Boolean);
   const options = receipt.threadId ? { message_thread_id: receipt.threadId } : {};
   await sendMessage(receipt.transportChatId, lines.join("\n"), options);

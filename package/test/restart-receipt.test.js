@@ -17,8 +17,8 @@ test("restart receipt returns to the originating Telegram topic exactly once", a
     assert.equal(result.verified, true);
     assert.deepEqual(sent[0].slice(0, 1), [-1001]);
     assert.equal(sent[0][2].message_thread_id, 23);
-    assert.match(sent[0][1], /Arisa 5\.1\.30 is running/);
-    assert.match(sent[0][1], /Commit: abc123/);
+    assert.match(sent[0][1], /Restart completed\.\ntest\nArisa 5\.1\.30 is running/);
+    assert.match(sent[0][1], /at commit abc123/);
     assert.equal(await deliverRestartReceipt(() => {}, { receiptFile, getIdentity: identity }), null);
   } finally {
     await rm(directory, { recursive: true, force: true });

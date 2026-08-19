@@ -1098,10 +1098,10 @@ export async function createTelegramBot({ config, artifactStore, toolRegistry, t
         });
       },
       initializeForumTopic,
-      prepareRestartReceipt: () => prepareRestartReceipt({
+      prepareRestartReceipt: (summary) => prepareRestartReceipt({
         transportChatId: route.transportChatId,
         threadId: route.threadId
-      }, { reason: "Agent-requested restart" }),
+      }, { reason: String(summary || "Agent-requested restart").trim() }),
       cancelRestartReceipt,
       getTaskContext: () => route.workspace ? {
         transportChatId: route.transportChatId,
