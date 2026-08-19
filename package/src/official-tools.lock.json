@@ -1,7 +1,7 @@
 {
   "version": 1,
   "repository": "https://github.com/clasen/Arisa.git",
-  "commit": "f046fdc5aa59ce6fb9e38a536739d9169e1781c0",
+  "commit": "aaec12e4f63f4959462b26380e7d4c1a60562586",
   "tools": {
     "browser-session-bridge": {
       "version": "0.1.0",
@@ -173,16 +173,16 @@
       }
     },
     "process-retrospective": {
-      "version": "1.0.0",
+      "version": "1.1.0",
       "files": {
-        "README.md": "7fa901adf532dbd1bb337a8019b0bd73978eef3b1ded51ffb24a3279d107056d",
+        "README.md": "798c5c34893dccabe2101be91581b1845359fb57744efcc56a2b5beb83712c15",
         "config.js": "30703e809f0a2c4b85ffb1e1f9cd7ee599224e9bc62c3bc19e71e271cbc72b5d",
         "index.js": "9bd1ae078293211387ee3035b4c4dc7cc5852d08503cd55cf5fb3187cf1ace34",
-        "package.json": "e3978089354004e495b7c7f4b4edd9c0984b34f68229d0dfdafbb2e606d48c8d",
-        "reflection-plan.js": "78208b7316cf198213b3cc041154b1a46f1182a84c1bfc7c4474e9d609e3c708",
+        "package.json": "491b490a8c7f5db0fef1202f5d3059f1cc2dd75a84c6668f9fd2f5c81c1a4240",
+        "reflection-plan.js": "6c7e088385d39d2e3ba4f74c2d6dd94194e6a506f4ac263e552d34d9c2335488",
         "state-store.js": "6d0d39bff7e5e16558123c088eb8946bf3758596ae974598936b94424618c7cf",
-        "test/reflection-plan.test.js": "1480f74323fe2bc4f38573c462046a81a1ea198dc0783fe8c8abbda8cdcb93e4",
-        "tool.manifest.json": "4304208986be075c95c6d71aa97d301fd266af18fef1b6ddac4cf004e38427e7"
+        "test/reflection-plan.test.js": "d7c5953b5c5ba6fed4c403d64affce3f2b70b7975c1f28edcd1b902651fbe727",
+        "tool.manifest.json": "33440c26660f74dc381c4b4cc5f8487f4764693a352d37ae7ae2ef67e669754f"
       }
     },
     "telemetry-ledger": {
