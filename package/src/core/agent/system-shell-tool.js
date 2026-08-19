@@ -164,8 +164,8 @@ async function runShellCommand({ command, cwd, shellPath, timeoutMs }) {
   });
 }
 
-function isArisaRestartCommand(command) {
-  return /^\s*arisa\s+restart\s*$/i.test(String(command || ""));
+export function isArisaRestartCommand(command) {
+  return /(?:^|[;&|]\s*)arisa\s+restart(?:\s*(?:$|[;&|]))/i.test(String(command || ""));
 }
 
 export function createSystemShellTool({ workspaceDir, shell = {}, beforeRestart, cancelRestart }) {

@@ -6,7 +6,7 @@ import test from "node:test";
 import { buildPiToolPolicy } from "../src/core/agent/core-tools.js";
 import { applyConfigDefaults } from "../src/core/config/config-defaults.js";
 import { appendArisaAgentsFile, arisaAgentsFile } from "../src/core/agent/runtime-context.js";
-import { createSystemShellTool } from "../src/core/agent/system-shell-tool.js";
+import { createSystemShellTool, isArisaRestartCommand } from "../src/core/agent/system-shell-tool.js";
 import { applyRuntimeOverrides } from "../src/runtime/create-app.js";
 import { arisaHomeDir } from "../src/runtime/paths.js";
 
@@ -114,6 +114,12 @@ test("system_shell runs commands from the configured workspace", async () => {
   assert.equal(result.details.cwd, workspaceDir);
   assert.equal(result.details.exitCode, 0);
   assert.equal(result.details.stdout, realWorkspaceDir);
+});
+
+test("system_shell prepares restart receipts for sequenced arisa restart commands", () => {
+  assert.equal(isArisaRestartCommand("arisa restart"), true);
+  assert.equal(isArisaRestartCommand("cd /tmp/work && arisa restart"), true);
+  assert.equal(isArisaRestartCommand("echo arisa restart"), false);
 });
 
 test("adds Arisa AGENTS.md to Pi context files without duplicating it", () => {
