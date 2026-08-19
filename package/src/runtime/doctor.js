@@ -193,7 +193,6 @@ export async function inspectSystemResources({ diskPath = arisaHomeDir } = {}) {
 
 function assertDoctorPolicy(policy) {
   const positiveValues = [
-    "contextInspectionTimeoutMs",
     "contextWarningPercent",
     "contextCriticalPercent",
     "contextInefficientMinTokens",
@@ -318,9 +317,7 @@ export async function runDoctor({
   inspectToolDependencies = null
 }) {
   assertDoctorPolicy(doctorPolicy);
-  const runtime = await agentManager.getRuntimeDiagnostic({
-    contextInspectionTimeoutMs: doctorPolicy.contextInspectionTimeoutMs
-  });
+  const runtime = await agentManager.getRuntimeDiagnostic();
   const report = {
     runtime,
     contexts: runtime.contexts.map((context) => evaluateContext(context, doctorPolicy)),

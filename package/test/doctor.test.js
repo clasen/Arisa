@@ -4,7 +4,6 @@ import { formatDoctorReport, runDoctor } from "../src/runtime/doctor.js";
 import { serviceEntryFile } from "../src/runtime/service-manager.js";
 
 const doctorPolicy = {
-  contextInspectionTimeoutMs: 1_000,
   contextWarningPercent: 70,
   contextCriticalPercent: 90,
   contextInefficientMinTokens: 32_000,
@@ -159,8 +158,8 @@ test("requires complete positive doctor context policy", async () => {
       agentManager: { getRuntimeDiagnostic: async () => runtime() },
       toolProcessSupervisor: { repair: async () => [] },
       daemonPolicy,
-      doctorPolicy: { ...doctorPolicy, contextInspectionTimeoutMs: 0 }
+      doctorPolicy: { ...doctorPolicy, contextWarningPercent: 0 }
     }),
-    /positive contextInspectionTimeoutMs/
+    /positive contextWarningPercent/
   );
 });

@@ -16,15 +16,51 @@ function toolEnv() {
   return { ...process.env, ARISA_PACKAGE_DIR: arisaPackageDir, ARISA_IPC_SOCKET: arisaIpcSocketFile };
 }
 
-function runProcess(command, args, options = {}) {
-  return new Promise((resolve) => {
-    const child = spawn(command, args, { ...options, stdio: ["ignore", "pipe", "pipe"] });
-    let stdout = "";
-    let stderr = "";
-    child.stdout.on("data", (d) => { stdout += d.toString(); });
-    child.stderr.on("data", (d) => { stderr += d.toString(); });
-    child.on("close", (code) => resolve({ code, stdout, stderr }));
+const defaultToolHelpTimeoutMs = 10_000;
+const defaultToolRunTimeoutMs = 30 * 60_000;
+const defaultToolKillGraceMs = 2_000;
+
+function positiveDuration(value, fallback) {
+  return Number.isFinite(value) && value > 0 ? value : fallback;
+}
+
+function waitForToolProcess(child, { timeoutMs, killGraceMs, label }) {
+  return new Promise((resolve, reject) => {
+    let timedOut = false;
+    let forceTimer = null;
+    const timeout = setTimeout(() => {
+      timedOut = true;
+      child.kill("SIGTERM");
+      forceTimer = setTimeout(() => child.kill("SIGKILL"), killGraceMs);
+    }, timeoutMs);
+
+    const finish = (callback, value) => {
+      clearTimeout(timeout);
+      clearTimeout(forceTimer);
+      callback(value);
+    };
+
+    child.once("error", (error) => finish(reject, error));
+    child.once("close", (code) => {
+      if (!timedOut) {
+        finish(resolve, code);
+        return;
+      }
+      const error = new Error(`${label} timed out after ${timeoutMs}ms`);
+      error.code = "TOOL_PROCESS_TIMEOUT";
+      finish(reject, error);
+    });
   });
+}
+
+async function runProcess(command, args, { timeoutMs, killGraceMs, label, ...options } = {}) {
+  const child = spawn(command, args, { ...options, stdio: ["ignore", "pipe", "pipe"] });
+  let stdout = "";
+  let stderr = "";
+  child.stdout.on("data", (d) => { stdout += d.toString(); });
+  child.stderr.on("data", (d) => { stderr += d.toString(); });
+  const code = await waitForToolProcess(child, { timeoutMs, killGraceMs, label });
+  return { code, stdout, stderr };
 }
 
 function requirementNames(requirements) {
@@ -121,7 +157,7 @@ export function createToolOutputParser(name, { onEvent, maxFrameBytes = 1_048_57
   };
 }
 
-async function runToolProcess(command, args, { onEvent, maxFrameBytes, ...options } = {}) {
+async function runToolProcess(command, args, { onEvent, maxFrameBytes, timeoutMs, killGraceMs, label, ...options } = {}) {
   const child = spawn(command, args, { ...options, stdio: ["ignore", "pipe", "pipe"] });
   const parser = createToolOutputParser(path.basename(args[0] || command), { onEvent, maxFrameBytes });
   const stderrChunks = [];
@@ -139,13 +175,15 @@ async function runToolProcess(command, args, { onEvent, maxFrameBytes, ...option
     }
     return Buffer.concat(stderrChunks).toString("utf8");
   })();
-  const exitPromise = new Promise((resolve, reject) => {
-    child.once("error", reject);
-    child.once("close", resolve);
-  });
   child.stdout.resume();
   child.stderr.resume();
-  const code = await exitPromise;
+  let code;
+  try {
+    code = await waitForToolProcess(child, { timeoutMs, killGraceMs, label });
+  } catch (error) {
+    await Promise.allSettled([stdoutTask, stderrTask]);
+    throw error;
+  }
   const [parsed, stderr] = await Promise.all([stdoutTask, stderrTask]);
   return { code, parsed, stderr };
 }
@@ -228,8 +266,18 @@ async function readOfficialToolNames() {
 }
 
 export class ToolRegistry {
-  constructor({ logger, usageStore = new ToolUsageStore(), resolveOfficialToolNames = readOfficialToolNames } = {}) {
+  constructor({
+    logger,
+    usageStore = new ToolUsageStore(),
+    resolveOfficialToolNames = readOfficialToolNames,
+    helpTimeoutMs = defaultToolHelpTimeoutMs,
+    runTimeoutMs = defaultToolRunTimeoutMs,
+    killGraceMs = defaultToolKillGraceMs
+  } = {}) {
     this.logger = logger;
+    this.helpTimeoutMs = positiveDuration(helpTimeoutMs, defaultToolHelpTimeoutMs);
+    this.runTimeoutMs = positiveDuration(runTimeoutMs, defaultToolRunTimeoutMs);
+    this.killGraceMs = positiveDuration(killGraceMs, defaultToolKillGraceMs);
     this.tools = new Map();
     this.skillRegistry = new SkillRegistry();
     this.usageStore = usageStore;
@@ -337,7 +385,13 @@ export class ToolRegistry {
   async help(name) {
     const tool = this.get(name);
     if (!tool) throw new Error(`Tool not found: ${name}`);
-    const result = await runProcess("node", [tool.entry, "--help"], { cwd: tool.dir, env: toolEnv() });
+    const result = await runProcess("node", [tool.entry, "--help"], {
+      cwd: tool.dir,
+      env: toolEnv(),
+      timeoutMs: this.helpTimeoutMs,
+      killGraceMs: this.killGraceMs,
+      label: `Tool help for ${name}`
+    });
     const help = result.stdout || result.stderr;
     const skills = await this.resolveSkills(name);
     const sections = [
@@ -447,7 +501,10 @@ export class ToolRegistry {
           cwd: tool.dir,
           env: toolEnv(),
           onEvent,
-          maxFrameBytes: daemonConfigDefaults.ipcFrameBytes
+          maxFrameBytes: daemonConfigDefaults.ipcFrameBytes,
+          timeoutMs: this.runTimeoutMs,
+          killGraceMs: this.killGraceMs,
+          label: `Tool run for ${name}`
         });
         if (processResult.stderr.trim()) {
           this.logger?.log("tools", `${name} stderr: ${processResult.stderr.trim()}`);
@@ -464,6 +521,18 @@ export class ToolRegistry {
       }
       return normalized;
     } catch (error) {
+      if (error?.code === "TOOL_PROCESS_TIMEOUT") {
+        return normalizeToolResult(name, {
+          ok: false,
+          status: "outcome_uncertain",
+          error: error.message,
+          resolution: {
+            type: "status_check_required",
+            retry: false,
+            message: "The tool process was terminated after timing out. Check external state before retrying."
+          }
+        });
+      }
       return normalizeToolResult(name, {
         ok: false,
         error: error?.message || `Invalid tool response for ${name}`

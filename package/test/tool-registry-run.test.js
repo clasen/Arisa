@@ -89,6 +89,15 @@ for (const frame of frames) {
   return dir;
 }
 
+async function createHangingTool(name = "hanging-tool") {
+  const dir = await createFakeTool(name);
+  await writeFile(path.join(dir, "index.js"), `
+process.on("SIGTERM", () => {});
+setInterval(() => {}, 1_000);
+`, "utf8");
+  return dir;
+}
+
 test("loads and lists installed tools from the user tools directory", async () => {
   await resetHome();
   await createFakeTool("fake-tool", {
@@ -253,6 +262,37 @@ test("rejects unknown tools", async () => {
   await assert.rejects(
     () => registry.run({ name: "missing-tool", request: {}, chatId: "chat-1" }),
     /Tool not found: missing-tool/
+  );
+});
+
+test("terminates timed-out tool runs and requires a status check before retry", async () => {
+  await resetHome();
+  await createHangingTool();
+  const registry = new ToolRegistry({ runTimeoutMs: 20, killGraceMs: 20 });
+  await registry.load();
+
+  const result = await registry.run({
+    name: "hanging-tool",
+    chatId: "chat-1",
+    request: { args: {} }
+  });
+
+  assert.equal(result.ok, false);
+  assert.equal(result.status, "outcome_uncertain");
+  assert.equal(result.resolution.type, "status_check_required");
+  assert.equal(result.resolution.retry, false);
+  assert.match(result.error, /timed out after 20ms/);
+});
+
+test("terminates timed-out tool help processes", async () => {
+  await resetHome();
+  await createHangingTool();
+  const registry = new ToolRegistry({ helpTimeoutMs: 20, killGraceMs: 20 });
+  await registry.load();
+
+  await assert.rejects(
+    () => registry.help("hanging-tool"),
+    /Tool help for hanging-tool timed out after 20ms/
   );
 });
 

@@ -56,7 +56,6 @@ function requestIpc({ socketPath, request, timeoutMs = DEFAULT_TIMEOUT_MS }) {
 export function createArisaClient({
   toolName,
   chatId = null,
-  capabilityToken = process.env.ARISA_IPC_TOKEN || "",
   socketPath = process.env.ARISA_IPC_SOCKET || arisaIpcSocketFile
 } = {}) {
   if (typeof toolName !== "string" || !toolName.trim()) {
@@ -71,7 +70,6 @@ export function createArisaClient({
       method,
       toolName,
       chatId,
-      capabilityToken,
       params
     }
   });

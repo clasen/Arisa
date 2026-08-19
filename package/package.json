@@ -1,6 +1,6 @@
 {
   "name": "arisa",
-  "version": "5.1.33",
+  "version": "5.1.34",
   "description": "Telegram + Pi Agent modular assistant",
   "type": "module",
   "main": "src/index.js",

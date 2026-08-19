@@ -23,7 +23,6 @@ export const telegramConfigDefaults = Object.freeze({
 });
 
 export const doctorConfigDefaults = Object.freeze({
-  contextInspectionTimeoutMs: 5_000,
   contextWarningPercent: 70,
   contextCriticalPercent: 90,
   contextInefficientMinTokens: 32_000,

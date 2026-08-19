@@ -313,7 +313,7 @@ export class AgentManager {
     this.closeCachedSession(String(chatId));
   }
 
-  async getRuntimeDiagnostic({ contextInspectionTimeoutMs } = {}) {
+  async getRuntimeDiagnostic() {
     const contexts = await Promise.all([...this.sessions.entries()].map(async ([chatId, context]) => {
       const base = { chatId };
       try {
