@@ -27,7 +27,7 @@ import {
   parseSpeedPickerAction,
   reverseModelOrder
 } from "../src/transport/telegram/model-picker.js";
-import { closeModelPicker } from "../src/transport/telegram/bot.js";
+import { closeModelPicker, createTelegramModelCallbackHandler } from "../src/transport/telegram/model-callback.js";
 
 function createConfig() {
   return applyConfigDefaults({
@@ -218,6 +218,52 @@ test("closes the picker after selecting the already active model and effort", as
   assert.deepEqual(calls, [
     ["editMessageText", 123, 456, "Already using openai-codex/gpt-b (effort: high)."],
     ["answerCallbackQuery", { text: "Already using gpt-b at high." }]
+  ]);
+});
+
+test("model callback handler delegates unrelated callbacks", async () => {
+  let delegated = false;
+  const handler = createTelegramModelCallbackHandler({
+    config: createConfig(),
+    authorizeContext: async () => { throw new Error("must not authorize"); },
+    contextRoute: () => ({ sessionId: "123" }),
+    getChatState: () => ({ processing: false }),
+    logger: null
+  });
+
+  await handler({ callbackQuery: { data: "other:action" } }, async () => { delegated = true; });
+  assert.equal(delegated, true);
+});
+
+test("model callback handler persists a non-reasoning model selection", async () => {
+  const config = createConfig();
+  const calls = [];
+  const handler = createTelegramModelCallbackHandler({
+    config,
+    authorizeContext: async () => ({ ok: true }),
+    contextRoute: () => ({ sessionId: "123" }),
+    getChatState: () => ({ processing: false }),
+    getProviderModels: async () => [{ provider: "openai-codex", id: "gpt-next", reasoning: false }],
+    showModelPicker: async () => {},
+    showEffortPicker: async () => {},
+    persistChatModel: async (...args) => calls.push(["persist", ...args]),
+    persistChatEffort: async () => {},
+    persistChatSpeed: async () => {},
+    logger: null
+  });
+  const ctx = {
+    chat: { id: 123 },
+    callbackQuery: { data: "model:0", message: { message_id: 456 } },
+    api: { async editMessageText(...args) { calls.push(["edit", ...args]); } },
+    async answerCallbackQuery(...args) { calls.push(["answer", ...args]); }
+  };
+
+  await handler(ctx, async () => {});
+
+  assert.deepEqual(calls, [
+    ["persist", "123", { provider: "openai-codex", id: "gpt-next", reasoning: false }, "off"],
+    ["edit", 123, 456, "Model changed to openai-codex/gpt-next.\nA new chat context will start with your next message."],
+    ["answer", { text: "Using gpt-next." }]
   ]);
 });
 
