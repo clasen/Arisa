@@ -2,7 +2,7 @@
   "name": "whatsapp-web",
   "private": true,
   "type": "module",
-  "version": "1.2.0",
+  "version": "1.2.1",
   "scripts": {
     "postinstall": "node apply-whatsapp-web-compat.js"
   },

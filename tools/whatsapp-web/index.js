@@ -81,7 +81,7 @@ Modes:
   login      Start this chat's WhatsApp session, enable watch, and return a QR code when needed.
   status     Show this chat's WhatsApp session status.
   send       Send one WhatsApp message from this chat's WhatsApp session. Enables watch by default. Supports humanized delay/typing.
-  set-profile-picture Set the current WhatsApp account profile picture from an image artifact. Optional args.zoom, focusX, and focusY crop it closer.
+  set-profile-picture Set the current WhatsApp account profile picture from an image artifact.
   broadcast  Send one message to multiple recipients from this chat's session. Enables watch by default. Supports humanized delay/typing.
   inbox      Read/process received WhatsApp replies from this chat's local inbox.
   sync       Backfill recent messages from known chats/groups into the inbox.
@@ -100,7 +100,7 @@ Examples:
   { "chatId": "123456789", "args": { "mode": "send", "to": "+15551234567", "message": "Hello" } }
   { "chatId": "123456789", "args": { "mode": "send", "to": "+15551234567", "message": "Hello", "initialDelayMs": "10000", "typingMs": "30000" } }
   { "chatId": "123456789", "args": { "mode": "send", "to": "+15551234567", "message": "Replying", "quotedMessageId": "..." } }
-  { "chatId": "123456789", "artifact": { "path": "/tmp/avatar.jpg" }, "args": { "mode": "set-profile-picture", "zoom": "2", "focusX": "0.55", "focusY": "0.08" } }
+  { "chatId": "123456789", "artifact": { "path": "/tmp/avatar.jpg" }, "args": { "mode": "set-profile-picture" } }
   { "chatId": "123456789", "args": { "mode": "wait-reply", "from": "+15551234567" } }
   { "chatId": "123456789", "args": { "mode": "react", "messageId": "...", "emoji": "👀" } }
   { "chatId": "123456789", "args": { "mode": "reactions", "messageId": "..." } }
@@ -1558,21 +1558,6 @@ function sendTimingArgs(args = {}) {
   };
 }
 
-async function zoomProfilePicture(chatId, sourcePath, args = {}) {
-  const zoom = Math.min(3, Math.max(1, Number(args.zoom) || 1));
-  if (zoom <= 1) return { path: sourcePath, generated: false };
-  const focusX = Math.min(1, Math.max(0, Number(args.focusX) || 0.55));
-  const focusY = Math.min(1, Math.max(0, Number(args.focusY) || 0.08));
-  const paths = chatPaths(chatId);
-  await mkdir(paths.mediaTmpDir, { recursive: true });
-  const outputPath = path.join(paths.mediaTmpDir, `whatsapp-profile-${crypto.randomUUID()}.jpg`);
-  const filter = `crop=iw/${zoom}:ih/${zoom}:(iw-iw/${zoom})*${focusX}:(ih-ih/${zoom})*${focusY},scale=1024:1024`;
-  await new Promise((resolve, reject) => {
-    execFile("ffmpeg", ["-y", "-i", sourcePath, "-vf", filter, "-q:v", "2", outputPath], (error) => error ? reject(error) : resolve());
-  });
-  return { path: outputPath, generated: true };
-}
-
 async function sendOne(chatId, to, message, artifact = null, args = {}) {
   return submitChatJob(chatId, {
     type: "send",
@@ -1658,22 +1643,13 @@ async function run(requestFile) {
 
     if (mode === "set-profile-picture") {
       if (!request.artifact?.path) throw new Error("An image artifact is required");
-      const profileImage = await zoomProfilePicture(chatId, request.artifact.path, request.args);
       const result = await submitChatJob(chatId, {
         type: "setProfilePicture",
-        mediaPath: profileImage.path,
+        mediaPath: request.artifact.path,
         readyTimeoutMs: number(config.READY_TIMEOUT_MS, 120000),
         operationTimeoutMs: number(request.args?.timeoutMs, 45000)
       }, { timeoutMs: number(config.JOB_TIMEOUT_MS, 120000) });
-      console.log(JSON.stringify(toolOk({
-        text: "WhatsApp profile picture updated.",
-        filePath: profileImage.generated ? profileImage.path : undefined,
-        fileName: profileImage.generated ? "whatsapp-profile.jpg" : undefined,
-        mimeType: profileImage.generated ? "image/jpeg" : undefined,
-        kind: profileImage.generated ? "image" : undefined,
-        delivery: profileImage.generated ? { method: "photo" } : undefined,
-        json: { ...result, zoomApplied: profileImage.generated }
-      })));
+      console.log(JSON.stringify(toolOk({ text: "WhatsApp profile picture updated.", json: result })));
       return;
     }
 

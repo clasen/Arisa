@@ -1,0 +1,25 @@
+{
+  "name": "image-crop",
+  "version": "0.1.0",
+  "description": "Crop an image artifact around a configurable focal point, apply optical-style zoom, and resize it to a square JPEG.",
+  "entry": "index.js",
+  "input": [
+    "image/jpeg",
+    "image/png",
+    "image/webp"
+  ],
+  "output": [
+    "image/jpeg"
+  ],
+  "configSchema": {},
+  "category": "image",
+  "keywords": [
+    "avatar",
+    "crop",
+    "image",
+    "profile-picture",
+    "resize",
+    "square",
+    "zoom"
+  ]
+}
