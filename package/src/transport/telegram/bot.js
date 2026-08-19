@@ -1102,7 +1102,11 @@ export async function createTelegramBot({ config, artifactStore, toolRegistry, t
         transportChatId: route.transportChatId,
         threadId: route.threadId
       }, { reason: "Agent-requested restart" }),
-      cancelRestartReceipt
+      cancelRestartReceipt,
+      getTaskContext: () => route.workspace ? {
+        transportChatId: route.transportChatId,
+        messageThreadId: route.topicThreadId
+      } : null
     };
   }
 
@@ -1328,11 +1332,23 @@ export async function createTelegramBot({ config, artifactStore, toolRegistry, t
     timer.unref?.();
   }
 
-  async function enqueueAsyncPrompt({ chatId, prompt, label }) {
-    const ctx = { chat: { id: chatId }, api: bot.api };
-    const chatState = getChatState(chatId);
+  async function enqueueAsyncPrompt({ chatId, prompt, label, telegramContext }) {
+    let ctx = { chat: { id: chatId }, api: bot.api };
+    if (telegramContext?.transportChatId && telegramContext?.messageThreadId) {
+      ctx = {
+        chat: { id: telegramContext.transportChatId, type: "supergroup", is_forum: true },
+        from: { id: chatId },
+        message: { message_thread_id: telegramContext.messageThreadId },
+        api: bot.api
+      };
+      const route = await resolveTelegramWorkspaceRoute({ config, api: bot.api, ctx });
+      if (!route.ok) throw new Error("Scheduled owner-workspace destination is unavailable.");
+      workspaceRoutes.set(ctx, route);
+    }
+    const route = contextRoute(ctx);
+    const chatState = getChatState(route.sessionId);
     if (chatState.processing) await ensureQueuedTelegramTyping(chatState, ctx);
-    return enqueuePrompt({ chatId, prompt, label, ctx });
+    return enqueuePrompt({ chatId: route.sessionId, prompt, label, ctx });
   }
 
   async function dispatchTask(task) {
@@ -1351,7 +1367,8 @@ export async function createTelegramBot({ config, artifactStore, toolRegistry, t
       await enqueueAsyncPrompt({
         chatId,
         prompt: await buildAsyncTaskPrompt({ task, artifactStore, toolRegistry, resourceNotes, logger }),
-        label: `scheduled task ${task.id}`
+        label: `scheduled task ${task.id}`,
+        telegramContext: task.payload.telegramContext
       });
       await taskStore.complete(task.id);
       return;
@@ -1370,7 +1387,8 @@ export async function createTelegramBot({ config, artifactStore, toolRegistry, t
       await enqueueAsyncPrompt({
         chatId,
         prompt: await buildAsyncEventPrompt(task, resourceNotes),
-        label: `agent event ${task.id}`
+        label: `agent event ${task.id}`,
+        telegramContext: task.payload.telegramContext
       });
       await taskStore.complete(task.id);
       return;

@@ -459,7 +459,8 @@ export class AgentManager {
       createForumTopic: (...args) => telegramTarget.current.createForumTopic(...args),
       initializeForumTopic: (...args) => telegramTarget.current.initializeForumTopic(...args),
       prepareRestartReceipt: (...args) => telegramTarget.current.prepareRestartReceipt(...args),
-      cancelRestartReceipt: (...args) => telegramTarget.current.cancelRestartReceipt(...args)
+      cancelRestartReceipt: (...args) => telegramTarget.current.cancelRestartReceipt(...args),
+      getTaskContext: (...args) => telegramTarget.current.getTaskContext?.(...args) || null
     };
     const assertAccess = () => accessGuardTarget.current();
     const customTools = guardTools([
@@ -541,7 +542,7 @@ export class AgentManager {
     ]);
   }
 
-  async runTool({ name, request, chatId }) {
+  async runTool({ name, request, chatId, taskContext = null }) {
     await this.toolRegistry.load();
     this.logger?.log("agent", `run_tool ${name}`);
     const chatArtifactStore = this.artifactStore.forChat(chatId);
@@ -578,7 +579,10 @@ export class AgentManager {
       const scheduled = await this.taskStore.addMany(
         result.asyncTasks || [result.asyncTask],
         {
-          payload: { chatId },
+          payload: {
+            chatId,
+            ...(taskContext ? { telegramContext: taskContext } : {})
+          },
           source: { type: "tool", toolName: name, chatId }
         }
       );
@@ -724,7 +728,8 @@ export class AgentManager {
               resourceId: params.resourceId,
               args: params.args || {}
             },
-            chatId
+            chatId,
+            taskContext: telegram.getTaskContext()
           });
 
           if (params.deliver && result.output?.artifactId) {
