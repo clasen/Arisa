@@ -2,15 +2,17 @@
 import test from "node:test";
 import {
   collectText,
-  createChatStateStore,
-  drainChatPromptQueue,
   ensureQueuedTelegramTyping,
   isSilentReply,
-  queueChatPrompt,
-  resolveTelegramBusyMessageMode,
-  routeBusyPrompt,
   stopQueuedTelegramTyping
 } from "../src/transport/telegram/bot.js";
+import {
+  createChatStateStore,
+  drainChatPromptQueue,
+  queueChatPrompt,
+  resolveTelegramBusyMessageMode,
+  routeBusyPrompt
+} from "../src/transport/telegram/chat-queue.js";
 import { selectScheduledTasks } from "../src/core/agent/agent-manager.js";
 
 test("queued Telegram prompts start typing immediately and share one indicator", async () => {
