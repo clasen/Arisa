@@ -17,6 +17,7 @@ import { formatDoctorReport } from "../../runtime/doctor.js";
 import { formatToolUsageReport } from "../../runtime/tool-usage-report.js";
 import { ToolResourceNoteStore } from "../../core/tools/tool-resource-note-store.js";
 import { formatUpdateReport } from "../../runtime/update-manager.js";
+import { cancelRestartReceipt, deliverRestartReceipt, prepareRestartReceipt } from "../../runtime/restart-receipt.js";
 import { buildUpdatePicker, createTelegramUpdateCallbackHandler } from "./update-command.js";
 import { resolveTelegramWorkspaceRoute, topicSessionId } from "./workspace-group.js";
 
@@ -74,7 +75,7 @@ export function createTelegramRestartHandler({ authorize, requestRestart, logger
     restartRequested = true;
     try {
       await ctx.reply("Arisa is restarting. I'll be back shortly.");
-      const handoff = await requestRestart();
+      const handoff = await requestRestart(ctx);
       logger?.log("telegram", `restart handed off to process ${handoff.pid}`);
     } catch (error) {
       restartRequested = false;
@@ -637,16 +638,29 @@ export async function createTelegramBot({ config, artifactStore, toolRegistry, t
   let piAuthIssue = null;
   let taskTimer = null;
 
+  const requestRestartWithReceipt = async (ctx, reason = "Telegram restart") => {
+    const route = contextRoute(ctx);
+    const receipt = await prepareRestartReceipt({
+      transportChatId: route.transportChatId,
+      threadId: route.threadId
+    }, { reason });
+    try {
+      return await requestRestart();
+    } catch (error) {
+      await cancelRestartReceipt(receipt.id).catch(() => {});
+      throw error;
+    }
+  };
   const handleRestartCommand = createTelegramRestartHandler({
     authorize: authorizeContext,
-    requestRestart,
+    requestRestart: (ctx) => requestRestartWithReceipt(ctx, "Telegram /restart"),
     logger
   });
   const handleUpdateCallback = createTelegramUpdateCallbackHandler({
     authorize: authorizeContext,
     updateCore,
     updateTools,
-    requestRestart,
+    requestRestart: (ctx) => requestRestartWithReceipt(ctx, "Telegram update restart"),
     logger
   });
 
@@ -1083,7 +1097,12 @@ export async function createTelegramBot({ config, artifactStore, toolRegistry, t
           context
         });
       },
-      initializeForumTopic
+      initializeForumTopic,
+      prepareRestartReceipt: () => prepareRestartReceipt({
+        transportChatId: route.transportChatId,
+        threadId: route.threadId
+      }, { reason: "Agent-requested restart" }),
+      cancelRestartReceipt
     };
   }
 
@@ -1287,6 +1306,12 @@ export async function createTelegramBot({ config, artifactStore, toolRegistry, t
       } catch (error) {
         logger?.log("telegram", `startup message failed for chat ${chatId}: ${error instanceof Error ? error.message : String(error)}`);
       }
+    }
+    try {
+      const result = await deliverRestartReceipt((chatId, text, options) => bot.api.sendMessage(chatId, text, options));
+      if (result) logger?.log("telegram", `delivered restart receipt ${result.receipt.id}`);
+    } catch (error) {
+      logger?.log("telegram", `restart receipt delivery failed: ${error instanceof Error ? error.message : String(error)}`);
     }
   }
 

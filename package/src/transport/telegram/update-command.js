@@ -95,7 +95,7 @@ export function createTelegramUpdateCallbackHandler({ authorize, updateCore, upd
           `Arisa updated from ${result.previousVersion} to ${result.currentVersion}. Restarting…`
         );
         try {
-          await requestRestart();
+          await requestRestart(ctx);
         } catch (error) {
           const message = error instanceof Error ? error.message : String(error);
           logger?.error("update", `restart after update failed: ${message}`);

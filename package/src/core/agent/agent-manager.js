@@ -457,12 +457,19 @@ export class AgentManager {
     const telegramProxy = {
       sendMedia: (...args) => telegramTarget.current.sendMedia(...args),
       createForumTopic: (...args) => telegramTarget.current.createForumTopic(...args),
-      initializeForumTopic: (...args) => telegramTarget.current.initializeForumTopic(...args)
+      initializeForumTopic: (...args) => telegramTarget.current.initializeForumTopic(...args),
+      prepareRestartReceipt: (...args) => telegramTarget.current.prepareRestartReceipt(...args),
+      cancelRestartReceipt: (...args) => telegramTarget.current.cancelRestartReceipt(...args)
     };
     const assertAccess = () => accessGuardTarget.current();
     const customTools = guardTools([
       ...this.createTools(telegramProxy, scopeChatId, policy),
-      createSystemShellTool({ workspaceDir: policy.workspaceDir, shell: policy.shell })
+      createSystemShellTool({
+        workspaceDir: policy.workspaceDir,
+        shell: policy.shell,
+        beforeRestart: () => telegramProxy.prepareRestartReceipt(),
+        cancelRestart: (receiptId) => telegramProxy.cancelRestartReceipt(receiptId)
+      })
     ], assertAccess);
     const settingsManager = createPiSettingsManager(this.config);
     const resourceLoader = await createArisaResourceLoader({

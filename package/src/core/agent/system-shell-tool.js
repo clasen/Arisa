@@ -164,7 +164,11 @@ async function runShellCommand({ command, cwd, shellPath, timeoutMs }) {
   });
 }
 
-export function createSystemShellTool({ workspaceDir, shell = {} }) {
+function isArisaRestartCommand(command) {
+  return /^\s*arisa\s+restart\s*$/i.test(String(command || ""));
+}
+
+export function createSystemShellTool({ workspaceDir, shell = {}, beforeRestart, cancelRestart }) {
   return defineTool({
     name: "system_shell",
     label: "System Shell",
@@ -177,12 +181,18 @@ export function createSystemShellTool({ workspaceDir, shell = {} }) {
       const timeoutMs = Number.isFinite(Number(params.timeoutMs)) && Number(params.timeoutMs) > 0
         ? Math.floor(Number(params.timeoutMs))
         : (shell.timeoutMs || defaultTimeoutMs);
+      const restartReceipt = isArisaRestartCommand(params.command) && typeof beforeRestart === "function"
+        ? await beforeRestart()
+        : null;
       const result = await runShellCommand({
         command: params.command,
         cwd: workspaceDir,
         shellPath: shell.shellPath,
         timeoutMs
       });
+      if (!result.ok && restartReceipt?.id && typeof cancelRestart === "function") {
+        await cancelRestart(restartReceipt.id).catch(() => {});
+      }
       const details = {
         stdout: result.stdout,
         stderr: result.stderr,
