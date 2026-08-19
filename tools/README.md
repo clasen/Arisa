@@ -96,6 +96,17 @@ Read, search, send, and manage Gmail through Google Workspace CLI with OAuth or 
 - **Setup:** Google Workspace OAuth or API credentials
 - **Install footprint:** **Medium**, one npm dependency and interactive OAuth setup
 
+### [`image-transform`](./image-transform/)
+
+Apply ordered, deterministic image operations in one artifact pipe: crop, resize, rotate, flip, tonal adjustment, grayscale, blur, sharpen, and format conversion.
+
+- **Category:** `image`
+- **Tags:** `adjust` · `convert` · `crop` · `flip` · `image` · `resize` · `rotate` · `transform` · `zoom`
+- **Accepts:** `image/jpeg`, `image/png`, `image/webp`
+- **Produces:** `image/jpeg`, `image/png`, `image/webp`
+- **Setup:** `ffmpeg` available on the host
+- **Install footprint:** **Low**, no npm dependencies
+
 ### [`markdown-pdf`](./markdown-pdf/)
 
 Convert Markdown to PDF with support for headings, emphasis, links, code, blockquotes, lists, tables, images, rules, and footnotes.

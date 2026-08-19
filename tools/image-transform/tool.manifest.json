@@ -1,0 +1,11 @@
+{
+  "name": "image-transform",
+  "version": "0.1.0",
+  "description": "Apply ordered, deterministic image manipulations including crop, resize, rotate, flip, tonal adjustment, grayscale, blur, sharpen, and format conversion.",
+  "entry": "index.js",
+  "input": ["image/jpeg", "image/png", "image/webp"],
+  "output": ["image/jpeg", "image/png", "image/webp"],
+  "configSchema": {},
+  "category": "image",
+  "keywords": ["adjust", "avatar", "blur", "convert", "crop", "flip", "image", "manipulate", "resize", "rotate", "sharpen", "transform", "zoom"]
+}
