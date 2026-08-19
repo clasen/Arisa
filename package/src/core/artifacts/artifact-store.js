@@ -86,14 +86,14 @@ class ChatArtifactStore {
     return artifact;
   }
 
-  async createFromFile({ originalPath, fileName, kind, mimeType, source, metadata = {} }) {
+  async createFileArtifact({ fileName, kind, mimeType, source, metadata = {}, writeFileContent }) {
     await this.init();
     await this.reload();
     const artifactId = id();
     const dir = path.join(this.rootDir, artifactId);
     await mkdir(dir, { recursive: true });
     const destPath = path.join(dir, fileName);
-    await copyArtifactFile(originalPath, destPath, mimeType);
+    await writeFileContent(destPath);
     const artifact = {
       id: artifactId,
       chatId: this.chatId,
@@ -109,27 +109,26 @@ class ChatArtifactStore {
     return artifact;
   }
 
-  async createGeneratedFile({ fileName, content, kind, mimeType, source, metadata = {} }) {
-    await this.init();
-    await this.reload();
-    const artifactId = id();
-    const dir = path.join(this.rootDir, artifactId);
-    await mkdir(dir, { recursive: true });
-    const destPath = path.join(dir, fileName);
-    await writeArtifactFile(destPath, content);
-    const artifact = {
-      id: artifactId,
-      chatId: this.chatId,
+  async createFromFile({ originalPath, fileName, kind, mimeType, source, metadata = {} }) {
+    return this.createFileArtifact({
+      fileName,
       kind,
       mimeType,
-      path: destPath,
       source,
       metadata,
-      createdAt: new Date().toISOString()
-    };
-    this.items.push(artifact);
-    await this.saveIndex();
-    return artifact;
+      writeFileContent: (destPath) => copyArtifactFile(originalPath, destPath, mimeType)
+    });
+  }
+
+  async createGeneratedFile({ fileName, content, kind, mimeType, source, metadata = {} }) {
+    return this.createFileArtifact({
+      fileName,
+      kind,
+      mimeType,
+      source,
+      metadata,
+      writeFileContent: (destPath) => writeArtifactFile(destPath, content)
+    });
   }
 
   async get(artifactId) {
