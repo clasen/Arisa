@@ -161,7 +161,6 @@ test("chat state uses one queue for numeric and string chat IDs", () => {
     historyRevision: 0,
     beforeNextPrompt: null,
     activeSession: null,
-    activeSteers: [],
     assistantMessages: new Map(),
     stopQueuedTyping: null
   });
@@ -277,7 +276,6 @@ test("steer mode sends text to the active Pi session", async () => {
 
   assert.equal(result.disposition, "steered");
   assert.deepEqual(received, ["change direction"]);
-  assert.deepEqual(chatState.activeSteers, ["change direction"]);
   assert.deepEqual(chatState.pendingPrompts, []);
 });
 

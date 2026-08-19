@@ -11,8 +11,7 @@ import { getAgentConfig, resolveChatModel, resolveChatSpeed, resolveChatThinking
 import { clampModelThinkingLevel, createPiRuntime, listModelThinkingLevels, listProviderModels, modelSupportsThinking } from "../../core/agent/pi-runtime.js";
 import { clampModelSpeed, MODEL_SPEEDS, modelSupportsSpeed } from "../../core/agent/model-speed.js";
 import { normalizeArtifactForReasoning, shouldNormalizeArtifactToText } from "../../core/artifacts/normalize-for-reasoning.js";
-import { formatPortableSessionHistory } from "../../core/agent/agent-manager.js";
-import { ConversationHistoryStore } from "../../core/conversation/conversation-history-store.js";
+import { SessionSeedStore } from "../../core/conversation/session-seed-store.js";
 import { formatDoctorReport } from "../../runtime/doctor.js";
 import { formatToolUsageReport } from "../../runtime/tool-usage-report.js";
 import { ToolResourceNoteStore } from "../../core/tools/tool-resource-note-store.js";
@@ -517,7 +516,7 @@ export async function createTelegramBot({ config, artifactStore, toolRegistry, t
   const resourceNotes = new ToolResourceNoteStore();
   const bot = new Bot(config.telegram.token);
   const perChatState = createChatStateStore();
-  const conversationHistory = new ConversationHistoryStore();
+  const sessionSeeds = new SessionSeedStore();
   const notifiedPromptErrors = new WeakSet();
   const authRenewals = new Map();
   const workspaceRoutes = new WeakMap();
@@ -951,7 +950,7 @@ export async function createTelegramBot({ config, artifactStore, toolRegistry, t
         throw new Error("The General topic already uses the owner's private session and cannot be reinitialized here.");
       }
       const handoff = buildTopicInitializationHandoff({ name, context });
-      await conversationHistory.reset(initializedSessionId, { runtime: "pi", history: handoff });
+      await sessionSeeds.set(initializedSessionId, handoff);
       agentManager.resetSession(initializedSessionId, { handoff });
       await agentManager.waitForSessionClose(initializedSessionId);
       return {
@@ -1034,7 +1033,7 @@ export async function createTelegramBot({ config, artifactStore, toolRegistry, t
       : extra;
     const work = async () => {
       if (route.workspace && route.threadId) {
-        const handoff = await conversationHistory.consumeSeedHandoff(sessionId);
+        const handoff = await sessionSeeds.consume(sessionId);
         if (handoff) {
           agentManager.resetSession(sessionId, { handoff });
           await agentManager.waitForSessionClose(sessionId);
@@ -1044,17 +1043,10 @@ export async function createTelegramBot({ config, artifactStore, toolRegistry, t
         scopeChatId: route.scopeChatId,
         accessGuard: createWorkspaceAccessGuard(route)
       });
-      const historyRevision = getChatState(sessionId).historyRevision;
-      await conversationHistory.ensureSeed(sessionId, {
-        runtime: "pi",
-        history: formatPortableSessionHistory(session.messages)
-      });
       let text = "";
-      let steeredPrompts = [];
       const chatState = getChatState(sessionId);
       chatState.activeSession = session;
       chatState.activeRoute = route;
-      chatState.activeSteers = [];
       try {
         text = await withPromptSpeed({
           speedController,
@@ -1073,20 +1065,8 @@ export async function createTelegramBot({ config, artifactStore, toolRegistry, t
         agentManager.resetSession(sessionId);
         throw error;
       } finally {
-        steeredPrompts = [...chatState.activeSteers];
         if (chatState.activeSession === session) chatState.activeSession = null;
         chatState.activeRoute = null;
-        chatState.activeSteers = [];
-      }
-      if (getChatState(sessionId).historyRevision === historyRevision) {
-        const historyPrompt = steeredPrompts.length
-          ? [prompt, ...steeredPrompts.map((message) => `[Steering message]\n${message}`)].join("\n\n")
-          : prompt;
-        await conversationHistory.appendTurn(sessionId, {
-          runtime: "pi",
-          prompt: historyPrompt,
-          response: text
-        });
       }
       if (text) {
         await createWorkspaceAccessGuard(route)();
@@ -1352,7 +1332,7 @@ export async function createTelegramBot({ config, artifactStore, toolRegistry, t
       queueChatPrompt(chatState, prompt, { replace: true, ctx });
       chatState.continueAfterClose = true;
       const reset = (async () => {
-        await conversationHistory.reset(sessionId, { runtime: "pi" });
+        await sessionSeeds.clear(sessionId);
         agentManager.resetSession(sessionId);
       })();
       chatState.beforeNextPrompt = reset;
@@ -1374,10 +1354,11 @@ export async function createTelegramBot({ config, artifactStore, toolRegistry, t
       beforeInitialPrompt: async () => {
         const handoff = await withTyping(ctx, () => summarizeSessionBeforeReset(sessionId, route));
         if (chatState.historyRevision !== commandRevision) return;
-        await conversationHistory.reset(sessionId, {
-          runtime: "pi",
-          history: handoff.handoff
-        });
+        if (route.workspace && route.threadId) {
+          await sessionSeeds.set(sessionId, handoff.handoff);
+        } else {
+          await sessionSeeds.clear(sessionId);
+        }
         if (chatState.historyRevision !== commandRevision) return;
         agentManager.resetSession(sessionId, handoff);
       }

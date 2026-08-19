@@ -21,7 +21,6 @@ function runtime(overrides = {}) {
     harness: "pi",
     sessions: 1,
     closingSessions: 0,
-    managedProcessIds: [],
     contexts: [],
     ...overrides
   };

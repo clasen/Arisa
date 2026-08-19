@@ -10,7 +10,6 @@ export function createChatStateStore() {
       historyRevision: 0,
       beforeNextPrompt: null,
       activeSession: null,
-      activeSteers: [],
       assistantMessages: new Map(),
       stopQueuedTyping: null
     };
@@ -65,7 +64,6 @@ export async function routeBusyPrompt({ chatState, prompt, mode = "queue", repla
   ) {
     try {
       await session.steer(prompt);
-      chatState.activeSteers.push(prompt);
       return { disposition: "steered" };
     } catch (error) {
       queueChatPrompt(chatState, prompt, { ctx });
@@ -130,6 +128,5 @@ export async function drainChatPromptQueue({
     stopQueuedTyping(chatState);
     chatState.processing = false;
     chatState.activeSession = null;
-    chatState.activeSteers = [];
   }
 }

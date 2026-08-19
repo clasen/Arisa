@@ -31,32 +31,6 @@ const arisaToolNames = [
   "send_artifact"
 ];
 
-function messageText(content) {
-  if (typeof content === "string") return content.trim();
-  if (!Array.isArray(content)) return "";
-  return content
-    .filter((item) => item?.type === "text" && typeof item.text === "string")
-    .map((item) => item.text.trim())
-    .filter(Boolean)
-    .join("\n");
-}
-
-export function formatPortableSessionHistory(messages = []) {
-  return messages
-    .map((message) => {
-      const text = messageText(message?.content);
-      if (!text) return "";
-      const role = message.role === "assistant"
-        ? "Assistant"
-        : message.role === "user"
-          ? "User"
-          : (message.customType ? `Session memory (${message.customType})` : "Session context");
-      return `${role}:\n${text}`;
-    })
-    .filter(Boolean)
-    .join("\n\n");
-}
-
 const operationalNoteMaxChars = 220;
 
 function normalizeOperationalNote(note) {
@@ -364,7 +338,6 @@ export class AgentManager {
       harness: "pi",
       sessions: this.sessions.size,
       closingSessions: this.sessionClosePromises.size,
-      managedProcessIds: [],
       contexts
     };
   }

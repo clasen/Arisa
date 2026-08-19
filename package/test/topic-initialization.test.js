@@ -1,10 +1,10 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { buildTopicInitializationHandoff, isProcessableTelegramMessage, startTelegramTyping } from "../src/transport/telegram/bot.js";
-import { ConversationHistoryStore } from "../src/core/conversation/conversation-history-store.js";
+import { SessionSeedStore } from "../src/core/conversation/session-seed-store.js";
 
 test("Telegram typing action stays inside the message topic", async () => {
   const calls = [];
@@ -38,16 +38,28 @@ test("topic initialization context is explicit and bounded to the topic", () => 
   assert.match(handoff, /Draft first-person development stories/);
 });
 
-test("a persisted topic seed is consumed exactly once and can be replaced", async () => {
+test("a persisted session seed is consumed exactly once and can be replaced", async () => {
   const directory = await mkdtemp(path.join(os.tmpdir(), "arisa-topic-seed-"));
-  const store = new ConversationHistoryStore({ historyFile: (chatId) => path.join(directory, `${chatId}.jsonl`) });
+  const seedFile = (chatId) => path.join(directory, `${chatId}.jsonl`);
+  const legacyFile = (chatId) => path.join(directory, `${chatId}.legacy.jsonl`);
+  const store = new SessionSeedStore({ seedFile, legacyFile });
   try {
-    await store.reset("topic", { runtime: "pi", history: "Stories context" });
-    assert.match(await store.consumeSeedHandoff("topic"), /Stories context/);
-    assert.equal(await store.consumeSeedHandoff("topic"), "");
+    await store.set("topic", "Stories context");
+    assert.equal(await store.consume("topic"), "Stories context");
+    assert.equal(await store.consume("topic"), "");
 
-    await store.reset("topic", { runtime: "pi", history: "Replacement context" });
-    assert.match(await store.consumeSeedHandoff("topic"), /Replacement context/);
+    await store.set("topic", "Replacement context");
+    assert.equal(await store.consume("topic"), "Replacement context");
+
+    await writeFile(legacyFile("pending-legacy"), `${JSON.stringify({ kind: "seed", history: "Pending legacy context" })}\n`, "utf8");
+    assert.equal(await store.consume("pending-legacy"), "Pending legacy context");
+
+    await writeFile(legacyFile("legacy"), [
+      JSON.stringify({ kind: "seed", history: "Old portable context" }),
+      JSON.stringify({ kind: "turn", prompt: "stale", response: "stale" }),
+      ""
+    ].join("\n"), "utf8");
+    assert.equal(await store.consume("legacy"), "");
   } finally {
     await rm(directory, { recursive: true, force: true });
   }

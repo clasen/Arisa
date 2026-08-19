@@ -9,7 +9,7 @@ import {
   chatsDir,
   createIpcSocketPath,
   getChatArtifactsDir,
-  getChatConversationHistoryFile,
+  getChatSessionSeedFile,
   getChatToolConfigPath,
   getChatToolUsageFile,
   getChatToolStateDir,
@@ -25,10 +25,10 @@ test("keeps chat artifact paths scoped below the chat directory", () => {
   assert.equal(artifactsDir, path.join(chatsDir, "chat-1", "artifacts"));
 });
 
-test("keeps portable conversation history scoped below the chat state directory", () => {
+test("keeps pending session seeds scoped below the chat state directory", () => {
   assert.equal(
-    getChatConversationHistoryFile("chat-1"),
-    path.join(chatsDir, "chat-1", "state", "conversation.jsonl")
+    getChatSessionSeedFile("chat-1"),
+    path.join(chatsDir, "chat-1", "state", "session-seed.jsonl")
   );
 });
 
