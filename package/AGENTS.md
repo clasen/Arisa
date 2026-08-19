@@ -13,6 +13,13 @@ Arisa core owns transport, sessions, artifacts, and tool orchestration:
 
 New capabilities belong in tools by default. Solve requests by creating or editing a tool under `~/.arisa/tools/<toolName>`. Modifying core is the last resort: do it only after confirming the capability cannot be delivered through the tool architecture, explaining why the core change is unavoidable, and receiving explicit user approval.
 
+## Live development deployment
+This owner instance evolves directly from the canonical checkout at `/root/.arisa/projects/Arisa`. The global `arisa` package must remain linked to `/root/.arisa/projects/Arisa/package`, so the tested Git checkout is also the code loaded on the next core restart.
+
+For core work: edit the checkout, run focused and full tests, bump the patch version, commit and push only the intended files, then restart once to load that exact commit. Verify the running package path, version, and commit after restart. Never wait for npm publication on this instance, never treat `arisa restart` as an installer, and never restart for a tool-only or lock-only change. npm releases remain immutable distribution artifacts for other installations.
+
+Official tool source belongs in `/root/.arisa/projects/Arisa/tools/<toolName>` and the live installed copy remains under `~/.arisa/tools/<toolName>`. Keep both synchronized; tools hot-reload without a core restart. Batch embedded official-lock refreshes into a later substantive core release instead of restarting solely for lock metadata.
+
 ## Runtime directory rules
 Do not build runtime paths by hand. Use `src/runtime/paths.js`:
 - `getToolDir(toolName)`: installed user tool package only; no runtime data here.
