@@ -5,6 +5,7 @@ import { chromium } from "playwright";
 import defaults from "./config.js";
 
 const toolName = "x-session-reader";
+const bridgeToolName = "browser-session-bridge";
 const importCore = (relativePath) => import(pathToFileURL(path.join(process.env.ARISA_PACKAGE_DIR, "src", relativePath)).href);
 const { loadToolConfig } = await importCore("core/tools/tool-config.js");
 const { toolError, toolNeedsConfig, toolOk } = await importCore("core/tools/tool-result.js");
@@ -37,7 +38,7 @@ Expected input:
   }
 
 Config:
-  X_COOKIES  JSON cookie array exported from your browser, or a raw Cookie header.
+  X_COOKIES  Optional fallback JSON cookie array exported from your browser, or a raw Cookie header. The tool first tries browser-session-bridge x.com sessions.
   CHROME_EXECUTABLE_PATH optional Chrome/Chromium executable path for Playwright.
   HEADLESS true|false.
 
@@ -257,16 +258,35 @@ function formatPosts(title, posts, emptyMessage) {
   ].join("\n\n");
 }
 
+async function loadBridgeCookies(chatId) {
+  if (chatId == null || chatId === "") return "";
+  const stateDir = getChatToolStateDir(chatId, bridgeToolName);
+  const sessionPath = path.join(stateDir, "sessions", "x.com.json");
+  try {
+    const session = JSON.parse((await readFile(sessionPath, "utf8")).replace(/^\uFEFF/, ""));
+    return Array.isArray(session.cookies) && session.cookies.length ? JSON.stringify(session.cookies) : "";
+  } catch (error) {
+    if (error?.code === "ENOENT") return "";
+    throw new Error(`Could not read ${bridgeToolName} x.com session: ${error.message || error}`);
+  }
+}
+
+async function loadConfig(request) {
+  const config = await loadToolConfig(toolName, defaults, request.chatId ?? null);
+  const bridgeCookies = await loadBridgeCookies(request.chatId ?? null);
+  return bridgeCookies ? { ...config, X_COOKIES: bridgeCookies } : config;
+}
+
 async function run(requestFile) {
   const request = JSON.parse(await readFile(requestFile, "utf8"));
-  const config = await loadToolConfig(toolName, defaults, request.chatId ?? null);
+  const config = await loadConfig(request);
 
   if (!config.X_COOKIES) {
     console.log(JSON.stringify(toolNeedsConfig({
       tool: toolName,
       missingConfig: ["X_COOKIES"],
       configPath: request.chatId != null ? getChatToolConfigPath(request.chatId, toolName) : getToolConfigPath(toolName),
-      message: "Paste your X/Twitter cookies as a JSON array exported from your browser, or as a raw Cookie header."
+      message: "Share your active x.com session through browser-session-bridge, or paste X/Twitter cookies as a JSON array exported from your browser or as a raw Cookie header."
     })));
     return;
   }

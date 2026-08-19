@@ -14,6 +14,7 @@ test("official orchestrators declare their hard tool dependencies", async () => 
   });
   assert.deepEqual((await manifest("x-campaign-runner")).toolDependencies, { "x-dm": "^0.2.0" });
   assert.deepEqual((await manifest("x-dm")).toolDependencies, { "browser-session-bridge": "^0.1.0" });
+  assert.deepEqual((await manifest("x-session-reader")).toolDependencies, { "browser-session-bridge": "^0.1.0" });
   assert.deepEqual((await manifest("official-tool-sync")).toolDependencies, { trash: "^1.0.0" });
 });
 

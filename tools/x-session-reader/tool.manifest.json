@@ -1,7 +1,10 @@
 {
   "name": "x-session-reader",
-  "description": "Read posts and bookmarks visible to a user-provided X/Twitter web session cookie, without bypassing login or anti-bot checks.",
+  "description": "Read posts and bookmarks visible to a user-provided or browser-session-bridge X/Twitter web session, without bypassing login or anti-bot checks.",
   "entry": "index.js",
+  "toolDependencies": {
+    "browser-session-bridge": "^0.1.0"
+  },
   "input": [
     "text/plain",
     "application/json"
@@ -15,9 +18,9 @@
   "configSchema": {
     "X_COOKIES": {
       "type": "string",
-      "required": true,
+      "required": false,
       "secret": true,
-      "prompt": "Paste your X/Twitter cookies as a JSON array exported from your browser, or as a raw Cookie header."
+      "prompt": "Optional fallback X/Twitter cookies as a JSON array exported from your browser, or as a raw Cookie header. The tool first tries the chat's browser-session-bridge x.com session."
     },
     "CHROME_EXECUTABLE_PATH": {
       "type": "string",
