@@ -1,6 +1,6 @@
 import path from "node:path";
 import { readFileSync } from "node:fs";
-import { readFile, stat, unlink } from "node:fs/promises";
+import { readFile, stat } from "node:fs/promises";
 import { createAgentSession, DefaultResourceLoader, SessionManager, SettingsManager, defineTool } from "@earendil-works/pi-coding-agent";
 import { Type } from "@sinclair/typebox";
 import { createPiRuntime, hasProviderAuth } from "./pi-runtime.js";
@@ -14,6 +14,7 @@ import { clampModelSpeed, createModelSpeedController } from "./model-speed.js";
 import { arisaHomeDir, getChatPiSessionsDir, sessionStartOperationalNotesFile } from "../../runtime/paths.js";
 import { searchOfficialToolCatalog } from "../tools/official-tool-catalog.js";
 import { ToolResourceNoteStore } from "../tools/tool-resource-note-store.js";
+import { materializeToolOutput } from "../tools/tool-output-materializer.js";
 
 const piValidationTimeoutMs = 60_000;
 const arisaToolNames = [
@@ -557,7 +558,6 @@ export class AgentManager {
   async runTool({ name, request, chatId, taskContext = null }) {
     await this.toolRegistry.load();
     this.logger?.log("agent", `run_tool ${name}`);
-    const chatArtifactStore = this.artifactStore.forChat(chatId);
     const resourceId = String(request?.resourceId || "").trim();
     const resourceNote = resourceId
       ? await this.resourceNotes.get(chatId, name, resourceId)
@@ -565,44 +565,14 @@ export class AgentManager {
     const enrichedRequest = resourceNote ? { ...request, resourceId, resourceNote } : request;
     const result = await this.toolRegistry.run({ name, request: enrichedRequest, chatId });
 
-    if (result.output?.text) {
-      const outArtifact = await chatArtifactStore.createText({
-        text: result.output.text,
-        source: { type: "tool", toolName: name },
-        metadata: { tool: name }
-      });
-      result.output.artifactId = outArtifact.id;
-    }
-
-    if (result.output?.filePath) {
-      const generated = await chatArtifactStore.createFromFile({
-        originalPath: result.output.filePath,
-        fileName: result.output.fileName || path.basename(result.output.filePath),
-        kind: result.output.kind || "file",
-        mimeType: result.output.mimeType || "application/octet-stream",
-        source: { type: "tool", toolName: name },
-        metadata: { tool: name, delivery: result.output.delivery }
-      });
-      result.output.artifactId = generated.id;
-      await unlink(result.output.filePath).catch(() => {});
-    }
-
-    if (result.asyncTask || result.asyncTasks?.length) {
-      const scheduled = await this.taskStore.addMany(
-        result.asyncTasks || [result.asyncTask],
-        {
-          payload: {
-            chatId,
-            ...(taskContext ? { telegramContext: taskContext } : {})
-          },
-          source: { type: "tool", toolName: name, chatId }
-        }
-      );
-      result.asyncTasks = scheduled;
-      delete result.asyncTask;
-    }
-
-    return result;
+    return materializeToolOutput({
+      result,
+      name,
+      chatId,
+      artifactStore: this.artifactStore,
+      taskStore: this.taskStore,
+      taskContext
+    });
   }
 
   createTools(telegram, chatId, policy = buildPiToolPolicy({ config: this.config, customToolNames: arisaToolNames })) {
