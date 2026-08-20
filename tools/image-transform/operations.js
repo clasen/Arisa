@@ -1,3 +1,17 @@
+const MAX_OPERATIONS = 32;
+const MAX_DIMENSION = 16384;
+
+const chainMethods = new Set([
+  "affine", "autoOrient", "blur", "clahe", "convolve", "ensureAlpha", "extend", "extract",
+  "flatten", "flip", "flop", "gamma", "grayscale", "greyscale", "linear", "median", "modulate",
+  "negate", "normalise", "normalize", "pipelineColourspace", "pipelineColorspace", "recomb",
+  "removeAlpha", "resize", "rotate", "sharpen", "threshold", "tint", "toColourspace",
+  "toColorspace", "trim", "unflatten", "withExif", "withExifMerge", "withMetadata"
+]);
+
+const outputMethods = new Set(["avif", "gif", "heif", "jpeg", "png", "tiff", "webp"]);
+const aliases = new Map([["jpg", "jpeg"], ["toFormat", "format"]]);
+
 function number(value, fallback, min, max, name) {
   const parsed = Number(value ?? fallback);
   if (!Number.isFinite(parsed) || parsed < min || parsed > max) throw new Error(`${name} must be between ${min} and ${max}`);
@@ -8,83 +22,113 @@ function integer(value, fallback, min, max, name) {
   return Math.round(number(value, fallback, min, max, name));
 }
 
-function safeColor(value) {
-  const color = String(value || "black");
-  if (!/^(#[0-9a-f]{6,8}|[a-z]+)$/i.test(color)) throw new Error("background must be a named color or #RRGGBB[AA]");
-  return color;
+function parseJson(value, label) {
+  try { return JSON.parse(value); } catch { throw new Error(`${label} must be valid JSON`); }
+}
+
+function assertSafeValue(value, path = "args") {
+  if (value === null || ["string", "boolean"].includes(typeof value)) return;
+  if (typeof value === "number") {
+    if (!Number.isFinite(value)) throw new Error(`${path} must contain only finite numbers`);
+    return;
+  }
+  if (Array.isArray(value)) {
+    if (value.length > 65536) throw new Error(`${path} is too large`);
+    value.forEach((item, index) => assertSafeValue(item, `${path}[${index}]`));
+    return;
+  }
+  if (typeof value !== "object") throw new Error(`${path} contains an unsupported value`);
+  for (const [key, item] of Object.entries(value)) {
+    if (["input", "file", "path"].includes(key)) throw new Error(`${path}.${key} cannot reference local files`);
+    if (["width", "height"].includes(key) && Number(item) > MAX_DIMENSION) throw new Error(`${path}.${key} cannot exceed ${MAX_DIMENSION}`);
+    assertSafeValue(item, `${path}.${key}`);
+  }
+}
+
+function methodOperation(operation) {
+  const requested = String(operation.method || "");
+  const method = aliases.get(requested) || requested;
+  if (method === "format") {
+    const format = String(operation.format || operation.args?.[0] || "jpeg").toLowerCase().replace("jpg", "jpeg");
+    if (!outputMethods.has(format)) throw new Error(`Unsupported Sharp output format: ${format}`);
+    const options = operation.options || operation.args?.[1];
+    return { method: format, args: options === undefined ? [] : [options] };
+  }
+  if (!chainMethods.has(method) && !outputMethods.has(method)) throw new Error(`Unsupported Sharp method: ${method || "missing method"}`);
+  let args = operation.args ?? (operation.options === undefined ? [] : [operation.options]);
+  if (typeof args === "string") args = parseJson(args, `${method} args`);
+  if (!Array.isArray(args)) throw new Error(`${method} args must be a JSON array`);
+  assertSafeValue(args, `${method} args`);
+  return { method, args };
+}
+
+function legacyCrop(operation) {
+  if (operation.width || operation.height) {
+    return {
+      method: "extract",
+      args: [{
+        width: integer(operation.width, 1, 1, MAX_DIMENSION, "crop width"),
+        height: integer(operation.height, 1, 1, MAX_DIMENSION, "crop height"),
+        left: integer(operation.x, 0, 0, MAX_DIMENSION, "crop x"),
+        top: integer(operation.y, 0, 0, MAX_DIMENSION, "crop y")
+      }]
+    };
+  }
+  return {
+    method: "$focalCrop",
+    args: [{
+      zoom: number(operation.zoom, 1, 1, 8, "crop zoom"),
+      focusX: number(operation.focusX, 0.5, 0, 1, "crop focusX"),
+      focusY: number(operation.focusY, 0.5, 0, 1, "crop focusY")
+    }]
+  };
+}
+
+function legacyOperation(operation) {
+  const type = String(operation.type || "").toLowerCase();
+  if (type === "crop") return legacyCrop(operation);
+  if (type === "resize") {
+    const width = integer(operation.width, 1024, 1, MAX_DIMENSION, "resize width");
+    const height = integer(operation.height, width, 1, MAX_DIMENSION, "resize height");
+    return { method: "resize", args: [{ width, height, fit: operation.fit || "contain", background: operation.background || "black" }] };
+  }
+  if (type === "rotate") return { method: "rotate", args: [number(operation.degrees, 0, -360, 360, "rotate degrees"), { background: operation.background || { r: 0, g: 0, b: 0, alpha: 0 } }] };
+  if (type === "flip") {
+    if (!["horizontal", "vertical"].includes(operation.axis)) throw new Error("flip axis must be horizontal or vertical");
+    return { method: operation.axis === "horizontal" ? "flop" : "flip", args: [] };
+  }
+  if (type === "adjust") return {
+    method: "$adjust",
+    args: [{
+      brightness: number(operation.brightness, 0, -1, 1, "brightness"),
+      contrast: number(operation.contrast, 1, 0.1, 3, "contrast"),
+      saturation: number(operation.saturation, 1, 0, 3, "saturation")
+    }]
+  };
+  if (type === "grayscale") return { method: "grayscale", args: [] };
+  if (type === "blur") return { method: "blur", args: [number(operation.sigma, 1, 0.3, 1000, "blur sigma")] };
+  if (type === "sharpen") return { method: "sharpen", args: [] };
+  if (type === "format") {
+    const format = String(operation.format || "jpeg").toLowerCase().replace("jpg", "jpeg");
+    if (!outputMethods.has(format)) throw new Error(`Unsupported Sharp output format: ${format}`);
+    return { method: format, args: [{ quality: integer(operation.quality, 90, 1, 100, "format quality") }] };
+  }
+  throw new Error(`Unsupported image operation: ${type || "missing type"}`);
 }
 
 export function parseOperations(value) {
   let operations = value;
-  if (typeof value === "string") {
-    try { operations = JSON.parse(value); } catch { throw new Error("operations must be valid JSON"); }
-  }
+  if (typeof operations === "string") operations = parseJson(operations, "operations");
   if (!Array.isArray(operations) || !operations.length) throw new Error("operations must be a non-empty JSON array");
-  if (operations.length > 12) throw new Error("A maximum of 12 operations is allowed");
+  if (operations.length > MAX_OPERATIONS) throw new Error(`A maximum of ${MAX_OPERATIONS} operations is allowed`);
   return operations;
 }
 
-function cropFilter(operation) {
-  if (operation.width || operation.height) {
-    const width = integer(operation.width, 1, 1, 16384, "crop width");
-    const height = integer(operation.height, 1, 1, 16384, "crop height");
-    const x = integer(operation.x, 0, 0, 16384, "crop x");
-    const y = integer(operation.y, 0, 0, 16384, "crop y");
-    return `crop=${width}:${height}:${x}:${y}`;
-  }
-  const zoom = number(operation.zoom, 1, 1, 8, "crop zoom");
-  const focusX = number(operation.focusX, 0.5, 0, 1, "crop focusX");
-  const focusY = number(operation.focusY, 0.5, 0, 1, "crop focusY");
-  const side = `min(iw\\,ih)/${zoom}`;
-  return `crop=${side}:${side}:(iw-${side})*${focusX}:(ih-${side})*${focusY}`;
-}
-
-function resizeFilters(operation) {
-  const width = integer(operation.width, 1024, 1, 16384, "resize width");
-  const height = integer(operation.height, width, 1, 16384, "resize height");
-  const fit = String(operation.fit || "contain");
-  if (fit === "fill") return [`scale=${width}:${height}`];
-  if (fit === "cover") return [`scale=${width}:${height}:force_original_aspect_ratio=increase`, `crop=${width}:${height}`];
-  if (fit !== "contain") throw new Error("resize fit must be contain, cover, or fill");
-  return [
-    `scale=${width}:${height}:force_original_aspect_ratio=decrease`,
-    `pad=${width}:${height}:(ow-iw)/2:(oh-ih)/2:${safeColor(operation.background)}`
-  ];
-}
-
-function rotateFilter(operation) {
-  const degrees = number(operation.degrees, 0, -360, 360, "rotate degrees");
-  if (degrees === 90 || degrees === -270) return "transpose=1";
-  if (degrees === -90 || degrees === 270) return "transpose=2";
-  if (Math.abs(degrees) === 180) return "hflip,vflip";
-  return `rotate=${degrees}*PI/180:ow=rotw(iw):oh=roth(ih):c=none`;
-}
-
 export function compileOperations(operations) {
-  const filters = [];
-  let format = "jpeg";
-  let quality = 90;
-  for (const operation of operations) {
-    const type = String(operation?.type || "").toLowerCase();
-    if (type === "crop") filters.push(cropFilter(operation));
-    else if (type === "resize") filters.push(...resizeFilters(operation));
-    else if (type === "rotate") filters.push(rotateFilter(operation));
-    else if (type === "flip") {
-      if (!['horizontal', 'vertical'].includes(operation.axis)) throw new Error("flip axis must be horizontal or vertical");
-      filters.push(operation.axis === "horizontal" ? "hflip" : "vflip");
-    } else if (type === "adjust") {
-      const brightness = number(operation.brightness, 0, -1, 1, "brightness");
-      const contrast = number(operation.contrast, 1, 0.1, 3, "contrast");
-      const saturation = number(operation.saturation, 1, 0, 3, "saturation");
-      filters.push(`eq=brightness=${brightness}:contrast=${contrast}:saturation=${saturation}`);
-    } else if (type === "grayscale") filters.push("format=gray");
-    else if (type === "blur") filters.push(`gblur=sigma=${number(operation.sigma, 1, 0.1, 100, "blur sigma")}`);
-    else if (type === "sharpen") filters.push("unsharp=5:5:1.0:5:5:0.0");
-    else if (type === "format") {
-      format = String(operation.format || "jpeg").toLowerCase().replace("jpg", "jpeg");
-      if (!["jpeg", "png", "webp"].includes(format)) throw new Error("format must be jpeg, png, or webp");
-      quality = integer(operation.quality, 90, 1, 100, "format quality");
-    } else throw new Error(`Unsupported image operation: ${type || "missing type"}`);
-  }
-  return { filters, format, quality };
+  const pipeline = operations.map((operation) => operation?.method ? methodOperation(operation) : legacyOperation(operation || {}));
+  const formatOperation = [...pipeline].reverse().find(({ method }) => outputMethods.has(method));
+  if (!formatOperation) pipeline.push({ method: "jpeg", args: [{ quality: 90 }] });
+  return { pipeline, format: formatOperation?.method || "jpeg" };
 }
+
+export const supportedSharpMethods = [...chainMethods, ...outputMethods, "format"].sort();

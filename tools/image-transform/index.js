@@ -3,8 +3,8 @@ import path from "node:path";
 import process from "node:process";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { mkdir, readFile } from "node:fs/promises";
-import { compileOperations, parseOperations } from "./operations.js";
-import { outputMetadata, runFfmpeg } from "./ffmpeg.js";
+import { compileOperations, parseOperations, supportedSharpMethods } from "./operations.js";
+import { outputMetadata, runSharp } from "./sharp-runner.js";
 
 const toolName = "image-transform";
 const toolDir = path.dirname(fileURLToPath(import.meta.url));
@@ -20,20 +20,17 @@ Usage:
   node index.js --help
   node index.js run --request-file <json>
 
-Apply an ordered JSON array of deterministic image operations.
-Supported operation types:
-  crop       Focal square crop: zoom, focusX, focusY; or fixed width, height, x, y
-  resize     width, height, fit=contain|cover|fill, background
-  rotate     degrees
-  flip       axis=horizontal|vertical
-  adjust     brightness, contrast, saturation
-  grayscale  no options
-  blur       sigma
-  sharpen    no options
-  format     format=jpeg|png|webp, quality=1..100
+Build an ordered Sharp pipeline from JSON. Use Sharp method names directly:
+  [{"method":"resize","args":[{"width":1024,"height":1024,"fit":"cover"}]},{"method":"modulate","args":[{"saturation":1.15}]},{"method":"webp","args":[{"quality":90}]}]
 
-Example args.operations:
-  [{"type":"crop","zoom":2,"focusX":0.55,"focusY":0.08},{"type":"resize","width":1024,"height":1024,"fit":"cover"},{"type":"format","format":"jpeg","quality":92}]
+A method may use "options" instead of a one-element "args" array. Up to 32 operations are accepted.
+Local file references inside operation arguments are rejected; the source and output remain artifact-scoped.
+
+Supported chain/output methods:
+  ${supportedSharpMethods.join(", ")}
+
+Legacy operations remain compatible:
+  crop, resize, rotate, flip, adjust, grayscale, blur, sharpen, format
 `);
 }
 
@@ -48,15 +45,15 @@ async function run(requestFile) {
     const tmpDir = getChatToolTmpDir(request.chatId, toolName);
     await mkdir(tmpDir, { recursive: true });
     const outputPath = path.join(tmpDir, `image-transform-${crypto.randomUUID()}.${metadata.extension}`);
-    await runFfmpeg({ sourcePath: request.artifact.path, outputPath, ...plan });
+    const info = await runSharp({ sourcePath: request.artifact.path, outputPath, pipeline: plan.pipeline });
     console.log(JSON.stringify(toolOk({
-      text: `Applied ${operations.length} image operation(s).`,
+      text: `Applied ${operations.length} image operation(s) with Sharp.`,
       filePath: outputPath,
       fileName: `image-transform.${metadata.extension}`,
       mimeType: metadata.mimeType,
       kind: "image",
-      delivery: { method: "photo" },
-      json: { operations, format: plan.format }
+      delivery: { method: ["jpeg", "png", "webp"].includes(plan.format) ? "photo" : "document" },
+      json: { operations, format: plan.format, width: info.width, height: info.height, size: info.size }
     })));
   } catch (error) {
     console.log(JSON.stringify(toolError(error.message || String(error))));

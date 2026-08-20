@@ -1,11 +1,11 @@
 {
   "name": "image-transform",
-  "version": "0.1.0",
-  "description": "Apply ordered, deterministic image manipulations including crop, resize, rotate, flip, tonal adjustment, grayscale, blur, sharpen, and format conversion.",
+  "version": "0.2.0",
+  "description": "Build powerful artifact-scoped image pipelines from safe Sharp API method calls, with broad transforms, effects, metadata controls, format conversion, and legacy operation compatibility.",
   "entry": "index.js",
-  "input": ["image/jpeg", "image/png", "image/webp"],
-  "output": ["image/jpeg", "image/png", "image/webp"],
+  "input": ["image/jpeg", "image/png", "image/webp", "image/avif", "image/gif", "image/heif", "image/tiff"],
+  "output": ["image/jpeg", "image/png", "image/webp", "image/avif", "image/gif", "image/heif", "image/tiff"],
   "configSchema": {},
   "category": "image",
-  "keywords": ["adjust", "avatar", "blur", "convert", "crop", "flip", "image", "manipulate", "resize", "rotate", "sharpen", "transform", "zoom"]
+  "keywords": ["adjust", "affine", "avatar", "blur", "clahe", "colorspace", "convert", "convolve", "crop", "effects", "flip", "image", "manipulate", "metadata", "resize", "rotate", "sharp", "sharpen", "transform", "zoom"]
 }

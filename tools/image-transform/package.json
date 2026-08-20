@@ -2,6 +2,11 @@
   "name": "image-transform",
   "private": true,
   "type": "module",
-  "version": "0.1.0",
-  "scripts": { "test": "node --test" }
+  "version": "0.2.0",
+  "scripts": {
+    "test": "node --test"
+  },
+  "dependencies": {
+    "sharp": "^0.34.5"
+  }
 }
