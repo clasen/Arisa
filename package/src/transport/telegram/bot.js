@@ -76,6 +76,12 @@ export function isProcessableTelegramMessage(message = {}) {
   );
 }
 
+export function resolveIncomingBusyMessageMode({ config, route, message }) {
+  if (route?.workspace) return "queue";
+  if (typeof message?.text !== "string") return "queue";
+  return resolveTelegramBusyMessageMode(config, route?.sessionId);
+}
+
 export function buildTopicInitializationHandoff({ name, context }) {
   return [
     `Telegram topic: ${String(name || "").trim()}`,
@@ -692,9 +698,11 @@ export async function createTelegramBot({ config, artifactStore, toolRegistry, t
     if (chatState.processing) {
       await ensureQueuedTelegramTyping(chatState, ctx);
       const incomingPrompt = await buildIncomingPrompt(ctx, route);
-      const busyMessageMode = typeof ctx.message?.text === "string"
-        ? resolveTelegramBusyMessageMode(config, route.sessionId)
-        : "queue";
+      const busyMessageMode = resolveIncomingBusyMessageMode({
+        config,
+        route,
+        message: ctx.message
+      });
       return enqueuePrompt({
         chatId: route.sessionId,
         prompt: incomingPrompt,

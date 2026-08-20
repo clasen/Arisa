@@ -4,6 +4,7 @@ import {
   collectText,
   ensureQueuedTelegramTyping,
   isSilentReply,
+  resolveIncomingBusyMessageMode,
   stopQueuedTelegramTyping
 } from "../src/transport/telegram/bot.js";
 import {
@@ -290,6 +291,20 @@ test("busy message mode supports global defaults and per-chat overrides", () => 
   assert.equal(resolveTelegramBusyMessageMode(config, 879964957), "steer");
   assert.equal(resolveTelegramBusyMessageMode(config, 123), "queue");
   assert.equal(resolveTelegramBusyMessageMode({ telegram: { busyMessageMode: "invalid" } }, 123), "queue");
+});
+
+test("forum topics queue while direct Arisa messages retain steer mode", () => {
+  const config = { telegram: { busyMessageMode: "steer", chatMeta: {} } };
+  assert.equal(resolveIncomingBusyMessageMode({
+    config,
+    route: { workspace: true, sessionId: "owner--topic-87" },
+    message: { text: "topic follow-up" }
+  }), "queue");
+  assert.equal(resolveIncomingBusyMessageMode({
+    config,
+    route: { workspace: false, sessionId: "879964957" },
+    message: { text: "direct follow-up" }
+  }), "steer");
 });
 
 test("steer mode sends text to the active Pi session", async () => {
