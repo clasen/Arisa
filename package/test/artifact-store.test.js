@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
@@ -9,7 +9,7 @@ process.env.HOME = homeDir;
 process.env.USERPROFILE = homeDir;
 
 const { ArtifactStore } = await import("../src/core/artifacts/artifact-store.js");
-const { arisaHomeDir } = await import("../src/runtime/paths.js");
+const { arisaHomeDir, getChatArtifactsIndexFile } = await import("../src/runtime/paths.js");
 
 async function resetHome() {
   await rm(arisaHomeDir, { recursive: true, force: true });
@@ -44,6 +44,42 @@ test("creates, persists, reads, and lists text artifacts by recency", async () =
 
   const reloadedStore = new ArtifactStore().forChat("chat-1");
   assert.deepEqual(await reloadedStore.get(first.id), first);
+});
+
+test("serializes 100 concurrent artifact writes across store instances", async () => {
+  await resetHome();
+  const chatId = "concurrent-chat";
+  const stores = Array.from({ length: 5 }, () => new ArtifactStore().forChat(chatId));
+  const artifacts = await Promise.all(Array.from({ length: 100 }, (_, index) => (
+    stores[index % stores.length].createText({
+      text: `message ${index}`,
+      source: { type: "test", index }
+    })
+  )));
+
+  const persisted = JSON.parse(await readFile(getChatArtifactsIndexFile(chatId), "utf8"));
+  assert.equal(persisted.length, 100);
+  assert.equal(new Set(persisted.map((artifact) => artifact.id)).size, 100);
+  assert.deepEqual(
+    new Set(persisted.map((artifact) => artifact.id)),
+    new Set(artifacts.map((artifact) => artifact.id))
+  );
+  const stateFiles = await readdir(path.dirname(getChatArtifactsIndexFile(chatId)));
+  assert.equal(stateFiles.some((name) => name.endsWith(".tmp")), false);
+});
+
+test("refuses to overwrite a corrupt artifact index", async () => {
+  await resetHome();
+  const chatId = "corrupt-chat";
+  const indexFile = getChatArtifactsIndexFile(chatId);
+  await new ArtifactStore().forChat(chatId).createText({ text: "safe", source: { type: "test" } });
+  await writeFile(indexFile, "{truncated", "utf8");
+
+  await assert.rejects(
+    new ArtifactStore().forChat(chatId).createText({ text: "must not replace", source: { type: "test" } }),
+    /Artifact index is unreadable/
+  );
+  assert.equal(await readFile(indexFile, "utf8"), "{truncated");
 });
 
 test("copies file artifacts into the chat artifact directory", async () => {

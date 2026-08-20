@@ -1,9 +1,10 @@
-import { mkdir, readFile, writeFile, copyFile } from "node:fs/promises";
+import { copyFile, mkdir, open, readFile, rename, unlink, writeFile } from "node:fs/promises";
 import path from "node:path";
 import crypto from "node:crypto";
 import { getChatArtifactsDir, getChatArtifactsIndexFile } from "../../runtime/paths.js";
 
 const UTF8_BOM = Buffer.from([0xef, 0xbb, 0xbf]);
+const indexOperations = new Map();
 
 function id() {
   return crypto.randomUUID();
@@ -42,6 +43,48 @@ async function copyArtifactFile(originalPath, destPath, mimeType) {
   return writeFile(destPath, withUtf8Bom(content));
 }
 
+async function serializeIndexOperation(indexFile, operation) {
+  const previous = indexOperations.get(indexFile) || Promise.resolve();
+  const current = previous.catch(() => {}).then(operation);
+  indexOperations.set(indexFile, current);
+  try {
+    return await current;
+  } finally {
+    if (indexOperations.get(indexFile) === current) indexOperations.delete(indexFile);
+  }
+}
+
+async function syncParentDirectory(file) {
+  let handle;
+  try {
+    handle = await open(path.dirname(file), "r");
+    await handle.sync();
+  } catch {
+    // Some platforms do not support fsync on directories; rename remains atomic there.
+  } finally {
+    await handle?.close().catch(() => {});
+  }
+}
+
+async function writeJsonAtomically(file, value) {
+  await mkdir(path.dirname(file), { recursive: true });
+  const temporary = `${file}.${process.pid}.${id()}.tmp`;
+  let handle;
+  try {
+    handle = await open(temporary, "wx", 0o600);
+    await handle.writeFile(`${JSON.stringify(value, null, 2)}\n`, "utf8");
+    await handle.sync();
+    await handle.close();
+    handle = null;
+    await rename(temporary, file);
+    await syncParentDirectory(file);
+  } catch (error) {
+    await handle?.close().catch(() => {});
+    await unlink(temporary).catch(() => {});
+    throw error;
+  }
+}
+
 class ChatArtifactStore {
   constructor(chatId) {
     this.chatId = String(chatId);
@@ -52,9 +95,15 @@ class ChatArtifactStore {
 
   async reload() {
     try {
-      this.items = JSON.parse(await readFile(this.indexFile, "utf8"));
-    } catch {
-      this.items = [];
+      const parsed = JSON.parse(await readFile(this.indexFile, "utf8"));
+      if (!Array.isArray(parsed)) throw new Error("Artifact index must contain a JSON array");
+      this.items = parsed;
+    } catch (error) {
+      if (error?.code === "ENOENT") {
+        this.items = [];
+        return;
+      }
+      throw new Error(`Artifact index is unreadable: ${this.indexFile}`, { cause: error });
     }
   }
 
@@ -63,9 +112,20 @@ class ChatArtifactStore {
     if (!this.items) await this.reload();
   }
 
-  async saveIndex() {
-    await mkdir(path.dirname(this.indexFile), { recursive: true });
-    await writeFile(this.indexFile, `${JSON.stringify(this.items, null, 2)}\n`, "utf8");
+  async appendToIndex(artifact) {
+    return serializeIndexOperation(this.indexFile, async () => {
+      await this.reload();
+      this.items.push(artifact);
+      await writeJsonAtomically(this.indexFile, this.items);
+      return artifact;
+    });
+  }
+
+  async readIndex() {
+    return serializeIndexOperation(this.indexFile, async () => {
+      await this.reload();
+      return this.items;
+    });
   }
 
   async createText({ text, mimeType = "text/plain", source, metadata = {} }) {
@@ -81,9 +141,7 @@ class ChatArtifactStore {
       metadata,
       createdAt: new Date().toISOString()
     };
-    this.items.push(artifact);
-    await this.saveIndex();
-    return artifact;
+    return this.appendToIndex(artifact);
   }
 
   async createFileArtifact({ fileName, kind, mimeType, source, metadata = {}, writeFileContent }) {
@@ -104,9 +162,7 @@ class ChatArtifactStore {
       metadata,
       createdAt: new Date().toISOString()
     };
-    this.items.push(artifact);
-    await this.saveIndex();
-    return artifact;
+    return this.appendToIndex(artifact);
   }
 
   async createFromFile({ originalPath, fileName, kind, mimeType, source, metadata = {} }) {
@@ -133,14 +189,14 @@ class ChatArtifactStore {
 
   async get(artifactId) {
     await this.init();
-    await this.reload();
-    return this.items.find((item) => item.id === artifactId) || null;
+    const items = await this.readIndex();
+    return items.find((item) => item.id === artifactId) || null;
   }
 
   async listRecent(limit = 20) {
     await this.init();
-    await this.reload();
-    return [...this.items].slice(-limit).reverse();
+    const items = await this.readIndex();
+    return [...items].slice(-limit).reverse();
   }
 }
 
