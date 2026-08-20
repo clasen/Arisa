@@ -222,6 +222,8 @@ export class TaskStore {
     task.lastRunAt = completedAt;
     delete task.lastError;
     delete task.error;
+    delete task.lastOutcome;
+    delete task.consecutiveFailures;
     if (nextRunAt) {
       task.status = "pending";
       task.runAt = nextRunAt;
@@ -251,8 +253,25 @@ export class TaskStore {
       await this.save();
       return structuredClone(task);
     }
-    if (!retryable || task.attempts >= task.retry.maxAttempts) {
-      return this.fail(taskId, message);
+    if (!retryable) return this.fail(taskId, message);
+    if (task.attempts >= task.retry.maxAttempts) {
+      const now = Date.now();
+      const nextRunAt = computeNextRunAt(task, now);
+      if (!nextRunAt) return this.fail(taskId, message);
+
+      const failedAt = new Date(now).toISOString();
+      task.status = "pending";
+      task.runAt = nextRunAt;
+      task.attempts = 0;
+      task.lastOutcome = "failed";
+      task.lastError = message;
+      task.lastFailedAt = failedAt;
+      task.consecutiveFailures = Number(task.consecutiveFailures || 0) + 1;
+      task.updatedAt = failedAt;
+      delete task.startedAt;
+      delete task.error;
+      await this.save();
+      return { ...structuredClone(task), terminalFailure: true };
     }
 
     const now = Date.now();

@@ -10,9 +10,21 @@ export class NonRetryableTaskError extends Error {
   }
 }
 
-export function createTaskRunner({ taskStore, dispatch, logger, claimLimit = 10 }) {
+export function createTaskRunner({ taskStore, dispatch, onTerminalFailure, logger, claimLimit = 10 }) {
   if (!taskStore || typeof dispatch !== "function") {
     throw new Error("Task runner requires taskStore and dispatch");
+  }
+
+  async function reportTerminalFailure(task, updated, error) {
+    const isTerminal = updated?.status === "failed"
+      || updated?.status === "outcome_uncertain"
+      || updated?.terminalFailure === true;
+    if (!isTerminal || typeof onTerminalFailure !== "function") return;
+    try {
+      await onTerminalFailure({ task, result: updated, error });
+    } catch (notificationError) {
+      logger?.log("tasks", `task ${task.id} failure notification failed: ${errorMessage(notificationError)}`);
+    }
   }
 
   async function runClaimedTask(task) {
@@ -27,6 +39,7 @@ export function createTaskRunner({ taskStore, dispatch, logger, claimLimit = 10 
       const updated = await taskStore.retryOrFail(task.id, error, retryOptions);
       const status = updated?.status || "missing";
       logger?.log("tasks", `task ${task.id} ${status}: ${errorMessage(error)}`);
+      await reportTerminalFailure(task, updated, error);
       return { taskId: task.id, status, error: errorMessage(error) };
     }
   }

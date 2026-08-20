@@ -13,6 +13,36 @@ function requireChatId(task) {
   return chatId;
 }
 
+function safeErrorSummary(error) {
+  return errorMessage(error)
+    .replace(/(bearer\s+)[^\s]+/gi, "$1[redacted]")
+    .replace(/((?:api[_-]?key|token|secret|password)\s*[=:]\s*)[^\s,;]+/gi, "$1[redacted]")
+    .replace(/\s+/g, " ")
+    .trim()
+    .slice(0, 300) || "Unknown error";
+}
+
+function failureDestination(task) {
+  const destination = task.route?.transport === "telegram" ? task.route.destination : null;
+  return {
+    chatId: destination?.chatId || task.payload?.chatId,
+    threadId: destination?.threadId || null
+  };
+}
+
+function buildFailureNotice({ task, result, error }) {
+  const uncertain = result?.status === "outcome_uncertain";
+  const recurring = result?.terminalFailure === true && result?.status === "pending";
+  const lines = [
+    uncertain ? "⚠️ Arisa task outcome is uncertain" : "⚠️ Arisa task failed",
+    `Task: ${task.kind || "unknown"} (${task.id})`,
+    `Error: ${safeErrorSummary(error)}`
+  ];
+  if (recurring) lines.push(`Next run: ${result.runAt}`);
+  else lines.push("No further retries are scheduled.");
+  return lines.join("\n");
+}
+
 export function createTelegramTaskDispatcher({
   taskStore,
   sendMessage,
@@ -81,6 +111,21 @@ export function createTelegramTaskDispatcher({
     throw new NonRetryableTaskError(`Unsupported task: ${task.kind}`);
   }
 
-  const runner = createTaskRunner({ taskStore, dispatch: dispatchTask, logger });
+  async function notifyTerminalFailure(details) {
+    const destination = failureDestination(details.task);
+    if (!destination.chatId) {
+      logger?.log("tasks", `task ${details.task.id} has no Telegram failure-notification destination`);
+      return;
+    }
+    const options = destination.threadId ? { message_thread_id: destination.threadId } : undefined;
+    await sendMessage(destination.chatId, buildFailureNotice(details), options);
+  }
+
+  const runner = createTaskRunner({
+    taskStore,
+    dispatch: dispatchTask,
+    onTerminalFailure: notifyTerminalFailure,
+    logger
+  });
   return { dispatchTask, dispatchDueTasks: runner.dispatchDueTasks, runClaimedTask: runner.runClaimedTask };
 }

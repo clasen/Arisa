@@ -117,8 +117,42 @@ test("fails malformed tasks without retrying", async () => {
 
   assert.deepEqual(calls, [
     ["retryOrFail", "bad-1", "Task missing chatId: agent_task", { retryable: false }],
-    ["retryOrFail", "bad-2", "Unsupported task: other", { retryable: false }]
+    ["retryOrFail", "bad-2", "Unsupported task: other", { retryable: false }],
+    ["send", 123, "⚠️ Arisa task failed\nTask: other (bad-2)\nError: Unsupported task: other\nNo further retries are scheduled.", undefined]
   ]);
+});
+
+test("notifies the routed Telegram topic once retries are exhausted", async () => {
+  const { calls, dispatcher } = createHarness({
+    taskStore: {
+      async retryOrFail(taskId, error, options) {
+        calls.push(["retryOrFail", taskId, error.message, options]);
+        return {
+          status: "pending",
+          terminalFailure: true,
+          runAt: "2026-08-21T00:00:00.000Z"
+        };
+      }
+    },
+    dependencies: {
+      enqueueAsyncPrompt: async () => { throw new Error("token=very-secret-value queue unavailable"); }
+    }
+  });
+
+  await dispatcher.runClaimedTask({
+    id: "recurring-bad",
+    kind: "agent_task",
+    payload: { chatId: 123, prompt: "private payload must not appear" },
+    route: { transport: "telegram", destination: { chatId: -1001, threadId: 87 } }
+  });
+
+  assert.deepEqual(calls.at(-1), [
+    "send",
+    -1001,
+    "⚠️ Arisa task failed\nTask: agent_task (recurring-bad)\nError: token=[redacted] queue unavailable\nNext run: 2026-08-21T00:00:00.000Z",
+    { message_thread_id: 87 }
+  ]);
+  assert.equal(calls.at(-1)[2].includes("private payload"), false);
 });
 
 test("due-task dispatch retries one failure without blocking another task", async () => {

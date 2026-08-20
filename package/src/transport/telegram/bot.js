@@ -527,7 +527,7 @@ export async function createTelegramBot({ config, artifactStore, toolRegistry, t
 
   const { dispatchDueTasks } = createTelegramTaskDispatcher({
     taskStore,
-    sendMessage: (chatId, text) => bot.api.sendMessage(chatId, text),
+    sendMessage: (chatId, text, options) => bot.api.sendMessage(chatId, text, options),
     enqueueAsyncPrompt,
     artifactStore,
     toolRegistry,

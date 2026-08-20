@@ -142,6 +142,34 @@ test("backs off known failures and fails after the attempt limit", async () => {
   assert.equal(failed.attempts, 2);
 });
 
+test("keeps recurring tasks scheduled after a run exhausts its retries", async () => {
+  await resetHome();
+  const store = new TaskStore();
+  const past = new Date(Date.now() - 1000).toISOString();
+  await store.add({
+    id: "recurring-failure",
+    kind: "agent_task",
+    runAt: past,
+    recurrence: { type: "interval", everySeconds: 60 },
+    retry: { maxAttempts: 1 }
+  });
+
+  await store.claimDue();
+  const result = await store.retryOrFail("recurring-failure", "temporary outage");
+
+  assert.equal(result.status, "pending");
+  assert.equal(result.terminalFailure, true);
+  assert.equal(result.lastOutcome, "failed");
+  assert.equal(result.lastError, "temporary outage");
+  assert.equal(result.attempts, 0);
+  assert.equal(result.consecutiveFailures, 1);
+  assert.ok(Date.parse(result.runAt) > Date.now());
+
+  const persisted = await store.get("recurring-failure");
+  assert.equal(persisted.terminalFailure, undefined);
+  assert.equal(persisted.status, "pending");
+});
+
 test("moves legacy Telegram routing out of task payloads", async () => {
   await resetHome();
   const store = new TaskStore();
