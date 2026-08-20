@@ -1,11 +1,9 @@
-import { Bot, InputFile } from "grammy";
-import path from "node:path";
+import { Bot } from "grammy";
 import { authorizeChat } from "./auth.js";
 import { captureIncomingArtifact } from "./media.js";
-import { buildDeviceCodeTelegramMessage } from "./device-code-message.js";
 import { renderTelegramHtml } from "./text-format.js";
-import { buildPiAuthRecoveryBlockedMessage, buildPiAuthTelegramMessage, getErrorMessage, getPiAuthIssue, getPiAuthStatus } from "../../core/agent/auth-flow.js";
-import { createPiOAuthLogin } from "../../core/agent/pi-auth-login.js";
+import { buildPiAuthTelegramMessage, getErrorMessage, getPiAuthIssue } from "../../core/agent/auth-flow.js";
+import { createTelegramAuthController } from "./telegram-auth-controller.js";
 import { resolveChatSpeed } from "../../core/agent/model-selection.js";
 import { SessionSeedStore } from "../../core/conversation/session-seed-store.js";
 import { formatDoctorReport } from "../../runtime/doctor.js";
@@ -17,7 +15,9 @@ import { buildUpdatePicker, createTelegramUpdateCallbackHandler } from "./update
 import { createTelegramModelControls } from "./model-controls.js";
 import { createTelegramModelCallbackHandler } from "./model-callback.js";
 import { createTelegramTaskDispatcher } from "./task-dispatcher.js";
-import { resolveTelegramWorkspaceRoute, topicSessionId } from "./workspace-group.js";
+import { createTelegramSessionBridgeController } from "./telegram-session-bridge.js";
+import { createTelegramWorkspaceController } from "./telegram-workspace-controller.js";
+import { resolveTelegramWorkspaceRoute } from "./workspace-group.js";
 import {
   buildNewSessionPrompt,
   buildPrompt,
@@ -176,11 +176,12 @@ export async function createTelegramBot({ config, artifactStore, toolRegistry, t
   const perChatState = createChatStateStore();
   const sessionSeeds = new SessionSeedStore();
   const notifiedPromptErrors = new WeakSet();
-  const authRenewals = new Map();
-  const workspaceRoutes = new WeakMap();
-  const workspaceGateStates = new Map();
-  let piAuthIssue = null;
   let taskTimer = null;
+  const { authorizeContext, contextRoute, registerRoute } = createTelegramWorkspaceController({
+    config,
+    api: bot.api,
+    saveConfig
+  });
 
   const requestRestartWithReceipt = async (ctx, reason = "Telegram restart") => {
     const route = contextRoute(ctx);
@@ -220,152 +221,13 @@ export async function createTelegramBot({ config, artifactStore, toolRegistry, t
     if (error instanceof Error) notifiedPromptErrors.add(error);
   }
 
-  function rememberPiAuthIssue(error) {
-    const issue = getPiAuthIssue(error);
-    if (issue) piAuthIssue = issue;
-    return issue;
-  }
-
-  async function notifyPiAuthIssueIfNeeded(chatId, error) {
-    const issue = rememberPiAuthIssue(error);
-    if (!issue) return false;
-
-    try {
-      await bot.api.sendMessage(chatId, buildPiAuthTelegramMessage({ config, chatId, issue }));
-      markPromptErrorNotified(error);
-      return true;
-    } catch (notifyError) {
-      logger?.error("telegram", `auth issue notice failed for chat ${chatId}: ${getErrorMessage(notifyError)}`);
-      return false;
-    }
-  }
-
-  function selectTelegramLoginOption(options = []) {
-    return options.find((option) => /device/i.test(`${option.id} ${option.label}`))
-      || options.find((option) => /browser|oauth|web/i.test(`${option.id} ${option.label}`))
-      || options[0]
-      || null;
-  }
-
-  async function finishAuthRenewal(chatId, renewal) {
-    try {
-      await renewal.promise;
-      await agentManager.validateAgent();
-      agentManager.clearSessionCache(chatId);
-      piAuthIssue = null;
-      logger?.log("telegram", `Pi auth renewal completed for chat ${chatId}`);
-      await bot.api.sendMessage(chatId, buildPiAuthTelegramMessage({ config, chatId, verified: true }));
-    } catch (error) {
-      const issue = rememberPiAuthIssue(error) || { kind: "validation-failed", message: getErrorMessage(error) };
-      piAuthIssue = issue;
-      logger?.error("telegram", `Pi auth renewal failed for chat ${chatId}: ${getErrorMessage(error)}`);
-      await bot.api.sendMessage(chatId, buildPiAuthTelegramMessage({ config, chatId, issue })).catch((notifyError) => {
-        logger?.error("telegram", `auth renewal failure notice failed for chat ${chatId}: ${getErrorMessage(notifyError)}`);
-      });
-    } finally {
-      authRenewals.delete(chatKey(chatId));
-    }
-  }
-
-  async function startAuthRenewal(chatId) {
-    const key = chatKey(chatId);
-    const existing = authRenewals.get(key);
-    if (existing) {
-      return { started: false, renewal: existing };
-    }
-
-    const renewal = createPiOAuthLogin({
-      provider: config.pi.provider,
-      onSelect: async ({ message, options }) => {
-        const selected = selectTelegramLoginOption(options);
-        if (!selected) return undefined;
-        logger?.log("telegram", `Pi auth option for chat ${chatId}: ${selected.id}`);
-        await bot.api.sendMessage(chatId, `${message}\nUsing: ${selected.label || selected.id}`);
-        return selected.id;
-      },
-      onAuth: async ({ url, instructions }) => {
-        await bot.api.sendMessage(chatId, [
-          instructions || "Open this URL to continue Pi authentication:",
-          url,
-          "After login, paste the full redirect URL back here."
-        ].join("\n"));
-      },
-      onDeviceCode: async ({ userCode, verificationUri, expiresInSeconds }) => {
-        const payload = buildDeviceCodeTelegramMessage({ userCode, verificationUri, expiresInSeconds });
-        const { text, ...options } = payload;
-        await bot.api.sendMessage(chatId, text, options);
-      },
-      onPrompt: async ({ message, controller }) => {
-        await bot.api.sendMessage(chatId, `${message}\nReply here with the value.`);
-        return controller.waitForManualCode();
-      },
-      onProgress: (message) => {
-        if (message) logger?.log("telegram", `Pi auth progress for chat ${chatId}: ${message}`);
-      }
-    });
-
-    authRenewals.set(key, renewal);
-    finishAuthRenewal(chatId, renewal);
-    return { started: true, renewal };
-  }
-
-  async function submitAuthRenewalInput(ctx) {
-    const renewal = authRenewals.get(chatKey(ctx.chat.id));
-    const text = getIncomingMessageText(ctx.message).trim();
-    if (!renewal || !renewal.manualInputRequested || !text) return false;
-
-    if (!renewal.submitManualCode(text)) return false;
-    await ctx.reply("Got it. Finishing Pi login now...");
-    return true;
-  }
-
-  function getIncomingChatMeta(ctx) {
-    return {
-      languageCode: ctx.from?.language_code || "",
-      username: ctx.from?.username || "",
-      firstName: ctx.from?.first_name || "",
-      lastName: ctx.from?.last_name || ""
-    };
-  }
-
-  async function authorizeContext(ctx) {
-    const route = await resolveTelegramWorkspaceRoute({ config, api: ctx.api, ctx });
-    if (!route.workspace) {
-      const auth = await authorizeChat({ config, chatId: ctx.chat.id, saveConfig, chatMeta: getIncomingChatMeta(ctx) });
-      if (auth.ok) workspaceRoutes.set(ctx, route);
-      return auth;
-    }
-
-    const gateKey = String(ctx.chat.id);
-    const previous = workspaceGateStates.get(gateKey);
-    if (!route.ok) {
-      workspaceGateStates.set(gateKey, route.reason || "locked");
-      if (previous !== (route.reason || "locked")) {
-        await ctx.reply("Private workspace access is paused because this forum is no longer owner-only.").catch(() => {});
-      }
-      return { ok: false, reason: route.reason || "workspace-locked" };
-    }
-    if (!(config.telegram.authorizedChatIds || []).includes(route.ownerChatId)) {
-      return { ok: false, reason: "owner-not-authorized" };
-    }
-    workspaceRoutes.set(ctx, route);
-    workspaceGateStates.set(gateKey, "ready");
-    if (previous && previous !== "ready") {
-      await ctx.reply("Private workspace access restored.").catch(() => {});
-    }
-    return { ok: true, firstTime: false, workspace: true };
-  }
-
-  function contextRoute(ctx) {
-    return workspaceRoutes.get(ctx) || {
-      ok: true,
-      workspace: false,
-      sessionId: String(ctx.chat.id),
-      scopeChatId: ctx.chat.id,
-      transportChatId: ctx.chat.id,
-      threadId: null
-    };
-  }
+  const authController = createTelegramAuthController({
+    config,
+    api: bot.api,
+    agentManager,
+    logger,
+    markPromptErrorNotified
+  });
 
   function getChatState(chatId) {
     return perChatState.get(chatId);
@@ -418,143 +280,22 @@ export async function createTelegramBot({ config, artifactStore, toolRegistry, t
     return buildPrompt({ ctx, artifact, transcript, toolResult });
   }
 
-  async function sendTextReply({ sendText, sendDocument, chatId, artifactChatId = chatId, text }) {
-    const maxInlineReplyLength = 3500;
-
-    if (isSilentReply(text)) {
-      logger?.log("telegram", `suppressing silent reply for chat ${chatId}`);
-      return;
-    }
-
-    if (text.length > maxInlineReplyLength) {
-      logger?.log("telegram", `sending long reply as markdown attachment for chat ${chatId}`);
-      const chatArtifactStore = artifactStore.forChat(artifactChatId);
-      const artifact = await chatArtifactStore.createGeneratedFile({
-        fileName: `reply-${Date.now()}.md`,
-        content: text,
-        kind: "document",
-        mimeType: "text/markdown",
-        source: { type: "assistant", chatId },
-        metadata: { delivery: "telegram-document" }
-      });
-      await sendDocument(new InputFile(artifact.path, path.basename(artifact.path)), {
-        caption: "Response attached as Markdown."
-      });
-      return;
-    }
-
-    logger?.log("telegram", `sending text reply for chat ${chatId}`);
-    const sent = await sendText(renderTelegramHtml(text), { parse_mode: "HTML" });
-    if (sent?.message_id) {
-      const messages = getChatState(chatId).assistantMessages;
-      messages.set(sent.message_id, text);
-      while (messages.size > 50) messages.delete(messages.keys().next().value);
-    }
-  }
-
-  function createWorkspaceAccessGuard(route) {
-    return async () => {
-      if (!route.workspace) return;
-      const current = await resolveTelegramWorkspaceRoute({
-        config,
-        api: bot.api,
-        ctx: {
-          chat: { id: route.transportChatId, type: "supergroup", is_forum: true },
-          from: { id: route.ownerChatId },
-          message: { message_thread_id: route.threadId }
-        }
-      });
-      if (!current.ok) throw new Error("Owner-only workspace access is paused.");
-    };
-  }
-
-  function createTelegramSessionBridge(route) {
-    const messageOptions = (extra = {}) => route.workspace && route.threadId
-      ? { ...extra, message_thread_id: route.threadId }
-      : extra;
-    const initializeForumTopic = async ({ messageThreadId, name, context }) => {
-      if (!route.workspace) throw new Error("Telegram topic initialization is only available from the owner workspace forum.");
-      await createWorkspaceAccessGuard(route)();
-      const initializedSessionId = topicSessionId({
-        ownerChatId: route.ownerChatId,
-        groupChatId: route.transportChatId,
-        threadId: messageThreadId,
-        generalTopicId: route.generalTopicId
-      });
-      if (initializedSessionId === String(route.ownerChatId)) {
-        throw new Error("The General topic already uses the owner's private session and cannot be reinitialized here.");
-      }
-      const handoff = buildTopicInitializationHandoff({ name, context });
-      await sessionSeeds.set(initializedSessionId, handoff);
-      agentManager.resetSession(initializedSessionId, { handoff });
-      await agentManager.waitForSessionClose(initializedSessionId);
-      return {
-        ok: true,
-        chatId: route.transportChatId,
-        messageThreadId,
-        sessionId: initializedSessionId,
-        name,
-        initialized: true
-      };
-    };
-    return {
-      sendMedia: async (filePath, { method = "audio", caption, filename } = {}) => {
-        logger?.log("telegram", `sending ${method} reply for chat ${route.transportChatId}`);
-        const input = new InputFile(filePath, filename || undefined);
-        const options = messageOptions({ caption });
-        if (method === "voice") return bot.api.sendVoice(route.transportChatId, input, options);
-        if (method === "document") return bot.api.sendDocument(route.transportChatId, input, options);
-        if (method === "photo" || method === "image") return bot.api.sendPhoto(route.transportChatId, input, options);
-        if (method === "video") return bot.api.sendVideo(route.transportChatId, input, options);
-        return bot.api.sendAudio(route.transportChatId, input, options);
-      },
-      createForumTopic: async (name, context) => {
-        if (!route.workspace) throw new Error("Telegram topic creation is only available from the owner workspace forum.");
-        await createWorkspaceAccessGuard(route)();
-        const topic = await bot.api.createForumTopic(route.transportChatId, name);
-        return initializeForumTopic({
-          messageThreadId: topic.message_thread_id,
-          name: topic.name,
-          context
-        });
-      },
-      initializeForumTopic,
-      prepareRestartReceipt: (summary) => prepareRestartReceipt({
-        transportChatId: route.transportChatId,
-        threadId: route.threadId
-      }, { reason: String(summary || "Agent-requested restart").trim() }),
-      cancelRestartReceipt,
-      getTaskContext: () => route.workspace ? {
-        transport: "telegram",
-        destination: {
-          chatId: route.transportChatId,
-          threadId: route.topicThreadId
-        }
-      } : null
-    };
-  }
-
-  agentManager.setArtifactDeliveryHandler?.(async ({ chatId, artifact, caption, method }) => {
-    const resolvedMethod = method
-      || artifact.metadata?.delivery?.method
-      || (artifact.kind === "audio" || artifact.mimeType?.startsWith("audio/") ? "audio"
-        : artifact.kind === "image" || artifact.mimeType?.startsWith("image/") ? "photo"
-          : artifact.kind === "video" || artifact.mimeType?.startsWith("video/") ? "video"
-            : "document");
-    const safeCaption = caption && !/(^|\s)(\/[^\s]|[A-Za-z]:[\\/])/.test(caption) ? caption : undefined;
-    await createTelegramSessionBridge({
-      workspace: false,
-      sessionId: String(chatId),
-      scopeChatId: chatId,
-      transportChatId: chatId,
-      threadId: null
-    }).sendMedia(artifact.path, {
-      method: resolvedMethod,
-      caption: safeCaption,
-      filename: path.basename(artifact.path)
-    });
-    return { ok: true, artifactId: artifact.id, method: resolvedMethod };
+  const {
+    createSessionBridge: createTelegramSessionBridge,
+    createWorkspaceAccessGuard,
+    installArtifactDeliveryHandler,
+    sendTextReply
+  } = createTelegramSessionBridgeController({
+    config,
+    api: bot.api,
+    agentManager,
+    artifactStore,
+    sessionSeeds,
+    getChatState,
+    buildTopicInitializationHandoff,
+    logger
   });
+  installArtifactDeliveryHandler();
 
   async function processPromptForChat({ chatId, prompt, ctx = null, executionReceipt = null }) {
     const route = ctx ? contextRoute(ctx) : {
@@ -698,7 +439,7 @@ export async function createTelegramBot({ config, artifactStore, toolRegistry, t
       onPromptFailure: async (error) => {
         const message = getErrorMessage(error);
         logger?.error("telegram", `${label} failed for chat ${chatId}: ${message}`);
-        await notifyPiAuthIssueIfNeeded(chatId, error);
+        await authController.notifyIssueIfNeeded(chatId, error);
       }
     });
   }
@@ -777,7 +518,7 @@ export async function createTelegramBot({ config, artifactStore, toolRegistry, t
       };
       const route = await resolveTelegramWorkspaceRoute({ config, api: bot.api, ctx });
       if (!route.ok) throw new Error("Scheduled owner-workspace destination is unavailable.");
-      workspaceRoutes.set(ctx, route);
+      registerRoute(ctx, route);
     }
     const route = contextRoute(ctx);
     const chatState = getChatState(route.sessionId);
@@ -880,13 +621,8 @@ export async function createTelegramBot({ config, artifactStore, toolRegistry, t
   bot.command("new", async (ctx) => {
     const auth = await authorizeContext(ctx);
     if (!auth.ok) return;
-    if (piAuthIssue) {
-      await ctx.reply(buildPiAuthRecoveryBlockedMessage({
-        config,
-        chatId: ctx.chat.id,
-        issue: piAuthIssue,
-        renewalActive: authRenewals.has(chatKey(ctx.chat.id))
-      }));
+    if (authController.getIssue()) {
+      await ctx.reply(authController.buildBlockedMessage(ctx.chat.id));
       return;
     }
     await handleNewCommand(ctx);
@@ -954,38 +690,10 @@ export async function createTelegramBot({ config, artifactStore, toolRegistry, t
     await showSpeedPicker(ctx);
   });
 
-  bot.command("auth", async (ctx) => {
-    const auth = await authorizeContext(ctx);
-    if (!auth.ok) return;
-
-    const status = getPiAuthStatus(config, ctx.chat.id);
-    if (status.hasApiKey || !status.supportsOAuth) {
-      await withTyping(ctx, async () => {
-        try {
-          await agentManager.validateAgent();
-          agentManager.clearSessionCache(ctx.chat.id);
-          piAuthIssue = null;
-          await ctx.reply(buildPiAuthTelegramMessage({ config, chatId: ctx.chat.id, verified: true }));
-        } catch (error) {
-          const issue = rememberPiAuthIssue(error) || { kind: "validation-failed", message: getErrorMessage(error) };
-          piAuthIssue = issue;
-          await ctx.reply(buildPiAuthTelegramMessage({ config, chatId: ctx.chat.id, issue }));
-        }
-      });
-      return;
-    }
-
-    try {
-      const { started } = await startAuthRenewal(ctx.chat.id);
-      await ctx.reply(started
-        ? "Starting Pi login from Telegram..."
-        : "Pi login is already in progress. Paste the redirect URL or code here when you have it.");
-    } catch (error) {
-      const issue = rememberPiAuthIssue(error) || { kind: "validation-failed", message: getErrorMessage(error) };
-      piAuthIssue = issue;
-      await ctx.reply(buildPiAuthTelegramMessage({ config, chatId: ctx.chat.id, issue }));
-    }
-  });
+  bot.command("auth", (ctx) => authController.handleCommand(ctx, {
+    authorize: authorizeContext,
+    withTyping
+  }));
 
   const handleModelCallback = createTelegramModelCallbackHandler({
     config,
@@ -1010,7 +718,7 @@ export async function createTelegramBot({ config, artifactStore, toolRegistry, t
     const reaction = ctx.messageReaction;
     const chatId = reaction.chat.id;
     const auth = await authorizeChat({ config, chatId, saveConfig });
-    if (!auth.ok || piAuthIssue) return;
+    if (!auth.ok || authController.getIssue()) return;
 
     const reactedMessageText = getChatState(chatId).assistantMessages.get(reaction.message_id) || "";
     const prompt = buildReactionPrompt({ reaction, reactedMessageText });
@@ -1033,15 +741,10 @@ export async function createTelegramBot({ config, artifactStore, toolRegistry, t
     const command = getTelegramCommand(ctx);
     if (command) return;
 
-    if (await submitAuthRenewalInput(ctx)) return;
+    if (await authController.submitRenewalInput(ctx)) return;
 
-    if (piAuthIssue) {
-      await ctx.reply(buildPiAuthRecoveryBlockedMessage({
-        config,
-        chatId: ctx.chat.id,
-        issue: piAuthIssue,
-        renewalActive: authRenewals.has(chatKey(ctx.chat.id))
-      }));
+    if (authController.getIssue()) {
+      await ctx.reply(authController.buildBlockedMessage(ctx.chat.id));
       return;
     }
 
@@ -1087,7 +790,7 @@ export async function createTelegramBot({ config, artifactStore, toolRegistry, t
     async notifyPiAuthIssue(error) {
       let notified = false;
       for (const chatId of config.telegram.authorizedChatIds || []) {
-        notified = await notifyPiAuthIssueIfNeeded(chatId, error) || notified;
+        notified = await authController.notifyIssueIfNeeded(chatId, error) || notified;
       }
       return notified;
     }

@@ -1,5 +1,4 @@
 import path from "node:path";
-import { readFileSync } from "node:fs";
 import { readFile, stat } from "node:fs/promises";
 import { createAgentSession, DefaultResourceLoader, SessionManager, SettingsManager, defineTool } from "@earendil-works/pi-coding-agent";
 import { Type } from "@sinclair/typebox";
@@ -11,7 +10,8 @@ import { buildPiToolPolicy, getCoreCodingTools } from "./core-tools.js";
 import { createSystemShellTool } from "./system-shell-tool.js";
 import { clampModelThinkingLevel } from "./pi-runtime.js";
 import { clampModelSpeed, createModelSpeedController } from "./model-speed.js";
-import { arisaHomeDir, getChatPiSessionsDir, sessionStartOperationalNotesFile } from "../../runtime/paths.js";
+import { arisaHomeDir } from "../../runtime/paths.js";
+import { AgentSessionLifecycle } from "./agent-session-lifecycle.js";
 import { searchOfficialToolCatalog } from "../tools/official-tool-catalog.js";
 import { ToolResourceNoteStore } from "../tools/tool-resource-note-store.js";
 import { materializeToolOutput } from "../tools/tool-output-materializer.js";
@@ -32,34 +32,7 @@ const arisaToolNames = [
   "send_artifact"
 ];
 
-const operationalNoteMaxChars = 220;
-
-function normalizeOperationalNote(note) {
-  const text = typeof note === "string" ? note : note?.text;
-  const trimmed = String(text || "").replace(/\s+/g, " ").trim();
-  if (!trimmed) return "";
-  return trimmed.length <= operationalNoteMaxChars ? trimmed : `${trimmed.slice(0, operationalNoteMaxChars - 1).trim()}…`;
-}
-
-export function loadSessionStartOperationalNotes() {
-  try {
-    const raw = readFileSync(sessionStartOperationalNotesFile, "utf8");
-    const parsed = JSON.parse(raw);
-    const notes = Array.isArray(parsed) ? parsed : parsed?.notes;
-    if (!Array.isArray(notes)) return [];
-    return notes.map(normalizeOperationalNote).filter(Boolean).slice(0, 20);
-  } catch {
-    return [];
-  }
-}
-
-function formatSessionStartOperationalNotes(notes) {
-  if (!notes.length) return "";
-  return [
-    "Durable operating notes for this Arisa session:",
-    ...notes.map((note) => `- ${note}`)
-  ].join("\n");
-}
+export { loadSessionStartOperationalNotes } from "./agent-session-lifecycle.js";
 
 const estimatedImageTokens = 1_200;
 
@@ -117,12 +90,6 @@ function guardTools(tools, accessGuard) {
       return tool.execute(...args);
     }
   }));
-}
-
-function closeAgentSession(session) {
-  if (session?.close) return session.close();
-  if (session?.dispose) return session.dispose();
-  return undefined;
 }
 
 export const defaultScheduledTaskListLimit = 50;
@@ -242,11 +209,15 @@ export class AgentManager {
     this.taskStore = taskStore;
     this.logger = logger;
     this.resourceNotes = new ToolResourceNoteStore();
-    this.sessions = new Map();
-    this.pendingNewSessions = new Set();
-    this.pendingSessionHandoffs = new Map();
+    this.sessionLifecycle = new AgentSessionLifecycle({
+      logger,
+      summarizeContext: summarizeRetainedContext
+    });
+    this.sessions = this.sessionLifecycle.sessions;
+    this.pendingNewSessions = this.sessionLifecycle.pendingNewSessions;
+    this.pendingSessionHandoffs = this.sessionLifecycle.pendingSessionHandoffs;
+    this.sessionClosePromises = this.sessionLifecycle.sessionClosePromises;
     this.artifactDeliveryHandler = null;
-    this.sessionClosePromises = new Map();
   }
 
   setArtifactDeliveryHandler(handler) {
@@ -259,122 +230,32 @@ export class AgentManager {
   }
 
   closeCachedSession(sessionKey) {
-    const key = String(sessionKey);
-    const existing = this.sessions.get(key);
-    this.sessions.delete(key);
-    const closeSession = (existing?.session?.close || existing?.session?.dispose)
-      ? () => closeAgentSession(existing.session)
-      : null;
-    if (!closeSession) {
-      return this.sessionClosePromises.get(key) || Promise.resolve();
-    }
-
-    const previousClose = this.sessionClosePromises.get(key);
-    const closePromise = Promise.resolve(previousClose)
-      .catch(() => {})
-      .then(closeSession)
-      .catch((error) => {
-        this.logger?.error?.("agent", `session close failed for chat ${key}: ${error instanceof Error ? error.message : String(error)}`);
-      })
-      .finally(() => {
-        if (this.sessionClosePromises.get(key) === closePromise) {
-          this.sessionClosePromises.delete(key);
-        }
-      });
-    this.sessionClosePromises.set(key, closePromise);
-    return closePromise;
+    return this.sessionLifecycle.closeCached(sessionKey);
   }
 
-  async waitForSessionClose(sessionKey) {
-    const key = String(sessionKey);
-    let closing = this.sessionClosePromises.get(key);
-    while (closing) {
-      await closing;
-      closing = this.sessionClosePromises.get(key);
-    }
+  waitForSessionClose(sessionKey) {
+    return this.sessionLifecycle.waitForClose(sessionKey);
   }
 
   setConfig(config) {
-    for (const key of this.sessions.keys()) this.closeCachedSession(key);
+    this.sessionLifecycle.resetConfigState();
     this.config = config;
-    this.pendingNewSessions.clear();
-    this.pendingSessionHandoffs.clear();
   }
 
-  resetSession(chatId, { handoff = "", parentSession = "" } = {}) {
-    const sessionKey = String(chatId);
-    this.closeCachedSession(sessionKey);
-    this.pendingNewSessions.add(sessionKey);
-    const text = String(handoff || "").trim();
-    const parent = String(parentSession || "").trim();
-    if (text || parent) {
-      this.pendingSessionHandoffs.set(sessionKey, { text, parentSession: parent });
-    } else {
-      this.pendingSessionHandoffs.delete(sessionKey);
-    }
+  resetSession(chatId, options = {}) {
+    this.sessionLifecycle.resetSession(chatId, options);
   }
 
   clearSessionCache(chatId) {
-    this.closeCachedSession(String(chatId));
+    this.sessionLifecycle.closeCached(String(chatId));
   }
 
-  async getRuntimeDiagnostic() {
-    const contexts = await Promise.all([...this.sessions.entries()].map(async ([chatId, context]) => {
-      const base = { chatId };
-      try {
-        const stats = context.session.getSessionStats();
-        const retained = summarizeRetainedContext(context.session.messages);
-        return {
-          ...base,
-          ...retained,
-          tokens: stats.contextUsage?.tokens ?? null,
-          contextWindow: stats.contextUsage?.contextWindow ?? null,
-          percent: stats.contextUsage?.percent ?? null
-        };
-      } catch (error) {
-        return { ...base, error: error instanceof Error ? error.message : String(error) };
-      }
-    }));
-    return {
-      harness: "pi",
-      sessions: this.sessions.size,
-      closingSessions: this.sessionClosePromises.size,
-      contexts
-    };
+  getRuntimeDiagnostic() {
+    return this.sessionLifecycle.getDiagnostic();
   }
 
   createSessionManager(chatId, workspaceDir = arisaInstallDir, sessionRevision = 0) {
-    const sessionKey = String(chatId);
-    const sessionDir = getChatPiSessionsDir(sessionKey, sessionRevision);
-    if (this.pendingNewSessions.has(sessionKey)) {
-      this.logger?.log("agent", `starting new persisted session for chat ${sessionKey}`);
-      const handoff = this.pendingSessionHandoffs.get(sessionKey);
-      const sessionManager = SessionManager.create(
-        workspaceDir,
-        sessionDir,
-        handoff?.parentSession ? { parentSession: handoff.parentSession } : undefined
-      );
-      const operationalNotes = formatSessionStartOperationalNotes(loadSessionStartOperationalNotes());
-      if (operationalNotes) {
-        sessionManager.appendCustomMessageEntry(
-          "arisa-operational-notes",
-          operationalNotes,
-          false,
-          { source: "session-start" }
-        );
-      }
-      if (handoff?.text) {
-        sessionManager.appendCustomMessageEntry(
-          "arisa-session-handoff",
-          handoff.text,
-          false,
-          { source: "telegram-new" }
-        );
-      }
-      return { sessionManager, isNewSession: true };
-    }
-    this.logger?.log("agent", `recovering persisted session for chat ${sessionKey}`);
-    return { sessionManager: SessionManager.continueRecent(workspaceDir, sessionDir), isNewSession: false };
+    return this.sessionLifecycle.createSessionManager(chatId, workspaceDir, sessionRevision);
   }
 
   async validatePiAgent(config = this.config) {
@@ -525,10 +406,7 @@ export class AgentManager {
       accessGuardTarget
     };
     this.sessions.set(sessionKey, ctx);
-    if (isNewSession) {
-      this.pendingNewSessions.delete(sessionKey);
-      this.pendingSessionHandoffs.delete(sessionKey);
-    }
+    if (isNewSession) this.sessionLifecycle.completeNewSession(sessionKey);
     return ctx;
   }
 
@@ -547,12 +425,7 @@ export class AgentManager {
   }
 
   async close() {
-    const contexts = [...this.sessions.values()];
-    this.sessions.clear();
-    await Promise.allSettled([
-      ...this.sessionClosePromises.values(),
-      ...contexts.map((context) => closeAgentSession(context.session))
-    ]);
+    await this.sessionLifecycle.closeAll();
   }
 
   async runTool({ name, request, chatId, taskContext = null }) {

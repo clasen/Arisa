@@ -1,6 +1,15 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { buildDeviceCodeTelegramMessage } from "../src/transport/telegram/device-code-message.js";
+import { selectTelegramLoginOption } from "../src/transport/telegram/telegram-auth-controller.js";
+
+test("Telegram auth prefers device login and falls back deterministically", () => {
+  const browser = { id: "oauth", label: "Browser login" };
+  const device = { id: "device-code", label: "Device code" };
+  assert.strictEqual(selectTelegramLoginOption([browser, device]), device);
+  assert.strictEqual(selectTelegramLoginOption([browser]), browser);
+  assert.equal(selectTelegramLoginOption([]), null);
+});
 
 test("builds a copyable device-code Telegram message with HTML and inline buttons", () => {
   const payload = buildDeviceCodeTelegramMessage({
