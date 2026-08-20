@@ -160,6 +160,7 @@ test("chat state uses one queue for numeric and string chat IDs", () => {
     pendingPrompts: [],
     pendingPromptContexts: [],
     pendingPromptReceipts: [],
+    pendingPromptCoalescible: [],
     continueAfterClose: false,
     historyRevision: 0,
     beforeNextPrompt: null,
@@ -337,6 +338,38 @@ test("failed or unavailable steering falls back to the ordered queue", async () 
   assert.match(failed.steerError.message, /stream ended/);
   assert.equal(unavailable.disposition, "queued");
   assert.deepEqual(chatState.pendingPrompts, ["keep this", "and this"]);
+});
+
+test("direct steer fallback coalesces consecutive text without reordering it", async () => {
+  const steered = [];
+  const chatState = createChatStateStore().get("chat");
+
+  const unavailable = await routeBusyPrompt({
+    chatState,
+    prompt: "first direct message",
+    mode: "steer",
+    coalesceQueued: true,
+    ctx: { message: { message_id: 1 } }
+  });
+  chatState.activeSession = {
+    isStreaming: true,
+    async steer(prompt) { steered.push(prompt); }
+  };
+  const next = await routeBusyPrompt({
+    chatState,
+    prompt: "second direct message",
+    mode: "steer",
+    coalesceQueued: true,
+    ctx: { message: { message_id: 2 } }
+  });
+
+  assert.equal(unavailable.disposition, "queued");
+  assert.equal(next.disposition, "coalesced");
+  assert.deepEqual(steered, []);
+  assert.deepEqual(chatState.pendingPrompts, [
+    "first direct message\n\n--- next direct message ---\n\nsecond direct message"
+  ]);
+  assert.equal(chatState.pendingPromptContexts[0].message.message_id, 2);
 });
 
 test("a pending /new forces later text into the replacement queue", async () => {

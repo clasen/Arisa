@@ -629,7 +629,16 @@ export async function createTelegramBot({ config, artifactStore, toolRegistry, t
     return work();
   }
 
-  async function enqueuePrompt({ chatId, prompt, label, ctx = null, replaceQueued = false, busyMessageMode = "queue", waitForExecution = false }) {
+  async function enqueuePrompt({
+    chatId,
+    prompt,
+    label,
+    ctx = null,
+    replaceQueued = false,
+    busyMessageMode = "queue",
+    waitForExecution = false,
+    coalesceQueued = false
+  }) {
     const chatState = getChatState(chatId);
     const receipt = waitForExecution ? createPromptExecutionReceipt() : null;
 
@@ -646,10 +655,13 @@ export async function createTelegramBot({ config, artifactStore, toolRegistry, t
         mode: sameDelivery ? busyMessageMode : "queue",
         replaceQueued,
         ctx,
-        receipt
+        receipt,
+        coalesceQueued
       });
       if (routed.disposition === "steered") {
         logger?.log("telegram", `chat ${chatId} busy, steering ${label}`);
+      } else if (routed.disposition === "coalesced") {
+        logger?.log("telegram", `chat ${chatId} busy, coalescing ${label} into pending direct turn`);
       } else {
         logger?.log("telegram", `chat ${chatId} busy, queueing ${label}`);
         if (routed.steerError) {
@@ -708,6 +720,7 @@ export async function createTelegramBot({ config, artifactStore, toolRegistry, t
         prompt: incomingPrompt,
         label: `message ${ctx.msg.message_id}`,
         busyMessageMode,
+        coalesceQueued: busyMessageMode === "steer" && typeof ctx.message?.text === "string",
         ctx
       });
     }

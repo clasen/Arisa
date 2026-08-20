@@ -7,6 +7,7 @@ export function createChatStateStore() {
       pendingPrompts: [],
       pendingPromptContexts: [],
       pendingPromptReceipts: [],
+      pendingPromptCoalescible: [],
       continueAfterClose: false,
       historyRevision: 0,
       beforeNextPrompt: null,
@@ -44,21 +45,41 @@ function rejectQueuedReceipts(chatState, error) {
   for (const receipt of chatState.pendingPromptReceipts || []) receipt?.reject(error);
 }
 
-export function queueChatPrompt(chatState, prompt, { replace = false, ctx = null, receipt = null } = {}) {
+const COALESCED_PROMPT_SEPARATOR = "\n\n--- next direct message ---\n\n";
+
+function coalesceLastQueuedPrompt(chatState, prompt, ctx) {
+  const coalescible = chatState.pendingPromptCoalescible ||= [];
+  const index = chatState.pendingPrompts.length - 1;
+  if (index < 0 || !coalescible[index]) return false;
+  chatState.pendingPrompts[index] += `${COALESCED_PROMPT_SEPARATOR}${prompt}`;
+  (chatState.pendingPromptContexts ||= [])[index] = ctx;
+  return true;
+}
+
+export function queueChatPrompt(chatState, prompt, {
+  replace = false,
+  ctx = null,
+  receipt = null,
+  coalescible = false
+} = {}) {
   chatState.pendingPromptContexts ||= [];
   chatState.pendingPromptReceipts ||= [];
+  chatState.pendingPromptCoalescible ||= [];
   if (replace) {
     rejectQueuedReceipts(chatState, Object.assign(new Error("Queued prompt was superseded"), { code: "PROMPT_SUPERSEDED" }));
     chatState.pendingPrompts = [];
     chatState.pendingPromptContexts = [];
     chatState.pendingPromptReceipts = [];
+    chatState.pendingPromptCoalescible = [];
   }
   chatState.pendingPrompts.push(prompt);
   chatState.pendingPromptContexts.push(ctx);
   chatState.pendingPromptReceipts.push(receipt);
+  chatState.pendingPromptCoalescible.push(coalescible);
 }
 
 function takeQueuedPrompt(chatState) {
+  (chatState.pendingPromptCoalescible ||= []).shift();
   return {
     prompt: chatState.pendingPrompts.shift() || "",
     ctx: (chatState.pendingPromptContexts ||= []).shift() || null,
@@ -72,7 +93,19 @@ export function resolveTelegramBusyMessageMode(config, chatId) {
   return mode === "steer" ? "steer" : "queue";
 }
 
-export async function routeBusyPrompt({ chatState, prompt, mode = "queue", replaceQueued = false, ctx = null, receipt = null }) {
+export async function routeBusyPrompt({
+  chatState,
+  prompt,
+  mode = "queue",
+  replaceQueued = false,
+  ctx = null,
+  receipt = null,
+  coalesceQueued = false
+}) {
+  if (coalesceQueued && !replaceQueued && !receipt && coalesceLastQueuedPrompt(chatState, prompt, ctx)) {
+    return { disposition: "coalesced" };
+  }
+
   const session = chatState.activeSession;
   if (
     mode === "steer"
@@ -87,12 +120,17 @@ export async function routeBusyPrompt({ chatState, prompt, mode = "queue", repla
       await session.steer(prompt);
       return { disposition: "steered" };
     } catch (error) {
-      queueChatPrompt(chatState, prompt, { ctx, receipt });
+      queueChatPrompt(chatState, prompt, { ctx, receipt, coalescible: coalesceQueued });
       return { disposition: "queued", steerError: error };
     }
   }
 
-  queueChatPrompt(chatState, prompt, { replace: replaceQueued, ctx, receipt });
+  queueChatPrompt(chatState, prompt, {
+    replace: replaceQueued,
+    ctx,
+    receipt,
+    coalescible: coalesceQueued
+  });
   return { disposition: "queued" };
 }
 
