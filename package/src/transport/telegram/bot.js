@@ -7,7 +7,6 @@ import { createTelegramAuthController } from "./telegram-auth-controller.js";
 import { resolveChatSpeed } from "../../core/agent/model-selection.js";
 import { SessionSeedStore } from "../../core/conversation/session-seed-store.js";
 import { formatDoctorReport } from "../../runtime/doctor.js";
-import { formatToolUsageReport } from "../../runtime/tool-usage-report.js";
 import { ToolResourceNoteStore } from "../../core/tools/tool-resource-note-store.js";
 import { formatUpdateReport } from "../../runtime/update-manager.js";
 import { cancelRestartReceipt, deliverRestartReceipt, prepareRestartReceipt } from "../../runtime/restart-receipt.js";
@@ -16,6 +15,7 @@ import { createTelegramModelControls } from "./model-controls.js";
 import { createTelegramModelCallbackHandler } from "./model-callback.js";
 import { createTelegramTaskDispatcher } from "./task-dispatcher.js";
 import { createTelegramSessionBridgeController } from "./telegram-session-bridge.js";
+import { createTelegramToolsCommandHandler } from "./telegram-tools-command.js";
 import { createTelegramWorkspaceController } from "./telegram-workspace-controller.js";
 import { resolveTelegramWorkspaceRoute } from "./workspace-group.js";
 import {
@@ -42,7 +42,6 @@ import {
   resolveTelegramBusyMessageMode,
   routeBusyPrompt
 } from "./chat-queue.js";
-
 export {
   createChatStateStore,
   drainChatPromptQueue,
@@ -666,11 +665,13 @@ export async function createTelegramBot({ config, artifactStore, toolRegistry, t
     }
   });
 
-  bot.command("tools", async (ctx) => {
-    const auth = await authorizeContext(ctx);
-    if (!auth.ok) return;
-    await ctx.reply(renderTelegramHtml(formatToolUsageReport(await toolRegistry.usage(contextRoute(ctx).scopeChatId))), { parse_mode: "HTML" });
-  });
+  bot.command("tools", createTelegramToolsCommandHandler({
+    authorize: authorizeContext,
+    contextRoute,
+    toolRegistry,
+    withTyping,
+    logger
+  }));
 
   bot.command("model", async (ctx) => {
     const auth = await authorizeContext(ctx);
