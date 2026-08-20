@@ -1,5 +1,6 @@
 import path from "node:path";
 import { unlink } from "node:fs/promises";
+import { taskWithoutCallerRouting } from "../tasks/task-routing.js";
 
 export async function materializeToolOutput({ result, name, chatId, artifactStore, taskStore, taskContext = null }) {
   const chatArtifactStore = artifactStore.forChat(chatId);
@@ -27,11 +28,10 @@ export async function materializeToolOutput({ result, name, chatId, artifactStor
   }
 
   if (result.asyncTask || result.asyncTasks?.length) {
-    result.asyncTasks = await taskStore.addMany(result.asyncTasks || [result.asyncTask], {
-      payload: {
-        chatId,
-        ...(taskContext ? { telegramContext: taskContext } : {})
-      },
+    const requestedTasks = (result.asyncTasks || [result.asyncTask]).map(taskWithoutCallerRouting);
+    result.asyncTasks = await taskStore.addMany(requestedTasks, {
+      payload: { chatId },
+      ...(taskContext ? { route: taskContext } : {}),
       source: { type: "tool", toolName: name, chatId }
     });
     delete result.asyncTask;

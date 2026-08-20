@@ -158,6 +158,7 @@ test("chat state uses one queue for numeric and string chat IDs", () => {
     processing: false,
     pendingPrompts: [],
     pendingPromptContexts: [],
+    pendingPromptReceipts: [],
     continueAfterClose: false,
     historyRevision: 0,
     beforeNextPrompt: null,
@@ -181,6 +182,32 @@ test("queued prompts retain their message boundaries and order", async () => {
   });
 
   assert.deepEqual(processed, ["first request", "second request", "third request"]);
+});
+
+test("queued execution receipts resolve only after their prompt runs", async () => {
+  const chatState = createChatStateStore().get("chat");
+  chatState.processing = true;
+  let releaseFirst;
+  const firstGate = new Promise((resolve) => { releaseFirst = resolve; });
+  const { createPromptExecutionReceipt } = await import("../src/transport/telegram/chat-queue.js");
+  const receipt = createPromptExecutionReceipt();
+  queueChatPrompt(chatState, "scheduled request", { receipt });
+  let confirmed = false;
+  receipt.promise.then(() => { confirmed = true; });
+
+  const draining = drainChatPromptQueue({
+    chatState,
+    initialPrompt: "active request",
+    processPrompt: async ({ prompt }) => {
+      if (prompt === "active request") await firstGate;
+    }
+  });
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(confirmed, false);
+  releaseFirst();
+  await receipt.promise;
+  assert.equal(confirmed, true);
+  await draining;
 });
 
 test("a queued /new continues after the active session closes", async () => {

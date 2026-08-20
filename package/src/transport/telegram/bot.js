@@ -36,6 +36,7 @@ import {
 } from "./prompt-builders.js";
 import {
   createChatStateStore,
+  createPromptExecutionReceipt,
   drainChatPromptQueue,
   queueChatPrompt,
   resolveTelegramBusyMessageMode,
@@ -518,8 +519,11 @@ export async function createTelegramBot({ config, artifactStore, toolRegistry, t
       }, { reason: String(summary || "Agent-requested restart").trim() }),
       cancelRestartReceipt,
       getTaskContext: () => route.workspace ? {
-        transportChatId: route.transportChatId,
-        messageThreadId: route.topicThreadId
+        transport: "telegram",
+        destination: {
+          chatId: route.transportChatId,
+          threadId: route.topicThreadId
+        }
       } : null
     };
   }
@@ -546,7 +550,7 @@ export async function createTelegramBot({ config, artifactStore, toolRegistry, t
     return { ok: true, artifactId: artifact.id, method: resolvedMethod };
   });
 
-  async function processPromptForChat({ chatId, prompt, ctx = null }) {
+  async function processPromptForChat({ chatId, prompt, ctx = null, executionReceipt = null }) {
     const route = ctx ? contextRoute(ctx) : {
       workspace: false,
       sessionId: String(chatId),
@@ -593,11 +597,16 @@ export async function createTelegramBot({ config, artifactStore, toolRegistry, t
         }));
       } catch (error) {
         agentManager.resetSession(sessionId);
+        if (error && typeof error === "object") {
+          error.retryable = false;
+          error.outcomeUncertain = true;
+        }
         throw error;
       } finally {
         if (chatState.activeSession === session) chatState.activeSession = null;
         chatState.activeRoute = null;
       }
+      executionReceipt?.resolve({ status: "executed" });
       if (text) {
         await createWorkspaceAccessGuard(route)();
         await sendTextReply({
@@ -614,8 +623,9 @@ export async function createTelegramBot({ config, artifactStore, toolRegistry, t
     return work();
   }
 
-  async function enqueuePrompt({ chatId, prompt, label, ctx = null, replaceQueued = false, busyMessageMode = "queue" }) {
+  async function enqueuePrompt({ chatId, prompt, label, ctx = null, replaceQueued = false, busyMessageMode = "queue", waitForExecution = false }) {
     const chatState = getChatState(chatId);
+    const receipt = waitForExecution ? createPromptExecutionReceipt() : null;
 
     if (chatState.processing) {
       const incomingRoute = ctx ? contextRoute(ctx) : null;
@@ -629,7 +639,8 @@ export async function createTelegramBot({ config, artifactStore, toolRegistry, t
         prompt,
         mode: sameDelivery ? busyMessageMode : "queue",
         replaceQueued,
-        ctx
+        ctx,
+        receipt
       });
       if (routed.disposition === "steered") {
         logger?.log("telegram", `chat ${chatId} busy, steering ${label}`);
@@ -640,24 +651,28 @@ export async function createTelegramBot({ config, artifactStore, toolRegistry, t
         }
       }
       if (replaceQueued) chatState.continueAfterClose = true;
-      return;
+      return receipt ? receipt.promise : undefined;
     }
 
     chatState.processing = true;
     logger?.log("telegram", `processing ${label} in chat ${chatId}`);
-    return processChatPromptQueue({ chatId, prompt, label, ctx });
+    const draining = processChatPromptQueue({ chatId, prompt, label, ctx, initialReceipt: receipt });
+    if (!receipt) return draining;
+    draining.catch(() => {});
+    return receipt.promise;
   }
 
-  function processChatPromptQueue({ chatId, prompt, label, ctx = null, beforeInitialPrompt }) {
+  function processChatPromptQueue({ chatId, prompt, label, ctx = null, beforeInitialPrompt, initialReceipt = null }) {
     const chatState = getChatState(chatId);
     return drainChatPromptQueue({
       chatState,
       initialPrompt: prompt,
       initialCtx: ctx,
+      initialReceipt,
       beforeInitialPrompt,
-      processPrompt: ({ prompt: currentPrompt, ctx: currentCtx }) => {
+      processPrompt: ({ prompt: currentPrompt, ctx: currentCtx, receipt }) => {
         logger?.log("telegram", `prompt dispatch for chat ${chatId}`);
-        return processPromptForChat({ chatId, prompt: currentPrompt, ctx: currentCtx });
+        return processPromptForChat({ chatId, prompt: currentPrompt, ctx: currentCtx, executionReceipt: receipt });
       },
       onPromptInterrupted: (error) => {
         logger?.log("telegram", `${label} interrupted by queued /new for chat ${chatId}: ${getErrorMessage(error)}`);
@@ -729,13 +744,14 @@ export async function createTelegramBot({ config, artifactStore, toolRegistry, t
     timer.unref?.();
   }
 
-  async function enqueueAsyncPrompt({ chatId, prompt, label, telegramContext }) {
+  async function enqueueAsyncPrompt({ chatId, prompt, label, route: taskRoute }) {
     let ctx = { chat: { id: chatId }, api: bot.api };
-    if (telegramContext?.transportChatId && telegramContext?.messageThreadId) {
+    const destination = taskRoute?.transport === "telegram" ? taskRoute.destination : null;
+    if (destination?.chatId && destination?.threadId) {
       ctx = {
-        chat: { id: telegramContext.transportChatId, type: "supergroup", is_forum: true },
+        chat: { id: destination.chatId, type: "supergroup", is_forum: true },
         from: { id: chatId },
-        message: { message_thread_id: telegramContext.messageThreadId },
+        message: { message_thread_id: destination.threadId },
         api: bot.api
       };
       const route = await resolveTelegramWorkspaceRoute({ config, api: bot.api, ctx });
@@ -745,7 +761,7 @@ export async function createTelegramBot({ config, artifactStore, toolRegistry, t
     const route = contextRoute(ctx);
     const chatState = getChatState(route.sessionId);
     if (chatState.processing) await ensureQueuedTelegramTyping(chatState, ctx);
-    return enqueuePrompt({ chatId: route.sessionId, prompt, label, ctx });
+    return enqueuePrompt({ chatId: route.sessionId, prompt, label, ctx, waitForExecution: true });
   }
 
   const { dispatchDueTasks } = createTelegramTaskDispatcher({

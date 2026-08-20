@@ -178,7 +178,9 @@ Beyond time-based scheduling, tools can drive an event queue that wakes the agen
 - `poll_tool`: a recurring checker the poller **runs directly as a tool** (no agent turn spent). The poller materializes its output with the same logic as `run_tool`, so any `agent_event` the checker emits is enqueued for the next tick. Its `recurrence` reschedules the next poll.
 - `agent_event`: an incoming event. The poller delivers it as a prompt so the active runtime evaluates it and decides the next action (it may stay silent).
 
-Tasks without a `runAt` fire immediately, so `agent_event` and the first `poll_tool` run on the next tick.
+Tasks without a `runAt` fire immediately, so `agent_event` and the first `poll_tool` run on the next tick. A task remains `running` until its tool call or agent turn actually completes; placing a prompt in a busy chat queue is not completion. Known transient failures use bounded exponential backoff. Invalid tasks fail immediately, and interrupted or explicitly uncertain agent outcomes are recorded as `outcome_uncertain` instead of being replayed automatically.
+
+Task routing is top-level metadata, separate from business payloads: `{ route: { transport: "telegram", destination: { chatId, threadId } } }`. Tool-emitted tasks inherit the current trusted route; tools cannot override owner scope or transport routing in their output.
 
 The poller dispatches all three kinds, but only `agent_task` is exercised by a catalog tool today (`schedule-agent-task`). The following is the pattern to follow when a checker tool is built:
 

@@ -78,15 +78,17 @@ test("recovers interrupted running tasks for retry after restart", async () => {
   const recovered = await store.recoverInterrupted();
 
   assert.deepEqual(recovered.map((task) => task.id), ["interrupted-once", "interrupted-recurring"]);
-  assert.ok(recovered.every((task) => task.status === "pending"));
-  assert.ok(recovered.every((task) => task.runAt === runAt));
+  assert.equal(recovered[0].status, "outcome_uncertain");
+  assert.equal(recovered[1].status, "pending");
+  assert.ok(Date.parse(recovered[1].runAt) > Date.now());
+  assert.ok(recovered.every((task) => task.lastError === "execution interrupted before confirmation"));
   assert.equal((await store.get("still-pending")).status, "pending");
   assert.equal((await store.get("already-done")).status, "done");
 
   const restartedStore = new TaskStore();
   assert.deepEqual(
     (await restartedStore.claimDue()).map((task) => task.id),
-    ["interrupted-once", "interrupted-recurring", "still-pending"]
+    ["still-pending"]
   );
 });
 
@@ -114,6 +116,66 @@ test("completes one-off tasks and re-schedules recurring interval tasks", async 
   assert.ok(repeat.lastRunAt);
 });
 
+test("backs off known failures and fails after the attempt limit", async () => {
+  await resetHome();
+  const store = new TaskStore();
+  const runAt = new Date(Date.now() - 1000).toISOString();
+  await store.add({
+    id: "retrying",
+    kind: "agent_task",
+    runAt,
+    retry: { maxAttempts: 2, baseDelaySeconds: 1, maxDelaySeconds: 10, multiplier: 2 }
+  });
+
+  await store.claimDue();
+  const retrying = await store.retryOrFail("retrying", "temporary");
+  assert.equal(retrying.status, "pending");
+  assert.equal(retrying.attempts, 1);
+  assert.ok(Date.parse(retrying.runAt) > Date.now());
+
+  retrying.runAt = runAt;
+  store.tasks.find((task) => task.id === "retrying").runAt = runAt;
+  await store.save();
+  await store.claimDue();
+  const failed = await store.retryOrFail("retrying", "still broken");
+  assert.equal(failed.status, "failed");
+  assert.equal(failed.attempts, 2);
+});
+
+test("moves legacy Telegram routing out of task payloads", async () => {
+  await resetHome();
+  const store = new TaskStore();
+  const task = await store.add({
+    id: "routed",
+    kind: "agent_task",
+    payload: {
+      chatId: "owner",
+      telegramContext: { transportChatId: -1001, messageThreadId: 87 }
+    }
+  });
+
+  assert.deepEqual(task.route, {
+    transport: "telegram",
+    destination: { chatId: -1001, threadId: 87 }
+  });
+  assert.equal(task.payload.telegramContext, undefined);
+});
+
+test("records uncertain outcomes without retrying", async () => {
+  await resetHome();
+  const store = new TaskStore();
+  await store.add({ id: "uncertain", kind: "agent_task", status: "running", attempts: 1 });
+
+  const task = await store.retryOrFail("uncertain", "turn interrupted", {
+    retryable: false,
+    outcomeUncertain: true
+  });
+
+  assert.equal(task.status, "outcome_uncertain");
+  assert.equal(task.error, "turn interrupted");
+  assert.ok(task.uncertainAt);
+});
+
 test("fails and cancels tasks by id", async () => {
   await resetHome();
   const store = new TaskStore();
@@ -138,6 +200,7 @@ test("cancelAll preserves done and failed tasks and respects chat filters", asyn
   await store.add({ id: "chat-2-pending", kind: "agent_task" }, { payload: { chatId: "chat-2" } });
   await store.add({ id: "chat-1-done", kind: "agent_task", status: "done" }, { payload: { chatId: "chat-1" } });
   await store.add({ id: "chat-1-failed", kind: "agent_task", status: "failed" }, { payload: { chatId: "chat-1" } });
+  await store.add({ id: "chat-1-uncertain", kind: "agent_task", status: "outcome_uncertain" }, { payload: { chatId: "chat-1" } });
 
   const removed = await store.cancelAll({ chatId: "chat-1" });
   const remaining = await store.list();
@@ -145,6 +208,6 @@ test("cancelAll preserves done and failed tasks and respects chat filters", asyn
   assert.deepEqual(removed.map((task) => task.id), ["chat-1-pending"]);
   assert.deepEqual(
     remaining.map((task) => task.id),
-    ["chat-2-pending", "chat-1-done", "chat-1-failed"]
+    ["chat-2-pending", "chat-1-done", "chat-1-failed", "chat-1-uncertain"]
   );
 });

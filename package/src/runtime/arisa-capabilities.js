@@ -7,6 +7,7 @@ import {
 } from "./paths.js";
 import { ToolResourceNoteStore } from "../core/tools/tool-resource-note-store.js";
 import { installBundledOfficialTool } from "../core/tools/official-tool-installer.js";
+import { taskWithoutCallerRouting } from "../core/tasks/task-routing.js";
 
 function requireToolName(toolName) {
   if (typeof toolName !== "string" || !toolName.trim()) {
@@ -177,7 +178,7 @@ export function createArisaCapabilities({
 
     if (method === "tasks.add") {
       const scopedChatId = requireChatId(chatId, method);
-      return taskStore.add(params.task || {}, {
+      return taskStore.add(taskWithoutCallerRouting(params.task || {}), {
         payload: { chatId: scopedChatId },
         source: { type: "tool", toolName: scopedToolName, chatId: scopedChatId }
       });

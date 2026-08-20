@@ -1,7 +1,16 @@
+import { NonRetryableTaskError, createTaskRunner } from "../../core/tasks/task-runner.js";
 import { buildAsyncEventPrompt, buildAsyncTaskPrompt } from "./prompt-builders.js";
 
 function errorMessage(error) {
   return error instanceof Error ? error.message : String(error);
+}
+
+function requireChatId(task) {
+  const chatId = task.payload?.chatId;
+  if (chatId == null || chatId === "") {
+    throw new NonRetryableTaskError(`Task missing chatId: ${task.kind}`);
+  }
+  return chatId;
 }
 
 export function createTelegramTaskDispatcher({
@@ -15,21 +24,18 @@ export function createTelegramTaskDispatcher({
   logger
 }) {
   async function dispatchAgentTask(task, chatId) {
-    if (!task.payload.prompt) {
-      await taskStore.fail(task.id, "agent_task missing prompt");
-      return;
-    }
+    if (!task.payload.prompt) throw new NonRetryableTaskError("agent_task missing prompt");
     logger?.log("tasks", `running task ${task.id} for chat ${chatId}`);
     await enqueueAsyncPrompt({
       chatId,
       prompt: await buildAsyncTaskPrompt({ task, artifactStore, toolRegistry, resourceNotes, logger }),
       label: `scheduled task ${task.id}`,
-      telegramContext: task.payload.telegramContext
+      route: task.route
     });
-    await taskStore.complete(task.id);
   }
 
   async function dispatchAgentEvent(task, chatId) {
+    if (!task.payload?.prompt) throw new NonRetryableTaskError("agent_event missing prompt");
     logger?.log("tasks", `agent event ${task.id} for chat ${chatId}`);
     const acknowledgement = String(task.payload?.acknowledgement || "").trim();
     if (acknowledgement) {
@@ -43,52 +49,38 @@ export function createTelegramTaskDispatcher({
       chatId,
       prompt: await buildAsyncEventPrompt(task, resourceNotes),
       label: `agent event ${task.id}`,
-      telegramContext: task.payload.telegramContext
+      route: task.route
     });
-    await taskStore.complete(task.id);
   }
 
   async function dispatchPollTool(task, chatId) {
     const toolName = task.payload?.toolName;
-    if (!toolName) {
-      await taskStore.fail(task.id, "poll_tool missing toolName");
-      return;
-    }
+    if (!toolName) throw new NonRetryableTaskError("poll_tool missing toolName");
     logger?.log("tasks", `polling tool ${toolName} (task ${task.id}) for chat ${chatId}`);
-    try {
-      await agentManager.runTool({
-        name: toolName,
-        request: { args: task.payload.args || {} },
-        chatId
-      });
-    } catch (error) {
-      logger?.log("tasks", `poll_tool ${toolName} failed: ${errorMessage(error)}`);
+    const result = await agentManager.runTool({
+      name: toolName,
+      request: { args: task.payload.args || {} },
+      chatId
+    });
+    if (result?.ok === false) {
+      const error = new Error(result.error || `poll_tool ${toolName} failed`);
+      if (result.status === "needs_config") error.retryable = false;
+      if (result.status === "outcome_uncertain") {
+        error.retryable = false;
+        error.outcomeUncertain = true;
+      }
+      throw error;
     }
-    await taskStore.complete(task.id);
   }
 
   async function dispatchTask(task) {
-    const chatId = task.payload?.chatId;
-    if (!chatId) {
-      await taskStore.fail(task.id, `Task missing chatId: ${task.kind}`);
-      return;
-    }
+    const chatId = requireChatId(task);
     if (task.kind === "agent_task") return dispatchAgentTask(task, chatId);
     if (task.kind === "agent_event") return dispatchAgentEvent(task, chatId);
     if (task.kind === "poll_tool") return dispatchPollTool(task, chatId);
-    await taskStore.fail(task.id, `Unsupported task: ${task.kind}`);
+    throw new NonRetryableTaskError(`Unsupported task: ${task.kind}`);
   }
 
-  async function dispatchDueTasks() {
-    const tasks = await taskStore.claimDue(10);
-    for (const task of tasks) {
-      try {
-        await dispatchTask(task);
-      } catch (error) {
-        await taskStore.fail(task.id, errorMessage(error));
-      }
-    }
-  }
-
-  return { dispatchTask, dispatchDueTasks };
+  const runner = createTaskRunner({ taskStore, dispatch: dispatchTask, logger });
+  return { dispatchTask, dispatchDueTasks: runner.dispatchDueTasks, runClaimedTask: runner.runClaimedTask };
 }
