@@ -7,6 +7,7 @@ import { mkdir, readFile, readdir } from "node:fs/promises";
 import DeepBase from "deepbase";
 import defaults from "./config.js";
 import { classifyContextTimeout } from "./operation-timeout.js";
+import { SemanticWarmup } from "./semantic-warmup.js";
 
 const toolName = "context-vault";
 const require = createRequire(import.meta.url);
@@ -46,9 +47,9 @@ Actions via args.action:
   reindex         Rebuild the derived SeekMix semantic index from the memory vault.
   status          Show memory count and semantic index configuration.
 
-DeepBase remains the source of truth. SeekMix 1.4 provides a derived multilingual
-semantic index in a warm chat-scoped daemon; recall reranks semantic candidates with
-lexical overlap, importance, and recency.
+DeepBase remains the source of truth. Lexical recall is available as soon as the
+chat-scoped daemon starts. SeekMix 1.4 warms its derived multilingual semantic index
+in the background, then recall adds semantic candidates to the hybrid ranking.
 
 Timed-out reads are marked retry-safe. Timed-out mutations return outcome_uncertain
 and must be checked before any retry.
@@ -92,10 +93,7 @@ async function openDb(chatId) {
   return { db, stateDir };
 }
 
-async function createContext(chatId, config) {
-  const { db, stateDir } = await openDb(chatId);
-  const modelDir = path.join(getToolStateDir(toolName), "models");
-  await mkdir(modelDir, { recursive: true });
+async function createSemanticResources({ config, modelDir, stateDir }) {
   const { SeekMix, HuggingfaceProvider } = require("seekmix");
   const provider = new HuggingfaceProvider({
     model: String(config.MODEL || defaults.MODEL),
@@ -109,20 +107,28 @@ async function createContext(chatId, config) {
     embeddingProvider: provider
   });
   await store.connect();
-  return { chatId: String(chatId), config, db, store, provider, modelDir, stateDir };
+  return { store, provider };
+}
+
+async function createContext(chatId, config) {
+  const { db, stateDir } = await openDb(chatId);
+  const modelDir = path.join(getToolStateDir(toolName), "models");
+  await mkdir(modelDir, { recursive: true });
+  const context = { chatId: String(chatId), config, db, modelDir, stateDir, semantic: null };
+  context.semantic = new SemanticWarmup({
+    initialize: () => createSemanticResources(context),
+    listRecords: () => allMemories(db),
+    indexRecord: (resources, id, memory) => indexMemory(resources.store, id, memory),
+    deleteRecord: (resources, id) => resources.store.delete(memorySemanticId(id)),
+    clear: (resources) => resources.store.clear(),
+    dispose: (resources) => resources.store.disconnect().catch(() => {})
+  }).start();
+  return context;
 }
 
 async function allMemories(db) {
   const entries = await db.entries("memories").catch(() => []);
   return entries.map(([id, value]) => ({ id, ...value })).sort((a, b) => String(a.createdAt).localeCompare(String(b.createdAt)));
-}
-
-function lexicalMatch(memory, { query = "", category = "", tags = [] }) {
-  const haystack = [memory.text, memory.category, ...(memory.tags || [])].join(" ").toLowerCase();
-  const terms = termsFromQuery(query);
-  if (category && memory.category !== category) return false;
-  if (tags.length && !tags.every((tag) => (memory.tags || []).includes(tag))) return false;
-  return terms.every((term) => haystack.includes(term));
 }
 
 function formatMemory(memory) {
@@ -281,12 +287,16 @@ function recencyScore(memory) {
 }
 
 async function semanticCandidates(context, memories, query, category, tags, limit) {
-  const indexed = await syncSemanticIndex(context, memories);
+  if (context.semantic.status !== "ready" || !context.semantic.resources) {
+    throw new Error(`Semantic index is ${context.semantic.status}`);
+  }
+  const { store } = context.semantic.resources;
+  const indexed = await syncSemanticIndex({ store }, memories);
   const filters = ["context-memory"];
   if (category) filters.push(`category:${category}`);
   for (const tag of tags) filters.push(`tag:${tag}`);
   const candidateLimit = Math.max(5, Math.min(50, Math.max(limit * 3, asNumber(context.config.SEMANTIC_CANDIDATES, defaults.SEMANTIC_CANDIDATES))));
-  const matches = await context.store.search(query, { limit: candidateLimit, minSimilarity: asNumber(context.config.MIN_SIMILARITY, defaults.MIN_SIMILARITY), tags: { all: filters } });
+  const matches = await store.search(query, { limit: candidateLimit, minSimilarity: asNumber(context.config.MIN_SIMILARITY, defaults.MIN_SIMILARITY), tags: { all: filters } });
   return { indexed, matches };
 }
 
@@ -307,13 +317,19 @@ async function recall(context, request) {
   const ranking = new Map();
   let semantic = { indexed: 0, matches: [] };
   let semanticError = null;
-  try { semantic = await semanticCandidates(context, eligible, query, category, tags, limit); }
-  catch (error) { semanticError = error.message || String(error); }
+  const semanticStatus = context.semantic.status;
+  if (semanticStatus === "ready") {
+    try { semantic = await semanticCandidates(context, eligible, query, category, tags, limit); }
+    catch (error) { semanticError = error.message || String(error); }
+  } else if (semanticStatus === "degraded") {
+    semanticError = context.semantic.error;
+  }
   for (const hit of semantic.matches) {
     const memory = byId.get(hit.data?.id);
     if (memory) ranking.set(memory.id, { memory, semanticSimilarity: hit.similarity, semanticRank: semantic.matches.indexOf(hit) + 1 });
   }
-  for (const memory of eligible.filter((item) => lexicalMatch(item, { query, category, tags }))) {
+  for (const memory of eligible) {
+    if (lexicalOverlap(memory, terms) <= 0) continue;
     if (!ranking.has(memory.id)) ranking.set(memory.id, { memory, semanticSimilarity: 0, semanticRank: null });
   }
   const ranked = [...ranking.values()].map((item) => {
@@ -326,14 +342,15 @@ async function recall(context, request) {
   const memories = selected.map((item) => item.memory);
   if (!memories.length && truthy(request.args?.fallbackSessions)) {
     const sessionResult = await searchSessions(request, context.config);
-    return { text: `${formatList(memories)}\n\nPrior Pi session fallback:\n${sessionResult.text}`, json: { memories, retrieval: { mode: semanticError ? "lexical-fallback" : "hybrid", semanticError }, sessionFallback: sessionResult.json } };
+    return { text: `${formatList(memories)}\n\nPrior Pi session fallback:\n${sessionResult.text}`, json: { memories, retrieval: { mode: semanticStatus === "ready" && !semanticError ? "hybrid" : "lexical-fallback", semanticStatus, semanticError }, sessionFallback: sessionResult.json } };
   }
   return {
     text: formatList(memories),
     json: {
       memories,
       retrieval: {
-        mode: semanticError ? "lexical-fallback" : "hybrid",
+        mode: semanticStatus === "ready" && !semanticError ? "hybrid" : "lexical-fallback",
+        semanticStatus,
         semanticIndexed: semantic.indexed,
         semanticCandidates: semantic.matches.length,
         semanticError,
@@ -350,9 +367,14 @@ async function remember(context, request) {
   const memory = { text, category: String(request.args?.category || "fact").trim() || "fact", tags: normalizeTags(request.args?.tags), importance: asNumber(request.args?.importance, 1), createdAt: now(), updatedAt: now(), source: request.args?.source || "user" };
   await context.db.set("memories", id, memory);
   let semanticIndexed = false;
+  let semanticDeferred = false;
   let semanticError = null;
-  try { semanticIndexed = await indexMemory(context.store, id, memory); } catch (error) { semanticError = error.message || String(error); }
-  return { text: `Remembered: ${formatMemory({ id, ...memory })}`, json: { id, memory, semanticIndexed, semanticError } };
+  try {
+    const semantic = await context.semantic.upsert(id, memory);
+    semanticIndexed = semantic.applied;
+    semanticDeferred = semantic.deferred;
+  } catch (error) { semanticError = error.message || String(error); }
+  return { text: `Remembered: ${formatMemory({ id, ...memory })}`, json: { id, memory, semanticIndexed, semanticDeferred, semanticError } };
 }
 
 async function updateMemory(context, request) {
@@ -363,9 +385,14 @@ async function updateMemory(context, request) {
   const updated = { ...existing, text: request.args?.text == null ? existing.text : String(request.args.text).trim(), category: request.args?.category == null ? existing.category : String(request.args.category).trim(), tags: request.args?.tags == null ? existing.tags : normalizeTags(request.args.tags), importance: request.args?.importance == null ? existing.importance : asNumber(request.args.importance, existing.importance || 1), updatedAt: now() };
   await context.db.set("memories", id, updated);
   let semanticIndexed = false;
+  let semanticDeferred = false;
   let semanticError = null;
-  try { semanticIndexed = await indexMemory(context.store, id, updated); } catch (error) { semanticError = error.message || String(error); }
-  return { text: `Updated: ${formatMemory({ id, ...updated })}`, json: { id, memory: updated, semanticIndexed, semanticError } };
+  try {
+    const semantic = await context.semantic.upsert(id, updated);
+    semanticIndexed = semantic.applied;
+    semanticDeferred = semantic.deferred;
+  } catch (error) { semanticError = error.message || String(error); }
+  return { text: `Updated: ${formatMemory({ id, ...updated })}`, json: { id, memory: updated, semanticIndexed, semanticDeferred, semanticError } };
 }
 
 async function forget(context, request) {
@@ -373,21 +400,44 @@ async function forget(context, request) {
   if (!id) throw new Error("id is required");
   await context.db.del("memories", id);
   let semanticDeleted = false;
+  let semanticDeferred = false;
   let semanticError = null;
-  try { semanticDeleted = await context.store.delete(memorySemanticId(id)); } catch (error) { semanticError = error.message || String(error); }
-  return { text: `Forgot memory: ${id}`, json: { id, semanticDeleted, semanticError } };
+  try {
+    const semantic = await context.semantic.delete(id);
+    semanticDeleted = semantic.applied;
+    semanticDeferred = semantic.deferred;
+  } catch (error) { semanticError = error.message || String(error); }
+  return { text: `Forgot memory: ${id}`, json: { id, semanticDeleted, semanticDeferred, semanticError } };
 }
 
 async function reindex(context) {
-  await context.store.clear();
   const memories = await allMemories(context.db);
-  const indexed = await syncSemanticIndex(context, memories);
-  return { text: `Rebuilt semantic memory index with ${indexed} memories.`, json: { memories: memories.length, indexed } };
+  const result = await context.semantic.reindex();
+  const text = result.deferred
+    ? `Semantic reindex scheduled while the index is ${context.semantic.status}.`
+    : `Rebuilt semantic memory index with ${result.indexed} memories.`;
+  return { text, json: { memories: memories.length, indexed: result.indexed, deferred: result.deferred, semanticStatus: context.semantic.status } };
 }
 
 async function status(context) {
   const memories = await allMemories(context.db);
-  return { text: `${memories.length} memories; SeekMix ${require("seekmix/package.json").version} with ${context.provider.model} (${context.provider.dimensions} dimensions).`, json: { memories: memories.length, seekmixVersion: require("seekmix/package.json").version, model: context.provider.model, dimensions: context.provider.dimensions, minSimilarity: asNumber(context.config.MIN_SIMILARITY, defaults.MIN_SIMILARITY), semanticCandidates: asNumber(context.config.SEMANTIC_CANDIDATES, defaults.SEMANTIC_CANDIDATES) } };
+  const semantic = context.semantic.snapshot();
+  const provider = context.semantic.resources?.provider;
+  const detail = semantic.status === "ready" && provider
+    ? `${provider.model} (${provider.dimensions} dimensions)`
+    : semantic.status;
+  return {
+    text: `${memories.length} memories; lexical recall ready; semantic index ${detail}.`,
+    json: {
+      memories: memories.length,
+      seekmixVersion: require("seekmix/package.json").version,
+      model: provider?.model || String(context.config.MODEL || defaults.MODEL),
+      dimensions: provider?.dimensions || null,
+      minSimilarity: asNumber(context.config.MIN_SIMILARITY, defaults.MIN_SIMILARITY),
+      semanticCandidates: asNumber(context.config.SEMANTIC_CANDIDATES, defaults.SEMANTIC_CANDIDATES),
+      semantic
+    }
+  };
 }
 
 async function processRequest(context, request) {
@@ -406,16 +456,21 @@ async function processRequest(context, request) {
 }
 
 async function healthCheck(context) {
-  const id = "internal:health";
-  const existing = await context.store.getById(id);
-  if (!existing) await context.store.upsert({ id, content: "Context Vault semantic health probe", data: { healthy: true }, tags: ["internal-health"], expiresAt: null });
-  const results = await context.store.search("semantic health probe", { limit: 1, minSimilarity: -1, tags: { all: ["internal-health"] } });
-  if (results[0]?.id !== id) throw new Error("Context Vault semantic search health probe failed");
-  return { message: `Context Vault semantic memory is healthy (${context.provider.dimensions} dimensions)` };
+  await context.db.entries("memories");
+  if (context.semantic.status === "ready") {
+    const { store, provider } = context.semantic.resources;
+    const id = "internal:health";
+    const existing = await store.getById(id);
+    if (!existing) await store.upsert({ id, content: "Context Vault semantic health probe", data: { healthy: true }, tags: ["internal-health"], expiresAt: null });
+    const results = await store.search("semantic health probe", { limit: 1, minSimilarity: -1, tags: { all: ["internal-health"] } });
+    if (results[0]?.id !== id) throw new Error("Context Vault semantic search health probe failed");
+    return { message: `Context Vault lexical and semantic memory are healthy (${provider.dimensions} dimensions)` };
+  }
+  return { message: `Context Vault lexical memory is ready; semantic index is ${context.semantic.status}` };
 }
 
 async function closeContext(context) {
-  await context.store.disconnect().catch(() => {});
+  await context.semantic.close();
   if (typeof context.db.disconnect === "function") await context.db.disconnect().catch(() => {});
 }
 

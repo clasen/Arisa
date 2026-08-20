@@ -1,7 +1,7 @@
 {
   "name": "context-vault",
-  "version": "1.1.1",
-  "description": "Store, search, update, and forget chat-scoped user context and preferences with hybrid multilingual semantic and lexical recall plus prior Pi session fallback.",
+  "version": "1.2.0",
+  "description": "Store, search, update, and forget chat-scoped user context with immediate lexical recall, background semantic warmup, hybrid multilingual ranking when ready, and prior Pi session fallback.",
   "entry": "index.js",
   "daemon": {
     "scope": "chat",
