@@ -3,6 +3,7 @@ import { ArtifactStore } from "../core/artifacts/artifact-store.js";
 import { ToolRegistry } from "../core/tools/tool-registry.js";
 import { TaskStore } from "../core/tasks/task-store.js";
 import { AgentManager } from "../core/agent/agent-manager.js";
+import { createCapabilityService } from "../core/capabilities/capability-service.js";
 import { getErrorMessage, getPiAuthIssue } from "../core/agent/auth-flow.js";
 import { createTelegramBot } from "../transport/telegram/bot.js";
 import { createToolProcessSupervisor } from "./tool-process-supervisor.js";
@@ -120,7 +121,15 @@ export async function createApp({ logger, runtimeOverrides, requestRestart } = {
   logger?.log("app", `loaded ${toolRegistry.list().length} tools`);
 
   const agentManager = new AgentManager({ config, artifactStore, toolRegistry, taskStore, logger });
-  const arisaCapabilities = createArisaCapabilities({ artifactStore, taskStore, toolRegistry, agentManager });
+  const capabilityService = createCapabilityService({
+    artifactStore,
+    taskStore,
+    toolRegistry,
+    toolExecutor: agentManager,
+    logger
+  });
+  agentManager.setCapabilityService(capabilityService);
+  const arisaCapabilities = createArisaCapabilities({ capabilityService });
   const ipcServer = createIpcServer({ capabilities: arisaCapabilities, logger });
   const bot = await createTelegramBot({
     config,

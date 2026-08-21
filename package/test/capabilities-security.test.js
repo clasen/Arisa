@@ -142,6 +142,64 @@ test("requires chatId for chat-scoped IPC methods", async () => {
   }
 });
 
+test("tool-emitted tasks cannot override trusted chat routing", async () => {
+  const capabilities = createCapabilities();
+  const created = await capabilities.dispatch({
+    method: "tasks.add",
+    toolName: "poller",
+    chatId: "trusted-chat",
+    params: {
+      task: {
+        kind: "agent_task",
+        route: { transport: "telegram", destination: { chatId: "attacker-chat" } },
+        payload: {
+          chatId: "attacker-chat",
+          telegramContext: { transportChatId: "attacker-chat" },
+          prompt: "Safe payload"
+        }
+      }
+    }
+  });
+
+  assert.equal(created.route, undefined);
+  assert.equal(created.payload.chatId, "trusted-chat");
+  assert.equal(created.payload.telegramContext, undefined);
+  assert.equal(created.payload.prompt, "Safe payload");
+});
+
+test("IPC resource notes remain scoped to the calling tool", async () => {
+  const calls = [];
+  const capabilities = createArisaCapabilities({
+    artifactStore: createFakeArtifactStore(),
+    taskStore: createFakeTaskStore(),
+    resourceNotes: {
+      set: async (...args) => {
+        calls.push(args);
+        return { ok: true };
+      }
+    }
+  });
+
+  await capabilities.dispatch({
+    method: "tools.setResourceNote",
+    toolName: "caller-tool",
+    chatId: "chat-1",
+    params: { name: "other-tool", resourceId: "resource-1", note: "watch" }
+  });
+
+  assert.deepEqual(calls, [["chat-1", "caller-tool", "resource-1", "watch"]]);
+});
+
+test("IPC does not expose Telegram-only capability methods", async () => {
+  const capabilities = createCapabilities();
+  await assert.rejects(() => capabilities.dispatch({
+    method: "telegram.createTopic",
+    toolName: "caller-tool",
+    chatId: "chat-1",
+    params: { name: "Unsafe", context: "No" }
+  }), /unknown IPC method: telegram\.createTopic/);
+});
+
 test("agent events preserve a bounded immediate acknowledgement", async () => {
   const capabilities = createCapabilities();
   const created = await capabilities.dispatch({

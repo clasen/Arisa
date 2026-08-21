@@ -1,18 +1,16 @@
-import path from "node:path";
 import { readFile, stat } from "node:fs/promises";
-import { createAgentSession, DefaultResourceLoader, SessionManager, SettingsManager, defineTool } from "@earendil-works/pi-coding-agent";
-import { Type } from "@sinclair/typebox";
+import { createAgentSession, DefaultResourceLoader, SessionManager, SettingsManager } from "@earendil-works/pi-coding-agent";
 import { createPiRuntime, hasProviderAuth } from "./pi-runtime.js";
 import { resolveChatModelSelection } from "./model-selection.js";
 import { appendArisaAgentsFile, arisaAgentsFile, arisaInstallDir, buildAgentRuntimeContext } from "./runtime-context.js";
 import { withTimeout } from "./prompt-timeout.js";
-import { buildPiToolPolicy, getCoreCodingTools } from "./core-tools.js";
+import { buildPiToolPolicy } from "./core-tools.js";
 import { createSystemShellTool } from "./system-shell-tool.js";
 import { clampModelThinkingLevel } from "./pi-runtime.js";
 import { clampModelSpeed, createModelSpeedController } from "./model-speed.js";
 import { arisaHomeDir } from "../../runtime/paths.js";
 import { AgentSessionLifecycle } from "./agent-session-lifecycle.js";
-import { searchOfficialToolCatalog } from "../tools/official-tool-catalog.js";
+import { createPiCapabilityTools } from "./pi-capability-tools.js";
 import { ToolResourceNoteStore } from "../tools/tool-resource-note-store.js";
 import { materializeToolOutput } from "../tools/tool-output-materializer.js";
 
@@ -31,8 +29,6 @@ const arisaToolNames = [
   "initialize_telegram_topic",
   "send_artifact"
 ];
-
-export { loadSessionStartOperationalNotes } from "./agent-session-lifecycle.js";
 
 const estimatedImageTokens = 1_200;
 
@@ -92,33 +88,6 @@ function guardTools(tools, accessGuard) {
   }));
 }
 
-export const defaultScheduledTaskListLimit = 50;
-export const maxScheduledTaskListLimit = 100;
-
-export function selectScheduledTasks(tasks = [], { status, limit = defaultScheduledTaskListLimit } = {}) {
-  const parsedLimit = Number(limit);
-  const resolvedLimit = Math.min(
-    Math.max(Number.isFinite(parsedLimit) ? Math.trunc(parsedLimit) : defaultScheduledTaskListLimit, 1),
-    maxScheduledTaskListLimit
-  );
-  const allTasks = Array.isArray(tasks) ? tasks : [];
-  const orderedTasks = status
-    ? [...allTasks].reverse()
-    : [
-        ...allTasks.filter((task) => task.status === "pending" || task.status === "running").reverse(),
-        ...allTasks.filter((task) => task.status !== "pending" && task.status !== "running").reverse()
-      ];
-  const visibleTasks = orderedTasks.slice(0, resolvedLimit);
-
-  return {
-    tasks: visibleTasks,
-    total: allTasks.length,
-    returned: visibleTasks.length,
-    limit: resolvedLimit,
-    truncated: visibleTasks.length < allTasks.length
-  };
-}
-
 function isLocalBaseUrl(value) {
   if (typeof value !== "string" || !value.trim()) return false;
   try {
@@ -150,32 +119,6 @@ async function promptAndThrowOnAssistantError(session, prompt) {
   if (assistantErrorMessage) {
     throw new Error(assistantErrorMessage);
   }
-}
-
-function inferDeliveryMethod(artifact) {
-  if (artifact.kind === "audio" || (artifact.mimeType || "").startsWith("audio/")) return "audio";
-  if (artifact.kind === "image" || (artifact.mimeType || "").startsWith("image/")) return "photo";
-  if (artifact.kind === "video" || (artifact.mimeType || "").startsWith("video/")) return "video";
-  return "document";
-}
-
-function containsAbsolutePath(value) {
-  if (typeof value !== "string") return false;
-  return /(^|\s)(\/[^\s]|[A-Za-z]:[\\/])/.test(value);
-}
-
-export function resolveMediaCaption(caption) {
-  if (caption && !containsAbsolutePath(caption)) return caption;
-  return undefined;
-}
-
-async function deliverArtifactToChat({ artifact, telegram, caption, method, logger }) {
-  const resolvedMethod = method || artifact.metadata?.delivery?.method || inferDeliveryMethod(artifact);
-  const fileName = path.basename(artifact.path);
-  const resolvedCaption = resolveMediaCaption(caption);
-  logger?.log("agent", `deliver artifact ${artifact.id} as ${resolvedMethod}`);
-  await telegram.sendMedia(artifact.path, { method: resolvedMethod, caption: resolvedCaption, filename: fileName });
-  return { method: resolvedMethod, fileName, artifactId: artifact.id };
 }
 
 async function assertDirectory(dir, label) {
@@ -218,6 +161,12 @@ export class AgentManager {
     this.pendingSessionHandoffs = this.sessionLifecycle.pendingSessionHandoffs;
     this.sessionClosePromises = this.sessionLifecycle.sessionClosePromises;
     this.artifactDeliveryHandler = null;
+    this.capabilityService = null;
+  }
+
+  setCapabilityService(capabilityService) {
+    if (!capabilityService?.execute) throw new Error("AgentManager requires CapabilityService");
+    this.capabilityService = capabilityService;
   }
 
   setArtifactDeliveryHandler(handler) {
@@ -449,285 +398,13 @@ export class AgentManager {
   }
 
   createTools(telegram, chatId, policy = buildPiToolPolicy({ config: this.config, customToolNames: arisaToolNames })) {
-    const chatArtifactStore = this.artifactStore.forChat(chatId);
-
-    return [
-      defineTool({
-        name: "list_tools",
-        label: "List tools",
-        description: "List Arisa tools, or search installed tool metadata by capability with automatic official-catalog fallback.",
-        parameters: Type.Object({ query: Type.Optional(Type.String()) }),
-        execute: async (_id, params) => {
-          await this.toolRegistry.load();
-          const coreTools = getCoreCodingTools({
-            tools: policy.tools,
-            excludeTools: policy.excludeTools
-          });
-          const nativeTools = [{
-            name: "system_shell",
-            source: "arisa-native",
-            description: "Run native system shell commands in the active Arisa workspace.",
-            workspaceDir: policy.workspaceDir,
-            shell: policy.shell.shellPath || (process.platform === "win32" ? "powershell" : "sh"),
-            enabled: !(policy.excludeTools || []).includes("system_shell")
-          }];
-          const query = params.query?.trim() || "";
-          let catalogFallback = null;
-          const cliTools = query
-            ? this.toolRegistry.search(query).map((tool) => ({
-              ...tool,
-              source: "arisa-modular",
-              invocation: "run_tool"
-            }))
-            : (await this.toolRegistry.listWithRuntime(chatId)).map((tool) => ({
-              ...tool,
-              source: "arisa-modular",
-              invocation: "run_tool"
-            }));
-          if (query && cliTools.length === 0) {
-            try {
-              catalogFallback = await searchOfficialToolCatalog(query);
-            } catch (error) {
-              catalogFallback = { unavailable: true, error: error?.message || String(error), matches: [] };
-            }
-          }
-          const result = {
-            query: query || null,
-            workspaceDir: policy.workspaceDir,
-            coreTools: query ? [] : coreTools,
-            nativeTools: query ? [] : nativeTools,
-            cliTools,
-            officialCatalogMatches: Array.isArray(catalogFallback) ? catalogFallback : catalogFallback?.matches || [],
-            catalogFallback: catalogFallback && !Array.isArray(catalogFallback) ? catalogFallback : null,
-            tools: query ? cliTools : [...coreTools.filter((tool) => tool.enabled), ...nativeTools.filter((tool) => tool.enabled), ...cliTools]
-          };
-          return {
-            content: [{ type: "text", text: JSON.stringify(result, null, 2) }],
-            details: result
-          };
-        }
-      }),
-      defineTool({
-        name: "tool_help",
-        label: "Tool help",
-        description: "Show --help text for a CLI tool.",
-        parameters: Type.Object({ name: Type.String() }),
-        execute: async (_id, params) => {
-          await this.toolRegistry.load();
-          const help = await this.toolRegistry.help(params.name);
-          return { content: [{ type: "text", text: help }], details: { help } };
-        }
-      }),
-      defineTool({
-        name: "tool_skills",
-        label: "Tool skills",
-        description: "Show skills assigned to a CLI tool via its manifest skillHints.",
-        parameters: Type.Object({ name: Type.String() }),
-        execute: async (_id, params) => {
-          await this.toolRegistry.load();
-          const skills = await this.toolRegistry.resolveSkills(params.name);
-          const visible = skills.map(({ content, ...item }) => item);
-          return { content: [{ type: "text", text: JSON.stringify(visible, null, 2) }], details: visible };
-        }
-      }),
-      defineTool({
-        name: "set_tool_config",
-        label: "Set tool config",
-        description: "Write a tool config value scoped to the current chat.",
-        parameters: Type.Object({ name: Type.String(), field: Type.String(), value: Type.String() }),
-        execute: async (_id, params) => {
-          await this.toolRegistry.load();
-          const result = await this.toolRegistry.setConfig(params.name, params.field, params.value, chatId);
-          return { content: [{ type: "text", text: JSON.stringify(result) }], details: result };
-        }
-      }),
-      defineTool({
-        name: "set_tool_resource_note",
-        label: "Set tool resource note",
-        description: "Set or clear a deterministic chat-scoped note of up to 200 characters for one tool resource.",
-        parameters: Type.Object({
-          name: Type.String(),
-          resourceId: Type.String(),
-          note: Type.String()
-        }),
-        execute: async (_id, params) => {
-          const result = await this.resourceNotes.set(chatId, params.name, params.resourceId, params.note);
-          return { content: [{ type: "text", text: JSON.stringify(result) }], details: result };
-        }
-      }),
-      defineTool({
-        name: "run_tool",
-        label: "Run tool",
-        description: "Run a CLI tool using text input or an artifactId. Inspect the returned status/resolution fields. If a tool reports missing config, ask the user naturally, use set_tool_config, and retry. Set `deliver: true` to also send the generated file to the chat in one step (only when you want the user to receive it now, not for intermediate pipe steps).",
-        parameters: Type.Object({
-          name: Type.String(),
-          artifactId: Type.Optional(Type.String()),
-          text: Type.Optional(Type.String()),
-          resourceId: Type.Optional(Type.String()),
-          args: Type.Optional(Type.Record(Type.String(), Type.String())),
-          deliver: Type.Optional(Type.Boolean())
-        }),
-        execute: async (_id, params) => {
-          let artifact = null;
-          if (params.artifactId) {
-            artifact = await chatArtifactStore.get(params.artifactId);
-            if (!artifact) {
-              return { content: [{ type: "text", text: `Artifact not found: ${params.artifactId}` }], details: { ok: false } };
-            }
-          }
-          const result = await this.runTool({
-            name: params.name,
-            request: {
-              artifact,
-              text: params.text,
-              resourceId: params.resourceId,
-              args: params.args || {}
-            },
-            chatId,
-            taskContext: telegram.getTaskContext()
-          });
-
-          if (params.deliver && result.output?.artifactId) {
-            const generated = await chatArtifactStore.get(result.output.artifactId);
-            if (generated?.path) {
-              result.sent = await deliverArtifactToChat({ artifact: generated, telegram, logger: this.logger });
-            }
-          }
-
-          return {
-            content: [{ type: "text", text: JSON.stringify(result, null, 2) }],
-            details: result
-          };
-        }
-      }),
-      defineTool({
-        name: "list_scheduled_tasks",
-        label: "List scheduled tasks",
-        description: "List scheduled async tasks for the current Telegram chat. Results default to 50 tasks, always include pending/running tasks, and accept an optional limit up to 100.",
-        parameters: Type.Object({
-          status: Type.Optional(Type.String()),
-          limit: Type.Optional(Type.Integer({ minimum: 1, maximum: maxScheduledTaskListLimit }))
-        }),
-        execute: async (_id, params) => {
-          const tasks = await this.taskStore.list({ chatId, status: params.status });
-          const result = selectScheduledTasks(tasks, {
-            status: params.status,
-            limit: params.limit
-          });
-          return {
-            content: [{ type: "text", text: JSON.stringify(result, null, 2) }],
-            details: result
-          };
-        }
-      }),
-      defineTool({
-        name: "cancel_scheduled_task",
-        label: "Cancel scheduled task",
-        description: "Cancel one scheduled async task by id for the current Telegram chat.",
-        parameters: Type.Object({ id: Type.String() }),
-        execute: async (_id, params) => {
-          const existing = await this.taskStore.get(params.id);
-          if (!existing || existing.payload?.chatId !== chatId) {
-            return {
-              content: [{ type: "text", text: JSON.stringify({ ok: false, error: "Task not found" }) }],
-              details: { ok: false, error: "Task not found" }
-            };
-          }
-          const task = await this.taskStore.cancel(params.id);
-          return {
-            content: [{ type: "text", text: JSON.stringify({ ok: true, task }, null, 2) }],
-            details: { ok: true, task }
-          };
-        }
-      }),
-      defineTool({
-        name: "cancel_all_scheduled_tasks",
-        label: "Cancel all scheduled tasks",
-        description: "Cancel all pending or running async tasks for the current Telegram chat.",
-        parameters: Type.Object({}),
-        execute: async () => {
-          const tasks = await this.taskStore.cancelAll({ chatId });
-          return {
-            content: [{ type: "text", text: JSON.stringify({ ok: true, cancelled: tasks.length }, null, 2) }],
-            details: { ok: true, tasks }
-          };
-        }
-      }),
-      defineTool({
-        name: "create_telegram_topic",
-        label: "Create Telegram topic",
-        description: "Create and initialize a new topic in the current owner-only Telegram forum. Topic names are dynamic, and context seeds the isolated session without copying unrelated history.",
-        parameters: Type.Object({
-          name: Type.String({ minLength: 1, maxLength: 128 }),
-          context: Type.String({ minLength: 1, maxLength: 4000 })
-        }),
-        execute: async (_id, params) => {
-          if (typeof telegram.createForumTopic !== "function") {
-            const result = { ok: false, error: "Telegram topic creation is unavailable in this chat." };
-            return { content: [{ type: "text", text: JSON.stringify(result) }], details: result };
-          }
-          const result = await telegram.createForumTopic(params.name.trim(), params.context.trim());
-          return { content: [{ type: "text", text: JSON.stringify(result, null, 2) }], details: result };
-        }
-      }),
-      defineTool({
-        name: "initialize_telegram_topic",
-        label: "Initialize Telegram topic",
-        description: "Seed or replace the isolated context of an existing topic in the current owner-only Telegram forum.",
-        parameters: Type.Object({
-          messageThreadId: Type.Integer({ minimum: 2 }),
-          name: Type.String({ minLength: 1, maxLength: 128 }),
-          context: Type.String({ minLength: 1, maxLength: 4000 })
-        }),
-        execute: async (_id, params) => {
-          if (typeof telegram.initializeForumTopic !== "function") {
-            const result = { ok: false, error: "Telegram topic initialization is unavailable in this chat." };
-            return { content: [{ type: "text", text: JSON.stringify(result) }], details: result };
-          }
-          const result = await telegram.initializeForumTopic({
-            messageThreadId: params.messageThreadId,
-            name: params.name.trim(),
-            context: params.context.trim()
-          });
-          return { content: [{ type: "text", text: JSON.stringify(result, null, 2) }], details: result };
-        }
-      }),
-      defineTool({
-        name: "send_artifact",
-        label: "Send artifact",
-        description: "Deliver an existing chat artifact to the current Telegram chat. Pass the `artifactId` returned by run_tool or from an inbound file. The delivery method and filename are derived from the artifact (its delivery hint, kind, and stored name); internal local paths are never exposed. No caption is shown by default, since the filename already appears on the attachment; set `caption` only to add a separate visible label, or `method` to override the delivery method. The artifact is not deleted.",
-        parameters: Type.Object({
-          artifactId: Type.String(),
-          caption: Type.Optional(Type.String()),
-          method: Type.Optional(Type.Union([
-            Type.Literal("voice"),
-            Type.Literal("audio"),
-            Type.Literal("document")
-          ]))
-        }),
-        execute: async (_id, params) => {
-          const artifact = await chatArtifactStore.get(params.artifactId);
-          if (!artifact) {
-            const result = { ok: false, status: "failed", error: `Artifact not found: ${params.artifactId}` };
-            return { content: [{ type: "text", text: JSON.stringify(result, null, 2) }], details: result };
-          }
-          if (!artifact.path) {
-            const result = { ok: false, status: "failed", error: `Artifact ${params.artifactId} has no file to deliver.` };
-            return { content: [{ type: "text", text: JSON.stringify(result, null, 2) }], details: result };
-          }
-          const sent = await deliverArtifactToChat({
-            artifact,
-            telegram,
-            caption: params.caption,
-            method: params.method,
-            logger: this.logger
-          });
-          return {
-            content: [{ type: "text", text: `Media sent to Telegram as ${sent.method}.` }],
-            details: { ok: true, sent }
-          };
-        }
-      })
-    ];
+    return createPiCapabilityTools({
+      capabilityService: this.capabilityService,
+      telegram,
+      chatId,
+      policy,
+      logger: this.logger
+    });
   }
+
 }

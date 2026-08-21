@@ -3,6 +3,7 @@ import { loadConfig } from "../core/config/config-store.js";
 import { TaskStore } from "../core/tasks/task-store.js";
 import { ToolRegistry } from "../core/tools/tool-registry.js";
 import { createDaemonRuntime } from "../core/tools/daemon-runtime.js";
+import { createCapabilityService } from "../core/capabilities/capability-service.js";
 import { createArisaCapabilities } from "./arisa-capabilities.js";
 import { createHeadlessToolExecutor } from "./headless-tool-executor.js";
 import { createIpcServer } from "./ipc/ipc-server.js";
@@ -26,12 +27,14 @@ export async function createHeadlessApp({
   await toolRegistry.load();
   const toolProcessSupervisor = supervisorFactory({ logger, policy: config.daemons, toolRegistry });
   const toolExecutor = createHeadlessToolExecutor({ artifactStore, taskStore, toolRegistry });
-  const capabilities = capabilitiesFactory({
+  const capabilityService = createCapabilityService({
     artifactStore,
     taskStore,
     toolRegistry,
-    agentManager: toolExecutor
+    toolExecutor,
+    logger
   });
+  const capabilities = capabilitiesFactory({ capabilityService, agentManager: toolExecutor });
   const ipcServer = ipcServerFactory({ capabilities, logger });
   const autoStartedDaemons = [];
 

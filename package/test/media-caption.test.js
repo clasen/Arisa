@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { resolveMediaCaption } from "../src/core/agent/agent-manager.js";
+import { resolveMediaCaption } from "../src/core/capabilities/capability-service.js";
 
 test("does not turn a domain-like filename into a caption", () => {
   assert.equal(resolveMediaCaption(undefined), undefined);

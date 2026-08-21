@@ -14,7 +14,7 @@ import {
   resolveTelegramBusyMessageMode,
   routeBusyPrompt
 } from "../src/transport/telegram/chat-queue.js";
-import { selectScheduledTasks } from "../src/core/agent/agent-manager.js";
+import { selectScheduledTasks } from "../src/core/capabilities/capability-service.js";
 
 test("queued Telegram prompts start typing immediately and share one indicator", async () => {
   let actions = 0;

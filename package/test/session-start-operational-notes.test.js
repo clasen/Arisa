@@ -16,7 +16,7 @@ async function loadNotesWithHome(homeDir, notesPayload) {
   );
 
   const script = `
-const mod = await import(${JSON.stringify(new URL("../src/core/agent/agent-manager.js", import.meta.url).href)});
+const mod = await import(${JSON.stringify(new URL("../src/core/agent/agent-session-lifecycle.js", import.meta.url).href)});
 process.stdout.write(JSON.stringify(mod.loadSessionStartOperationalNotes()));
 `;
   const { stdout } = await execFileAsync(process.execPath, ["--input-type=module", "--eval", script], {
