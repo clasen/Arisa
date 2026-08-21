@@ -10,6 +10,23 @@ const DEFAULT_RETRY = Object.freeze({
   multiplier: 2
 });
 
+const taskFileOperations = new Map();
+
+async function serializeTaskFileOperation(operation) {
+  const previous = taskFileOperations.get(tasksFile) || Promise.resolve();
+  const current = previous.catch(() => {}).then(operation);
+  taskFileOperations.set(tasksFile, current);
+  try {
+    return await current;
+  } finally {
+    if (taskFileOperations.get(tasksFile) === current) taskFileOperations.delete(tasksFile);
+  }
+}
+
+async function waitForTaskFileOperations() {
+  await (taskFileOperations.get(tasksFile) || Promise.resolve()).catch(() => {});
+}
+
 async function loadTasksFile() {
   try {
     const parsed = JSON.parse(await readFile(tasksFile, "utf8"));
@@ -123,179 +140,196 @@ function retryDelayMs(task) {
   return Math.max(1, Math.round(seconds * 1000));
 }
 
+function failTask(task, error) {
+  const failedAt = new Date().toISOString();
+  task.status = "failed";
+  task.error = error instanceof Error ? error.message : String(error);
+  task.lastError = task.error;
+  task.failedAt = failedAt;
+  task.updatedAt = failedAt;
+  return structuredClone(task);
+}
+
 export class TaskStore {
   constructor() {
     this.tasks = null;
   }
 
   async init() {
-    if (!this.tasks) this.tasks = await loadTasksFile();
+    if (!this.tasks) await this.reload();
   }
 
   async reload() {
+    await waitForTaskFileOperations();
     this.tasks = await loadTasksFile();
   }
 
+  async mutate(operation) {
+    return serializeTaskFileOperation(async () => {
+      this.tasks = await loadTasksFile();
+      const { result, changed = true } = await operation(this.tasks);
+      if (changed) await saveTasksFile(this.tasks);
+      return result;
+    });
+  }
+
   async save() {
-    await saveTasksFile(this.tasks || []);
+    const tasks = structuredClone(this.tasks || []);
+    return serializeTaskFileOperation(async () => {
+      this.tasks = tasks;
+      await saveTasksFile(tasks);
+    });
   }
 
   async add(task, defaults = {}) {
-    await this.init();
-    const normalized = normalizeTask(task, defaults);
-    this.tasks.push(normalized);
-    await this.save();
-    return normalized;
+    return this.mutate(async (tasks) => {
+      const normalized = normalizeTask(task, defaults);
+      tasks.push(normalized);
+      return { result: structuredClone(normalized) };
+    });
   }
 
-  async addMany(tasks = [], defaults = {}) {
-    await this.init();
-    const created = tasks.map((task) => normalizeTask(task, defaults));
-    this.tasks.push(...created);
-    if (created.length) await this.save();
-    return created;
+  async addMany(tasksToAdd = [], defaults = {}) {
+    return this.mutate(async (tasks) => {
+      const created = tasksToAdd.map((task) => normalizeTask(task, defaults));
+      tasks.push(...created);
+      return { result: structuredClone(created), changed: created.length > 0 };
+    });
   }
 
   async claimDue(limit = 10) {
-    await this.reload();
-    const now = Date.now();
-    const due = [];
+    return this.mutate(async (tasks) => {
+      const now = Date.now();
+      const due = [];
 
-    for (const task of this.tasks) {
-      if (due.length >= limit) break;
-      if (task.status !== "pending") continue;
-      if (!task.runAt || Number.isNaN(Date.parse(task.runAt))) continue;
-      if (Date.parse(task.runAt) > now) continue;
-      task.status = "running";
-      task.attempts += 1;
-      task.startedAt = new Date(now).toISOString();
-      task.updatedAt = task.startedAt;
-      due.push(structuredClone(task));
-    }
+      for (const task of tasks) {
+        if (due.length >= limit) break;
+        if (task.status !== "pending") continue;
+        if (!task.runAt || Number.isNaN(Date.parse(task.runAt))) continue;
+        if (Date.parse(task.runAt) > now) continue;
+        task.status = "running";
+        task.attempts += 1;
+        task.startedAt = new Date(now).toISOString();
+        task.updatedAt = task.startedAt;
+        due.push(structuredClone(task));
+      }
 
-    if (due.length) await this.save();
-    return due;
+      return { result: due, changed: due.length > 0 };
+    });
   }
 
   async recoverInterrupted() {
-    await this.reload();
-    const recovered = [];
-    const now = Date.now();
+    return this.mutate(async (tasks) => {
+      const recovered = [];
+      const now = Date.now();
 
-    for (const task of this.tasks) {
-      if (task.status !== "running") continue;
-      const interruptedAt = new Date(now).toISOString();
-      task.lastError = "execution interrupted before confirmation";
-      task.lastFailedAt = interruptedAt;
-      task.updatedAt = interruptedAt;
-      if (task.kind === "poll_tool") {
-        task.status = "pending";
-        task.runAt = new Date(now + retryDelayMs(task)).toISOString();
-      } else {
-        const nextRunAt = computeNextRunAt(task, now);
-        if (nextRunAt) {
+      for (const task of tasks) {
+        if (task.status !== "running") continue;
+        const interruptedAt = new Date(now).toISOString();
+        task.lastError = "execution interrupted before confirmation";
+        task.lastFailedAt = interruptedAt;
+        task.updatedAt = interruptedAt;
+        if (task.kind === "poll_tool") {
           task.status = "pending";
-          task.runAt = nextRunAt;
-          task.attempts = 0;
-          task.lastOutcome = "outcome_uncertain";
+          task.runAt = new Date(now + retryDelayMs(task)).toISOString();
         } else {
-          task.status = "outcome_uncertain";
-          task.error = task.lastError;
+          const nextRunAt = computeNextRunAt(task, now);
+          if (nextRunAt) {
+            task.status = "pending";
+            task.runAt = nextRunAt;
+            task.attempts = 0;
+            task.lastOutcome = "outcome_uncertain";
+          } else {
+            task.status = "outcome_uncertain";
+            task.error = task.lastError;
+          }
         }
+        recovered.push(structuredClone(task));
       }
-      recovered.push(structuredClone(task));
-    }
 
-    if (recovered.length) await this.save();
-    return recovered;
+      return { result: recovered, changed: recovered.length > 0 };
+    });
   }
 
   async complete(taskId) {
-    await this.init();
-    const task = this.tasks.find((item) => item.id === taskId);
-    if (!task) return null;
+    return this.mutate(async (tasks) => {
+      const task = tasks.find((item) => item.id === taskId);
+      if (!task) return { result: null, changed: false };
 
-    const now = Date.now();
-    const completedAt = new Date(now).toISOString();
-    const nextRunAt = computeNextRunAt(task, now);
-    task.lastCompletedAt = completedAt;
-    task.lastRunAt = completedAt;
-    delete task.lastError;
-    delete task.error;
-    delete task.lastOutcome;
-    delete task.consecutiveFailures;
-    if (nextRunAt) {
-      task.status = "pending";
-      task.runAt = nextRunAt;
-      task.attempts = 0;
-      delete task.startedAt;
-    } else {
-      task.status = "done";
-      task.completedAt = completedAt;
-    }
-    task.updatedAt = completedAt;
-    await this.save();
-    return structuredClone(task);
+      const now = Date.now();
+      const completedAt = new Date(now).toISOString();
+      const nextRunAt = computeNextRunAt(task, now);
+      task.lastCompletedAt = completedAt;
+      task.lastRunAt = completedAt;
+      delete task.lastError;
+      delete task.error;
+      delete task.lastOutcome;
+      delete task.consecutiveFailures;
+      if (nextRunAt) {
+        task.status = "pending";
+        task.runAt = nextRunAt;
+        task.attempts = 0;
+        delete task.startedAt;
+      } else {
+        task.status = "done";
+        task.completedAt = completedAt;
+      }
+      task.updatedAt = completedAt;
+      return { result: structuredClone(task) };
+    });
   }
 
   async retryOrFail(taskId, error, { retryable = true, outcomeUncertain = false } = {}) {
-    await this.init();
-    const task = this.tasks.find((item) => item.id === taskId);
-    if (!task) return null;
-    const message = error instanceof Error ? error.message : String(error);
-    if (outcomeUncertain) {
-      const uncertainAt = new Date().toISOString();
-      task.status = "outcome_uncertain";
-      task.error = message;
-      task.lastError = message;
-      task.uncertainAt = uncertainAt;
-      task.updatedAt = uncertainAt;
-      await this.save();
-      return structuredClone(task);
-    }
-    if (!retryable) return this.fail(taskId, message);
-    if (task.attempts >= task.retry.maxAttempts) {
+    return this.mutate(async (tasks) => {
+      const task = tasks.find((item) => item.id === taskId);
+      if (!task) return { result: null, changed: false };
+      const message = error instanceof Error ? error.message : String(error);
+      if (outcomeUncertain) {
+        const uncertainAt = new Date().toISOString();
+        task.status = "outcome_uncertain";
+        task.error = message;
+        task.lastError = message;
+        task.uncertainAt = uncertainAt;
+        task.updatedAt = uncertainAt;
+        return { result: structuredClone(task) };
+      }
+      if (!retryable) return { result: failTask(task, message) };
+      if (task.attempts >= task.retry.maxAttempts) {
+        const now = Date.now();
+        const nextRunAt = computeNextRunAt(task, now);
+        if (!nextRunAt) return { result: failTask(task, message) };
+
+        const failedAt = new Date(now).toISOString();
+        task.status = "pending";
+        task.runAt = nextRunAt;
+        task.attempts = 0;
+        task.lastOutcome = "failed";
+        task.lastError = message;
+        task.lastFailedAt = failedAt;
+        task.consecutiveFailures = Number(task.consecutiveFailures || 0) + 1;
+        task.updatedAt = failedAt;
+        delete task.startedAt;
+        delete task.error;
+        return { result: { ...structuredClone(task), terminalFailure: true } };
+      }
+
       const now = Date.now();
-      const nextRunAt = computeNextRunAt(task, now);
-      if (!nextRunAt) return this.fail(taskId, message);
-
-      const failedAt = new Date(now).toISOString();
       task.status = "pending";
-      task.runAt = nextRunAt;
-      task.attempts = 0;
-      task.lastOutcome = "failed";
+      task.runAt = new Date(now + retryDelayMs(task)).toISOString();
       task.lastError = message;
-      task.lastFailedAt = failedAt;
-      task.consecutiveFailures = Number(task.consecutiveFailures || 0) + 1;
-      task.updatedAt = failedAt;
-      delete task.startedAt;
-      delete task.error;
-      await this.save();
-      return { ...structuredClone(task), terminalFailure: true };
-    }
-
-    const now = Date.now();
-    task.status = "pending";
-    task.runAt = new Date(now + retryDelayMs(task)).toISOString();
-    task.lastError = message;
-    task.lastFailedAt = new Date(now).toISOString();
-    task.updatedAt = task.lastFailedAt;
-    await this.save();
-    return structuredClone(task);
+      task.lastFailedAt = new Date(now).toISOString();
+      task.updatedAt = task.lastFailedAt;
+      return { result: structuredClone(task) };
+    });
   }
 
   async fail(taskId, error) {
-    await this.init();
-    const task = this.tasks.find((item) => item.id === taskId);
-    if (!task) return null;
-    const failedAt = new Date().toISOString();
-    task.status = "failed";
-    task.error = error instanceof Error ? error.message : String(error);
-    task.lastError = task.error;
-    task.failedAt = failedAt;
-    task.updatedAt = failedAt;
-    await this.save();
-    return structuredClone(task);
+    return this.mutate(async (tasks) => {
+      const task = tasks.find((item) => item.id === taskId);
+      return task
+        ? { result: failTask(task, error) }
+        : { result: null, changed: false };
+    });
   }
 
   async list(filter = {}) {
@@ -315,25 +349,26 @@ export class TaskStore {
   }
 
   async cancel(taskId) {
-    await this.reload();
-    const index = this.tasks.findIndex((item) => item.id === taskId);
-    if (index === -1) return null;
-    const [task] = this.tasks.splice(index, 1);
-    await this.save();
-    return structuredClone(task);
+    return this.mutate(async (tasks) => {
+      const index = tasks.findIndex((item) => item.id === taskId);
+      if (index === -1) return { result: null, changed: false };
+      const [task] = tasks.splice(index, 1);
+      return { result: structuredClone(task) };
+    });
   }
 
   async cancelAll(filter = {}) {
-    await this.reload();
-    const removed = [];
-    this.tasks = this.tasks.filter((task) => {
-      if (filter.chatId && String(task.payload?.chatId) !== String(filter.chatId)) return true;
-      if (filter.status && task.status !== filter.status) return true;
-      if (["done", "failed", "outcome_uncertain"].includes(task.status)) return true;
-      removed.push(structuredClone(task));
-      return false;
+    return this.mutate(async (tasks) => {
+      const removed = [];
+      const remaining = tasks.filter((task) => {
+        if (filter.chatId && String(task.payload?.chatId) !== String(filter.chatId)) return true;
+        if (filter.status && task.status !== filter.status) return true;
+        if (["done", "failed", "outcome_uncertain"].includes(task.status)) return true;
+        removed.push(structuredClone(task));
+        return false;
+      });
+      tasks.splice(0, tasks.length, ...remaining);
+      return { result: removed, changed: removed.length > 0 };
     });
-    if (removed.length) await this.save();
-    return removed;
   }
 }
