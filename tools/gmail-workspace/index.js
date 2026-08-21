@@ -5,6 +5,7 @@ import { pathToFileURL } from "node:url";
 import { spawn } from "node:child_process";
 import defaults from "./config.js";
 import { acknowledgeSecretaryMessages, normalizeSecretaryState, selectSecretaryWake } from "./secretary-state.js";
+import { parseArgvArgument, parseListArgument } from "./arguments.js";
 
 const toolName = "gmail-workspace";
 
@@ -57,6 +58,7 @@ Actions via args.action:
   secretary-ack   Acknowledge handled or intentionally ignored monitor messages. Use a disposition containing correction when a corrective reply was sent. args: ids, disposition?
   raw             Run an allowed raw gws Gmail command. args.argv: ["gmail","users",...]
 
+List arguments accept native arrays in request files, JSON-encoded arrays through run_tool, and comma-separated strings where applicable.
 Authentication uses Google Workspace CLI OAuth/API credentials, not browser cookies.
 `);
 }
@@ -295,8 +297,7 @@ async function writeJsonAtomic(filePath, value) {
 }
 
 function parseMessageIds(value) {
-  if (Array.isArray(value)) return value.map(String).map((item) => item.trim()).filter(Boolean);
-  return String(value || "").split(",").map((item) => item.trim()).filter(Boolean);
+  return parseListArgument(value);
 }
 
 
@@ -481,7 +482,7 @@ async function handle(request, config) {
 
   if (action === "replace-draft-text") {
     const replacements = normalizeReplacements(request.args?.replacements);
-    const ids = Array.isArray(request.args?.ids) ? request.args.ids.map(String) : String(request.args?.ids || "").split(",").map((s) => s.trim()).filter(Boolean);
+    const ids = parseListArgument(request.args?.ids);
     const onlyIfContains = Array.isArray(request.args?.onlyIfContains)
       ? request.args.onlyIfContains
       : String(request.args?.onlyIfContains || "").split("||").map((s) => s.trim()).filter(Boolean);
@@ -515,7 +516,7 @@ async function handle(request, config) {
 
   if (action === "replace-draft-subject-text") {
     const replacements = normalizeReplacements(request.args?.replacements);
-    const ids = Array.isArray(request.args?.ids) ? request.args.ids.map(String) : String(request.args?.ids || "").split(",").map((s) => s.trim()).filter(Boolean);
+    const ids = parseListArgument(request.args?.ids);
     const targetIds = [];
     if (ids.length) {
       targetIds.push(...ids);
@@ -727,7 +728,10 @@ async function handle(request, config) {
     const current = normalizeSecretaryState(await readJsonSafe(monitorPath, {}));
     const result = acknowledgeSecretaryMessages(current, ids, request.args?.disposition || "handled");
     await writeJsonAtomic(monitorPath, result.state);
-    return { text: `Acknowledged ${result.acknowledged.length} secretary message(s).`, json: result };
+    return {
+      text: `Acknowledged ${result.acknowledged.length} secretary message(s).`,
+      json: { acknowledged: result.acknowledged, count: result.acknowledged.length }
+    };
   }
 
   if (action === "poll-secretary") {
@@ -764,10 +768,8 @@ Exact Gmail message IDs for this wake: ${ids.join(", ")}. Read every ID even if 
   }
 
   if (action === "raw") {
-    const rawArgv = request.args?.argv;
-    const argv = Array.isArray(rawArgv) ? rawArgv : typeof rawArgv === "string" ? JSON.parse(rawArgv) : rawArgv;
-    if (!Array.isArray(argv) || argv[0] !== "gmail") throw new Error('args.argv must be an array starting with "gmail"');
-    const { stdout, stderr } = await runCommand(argv.map(String), config);
+    const argv = parseArgvArgument(request.args?.argv);
+    const { stdout, stderr } = await runCommand(argv, config);
     return { text: (stdout || stderr).trim(), json: { stdout, stderr } };
   }
 

@@ -1,6 +1,6 @@
 {
   "name": "telemetry-ledger",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Record chat-scoped operational metrics, query latency and counters, compare time windows, and surface evidence-backed regression hypotheses without claiming causality.",
   "entry": "index.js",
   "input": ["application/json", "text/plain"],

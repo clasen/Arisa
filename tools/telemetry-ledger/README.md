@@ -24,3 +24,5 @@ Telemetry failures must never change the producer's business outcome. Do not rec
 ## Analysis
 
 Define metric direction first (`lower`, `higher`, or `neutral`), then compare adjacent windows. Classification requires a minimum sample count. Dimension breakdowns are reported as correlations only.
+
+`compare` and `report` return compact decision evidence by default so routine analysis does not duplicate large nested summaries into agent context. Pass `verbose: true` only for explicit diagnostics that need every aggregate field.

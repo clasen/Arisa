@@ -6,6 +6,7 @@ import defaults from "./config.js";
 import { compareWindows, filterEvents, summarizeByMetric } from "./analysis.js";
 import { appendRecords, pruneEvents, readDefinitions, readEvents, writeDefinitions } from "./storage.js";
 import { validateDefinition, validateDimensions, validateMetricName, validateRecord } from "./validation.js";
+import { compactReport, formatQueryText, formatReportText } from "./output.js";
 
 const toolName = "telemetry-ledger";
 const toolDir = path.dirname(fileURLToPath(import.meta.url));
@@ -26,8 +27,8 @@ Actions:
   define   Define metrics. args.definitions=<JSON array>
   record   Append numeric measurements. args.records=<JSON array>
   query    Summarize a window. args.metrics?, since?, until?, windowHours?, dimensions?, includeEvents?, limit?
-  compare  Compare adjacent windows. args.metrics?, currentHours?, baselineHours?, until?, dimensions?, groupBy?
-  report   Compare all metrics over adjacent windows. args.currentHours?, baselineHours?, until?, groupBy?
+  compare  Compare adjacent windows. args.metrics?, currentHours?, baselineHours?, until?, dimensions?, groupBy?, verbose?
+  report   Compare all metrics over adjacent windows. args.currentHours?, baselineHours?, until?, groupBy?, verbose?
   prune    Remove event files older than retention. args.retentionDays?
 
 Metric kinds: counter, gauge, duration, event.
@@ -104,7 +105,11 @@ async function run(requestFile) {
       const summaries = summarizeByMetric(window.events, definitions);
       const includeEvents = String(args.includeEvents || "false") === "true";
       const limit = Math.min(1000, Math.max(1, Number(args.limit || 100)));
-      console.log(JSON.stringify(toolOk({ text: JSON.stringify(summaries, null, 2), json: { since: window.since, until: window.until, summaries, events: includeEvents ? window.events.slice(-limit) : undefined } })));
+      const events = includeEvents ? window.events.slice(-limit) : undefined;
+      console.log(JSON.stringify(toolOk({
+        text: formatQueryText(summaries, events?.length || 0),
+        json: { since: window.since, until: window.until, summaries, events }
+      })));
       return;
     }
 
@@ -127,8 +132,9 @@ async function run(requestFile) {
         minimumSamples: positiveNumber(args.minimumSamples, config.MIN_COMPARE_SAMPLES, 1),
         groupBy: listArg(args.groupBy)
       });
-      const json = { baseline: { since: baselineSince, until: currentSince }, current: { since: currentSince, until }, ...analysis };
-      console.log(JSON.stringify(toolOk({ text: JSON.stringify(json, null, 2), json })));
+      const report = { baseline: { since: baselineSince, until: currentSince }, current: { since: currentSince, until }, ...analysis };
+      const json = String(args.verbose || "false").toLowerCase() === "true" ? report : compactReport(report);
+      console.log(JSON.stringify(toolOk({ text: formatReportText(report), json })));
       return;
     }
 
