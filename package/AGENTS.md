@@ -13,15 +13,6 @@ Arisa core owns transport, sessions, artifacts, and tool orchestration:
 
 New capabilities belong in tools by default. Solve requests by creating or editing a tool under `~/.arisa/tools/<toolName>`. Modifying core is the last resort: do it only after confirming the capability cannot be delivered through the tool architecture, explaining why the core change is unavoidable, and receiving explicit user approval.
 
-## Live development deployment
-This owner instance evolves directly from the canonical checkout at `/root/.arisa/projects/Arisa`. The global `arisa` package must remain linked to `/root/.arisa/projects/Arisa/package`, so the tested Git checkout is also the code loaded on the next core restart.
-
-For core work: edit the checkout, run focused and full tests, bump the patch version, commit and push only the intended files, then restart once to load that exact commit. Verify the running package path, version, and commit after restart. Never wait for npm publication on this instance, never treat `arisa restart` as an installer, and never restart for a tool-only or lock-only change. npm releases remain immutable distribution artifacts for other installations.
-
-After changing Telegram scheduled-task dispatch or its prompt composition, enqueue one harmless one-off `agent_task` through the live task store after restart and verify that it reaches `done` without sending user-visible text. Unit tests alone do not prove the live composition is wired correctly.
-
-Official tool source belongs in `/root/.arisa/projects/Arisa/tools/<toolName>` and the live installed copy remains under `~/.arisa/tools/<toolName>`. Keep both synchronized; tools hot-reload without a core restart. Batch embedded official-lock refreshes into a later substantive core release instead of restarting solely for lock metadata.
-
 ## Runtime directory rules
 Do not build runtime paths by hand. Use `src/runtime/paths.js`:
 - `getToolDir(toolName)`: installed user tool package only; no runtime data here.
@@ -177,10 +168,6 @@ Beyond time-based scheduling, tools can drive an event queue that wakes the agen
 - `agent_task`: a scheduled prompt. The poller delivers it as a prompt for the active runtime to fulfill (time-based work).
 - `poll_tool`: a recurring checker the poller **runs directly as a tool** (no agent turn spent). The poller materializes its output with the same logic as `run_tool`, so any `agent_event` the checker emits is enqueued for the next tick. Its `recurrence` reschedules the next poll.
 - `agent_event`: an incoming event. The poller delivers it as a prompt so the active runtime evaluates it and decides the next action (it may stay silent).
-
-Tasks without a `runAt` fire immediately, so `agent_event` and the first `poll_tool` run on the next tick. A task remains `running` until its tool call or agent turn actually completes; placing a prompt in a busy chat queue is not completion. Known transient failures use bounded exponential backoff. Invalid tasks fail immediately, and interrupted or explicitly uncertain agent outcomes are recorded as `outcome_uncertain` instead of being replayed automatically.
-
-Task routing is top-level metadata, separate from business payloads: `{ route: { transport: "telegram", destination: { chatId, threadId } } }`. Tool-emitted tasks inherit the current trusted route; tools cannot override owner scope or transport routing in their output.
 
 The poller dispatches all three kinds, but only `agent_task` is exercised by a catalog tool today (`schedule-agent-task`). The following is the pattern to follow when a checker tool is built:
 
