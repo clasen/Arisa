@@ -10,6 +10,9 @@ const DEFAULT_RETRY = Object.freeze({
   multiplier: 2
 });
 
+const TERMINAL_STATUSES = new Set(["done", "failed", "outcome_uncertain"]);
+const TERMINAL_PAYLOAD_KEYS = ["chatId", "toolName", "resourceId", "artifactId"];
+
 const taskFileOperations = new Map();
 
 async function serializeTaskFileOperation(operation) {
@@ -86,13 +89,35 @@ function migrateTask(task = {}) {
   const payload = { ...(task.payload || {}) };
   const route = task.route || legacyTelegramRoute(payload.telegramContext) || null;
   delete payload.telegramContext;
-  return {
+  const migrated = {
     ...task,
     payload,
     route,
-    attempts: Number.isSafeInteger(task.attempts) && task.attempts >= 0 ? task.attempts : 0,
-    retry: normalizeRetry(task.retry)
+    attempts: Number.isSafeInteger(task.attempts) && task.attempts >= 0 ? task.attempts : 0
   };
+  if (!TERMINAL_STATUSES.has(migrated.status)) migrated.retry = normalizeRetry(task.retry);
+  return migrated;
+}
+
+function compactTerminalPayload(payload = {}) {
+  return Object.fromEntries(TERMINAL_PAYLOAD_KEYS.flatMap((key) => {
+    const value = payload[key];
+    return ["string", "number", "boolean"].includes(typeof value) ? [[key, value]] : [];
+  }));
+}
+
+function compactTerminalTask(task) {
+  if (!TERMINAL_STATUSES.has(task.status)) return false;
+  const payload = compactTerminalPayload(task.payload);
+  const changed = !task.payloadCompacted
+    || JSON.stringify(task.payload || {}) !== JSON.stringify(payload)
+    || Object.hasOwn(task, "retry")
+    || Object.hasOwn(task, "recurrence");
+  task.payload = payload;
+  task.payloadCompacted = true;
+  delete task.retry;
+  delete task.recurrence;
+  return changed;
 }
 
 function normalizeTask(task, defaults = {}) {
@@ -105,7 +130,7 @@ function normalizeTask(task, defaults = {}) {
     || legacyTelegramRoute(mergedPayload.telegramContext)
     || null;
   delete mergedPayload.telegramContext;
-  return migrateTask({
+  const normalized = migrateTask({
     id: task.id || taskId(),
     status: task.status || "pending",
     createdAt: task.createdAt || new Date().toISOString(),
@@ -122,6 +147,8 @@ function normalizeTask(task, defaults = {}) {
     attempts: task.attempts || 0,
     retry: task.retry || defaults.retry
   });
+  compactTerminalTask(normalized);
+  return normalized;
 }
 
 function computeNextRunAt(task, now = Date.now()) {
@@ -147,6 +174,7 @@ function failTask(task, error) {
   task.lastError = task.error;
   task.failedAt = failedAt;
   task.updatedAt = failedAt;
+  compactTerminalTask(task);
   return structuredClone(task);
 }
 
@@ -221,33 +249,38 @@ export class TaskStore {
   async recoverInterrupted() {
     return this.mutate(async (tasks) => {
       const recovered = [];
+      let compacted = false;
       const now = Date.now();
 
       for (const task of tasks) {
-        if (task.status !== "running") continue;
-        const interruptedAt = new Date(now).toISOString();
-        task.lastError = "execution interrupted before confirmation";
-        task.lastFailedAt = interruptedAt;
-        task.updatedAt = interruptedAt;
-        if (task.kind === "poll_tool") {
-          task.status = "pending";
-          task.runAt = new Date(now + retryDelayMs(task)).toISOString();
-        } else {
-          const nextRunAt = computeNextRunAt(task, now);
-          if (nextRunAt) {
+        if (task.status === "running") {
+          const interruptedAt = new Date(now).toISOString();
+          task.lastError = "execution interrupted before confirmation";
+          task.lastFailedAt = interruptedAt;
+          task.updatedAt = interruptedAt;
+          if (task.kind === "poll_tool") {
             task.status = "pending";
-            task.runAt = nextRunAt;
-            task.attempts = 0;
-            task.lastOutcome = "outcome_uncertain";
+            task.runAt = new Date(now + retryDelayMs(task)).toISOString();
           } else {
-            task.status = "outcome_uncertain";
-            task.error = task.lastError;
+            const nextRunAt = computeNextRunAt(task, now);
+            if (nextRunAt) {
+              task.status = "pending";
+              task.runAt = nextRunAt;
+              task.attempts = 0;
+              task.lastOutcome = "outcome_uncertain";
+            } else {
+              task.status = "outcome_uncertain";
+              task.error = task.lastError;
+            }
           }
+          compactTerminalTask(task);
+          recovered.push(structuredClone(task));
+          continue;
         }
-        recovered.push(structuredClone(task));
+        if (compactTerminalTask(task)) compacted = true;
       }
 
-      return { result: recovered, changed: recovered.length > 0 };
+      return { result: recovered, changed: recovered.length > 0 || compacted };
     });
   }
 
@@ -275,6 +308,7 @@ export class TaskStore {
         task.completedAt = completedAt;
       }
       task.updatedAt = completedAt;
+      compactTerminalTask(task);
       return { result: structuredClone(task) };
     });
   }
@@ -291,6 +325,7 @@ export class TaskStore {
         task.lastError = message;
         task.uncertainAt = uncertainAt;
         task.updatedAt = uncertainAt;
+        compactTerminalTask(task);
         return { result: structuredClone(task) };
       }
       if (!retryable) return { result: failTask(task, message) };

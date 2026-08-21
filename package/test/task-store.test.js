@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
@@ -9,7 +9,7 @@ process.env.HOME = homeDir;
 process.env.USERPROFILE = homeDir;
 
 const { TaskStore } = await import("../src/core/tasks/task-store.js");
-const { arisaHomeDir } = await import("../src/runtime/paths.js");
+const { arisaHomeDir, tasksFile } = await import("../src/runtime/paths.js");
 
 async function resetHome() {
   await rm(arisaHomeDir, { recursive: true, force: true });
@@ -114,6 +114,87 @@ test("completes one-off tasks and re-schedules recurring interval tasks", async 
   assert.equal(repeat.status, "pending");
   assert.ok(Date.parse(repeat.runAt) > Date.now());
   assert.ok(repeat.lastRunAt);
+});
+
+test("compacts terminal payloads while preserving routing and audit identifiers", async () => {
+  await resetHome();
+  const store = new TaskStore();
+  const route = { transport: "telegram", destination: { chatId: -1001, threadId: 87 } };
+  const payload = {
+    chatId: "chat-1",
+    prompt: "private operational prompt ".repeat(200),
+    args: { cursor: "large private state".repeat(100) },
+    acknowledgement: "received",
+    toolName: "checker",
+    resourceId: "inbox:primary",
+    artifactId: "artifact-1"
+  };
+  await store.add({ id: "compact-done", kind: "agent_task", payload, route });
+  await store.add({ id: "compact-failed", kind: "agent_task", payload });
+  await store.add({ id: "compact-uncertain", kind: "agent_task", payload });
+
+  const done = await store.complete("compact-done");
+  const failed = await store.fail("compact-failed", "permanent failure");
+  const uncertain = await store.retryOrFail("compact-uncertain", "unknown outcome", {
+    retryable: false,
+    outcomeUncertain: true
+  });
+  const expectedPayload = {
+    chatId: "chat-1",
+    toolName: "checker",
+    resourceId: "inbox:primary",
+    artifactId: "artifact-1"
+  };
+
+  for (const task of [done, failed, uncertain]) {
+    assert.deepEqual(task.payload, expectedPayload);
+    assert.equal(task.payloadCompacted, true);
+    assert.equal(task.retry, undefined);
+    assert.equal(task.recurrence, undefined);
+  }
+  assert.deepEqual(done.route, route);
+  assert.ok(done.completedAt);
+  assert.equal(failed.error, "permanent failure");
+  assert.ok(uncertain.uncertainAt);
+  assert.deepEqual(
+    (await store.list({ chatId: "chat-1" })).map((task) => task.id),
+    ["compact-done", "compact-failed", "compact-uncertain"]
+  );
+});
+
+test("startup recovery compacts historical terminal tasks without changing active payloads", async () => {
+  await resetHome();
+  await mkdir(path.dirname(tasksFile), { recursive: true });
+  await writeFile(tasksFile, `${JSON.stringify([
+    {
+      id: "historical-done",
+      kind: "agent_task",
+      status: "done",
+      payload: { chatId: "chat-1", prompt: "obsolete prompt", args: { large: "value" } },
+      retry: { maxAttempts: 3 },
+      recurrence: null
+    },
+    {
+      id: "active-pending",
+      kind: "agent_task",
+      status: "pending",
+      runAt: new Date(Date.now() + 60_000).toISOString(),
+      payload: { chatId: "chat-1", prompt: "still required" }
+    }
+  ], null, 2)}\n`, "utf8");
+
+  const store = new TaskStore();
+  assert.deepEqual(await store.recoverInterrupted(), []);
+  const persisted = JSON.parse(await readFile(tasksFile, "utf8"));
+  const historical = persisted.find((task) => task.id === "historical-done");
+  const active = persisted.find((task) => task.id === "active-pending");
+
+  assert.deepEqual(historical.payload, { chatId: "chat-1" });
+  assert.equal(historical.payloadCompacted, true);
+  assert.equal(historical.retry, undefined);
+  assert.equal(historical.recurrence, undefined);
+  assert.equal(active.payload.prompt, "still required");
+  assert.ok(active.retry);
 });
 
 test("backs off known failures and fails after the attempt limit", async () => {
