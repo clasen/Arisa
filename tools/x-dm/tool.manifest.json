@@ -1,6 +1,6 @@
 {
   "name": "x-dm",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "description": "Safely manage X/Twitter outreach, follows, the logged-in account bio, and explicitly confirmed posts with account pinning and post-change verification.",
   "entry": "index.js",
   "toolDependencies": {
@@ -36,6 +36,11 @@
       "type": "string",
       "required": false,
       "prompt": "Run browser headless: true or false."
+    },
+    "BROWSER_CACHE_MAX_MB": {
+      "type": "string",
+      "required": false,
+      "prompt": "Maximum discardable Chromium cache usage in MiB for the persistent X profile; cookies, local storage, and IndexedDB are preserved."
     },
     "MIN_SECONDS_BETWEEN_SENDS": {
       "type": "string",

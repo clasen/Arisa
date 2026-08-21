@@ -1,5 +1,6 @@
 {
   "name": "x-session-reader",
+  "version": "1.1.0",
   "description": "Read posts and bookmarks visible to a user-provided or browser-session-bridge X/Twitter web session, without bypassing login or anti-bot checks.",
   "entry": "index.js",
   "toolDependencies": {
@@ -31,6 +32,11 @@
       "type": "string",
       "required": false,
       "prompt": "Run browser headless: true or false."
+    },
+    "BROWSER_CACHE_MAX_MB": {
+      "type": "string",
+      "required": false,
+      "prompt": "Maximum Chromium disk/media cache budget in MiB for each temporary X reader profile; temporary profiles are removed after use."
     }
   },
   "skillHints": [],

@@ -4,6 +4,7 @@ import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { chromium } from "playwright";
 import defaults from "./config.js";
+import { cacheBudgetBytes, chromiumCacheArgs, pruneChromiumCaches } from "./browser-cache.js";
 
 const toolName = "x-dm";
 const bridgeToolName = "browser-session-bridge";
@@ -363,7 +364,12 @@ async function launchSession(config, profileDir) {
     executablePath: config.CHROME_EXECUTABLE_PATH || undefined,
     viewport: { width: 1280, height: 900 },
     ignoreHTTPSErrors: true,
-    args: ["--no-sandbox", "--disable-setuid-sandbox", "--disable-dev-shm-usage"]
+    args: [
+      "--no-sandbox",
+      "--disable-setuid-sandbox",
+      "--disable-dev-shm-usage",
+      ...chromiumCacheArgs(cacheBudgetBytes(config.BROWSER_CACHE_MAX_MB))
+    ]
   });
   const browser = context.browser();
   activeBrowser = context;
@@ -1808,9 +1814,12 @@ async function browserAction(request, args, config) {
   if (!cookies.length) return toolError("Could not parse X_COOKIES. Use JSON cookies, Netscape cookies.txt, or a raw Cookie header.");
   const { stateDir } = await statePaths(request);
   const releaseBrowserLock = await acquireStateLock(stateDir, "browser.lock");
+  const profileDir = path.join(stateDir, "browser-profile");
+  const maxCacheBytes = cacheBudgetBytes(config.BROWSER_CACHE_MAX_MB);
   let session;
   try {
-    session = await launchSession(config, path.join(stateDir, "browser-profile"));
+    await pruneChromiumCaches(profileDir, maxCacheBytes);
+    session = await launchSession(config, profileDir);
     await session.context.addCookies(cookies);
     const page = await session.context.newPage();
     const account = await validateSession(page, config);
@@ -1907,6 +1916,7 @@ Pass confirm=true to apply exactly this bio.`,
     return await sendAction(request, args, config, page, account);
   } finally {
     await closeSession(session);
+    await pruneChromiumCaches(profileDir, maxCacheBytes).catch(() => {});
     await releaseBrowserLock();
   }
 }

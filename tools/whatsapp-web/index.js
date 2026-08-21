@@ -10,6 +10,7 @@ import qrcodeTerminal from "qrcode-terminal";
 import QRCode from "qrcode";
 import pkg from "whatsapp-web.js";
 import defaults from "./config.js";
+import { cacheBudgetBytes, chromiumCacheArgs, chromiumCacheUsage, pruneChromiumCaches } from "./browser-cache.js";
 
 const toolDir = path.dirname(fileURLToPath(import.meta.url));
 const arisaPackageDir = process.env.ARISA_PACKAGE_DIR || path.resolve(toolDir, "../../package");
@@ -60,7 +61,8 @@ function daemonForChat(chatId, { autoStart = true } = {}) {
     autoStart,
     beforeStart: async () => {
       await cleanupLegacyGlobalDaemon();
-      await cleanupBrowserLocks(chatPaths(normalizedChatId));
+      const effectiveConfig = await loadToolConfig(toolName, defaults, normalizedChatId);
+      await cleanupBrowserLocks(chatPaths(normalizedChatId), effectiveConfig.BROWSER_CACHE_MAX_MB);
     }
   });
 }
@@ -288,11 +290,15 @@ async function killChatBrowserProcesses(paths) {
   await execFileQuiet("pkill", ["-9", "-f", userDataDir]);
 }
 
-async function cleanupBrowserLocks(paths) {
+async function cleanupBrowserLocks(paths, maxCacheMb = config.BROWSER_CACHE_MAX_MB) {
   await killChatBrowserProcesses(paths);
   for (const name of ["SingletonLock", "SingletonSocket", "SingletonCookie"]) {
     await rm(path.join(paths.sessionDir, "session", name), { force: true }).catch(() => {});
   }
+  await pruneChromiumCaches(
+    path.join(paths.sessionDir, "session"),
+    cacheBudgetBytes(maxCacheMb)
+  ).catch(() => {});
 }
 
 async function readArray(file) {
@@ -619,7 +625,8 @@ function makeClient(chatId) {
       "--disable-dev-shm-usage",
       "--disable-gpu",
       "--renderer-process-limit=4",
-      "--disable-site-isolation-trials"
+      "--disable-site-isolation-trials",
+      ...chromiumCacheArgs(cacheBudgetBytes(config.BROWSER_CACHE_MAX_MB))
     ]
   };
   if (config.CHROME_EXECUTABLE_PATH && existsSync(config.CHROME_EXECUTABLE_PATH)) puppeteer.executablePath = config.CHROME_EXECUTABLE_PATH;
@@ -1279,6 +1286,18 @@ class SessionManager {
     return { messageId, artifactId: artifact.id, mimeType: artifact.mimeType, kind: artifact.kind, transcript };
   }
 
+  async enforceCacheBudget(chatId) {
+    const record = this.get(chatId);
+    if (!record?.client || record.restarting) return { skipped: "not-live" };
+    const maxBytes = cacheBudgetBytes(config.BROWSER_CACHE_MAX_MB);
+    const usage = await chromiumCacheUsage(path.join(chatPaths(chatId).sessionDir, "session"));
+    if (usage.bytes <= maxBytes) return { bytes: usage.bytes, maxBytes, restarted: false };
+    const idleMs = Date.now() - record.lastActivity;
+    if (idleMs < number(config.BROWSER_CACHE_IDLE_MS, 120000)) return { bytes: usage.bytes, maxBytes, restarted: false, skipped: "busy" };
+    await this.restart(chatId, "browser cache budget exceeded");
+    return { bytes: usage.bytes, maxBytes, restarted: true };
+  }
+
   async shutdownIdleClients() {
     if (this.idleShutdownMs <= 0) return;
     for (const [chatId, record] of this.sessions) {
@@ -1422,6 +1441,10 @@ async function runDaemon() {
       }).catch(() => {});
     });
   }, number(config.SYNC_INTERVAL_MS, 45000));
+
+  setInterval(() => {
+    manager.enforceCacheBudget(chatId).catch(() => {});
+  }, Math.max(60000, number(config.BROWSER_CACHE_CHECK_INTERVAL_MS, 1800000)));
 
   const watching = await isWatchEnabled(chatId);
   await daemon.workLoop({

@@ -1,8 +1,9 @@
-import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { mkdir, readFile, readdir, rm, stat, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
 import { chromium } from "playwright";
 import defaults from "./config.js";
+import { cacheBudgetBytes, chromiumCacheArgs } from "./browser-cache.js";
 
 const toolName = "x-session-reader";
 const bridgeToolName = "browser-session-bridge";
@@ -10,6 +11,17 @@ const importCore = (relativePath) => import(pathToFileURL(path.join(process.env.
 const { loadToolConfig } = await importCore("core/tools/tool-config.js");
 const { toolError, toolNeedsConfig, toolOk } = await importCore("core/tools/tool-result.js");
 const { getChatToolConfigPath, getChatToolStateDir, getToolConfigPath, getToolStateDir, getChatToolTmpDir, getToolTmpDir } = await importCore("runtime/paths.js");
+
+async function cleanupStaleTransientProfiles(stateDir, olderThanMs = 6 * 60 * 60 * 1000) {
+  const entries = await readdir(stateDir, { withFileTypes: true }).catch(() => []);
+  const now = Date.now();
+  for (const entry of entries) {
+    if (!entry.isDirectory() || !/^(browser-profile|bookmark-export)-\d+$/.test(entry.name)) continue;
+    const target = path.join(stateDir, entry.name);
+    const info = await stat(target).catch(() => null);
+    if (info && now - info.mtimeMs >= olderThanMs) await rm(target, { recursive: true, force: true });
+  }
+}
 
 function printHelp() {
   console.log(`x-session-reader
@@ -314,6 +326,8 @@ async function run(requestFile) {
   const scrollDelayMs = Math.min(Math.max(intArg(args.scrollDelayMs, wantsExport ? 900 : 1200), 100), 10000);
   const format = String(args.format || "json").toLowerCase();
   const stateDir = request.chatId != null ? getChatToolStateDir(request.chatId, toolName) : getToolStateDir(toolName);
+  await mkdir(stateDir, { recursive: true });
+  await cleanupStaleTransientProfiles(stateDir);
   const userDataDir = path.join(stateDir, `browser-profile-${Date.now()}`);
   await mkdir(userDataDir, { recursive: true });
 
@@ -324,7 +338,12 @@ async function run(requestFile) {
       executablePath: config.CHROME_EXECUTABLE_PATH || undefined,
       viewport: { width: 1280, height: 900 },
       ignoreHTTPSErrors: true,
-      args: ["--no-sandbox", "--disable-setuid-sandbox", "--disable-dev-shm-usage"]
+      args: [
+        "--no-sandbox",
+        "--disable-setuid-sandbox",
+        "--disable-dev-shm-usage",
+        ...chromiumCacheArgs(cacheBudgetBytes(config.BROWSER_CACHE_MAX_MB))
+      ]
     });
     await browser.route("**/*", async (route) => {
       const type = route.request().resourceType();
@@ -375,6 +394,7 @@ async function run(requestFile) {
     console.log(JSON.stringify(toolError(error.message || String(error))));
   } finally {
     if (browser) await browser.close().catch(() => {});
+    await rm(userDataDir, { recursive: true, force: true }).catch(() => {});
   }
 }
 
