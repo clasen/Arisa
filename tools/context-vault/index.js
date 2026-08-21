@@ -7,6 +7,7 @@ import { mkdir, readFile, readdir } from "node:fs/promises";
 import DeepBase from "deepbase";
 import defaults from "./config.js";
 import { classifyContextTimeout } from "./operation-timeout.js";
+import { semanticCandidatesWithFallback } from "./semantic-search.js";
 import { SemanticWarmup } from "./semantic-warmup.js";
 
 const toolName = "context-vault";
@@ -49,7 +50,8 @@ Actions via args.action:
 
 DeepBase remains the source of truth. Lexical recall is available as soon as the
 chat-scoped daemon starts. SeekMix 1.4 warms its derived multilingual semantic index
-in the background, then recall adds semantic candidates to the hybrid ranking.
+in the background, then recall adds semantic candidates to the hybrid ranking. Semantic
+recall has an internal deadline and falls back to lexical results when it expires.
 
 Timed-out reads are marked retry-safe. Timed-out mutations return outcome_uncertain
 and must be checked before any retry.
@@ -62,6 +64,9 @@ function asNumber(value, fallback) {
   return Number.isFinite(parsed) ? parsed : fallback;
 }
 function truthy(value) { return ["1", "true", "yes", "on"].includes(String(value || "").toLowerCase()); }
+function semanticSearchTimeoutMs(config) {
+  return Math.max(100, Math.min(60_000, asNumber(config.SEMANTIC_SEARCH_TIMEOUT_MS, defaults.SEMANTIC_SEARCH_TIMEOUT_MS)));
+}
 function normalizeTags(value) {
   if (Array.isArray(value)) return value.map(String).map((item) => item.trim()).filter(Boolean);
   return String(value || "").split(/[,#]/).map((item) => item.trim()).filter(Boolean);
@@ -315,15 +320,14 @@ async function recall(context, request) {
   const terms = termsFromQuery(query);
   const byId = new Map(eligible.map((memory) => [memory.id, memory]));
   const ranking = new Map();
-  let semantic = { indexed: 0, matches: [] };
-  let semanticError = null;
   const semanticStatus = context.semantic.status;
-  if (semanticStatus === "ready") {
-    try { semantic = await semanticCandidates(context, eligible, query, category, tags, limit); }
-    catch (error) { semanticError = error.message || String(error); }
-  } else if (semanticStatus === "degraded") {
-    semanticError = context.semantic.error;
-  }
+  const semanticResult = await semanticCandidatesWithFallback({
+    status: semanticStatus,
+    statusError: context.semantic.error,
+    timeoutMs: semanticSearchTimeoutMs(context.config),
+    search: () => semanticCandidates(context, eligible, query, category, tags, limit)
+  });
+  const { semantic, semanticError } = semanticResult;
   for (const hit of semantic.matches) {
     const memory = byId.get(hit.data?.id);
     if (memory) ranking.set(memory.id, { memory, semanticSimilarity: hit.similarity, semanticRank: semantic.matches.indexOf(hit) + 1 });
@@ -435,6 +439,7 @@ async function status(context) {
       dimensions: provider?.dimensions || null,
       minSimilarity: asNumber(context.config.MIN_SIMILARITY, defaults.MIN_SIMILARITY),
       semanticCandidates: asNumber(context.config.SEMANTIC_CANDIDATES, defaults.SEMANTIC_CANDIDATES),
+      semanticSearchTimeoutMs: semanticSearchTimeoutMs(context.config),
       semantic
     }
   };

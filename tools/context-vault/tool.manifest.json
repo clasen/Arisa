@@ -1,6 +1,6 @@
 {
   "name": "context-vault",
-  "version": "1.2.0",
+  "version": "1.2.1",
   "description": "Store, search, update, and forget chat-scoped user context with immediate lexical recall, background semantic warmup, hybrid multilingual ranking when ready, and prior Pi session fallback.",
   "entry": "index.js",
   "daemon": {
@@ -31,6 +31,11 @@
       "type": "number",
       "required": false,
       "prompt": "Minimum semantic similarity accepted during memory recall."
+    },
+    "SEMANTIC_SEARCH_TIMEOUT_MS": {
+      "type": "number",
+      "required": false,
+      "prompt": "Maximum time in milliseconds for semantic recall before falling back to lexical results."
     },
     "MODEL": {
       "type": "string",
