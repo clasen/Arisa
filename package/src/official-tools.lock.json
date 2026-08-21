@@ -1,7 +1,7 @@
 {
   "version": 1,
   "repository": "https://github.com/clasen/Arisa.git",
-  "commit": "43b032cbaa5e4ec42345a822119f06a13f49ff8f",
+  "commit": "784839326b4d7002e8329824284275893bc5eed0",
   "tools": {
     "browser-session-bridge": {
       "version": "0.1.0",
@@ -65,14 +65,16 @@
       }
     },
     "gmail-workspace": {
-      "version": "0.1.1",
+      "version": "0.1.2",
       "files": {
         "config.js": "6ad295ec4cedbc936835d8f86c7528e0939ef09d5792c003308d2ee85dc5eea4",
-        "index.js": "c4b1c27a3c5d2309501b695058da73f6287e2a6239f6e2384c05daae8ee25d43",
-        "package.json": "ba87edd5a148da9e99af6b3ab71a0024b86e1a469d56f548c7eeb253bb431f5d",
+        "index.js": "729f345fbd82d8e9525d46412b96efac0a30387477385208a4bb1c83fd794992",
+        "package.json": "991b2a5c03a049faa9363444ff5fd7517fd3556228dd8bad3d0f554cd3e2dd73",
         "secretary-state.js": "afc27732670420bccf1ce56ce715676dd2266de9f2d36a92015a93842755094a",
         "test/secretary-state.test.mjs": "3aea05524a4ad5ebcb79c6aa1db94fcd009ac8ae69414c8f950b32a32af94370",
-        "tool.manifest.json": "2860c5684b9b9532ab4675f5cc5b96238320209086b132a5eda74ba99b6c294a"
+        "tool.manifest.json": "1f9316a957b3a7167e41ece7c2b83f90e69fb390d6dd8c7f99789c538b7a4800",
+        "arguments.js": "b4089006818020cc1cd4e5a4cc6e22242939b45a4b42d216fba2269b8cb99e64",
+        "test/arguments.test.mjs": "dde82737924d75747490f5535bee2420c71838b3e758925132c825ee8c869bad"
       }
     },
     "magnific-mcp": {
@@ -189,18 +191,20 @@
       }
     },
     "telemetry-ledger": {
-      "version": "0.1.0",
+      "version": "0.1.1",
       "files": {
-        "README.md": "4cf1b8c7addaa0f6a2d802a7ae261293822c2662efac9c10afa844f9fbcf4e1d",
+        "README.md": "e74bcf93bc89de151d73a03d60a74a2699436775aa5f93d27cf3dbb59250aec4",
         "analysis.js": "c0effbff3af519b018e59c0460d2c277b4f7e1422ca2680de217bcb5e8a13136",
         "config.js": "ddc8543cde5aeda634b8df60628d0024bb03e65b8710cf4878b4c6a7d953a641",
-        "index.js": "7df14d142a70b725b32ee40741ce1007fd96a080f96a9b2e3e34d917d88621b5",
-        "package.json": "e662652038c1c5a6a2a4502b308ae89e1acbd3cb6d3fc494512a730ebe9ccb8a",
+        "index.js": "87f302af297233f2a1bc89d9be52b1b724478ed72658123ff841fcbcaa13389b",
+        "package.json": "f093c7b767dc042518ff6c19ac302b972a03ba34c45a73545079dd76bf525b75",
         "stats.js": "fc41b065d1f280dc278c53dc4c4baaa385a5bf25416c3e4ff8a153ea624967fb",
         "storage.js": "099187e270ccc2bd6d7300b78a2ee31a837f98694a23a3b40b20a646cdb1db1e",
         "test/telemetry.test.js": "312eef22ad960b19a6fe777aecd520952ae20ed03168edbbef8a0f747bee01c0",
-        "tool.manifest.json": "e4b321a56db9030e5b39b764547769c76bcf282ed019ebba0323bf16a73dbe05",
-        "validation.js": "1a50c75a5ca1bb7249bb8bfc3f2927b31ff4accd0efb56a48c36df5adae78f61"
+        "tool.manifest.json": "960b714ead9b0491581bf9f0f4dc882ce58bfc29cef4b2f5267cd0dbc9c37d48",
+        "validation.js": "1a50c75a5ca1bb7249bb8bfc3f2927b31ff4accd0efb56a48c36df5adae78f61",
+        "output.js": "e932098d51efdb99f8c39faaae0c5574d7e263f0e8c0875fc57e7a4311e715ea",
+        "test/output.test.js": "c18ae93cdf74de3748c1571833dfc1063ec6690219b03fbc7772bae504b6259f"
       }
     },
     "trash": {
@@ -230,17 +234,18 @@
       }
     },
     "x-dm": {
-      "version": "0.2.0",
+      "version": "0.2.1",
       "toolDependencies": {
         "browser-session-bridge": "^0.1.0"
       },
       "files": {
-        "config.js": "69a2dcccd10aa2f1ddcc24d52f4ce8fe4a6f5f5a85be64abbdf9dc9e19de0cd4",
-        "index.js": "83e3eb7fbeea8a5183303e0e56b1d6854ca7ccb800e4cd2ad689a5f13637380f",
-        "package.json": "3a76a921b1e78e91b1d2a5ae1926b298dfd6b4ee3f716d5382159b474ee400f4",
+        "config.js": "ac6eb70c1bc94230bc6df89fc73fc22ac53ccab49926abc3c453f85aca220596",
+        "index.js": "d89f70fed0754c61bd7ce31739304e4512ddabf16bc79a1488c164e32d31672d",
+        "package.json": "af4d72a99318d04b522773b8489288d191210435ae5543b564e2ce747164386c",
         "README.md": "503b0ed25ef9a8df3079523ea653178e6e029854b4d199cb8d20be82cc837f9e",
         "test/x-dm.test.mjs": "06352996e14777358eb62ad5e5d757b0dab5c0696927ed54ff40a5b7cdefcfd0",
-        "tool.manifest.json": "177e0abac770f89a0f06aa445363393fa38e7f05ad7cd773ea907fa56faed505"
+        "tool.manifest.json": "227dc3c4a48948cf72544d4b99ba2c3c5a255f8425e795304881ede73d82d011",
+        "browser-cache.js": "f71c20f9ab5f04d9d46c5e2551b348d47baba89a10a07173070298098a6d5551"
       }
     }
   }
