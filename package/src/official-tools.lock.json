@@ -1,7 +1,7 @@
 {
   "version": 1,
   "repository": "https://github.com/clasen/Arisa.git",
-  "commit": "784839326b4d7002e8329824284275893bc5eed0",
+  "commit": "e69c8c17177bd9c31d89d925d84b8484ce5b3ee2",
   "tools": {
     "browser-session-bridge": {
       "version": "0.1.0",
@@ -78,23 +78,24 @@
       }
     },
     "magnific-mcp": {
-      "version": "0.1.1",
+      "version": "0.2.0",
       "toolDependencies": {
         "mcp-client": "^0.1.0"
       },
       "files": {
-        "README.md": "519b68d10c80112f475ab173394e937b0fc5930758415c1fc65ea2f5536b6371",
+        "README.md": "31246c9263fc47c7c53476dd7f8e200d66e6550ffd440cd61d4c86782c0e8427",
         "config.js": "98a629781a1b2541806050952aa78a1e6e1b1671a6f1df7ba36c70dd116936a7",
         "delivery-claims.js": "52f05a5bd1ece1ab21f7d9a49f362f9c55f101ef5723efd642dbecf0236921cd",
+        "generation-request.js": "a6daa889b68fa188111b4389c6446daba87fc46fbddcf4bcccba817cf3f0b607",
         "generation-watch-close.js": "0dd780280eef870d2f11cb1800e6e9de19e5ead7b9d02b9983852cc8ddbdc79b",
         "generation-watch-plan.js": "eb60660341f254adc224181ca19dbbb969ef1d676aeaab60b71a8567f52648fe",
-        "index.js": "0dcbd84ad03ab59919df57081d34a45c3a8d59b3c37ac31249409210ae7107e6",
+        "index.js": "cb732f5353b85167efe7a674c64baff9036810a9e62022036a127229cbadd15a",
         "magnific-api.js": "39fa9a122577029111965c3e8487565c88ce46b61dec5ca685acf1c76cd3b636",
         "network.js": "b45e43b49eea98ca7d80921ebfa6daf8b0a85d2079d4653f9eda682bc82101ae",
-        "package.json": "9c44eb43a3555cf79bd327318f9a30d3060f22dd2fd534923e303cca1eed7de9",
+        "package.json": "f43620df319671f01ac2c3b8343f7a2316a8252d45a2089bc72fb9bcd062d89b",
         "state-store.js": "c3ee744509f7a6be251cd895406bd1c70827f53cbdc1ac9d1c2a6e48479bfe1e",
-        "test/magnific-mcp.test.js": "7a61dd19a2f6f9f48213cabf0de6e87e0b6fb73a94f0ea9dbfe9c8568c2cc32d",
-        "tool.manifest.json": "ff886d95250d279eff097430e6f89405a2bdd488d5f0949277cbc3f57f918950"
+        "test/magnific-mcp.test.js": "3af971e5a92cf6bd34111b159723892b3a5310952b036386ae98d3592708ddd0",
+        "tool.manifest.json": "846df18b51c3ae8b0f03571f412ca28e4c1e20d2738d50c63f7f7a0699a08114"
       }
     },
     "master-slave": {
