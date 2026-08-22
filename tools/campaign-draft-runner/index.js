@@ -2,6 +2,12 @@ import { mkdir, open, readFile, rename, rm, stat, writeFile } from "node:fs/prom
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import defaults from "./config.js";
+import {
+  campaignStateFingerprint,
+  canArmUnchangedBatchSkip,
+  evaluateUnchangedBatch,
+  recordFullBatchReview
+} from "./batch-skip.js";
 import { assessSearchQuality, recordSearchQuality } from "./search-quality.js";
 import { getFactSheetStatus, updateApprovedFacts } from "./product-facts.js";
 import { checkExhaustedSources, recordExhaustedSources } from "./source-exhaustion.js";
@@ -24,7 +30,7 @@ Usage:
   node index.js run --request-file <json>
 
 Actions via args.action:
-  run-batch   Reconcile Gmail Sent, verify contacts selected by a profile, and create Gmail drafts only. args: profile?, limit?, dryRun?, untilDrafted?, retryDelaySeconds?, maxAttempts?, maxRuntimeSeconds?
+  run-batch   Reconcile Gmail Sent, skip unchanged empty batches, verify contacts, and create Gmail drafts only. args: profile?, limit?, dryRun?, forceReview?, untilDrafted?, retryDelaySeconds?, maxAttempts?, maxRuntimeSeconds?
   reconcile-sent Reconcile manually sent Gmail messages into campaign state. args: profile?
   assess-search-quality Score the first search tranche and persist a five-cycle measurement window. args: profile?, searches=[{query,text}]
   sources-check Return which coverage/contact URLs remain exhausted within their 30-day window. args: profile?, urls=<JSON array>
@@ -39,6 +45,7 @@ Profiles live under the chat-scoped state directory:
 
 Profiles may enable web research to cite relevant articles or videos in the opening paragraph.
 When discovery.creativeDiscovery.enabled is true, zero-candidate runs automatically rotate through comparable titles, adjacent themes, audiences, and contact intents before returning no result.
+Clean empty runs arm a state fingerprint: identical later runs skip expensive discovery until state changes or the bounded periodic review is due. Use forceReview=true to bypass the skip once.
 The runner is generic. Campaign-specific copy, keywords, language detection, and tool names belong in the profile JSON.`);
 }
 
@@ -458,7 +465,7 @@ function compactSeenUrls(seenUrls, limit = 3000) {
 async function discoverContacts(arisa, chatId, profile, allContacts, draftRecipients, needed, options = {}) {
   const settings = profile.discovery;
   const dryRun = Boolean(options.dryRun);
-  const emptyResult = { queries: [], searches: 0, pagesOpened: 0, found: 0, added: [], skippedUsed: 0, skippedSeen: 0, rejectedEmails: 0 };
+  const emptyResult = { queries: [], searches: 0, pagesOpened: 0, found: 0, added: [], skippedUsed: 0, skippedSeen: 0, rejectedEmails: 0, errors: 0 };
   if (profile.selection?.agentDecidesEligibility === true) {
     return { ...emptyResult, skipped: "agent-review-required" };
   }
@@ -492,6 +499,7 @@ async function discoverContacts(arisa, chatId, profile, allContacts, draftRecipi
   let skippedUsed = 0;
   let skippedSeen = 0;
   let rejectedEmails = 0;
+  let errors = 0;
 
   for (const query of queries) {
     if (added.length >= needed || pagesOpened >= pageBudget) break;
@@ -509,6 +517,7 @@ async function discoverContacts(arisa, chatId, profile, allContacts, draftRecipi
       stats.results += results.length;
     } catch (error) {
       stats.errors += 1;
+      errors += 1;
       stats.lastError = clean(error?.message || error).slice(0, 300);
       queryStats[query] = stats;
       continue;
@@ -536,6 +545,7 @@ async function discoverContacts(arisa, chatId, profile, allContacts, draftRecipi
         seenUrls[result.url] = new Date().toISOString();
       } catch (error) {
         stats.errors += 1;
+        errors += 1;
         continue;
       }
       if (!pageLooksEditorial(result, page, settings)) continue;
@@ -551,6 +561,8 @@ async function discoverContacts(arisa, chatId, profile, allContacts, draftRecipi
             seenUrls[contactUrl] = new Date().toISOString();
             pageText += `\n${contactPage.text || ""}`;
           } catch {
+            stats.errors += 1;
+            errors += 1;
             seenUrls[contactUrl] = new Date().toISOString();
           }
         }
@@ -573,6 +585,8 @@ async function discoverContacts(arisa, chatId, profile, allContacts, draftRecipi
           break;
         } catch {
           rejectedEmails += 1;
+          stats.errors += 1;
+          errors += 1;
         }
       }
       if (!prospect) continue;
@@ -592,6 +606,7 @@ async function discoverContacts(arisa, chatId, profile, allContacts, draftRecipi
           });
         } catch (error) {
           stats.errors += 1;
+          errors += 1;
           continue;
         }
       }
@@ -623,12 +638,12 @@ async function discoverContacts(arisa, chatId, profile, allContacts, draftRecipi
     state.runs = [...(state.runs || []), {
       at: new Date().toISOString(), mode: creativeMode ? "creative" : "standard",
       queries, searches, pagesOpened, found: added.length,
-      skippedSeen, skippedUsed, rejectedEmails
+      skippedSeen, skippedUsed, rejectedEmails, errors
     }].slice(-200);
     state.updatedAt = new Date().toISOString();
     await saveDiscoveryState(file, state);
   }
-  return { mode: creativeMode ? "creative" : "standard", queries, searches, pagesOpened, found: added.length, added, skippedUsed, skippedSeen, rejectedEmails, archivedQueries: archivedThisRun, dryRun };
+  return { mode: creativeMode ? "creative" : "standard", queries, searches, pagesOpened, found: added.length, added, skippedUsed, skippedSeen, rejectedEmails, errors, archivedQueries: archivedThisRun, dryRun };
 }
 function researchTitleUsable(value) {
   const title = decodeHtmlEntities(value).replace(/[\r\n]+/g, " ").trim();
@@ -970,6 +985,41 @@ function buildApprovedFactsBody({ renderedBody, opening, profile, language, appr
   ].filter(Boolean).join("\n\n");
 }
 
+async function captureBatchState(arisa, chatId, profile) {
+  const stateDir = getChatToolStateDir(chatId, toolName);
+  const [campaign, draftRecipients, discoveryState, factStatus] = await Promise.all([
+    runTool(arisa, profile.campaignTool || defaults.CAMPAIGN_TOOL, { action: "status" }),
+    gmailDraftRecipients(arisa, profile),
+    readDiscoveryState(chatId).then((result) => result.data),
+    profile.factSheet ? getFactSheetStatus(stateDir, profile) : null
+  ]);
+  return {
+    fingerprint: campaignStateFingerprint({
+      profile,
+      campaign,
+      draftRecipients,
+      discovery: discoveryState,
+      factStatus
+    }),
+    draftRecipients
+  };
+}
+
+function batchSkipSettings(config, profile, args) {
+  const profileSettings = profile.batchSkip || {};
+  const configuredMs = Number(profileSettings.forceReviewAfterMinutes) > 0
+    ? Number(profileSettings.forceReviewAfterMinutes) * 60_000
+    : Number(config.UNCHANGED_BATCH_FORCE_MS || defaults.UNCHANGED_BATCH_FORCE_MS);
+  return {
+    enabled: truthy(config.UNCHANGED_BATCH_SKIP_ENABLED)
+      && profileSettings.enabled !== false
+      && !truthy(args.dryRun)
+      && !truthy(args.untilDrafted),
+    force: truthy(args.forceReview || args.force),
+    forceReviewAfterMs: Math.max(15 * 60_000, Math.min(7 * 86_400_000, configuredMs))
+  };
+}
+
 async function createDraft(arisa, profile, contact, approvedFacts = null) {
   const language = detectLanguage(contact, profile);
   const template = profile.templates?.[language] || profile.templates?.[profile.defaultLanguage || "en"];
@@ -1075,9 +1125,49 @@ async function handleRun(request) {
     const sentReconciliation = dryRun
       ? { enabled: profile.sentReconciliation?.enabled !== false, skipped: "dry-run" }
       : await reconcileSentMessages(arisa, request.chatId, profile);
+    const stateDir = getChatToolStateDir(request.chatId, toolName);
+    const skipSettings = batchSkipSettings(config, profile, args);
+    let batchSnapshot = null;
+    let batchSkip = { enabled: skipSettings.enabled, reason: skipSettings.enabled ? "preflight-unavailable" : "disabled" };
+    if (skipSettings.enabled) {
+      try {
+        batchSnapshot = await captureBatchState(arisa, request.chatId, profile);
+        batchSkip = await evaluateUnchangedBatch({
+          stateDir,
+          profileName: profile.name,
+          fingerprint: batchSnapshot.fingerprint,
+          forceReviewAfterMs: skipSettings.forceReviewAfterMs,
+          force: skipSettings.force
+        });
+        if (batchSkip.skip) {
+          const summary = batchSkip.lastFullSummary || {};
+          return {
+            action: "run-batch",
+            profile: profile.name,
+            dryRun: false,
+            skippedUnchanged: true,
+            batchSkip,
+            sentReconciliation,
+            candidates: Number(summary.candidates || 0),
+            eligiblePool: 0,
+            poolTarget: Number(summary.poolTarget || limit),
+            discovery: { skipped: "unchanged-state", found: 0, errors: 0 },
+            creativeDiscovery: null,
+            selected: [],
+            verified: 0,
+            drafted: 0,
+            sent: 0,
+            drafts: [],
+            skipped: []
+          };
+        }
+      } catch (error) {
+        batchSkip = { enabled: true, skip: false, reason: "preflight-unavailable", error: clean(error?.message || error).slice(0, 300) };
+      }
+    }
     let allContacts = await listAllContacts(arisa, profile);
     let candidateContacts = await listContacts(arisa, profile);
-    const draftRecipients = await gmailDraftRecipients(arisa, profile);
+    const draftRecipients = batchSnapshot?.draftRecipients || await gmailDraftRecipients(arisa, profile);
     const poolTarget = Math.max(limit, Number(profile.discovery?.minEligiblePool || limit));
     const candidatesPerDraft = Math.max(1, Number(profile.candidatesPerDraft || 6));
     let eligiblePool = chooseContacts(allContacts, candidateContacts, draftRecipients, profile, poolTarget, excludedEmails);
@@ -1133,7 +1223,7 @@ async function handleRun(request) {
       }
     }
 
-    return {
+    const output = {
       action: "run-batch",
       profile: profile.name,
       dryRun,
@@ -1148,8 +1238,31 @@ async function handleRun(request) {
       drafted: drafted.length,
       sent: 0,
       drafts: drafted,
-      skipped: skipped.slice(0, 20)
+      skipped: skipped.slice(0, 20),
+      batchSkip
     };
+    if (skipSettings.enabled && canArmUnchangedBatchSkip(output)) {
+      try {
+        const finalSnapshot = await captureBatchState(arisa, request.chatId, profile);
+        const recorded = await recordFullBatchReview({
+          stateDir,
+          profileName: profile.name,
+          fingerprint: finalSnapshot.fingerprint,
+          summary: { candidates: output.candidates, eligiblePool: output.eligiblePool, poolTarget: output.poolTarget }
+        });
+        output.batchSkip = {
+          enabled: true,
+          skip: false,
+          reason: batchSkip.reason,
+          armed: true,
+          lastFullReviewAt: recorded.lastFullReviewAt,
+          forceReviewAfterMs: skipSettings.forceReviewAfterMs
+        };
+      } catch (error) {
+        output.batchSkip = { enabled: true, skip: false, reason: "state-record-failed", error: clean(error?.message || error).slice(0, 300) };
+      }
+    }
+    return output;
   } finally {
     await releaseRunLock(lock);
   }

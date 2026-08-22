@@ -8,6 +8,7 @@ The tool can:
 - select unused contacts from `pr-campaign`;
 - discover public editorial contacts through `web-browser`, following same-site contact and staff links when result pages do not expose an address;
 - reject previously used recipients and outlets;
+- skip expensive unchanged empty batches while forcing bounded periodic reviews;
 - verify email domains before drafting;
 - research coverage on the contact's own site;
 - render localized subject and body templates;
@@ -108,7 +109,15 @@ Minimal profile structure:
 
 Use `action: "status"` to reconcile Gmail Sent, then inspect campaign and Gmail draft counts. The first reconciliation scans the configured sent-mail query. Later runs use the newest Gmail timestamp and persist message IDs in chat-scoped state. This records drafts sent manually as contacted without reopening them or changing terminal statuses such as bounced, opted-out, wrong-fit, and successful publication.
 
-When `TELEMETRY_ENABLED` is true and `telemetry-ledger` is installed, each run records business-operation latency and confirmed non-dry-run draft counts. Telemetry is optional and fail-open: recording failures never change the campaign result. The integration emits only bounded aggregate dimensions such as profile, action, and status; it never records addresses, copy, or source content.
+When `TELEMETRY_ENABLED` is true and `telemetry-ledger` is installed, each run records business-operation latency, confirmed non-dry-run draft counts, and whether an unchanged batch was skipped. Telemetry is optional and fail-open: recording failures never change the campaign result. The integration emits only bounded aggregate dimensions such as profile, action, and status; it never records addresses, copy, or source content.
+
+## Unchanged batch skipping
+
+After a clean full run finds no eligible contacts, creates no drafts, and reports no discovery errors, the runner stores a SHA-256 fingerprint of the profile, campaign counters, Gmail draft recipients, discovery state, and approved fact state. A later live `run-batch` still performs incremental Sent reconciliation, then skips contact loading, web discovery, verification, research, and draft work when that fingerprint is unchanged.
+
+State changes invalidate the fingerprint immediately. The default forced-review interval is six hours, bounded between 15 minutes and seven days, so external pages and same-count contact edits are eventually reconsidered. Set `UNCHANGED_BATCH_FORCE_MS` per chat, disable the feature with `UNCHANGED_BATCH_SKIP_ENABLED=false`, or use `forceReview=true` for one invocation. A profile may override the interval with `batchSkip.forceReviewAfterMinutes` or disable it with `batchSkip.enabled=false`.
+
+Dry runs and `untilDrafted` loops never use the skip. Runs with discovery errors or retryable selected contacts do not arm it. Skip state is chat/profile scoped and contains only a fingerprint, timestamps, aggregate counters, and a compact summary.
 
 Use `action: "reconcile-sent"` to run the same synchronization without discovery or drafting. `gmail-workspace` paginates sent mail, fetches message metadata concurrently, and passes recipients, subjects, timestamps, and Gmail message IDs to `pr-campaign` in one batch.
 

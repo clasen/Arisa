@@ -34,6 +34,14 @@ export function buildCampaignTelemetryRecords({ request, output, elapsedMs, stat
         unit: "draft",
         source: "campaign-draft-runner",
         dimensions: { producer: "campaign-draft-runner", campaign, draft_type: "campaign" }
+      },
+      {
+        metric: "campaign.batch.skipped_unchanged",
+        kind: "counter",
+        value: output.skippedUnchanged === true ? 1 : 0,
+        unit: "batch",
+        source: "campaign-draft-runner",
+        dimensions: { campaign, status }
       }
     );
   }

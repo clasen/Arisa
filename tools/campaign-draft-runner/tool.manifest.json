@@ -1,16 +1,18 @@
 {
   "name": "campaign-draft-runner",
-  "version": "0.3.3",
+  "version": "0.4.0",
   "toolDependencies": { "pr-campaign": "^0.1.0", "gmail-workspace": "^0.1.0" },
-  "description": "Run configurable outreach draft batches from chat-scoped profiles. Measures search quality, skips exhausted sources for 30 days, adapts reviewer-first discovery, maintains owner-approved product facts, validates grounded provenance and language, records optional operational telemetry, and creates Gmail drafts only; never sends mail.",
+  "description": "Run configurable outreach draft batches from chat-scoped profiles. Skips unchanged empty batches with periodic forced review, measures search quality, avoids exhausted sources, validates approved facts and provenance, records telemetry, and creates Gmail drafts only; never sends mail.",
   "entry": "index.js",
   "input": ["text/plain", "application/json"],
   "output": ["application/json", "text/plain"],
   "category": "communication",
-  "keywords": ["campaign", "contacts", "discovery", "drafts", "gmail", "metrics", "outreach", "pr", "quality", "facts", "research", "source-exhaustion", "personalization", "provenance", "preflight", "telemetry", "configurable"],
+  "keywords": ["campaign", "contacts", "discovery", "drafts", "fingerprint", "gmail", "metrics", "no-change", "outreach", "pr", "quality", "facts", "research", "source-exhaustion", "personalization", "provenance", "preflight", "telemetry", "configurable"],
   "configSchema": {
     "DEFAULT_LIMIT": { "type": "number", "required": false, "prompt": "Default number of drafts per batch." },
     "DEFAULT_PROFILE": { "type": "string", "required": false, "prompt": "Default profile name." },
+    "UNCHANGED_BATCH_SKIP_ENABLED": { "type": "boolean", "required": false, "prompt": "Skip expensive live batches when the campaign fingerprint is unchanged after a clean empty review." },
+    "UNCHANGED_BATCH_FORCE_MS": { "type": "number", "required": false, "prompt": "Maximum time between full campaign reviews even when the fingerprint is unchanged." },
     "TELEMETRY_ENABLED": { "type": "boolean", "required": false, "prompt": "Record bounded batch telemetry when telemetry-ledger is available." },
     "TELEMETRY_TOOL": { "type": "string", "required": false, "prompt": "Optional telemetry tool name. Leave empty to disable telemetry." }
   },
