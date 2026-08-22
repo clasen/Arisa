@@ -1,6 +1,6 @@
 {
   "name": "campaign-draft-runner",
-  "version": "0.4.1",
+  "version": "0.4.2",
   "toolDependencies": { "pr-campaign": "^0.1.0", "gmail-workspace": "^0.1.0" },
   "description": "Run configurable outreach draft batches from chat-scoped profiles. Skips unchanged empty batches with periodic forced review, measures search quality, avoids exhausted sources, validates approved facts and provenance, records telemetry, and creates Gmail drafts only; never sends mail.",
   "entry": "index.js",

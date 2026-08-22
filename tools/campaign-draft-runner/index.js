@@ -1145,6 +1145,8 @@ async function handleRun(request) {
             profile: profile.name,
             dryRun: false,
             skippedUnchanged: true,
+            stopCycle: true,
+            instruction: "Stop this campaign cycle because upstream state is unchanged. Do not run manual discovery, web searches, or contact lookups.",
             batchSkip,
             sentReconciliation,
             candidates: Number(summary.candidates || 0),

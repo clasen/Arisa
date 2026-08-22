@@ -115,6 +115,8 @@ When `TELEMETRY_ENABLED` is true and `telemetry-ledger` is installed, each run r
 
 After a clean full run finds no eligible contacts, creates no drafts, and reports no discovery errors, the runner stores a SHA-256 fingerprint of the profile, campaign counters, Gmail draft recipients, discovery state, and approved fact state. A later live `run-batch` still performs incremental Sent reconciliation, then skips contact loading, web discovery, verification, research, and draft work when that fingerprint is unchanged.
 
+Skipped output sets `stopCycle=true` and includes an explicit instruction not to continue with manual discovery, so agent-orchestrated schedules stop as well as direct tool callers.
+
 State changes invalidate the fingerprint immediately. The default forced-review interval is six hours, bounded between 15 minutes and seven days, so external pages and same-count contact edits are eventually reconsidered. Set `UNCHANGED_BATCH_FORCE_MS` per chat, disable the feature with `UNCHANGED_BATCH_SKIP_ENABLED=false`, or use `forceReview=true` for one invocation. A profile may override the interval with `batchSkip.forceReviewAfterMinutes` or disable it with `batchSkip.enabled=false`.
 
 Dry runs never use the skip. `untilDrafted` loops honor it because unchanged upstream state cannot produce a new result; use `forceReview=true` to bypass it. Runs with discovery errors or retryable selected contacts do not arm it. Skip state is chat/profile scoped and contains only a fingerprint, timestamps, aggregate counters, and a compact summary.
