@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { mkdtemp, rm } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
-import { assessSearchQuality, buildApprovedFactsBody, checkExhaustedSources, discoverContacts, getFactSheetStatus, isSelectable, normalizeCanonicalUrls, recordExhaustedSources, runTool, updateApprovedFacts, validateDraftContent } from "../index.js";
+import { assessSearchQuality, batchSkipSettings, buildApprovedFactsBody, checkExhaustedSources, discoverContacts, getFactSheetStatus, isSelectable, normalizeCanonicalUrls, recordExhaustedSources, runTool, updateApprovedFacts, validateDraftContent } from "../index.js";
 import { classifyToolTimeout } from "../operation-timeout.js";
 
 const contact = {
@@ -116,6 +116,13 @@ test("tool timeouts distinguish uncertain mutations from retry-safe reads", () =
   assert.equal(read.status, "timed_out");
   assert.equal(read.resolution.type, "retry_safe");
   assert.equal(classifyToolTimeout(new Error("validation failed"), "pr-campaign", "create-draft"), null);
+});
+
+test("unchanged skipping applies to untilDrafted runs but not dry runs", () => {
+  const config = { UNCHANGED_BATCH_SKIP_ENABLED: true, UNCHANGED_BATCH_FORCE_MS: 21600000 };
+  assert.equal(batchSkipSettings(config, {}, { untilDrafted: "true" }).enabled, true);
+  assert.equal(batchSkipSettings(config, {}, { dryRun: "true" }).enabled, false);
+  assert.equal(batchSkipSettings(config, { batchSkip: { enabled: false } }, {}).enabled, false);
 });
 
 test("agent eligibility bypasses positive keyword gates", () => {

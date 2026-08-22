@@ -117,7 +117,7 @@ After a clean full run finds no eligible contacts, creates no drafts, and report
 
 State changes invalidate the fingerprint immediately. The default forced-review interval is six hours, bounded between 15 minutes and seven days, so external pages and same-count contact edits are eventually reconsidered. Set `UNCHANGED_BATCH_FORCE_MS` per chat, disable the feature with `UNCHANGED_BATCH_SKIP_ENABLED=false`, or use `forceReview=true` for one invocation. A profile may override the interval with `batchSkip.forceReviewAfterMinutes` or disable it with `batchSkip.enabled=false`.
 
-Dry runs and `untilDrafted` loops never use the skip. Runs with discovery errors or retryable selected contacts do not arm it. Skip state is chat/profile scoped and contains only a fingerprint, timestamps, aggregate counters, and a compact summary.
+Dry runs never use the skip. `untilDrafted` loops honor it because unchanged upstream state cannot produce a new result; use `forceReview=true` to bypass it. Runs with discovery errors or retryable selected contacts do not arm it. Skip state is chat/profile scoped and contains only a fingerprint, timestamps, aggregate counters, and a compact summary.
 
 Use `action: "reconcile-sent"` to run the same synchronization without discovery or drafting. `gmail-workspace` paginates sent mail, fetches message metadata concurrently, and passes recipients, subjects, timestamps, and Gmail message IDs to `pr-campaign` in one batch.
 

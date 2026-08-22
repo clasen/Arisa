@@ -1013,8 +1013,7 @@ function batchSkipSettings(config, profile, args) {
   return {
     enabled: truthy(config.UNCHANGED_BATCH_SKIP_ENABLED)
       && profileSettings.enabled !== false
-      && !truthy(args.dryRun)
-      && !truthy(args.untilDrafted),
+      && !truthy(args.dryRun),
     force: truthy(args.forceReview || args.force),
     forceReviewAfterMs: Math.max(15 * 60_000, Math.min(7 * 86_400_000, configuredMs))
   };
@@ -1341,4 +1340,4 @@ async function main() {
 const isDirectRun = process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url);
 if (isDirectRun) main();
 
-export { assessSearchQuality, buildApprovedFactsBody, checkExhaustedSources, discoverContacts, getFactSheetStatus, isSelectable, normalizeCanonicalUrls, recordExhaustedSources, runTool, updateApprovedFacts, validateDraftContent };
+export { assessSearchQuality, batchSkipSettings, buildApprovedFactsBody, checkExhaustedSources, discoverContacts, getFactSheetStatus, isSelectable, normalizeCanonicalUrls, recordExhaustedSources, runTool, updateApprovedFacts, validateDraftContent };
