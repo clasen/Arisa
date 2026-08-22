@@ -1,7 +1,7 @@
 {
   "version": 1,
   "repository": "https://github.com/clasen/Arisa.git",
-  "commit": "26fc0c4603b4736f43238d6bf2e9f21826b95534",
+  "commit": "ddc770b568f729ea700ec228f37f36cad419b3c4",
   "tools": {
     "browser-session-bridge": {
       "version": "0.1.0",
@@ -31,16 +31,16 @@
       }
     },
     "campaign-draft-runner": {
-      "version": "0.4.0",
+      "version": "0.4.1",
       "toolDependencies": {
         "pr-campaign": "^0.1.0",
         "gmail-workspace": "^0.1.0"
       },
       "files": {
-        "README.md": "02628cc2cd212f471c74593395ae3be79679316f4393a540dc3474c391ae1e93",
+        "README.md": "7dac54edfca64beb05cfa9774f7800fb6fe20b27fa0d6bd28f9ce67427dda528",
         "batch-skip.js": "c14967108727688183f3475249e4e811d21dd816052da002e6f42377c3fbe0a7",
         "config.js": "6e2045f62a6e280669997a61923d97409293d41f8af5c9cb01cb0e5667c10435",
-        "index.js": "2fe4fe82aefadf4c243373f08d22d5dadc004960a13f6f85f30e9c7aee7d41de",
+        "index.js": "8efafc4e1f5b7cbecd99d59a82e14ac923e0527776ec797ab26e45980e28a261",
         "operation-timeout.js": "9b1ced30ec9ed710bb9118b91f6f3feded5111a08e1e21abf163e4cfb91d7ad2",
         "package.json": "a25b7ed1dd2c30cd68c3c10feb8ee1752cac8cd55cd4344690ffad649e231ec1",
         "product-facts.js": "69339e20e7b70a6b9833878d72b10b70ea4ede4aa448097975d0961b6aaced59",
@@ -48,9 +48,9 @@
         "source-exhaustion.js": "407f940f5205eb01715a797672d0dad8bd0b0b897024b5fcb87052a062ecd054",
         "telemetry.js": "984772e73d1cbb761771d6f62954a604333a301182ee74368a41ffab762da367",
         "test/batch-skip.test.js": "f3d8dba98a4d4cf4270f850ccbd99be560d52ef89f52b63b32e478dd97426e4d",
-        "test/selection-policy.test.js": "27dacdc6ac3b1c570229ef624267c5bf7e4b9606dbb71214c2a451a30ac3762b",
+        "test/selection-policy.test.js": "77565bc174291a47b8a9816e2a3ac36e2a0c0ba05e035112bb6b1c8308f4ecbc",
         "test/telemetry.test.js": "daa84b83658226ecd979f15d4e12d94740ffe5280d467ad29677fc1d77734a5b",
-        "tool.manifest.json": "44e71d10faa50b514fbde0372f951a0e811c27a5d9c732e171fbf854655a5da1"
+        "tool.manifest.json": "7811b7a37b5ba33b8bfcd29ddde2ebeeaeed9be35d44e7a892e744b78e79373b"
       }
     },
     "creator-scout": {
