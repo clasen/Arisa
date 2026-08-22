@@ -1,7 +1,7 @@
 {
   "version": 1,
   "repository": "https://github.com/clasen/Arisa.git",
-  "commit": "ddc770b568f729ea700ec228f37f36cad419b3c4",
+  "commit": "eefdcdca9b446a918ff71bfd84d0127c1db47ff1",
   "tools": {
     "browser-session-bridge": {
       "version": "0.1.0",
@@ -31,16 +31,16 @@
       }
     },
     "campaign-draft-runner": {
-      "version": "0.4.1",
+      "version": "0.4.2",
       "toolDependencies": {
         "pr-campaign": "^0.1.0",
         "gmail-workspace": "^0.1.0"
       },
       "files": {
-        "README.md": "7dac54edfca64beb05cfa9774f7800fb6fe20b27fa0d6bd28f9ce67427dda528",
+        "README.md": "8ed7523d974f9fc091ee79000ef2916fc96988729ec306ae8412786d43545c54",
         "batch-skip.js": "c14967108727688183f3475249e4e811d21dd816052da002e6f42377c3fbe0a7",
         "config.js": "6e2045f62a6e280669997a61923d97409293d41f8af5c9cb01cb0e5667c10435",
-        "index.js": "8efafc4e1f5b7cbecd99d59a82e14ac923e0527776ec797ab26e45980e28a261",
+        "index.js": "71661a9bc9c5bc581a014324a1608bf6497b9ecf5bc5db261189bb11de08cac2",
         "operation-timeout.js": "9b1ced30ec9ed710bb9118b91f6f3feded5111a08e1e21abf163e4cfb91d7ad2",
         "package.json": "a25b7ed1dd2c30cd68c3c10feb8ee1752cac8cd55cd4344690ffad649e231ec1",
         "product-facts.js": "69339e20e7b70a6b9833878d72b10b70ea4ede4aa448097975d0961b6aaced59",
@@ -50,7 +50,7 @@
         "test/batch-skip.test.js": "f3d8dba98a4d4cf4270f850ccbd99be560d52ef89f52b63b32e478dd97426e4d",
         "test/selection-policy.test.js": "77565bc174291a47b8a9816e2a3ac36e2a0c0ba05e035112bb6b1c8308f4ecbc",
         "test/telemetry.test.js": "daa84b83658226ecd979f15d4e12d94740ffe5280d467ad29677fc1d77734a5b",
-        "tool.manifest.json": "7811b7a37b5ba33b8bfcd29ddde2ebeeaeed9be35d44e7a892e744b78e79373b"
+        "tool.manifest.json": "a90fb10acd5a4a2644a3abd0c7664d44210057b77f787bf1bd25a33f05d23db6"
       }
     },
     "creator-scout": {
