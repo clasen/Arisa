@@ -3,6 +3,7 @@ import { access, mkdir, readFile, readdir, rename, rm } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import defaults from "./config.js";
+import { installStagedDependencies } from "./dependency-installer.js";
 import {
   applyPlan,
   assertStagingFits,
@@ -43,7 +44,7 @@ Safety behavior:
   - Local-only files and non-conflicting local changes are preserved.
   - Conflicting or untracked differences are refused by default.
   - To explicitly replace divergent official-managed files, args.confirmDiverged must exactly equal args.name.
-  - Dependencies and CLI validation run in staging before deployment.
+  - Dependencies are installed inside an isolated staging package and verified before CLI validation.
   - The current tool directory is moved through the essential trash tool before atomic replacement.
   - Every successful update returns a trash backup id for undo.
 `);
@@ -188,23 +189,10 @@ async function inspectInstalledCatalog(context) {
 }
 
 async function installDependencies(stageDir, config) {
-  const packageFile = path.join(stageDir, "package.json");
-  if (!(await exists(packageFile))) return { installed: false };
-  const packageJson = JSON.parse(await readFile(packageFile, "utf8"));
-  const dependencyCount = Object.keys({
-    ...(packageJson.dependencies || {}),
-    ...(packageJson.optionalDependencies || {}),
-    ...(packageJson.devDependencies || {})
-  }).length;
-  if (!dependencyCount) return { installed: false };
-  const timeoutMs = parsePositive(config.commandTimeoutMs, 180000);
-  try {
-    await runCommand("pnpm", ["install", "--lockfile=false"], { cwd: stageDir, timeoutMs });
-    return { installed: true, manager: "pnpm" };
-  } catch (pnpmError) {
-    await runCommand("npm", ["install", "--no-package-lock"], { cwd: stageDir, timeoutMs });
-    return { installed: true, manager: "npm", fallbackFrom: pnpmError.message };
-  }
+  return installStagedDependencies(stageDir, {
+    runCommand,
+    timeoutMs: parsePositive(config.commandTimeoutMs, 180000)
+  });
 }
 
 async function validateStage(stageDir, expectedName, config) {
