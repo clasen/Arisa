@@ -7,6 +7,7 @@ import defaults from "./config.js";
 import { claimDelivery, deliveryClaimed } from "./delivery-claims.js";
 import { cancelPendingGenerationWatches, claimTerminalEvent } from "./generation-watch-close.js";
 import { generationWatchTasks } from "./generation-watch-plan.js";
+import { startGeneration } from "./generation-request.js";
 import { callMagnific, findAll, findFirst, findUpload } from "./magnific-api.js";
 import { transfer } from "./network.js";
 import { pruneState, readState, writeState } from "./state-store.js";
@@ -26,7 +27,7 @@ Usage:
 Actions:
   balance          Read plan and credit balance without charging credits
   modes              Read available upscale modes and parameters
-  generate           Generate 1–8 images directly and monitor them reactively. args: prompt, mode?, aspectRatio?, count?
+  generate           Generate 1–8 images and monitor them reactively. An attached image artifact is used as a reference. args: prompt, mode?, aspectRatio?, count?
   watch-generation   Internal interruption-safe generation checker
   collect-generation Download one ready job image. args: jobId, index
   download           Download one completed Magnific creation as an artifact. args: creationIdentifier
@@ -61,21 +62,6 @@ function upscaleArguments(args, creationIdentifier) {
     const parsed = integer(args[key], range[0], range[1], key);
     if (parsed !== undefined) value[key] = parsed;
   }
-  return value;
-}
-
-function generationArguments(args) {
-  const prompt = clean(args.prompt);
-  if (!prompt || prompt.length > 10000) throw new Error("prompt is required and must be at most 10000 characters");
-  const mode = clean(args.mode || "imagen-nano-banana-2-lite");
-  if (!/^[a-z0-9][a-z0-9._-]{0,99}$/.test(mode)) throw new Error("Invalid image model slug");
-  const aspectRatio = clean(args.aspectRatio || "1:1");
-  const allowedRatios = new Set(["1:1", "2:3", "3:2", "4:3", "3:4", "5:4", "4:5", "16:9", "9:16", "21:9"]);
-  if (!allowedRatios.has(aspectRatio)) throw new Error("Unsupported aspectRatio");
-  const count = integer(args.count || 1, 1, 8, "count");
-  const value = { prompt, mode, aspectRatio, count };
-  if (clean(args.resolution)) value.resolution = clean(args.resolution);
-  if (clean(args.quality)) value.quality = clean(args.quality);
   return value;
 }
 
@@ -175,8 +161,17 @@ async function mainRun(request) {
   const state = pruneState(await readState(stateDir));
 
   if (action === "generate") {
-    const generationArgs = generationArguments(args);
-    const started = await callMagnific(arisa, profile, "images_generate", generationArgs);
+    const { generationArgs, reference, started } = await startGeneration({
+      args,
+      artifact: request.artifact,
+      uploadReference: (artifact) => uploadArtifact({
+        arisa,
+        profile,
+        artifact,
+        maxBytes: Number(config.MAX_UPLOAD_BYTES || defaults.MAX_UPLOAD_BYTES)
+      }),
+      generate: (value) => callMagnific(arisa, profile, "images_generate", value)
+    });
     const identifiers = [...new Set(findAll(started, "identifier").map(clean).filter(Boolean))];
     if (!identifiers.length) throw new Error("Magnific generation returned no creation identifiers");
     const jobId = randomUUID();
@@ -187,6 +182,7 @@ async function mainRun(request) {
       watchToken,
       identifiers,
       generationArgs,
+      reference,
       status: "queued",
       deliveryAttempts: {},
       createdAt,
@@ -195,8 +191,8 @@ async function mainRun(request) {
     };
     await writeState(stateDir, state);
     return toolOk({
-      text: `Magnific queued ${identifiers.length} image(s). Delivery will continue automatically if this turn is interrupted.`,
-      json: { jobId, count: identifiers.length, reactiveDelivery: true },
+      text: `Magnific queued ${identifiers.length} image(s)${reference ? " using the attached reference" : ""}. Delivery will continue automatically if this turn is interrupted.`,
+      json: { jobId, count: identifiers.length, referenceAttached: Boolean(reference), reactiveDelivery: true },
       mimeType: "application/json"
     }, {
       status: "scheduled",

@@ -1,13 +1,13 @@
 {
   "name": "magnific-mcp",
-  "version": "0.1.1",
+  "version": "0.2.0",
   "toolDependencies": { "mcp-client": "^0.1.0" },
-  "description": "Generate and upscale images directly through Magnific MCP with interruption-safe reactive monitoring, single terminal notifications, duplicate-safe delivery attempts, and artifact output.",
+  "description": "Generate images from text or an attached reference artifact and upscale images through Magnific MCP with interruption-safe reactive monitoring, duplicate-safe delivery attempts, and artifact output.",
   "entry": "index.js",
   "input": ["image/jpeg", "image/png", "image/webp", "application/json", "text/plain"],
   "output": ["image/*", "application/json", "text/plain"],
   "category": "image",
-  "keywords": ["artifact", "enhance", "generate", "image", "magnific", "mcp", "nano-banana", "precision", "reactive", "upscale"],
+  "keywords": ["artifact", "enhance", "generate", "image", "magnific", "mcp", "nano-banana", "precision", "reactive", "reference-image", "upscale"],
   "configSchema": {
     "MCP_PROFILE": { "type": "string", "required": false, "prompt": "Chat-scoped mcp-client profile used for Magnific." },
     "PREPARATION_TTL_MS": { "type": "number", "required": false, "prompt": "How long prepared upscale parameters remain usable." },

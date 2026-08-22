@@ -6,6 +6,7 @@ import test from "node:test";
 import { claimDelivery, deliveryClaimed } from "../delivery-claims.js";
 import { cancelPendingGenerationWatches, claimTerminalEvent, terminalEventClaimed } from "../generation-watch-close.js";
 import { generationWatchTasks } from "../generation-watch-plan.js";
+import { startGeneration } from "../generation-request.js";
 import { findFirst, findUpload, mcpData } from "../magnific-api.js";
 import { publicHttpsUrl } from "../network.js";
 import { prunePreparations, readState, writeState } from "../state-store.js";
@@ -23,6 +24,64 @@ test("rejects private transfer URLs", async () => {
   await assert.rejects(() => publicHttpsUrl("http://example.com/file"), /public HTTPS/);
   await assert.rejects(() => publicHttpsUrl("https://127.0.0.1/file"), /private/);
   assert.equal((await publicHttpsUrl("https://mcp.magnific.com/file")).hostname, "mcp.magnific.com");
+});
+
+test("uploads one attached artifact and binds its exact identifier to generation", async () => {
+  const calls = [];
+  const artifact = { id: "artifact-1", path: "/chat/artifacts/reference.png", mimeType: "image/png" };
+  const result = await startGeneration({
+    args: { prompt: "Keep this person consistent", count: "2" },
+    artifact,
+    uploadReference: async (received) => {
+      calls.push(["upload", received]);
+      return "creation-reference-1";
+    },
+    generate: async (args) => {
+      calls.push(["generate", args]);
+      return { creations: [{ identifier: "output-1" }, { identifier: "output-2" }] };
+    }
+  });
+
+  assert.deepEqual(calls, [
+    ["upload", artifact],
+    ["generate", {
+      prompt: "Keep this person consistent",
+      mode: "imagen-nano-banana-2-lite",
+      aspectRatio: "1:1",
+      count: 2,
+      references: [{ type: "image", identifier: "creation-reference-1" }]
+    }]
+  ]);
+  assert.deepEqual(result.reference, {
+    type: "image",
+    artifactId: "artifact-1",
+    creationIdentifier: "creation-reference-1"
+  });
+});
+
+test("does not start a paid generation when reference upload fails", async () => {
+  let generated = false;
+  await assert.rejects(() => startGeneration({
+    args: { prompt: "Use this reference" },
+    artifact: { id: "artifact-1" },
+    uploadReference: async () => { throw new Error("upload failed"); },
+    generate: async () => { generated = true; }
+  }), /upload failed/);
+  assert.equal(generated, false);
+});
+
+test("generates directly when no reference artifact is attached", async () => {
+  let uploads = 0;
+  const result = await startGeneration({
+    args: { prompt: "Text-only generation" },
+    artifact: null,
+    uploadReference: async () => { uploads += 1; },
+    generate: async (args) => args
+  });
+
+  assert.equal(uploads, 0);
+  assert.equal(result.reference, null);
+  assert.equal(result.generationArgs.references, undefined);
 });
 
 test("plans independent generation checks bound to one job token", () => {
