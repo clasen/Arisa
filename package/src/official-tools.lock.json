@@ -1,7 +1,7 @@
 {
   "version": 1,
   "repository": "https://github.com/clasen/Arisa.git",
-  "commit": "eefdcdca9b446a918ff71bfd84d0127c1db47ff1",
+  "commit": "8b18c8a0bdbc9edf1254a51369019721ba3c8c95",
   "tools": {
     "browser-session-bridge": {
       "version": "0.1.0",
@@ -154,18 +154,20 @@
       }
     },
     "official-tool-sync": {
-      "version": "1.0.0",
+      "version": "1.1.0",
       "toolDependencies": {
         "trash": "^1.0.0"
       },
       "files": {
         ".gitignore": "4d56952b0fb13bf8f9b6c13a6d4c34a075bac3af447636a1df4335d7576e2f97",
         "config.js": "744c445b1d2ff65b77f38a5473c24e50a32f4288c4a08c25a874a478086c08c8",
-        "index.js": "fdd4167c63cd33c8e7640cb7ce09fd618dbd416030aa920407392e4591543e94",
-        "package.json": "4447cb5d4e0a04526604dfb9820c44af88349c27e208f27baa148686846559da",
+        "dependency-installer.js": "dd91072612d4cba2ce83748ffae569067cbb2ebf63d59084572c3a9b77611927",
+        "dependency-installer.test.js": "9dc8a8c7d3ea29cfa2bb2d4daef3c02a6e996f9148a27cc499c8fd628fac857f",
+        "index.js": "12186107d449868621af98ce8f434fc84b5de09c62a2cb6b2cb67219b2e856a6",
+        "package.json": "0e95a190a04ebaf1eea81a90ecdb7b260595eb1ea0afe77f4d4215ccd6a9e949",
         "sync-lib.js": "c9f2cd7e19370088ab5fd10f6b2ada52c07d2e405674a356d0989f9a0f4984f6",
         "sync-lib.test.js": "c97cf850d9f42f6b121a458863b048bdcaa6d7d0475642f20742c5862ebf7cc4",
-        "tool.manifest.json": "8e0f94ad786bdaf9edb1a65cd03438e26c1e9927e8db9a5a39e349e7ef3c6cd3"
+        "tool.manifest.json": "00086b52dc969275e6dffc70720ef916493870fff3a27d076fed4ec04a160c75"
       }
     },
     "pr-campaign": {
