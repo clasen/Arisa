@@ -1,6 +1,6 @@
 # Magnific MCP
 
-Specialized image-upscale adapter over the chat-scoped `mcp-client` Magnific profile.
+Specialized Magnific adapter over the chat-scoped `mcp-client` profile. It generates and upscales images and materializes completed image, audio, or video creations as correctly typed Arisa artifacts.
 
 ## Generation flow
 
@@ -18,6 +18,7 @@ Jobs expire after 24 hours. Watch tasks are bound to a random job token, so stal
 1. `balance` and `modes` are read-only.
 2. `prepare-upscale` accepts a JPEG, PNG, or WebP artifact, uploads it as a hidden working asset, and validates the requested parameters without balance or cost preflights.
 3. `upscale` starts exactly one prepared upscale without an extra confirmation round-trip, waits for completion, records asset egress, and returns the resulting image as an Arisa artifact.
+4. `download` reads the completed creation, preserves its HTTP media type and extension, records asset egress, and returns image, audio, or video output with the appropriate delivery hint.
 
 Preparations expire after one hour and are single-use. Preparing creates a hidden source asset in the connected Magnific account but does not run the upscaler.
 

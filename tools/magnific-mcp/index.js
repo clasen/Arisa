@@ -9,6 +9,7 @@ import { cancelPendingGenerationWatches, claimTerminalEvent } from "./generation
 import { generationWatchTasks } from "./generation-watch-plan.js";
 import { startGeneration } from "./generation-request.js";
 import { callMagnific, findAll, findFirst, findUpload } from "./magnific-api.js";
+import { extension, mediaKind, outputMime } from "./media-output.js";
 import { transfer } from "./network.js";
 import { pruneState, readState, writeState } from "./state-store.js";
 
@@ -30,7 +31,7 @@ Actions:
   generate           Generate 1–8 images and monitor them reactively. An attached image artifact is used as a reference. args: prompt, mode?, aspectRatio?, count?
   watch-generation   Internal interruption-safe generation checker
   collect-generation Download one ready job image. args: jobId, index
-  download           Download one completed Magnific creation as an artifact. args: creationIdentifier
+  download           Download one completed Magnific image, audio, or video creation as an artifact. args: creationIdentifier
   prepare-upscale    Upload an image artifact and prepare its upscale parameters
   upscale            Run one prepared upscale directly. args: preparationId
 
@@ -69,15 +70,6 @@ function generationStatuses(result) {
   return findAll(result, "status").map((value) => clean(value).toLowerCase());
 }
 
-function outputMime(value, fallback = "image/png") {
-  const mime = clean(findFirst(value, ["mimeType", "mime_type", "contentType"]));
-  return mime.startsWith("image/") ? mime : fallback;
-}
-
-function extension(mimeType) {
-  return mimeType === "image/jpeg" ? ".jpg" : mimeType === "image/webp" ? ".webp" : ".png";
-}
-
 async function uploadArtifact({ arisa, profile, artifact, maxBytes }) {
   if (!artifact?.path) throw new Error("An image artifact is required");
   const mimeType = clean(artifact.mimeType).split(";", 1)[0];
@@ -106,13 +98,20 @@ async function downloadCreation({ arisa, profile, identifier, paths, chatId, too
   await callMagnific(arisa, profile, "creations_register_download", { identifiers: [identifier], tool });
   const response = await transfer(url, {}, 120000);
   const bytes = Buffer.from(await response.arrayBuffer());
-  const mimeType = outputMime(creation, response.headers.get("content-type") || "image/png");
+  const mimeType = outputMime(creation, response.headers.get("content-type") || "application/octet-stream");
   const tmpDir = paths.getChatToolTmpDir(chatId, TOOL_NAME);
   await mkdir(tmpDir, { recursive: true });
   const fileName = `magnific-${identifier}${extension(mimeType)}`;
   const filePath = path.join(tmpDir, fileName);
   await writeFile(filePath, bytes, { mode: 0o600 });
-  return { filePath, fileName, mimeType, kind: "image" };
+  const kind = mediaKind(mimeType);
+  return {
+    filePath,
+    fileName,
+    mimeType,
+    kind,
+    ...(kind === "audio" ? { delivery: { method: "audio" } } : {})
+  };
 }
 
 async function waitForCreation(arisa, profile, identifier, timeoutMs) {

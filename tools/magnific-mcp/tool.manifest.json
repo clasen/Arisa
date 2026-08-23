@@ -1,11 +1,11 @@
 {
   "name": "magnific-mcp",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "toolDependencies": { "mcp-client": "^0.1.0" },
-  "description": "Generate images from text or an attached reference artifact and upscale images through Magnific MCP with interruption-safe reactive monitoring, duplicate-safe delivery attempts, and artifact output.",
+  "description": "Generate and upscale images through Magnific MCP, and materialize completed Magnific image, audio, or video creations as correctly typed artifacts.",
   "entry": "index.js",
   "input": ["image/jpeg", "image/png", "image/webp", "application/json", "text/plain"],
-  "output": ["image/*", "application/json", "text/plain"],
+  "output": ["image/*", "audio/*", "video/*", "application/json", "text/plain"],
   "category": "image",
   "keywords": ["artifact", "enhance", "generate", "image", "magnific", "mcp", "nano-banana", "precision", "reactive", "reference-image", "upscale"],
   "configSchema": {
