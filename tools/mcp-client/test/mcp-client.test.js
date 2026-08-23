@@ -6,6 +6,20 @@ import test from "node:test";
 import { isPrivateAddress, validateRemoteUrl } from "../network-security.js";
 import { oauthWatchTasks } from "../oauth-watch-plan.js";
 import { openCredentials, readState, sealCredentials, writeState } from "../state-store.js";
+import { availableTools, remoteArguments, resolveRemoteTool } from "../tool-routing.js";
+
+test("routes discovered MCP tools generically", () => {
+  const catalog = availableTools({ tools: [
+    { name: "video_generate", inputSchema: { type: "object" } },
+    { name: "audio_tts", inputSchema: { type: "object" } }
+  ] });
+  assert.equal(resolveRemoteTool({ action: "video_generate" }, catalog), "video_generate");
+  assert.equal(resolveRemoteTool({ action: "call", tool: "audio_tts" }, catalog), "audio_tts");
+  assert.deepEqual(remoteArguments({ action: "video_generate", profile: "magnific", confirm: true, video: { clips: [] } }), { video: { clips: [] } });
+  assert.deepEqual(remoteArguments({ action: "call", tool: "audio_tts", arguments: '{"text":"hello"}' }), { text: "hello" });
+  assert.throws(() => resolveRemoteTool({ action: "unknown_tool" }, catalog), /does not provide/);
+  assert.throws(() => remoteArguments({ arguments: "[]" }), /must be a JSON object/);
+});
 
 test("rejects local and private MCP endpoints", async () => {
   await assert.rejects(() => validateRemoteUrl("http://example.com/mcp"), /HTTPS/);

@@ -12,12 +12,16 @@ export function mcpData(result) {
   return json?.structuredContent || parseTextJson(json?.content) || json;
 }
 
-export async function callMagnific(arisa, profile, tool, args = {}, timeoutMs = 120000) {
+export async function runMagnificClient(arisa, profile, args, timeoutMs = 120000) {
   const result = await arisa.tools.run({
     name: "mcp-client",
-    args: { action: "call", profile, tool, arguments: args, confirm: true }
+    args: { ...args, profile, ...(args.action === "tools" ? {} : { confirm: true }) }
   }, { timeoutMs });
   return mcpData(result);
+}
+
+export function callMagnific(arisa, profile, tool, args = {}, timeoutMs = 120000) {
+  return runMagnificClient(arisa, profile, { action: "call", tool, arguments: args }, timeoutMs);
 }
 
 export function findFirst(value, keys) {

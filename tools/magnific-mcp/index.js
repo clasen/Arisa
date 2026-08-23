@@ -8,9 +8,8 @@ import { claimDelivery, deliveryClaimed } from "./delivery-claims.js";
 import { cancelPendingGenerationWatches, claimTerminalEvent } from "./generation-watch-close.js";
 import { generationWatchTasks } from "./generation-watch-plan.js";
 import { startGeneration } from "./generation-request.js";
-import { callMagnific, findAll, findFirst, findUpload } from "./magnific-api.js";
+import { callMagnific, findAll, findFirst, findUpload, runMagnificClient } from "./magnific-api.js";
 import { extension, mediaKind, outputMime } from "./media-output.js";
-import { forwardedArguments, listMagnificTools, resolveMcpTool } from "./mcp-tools.js";
 import { transfer } from "./network.js";
 import { pruneState, readState, writeState } from "./state-store.js";
 
@@ -160,24 +159,16 @@ async function mainRun(request) {
     return toolOk({ ...output, text: "Magnific creation downloaded." });
   }
   if (action === "tools") {
-    const tools = await listMagnificTools(arisa, profile);
-    return toolOk({
-      text: `${tools.length} tools available from Magnific MCP.`,
-      json: { tools },
-      mimeType: "application/json"
-    });
+    const result = await runMagnificClient(arisa, profile, { action: "tools" });
+    const tools = Array.isArray(result?.tools) ? result.tools : [];
+    return toolOk({ text: `${tools.length} tools available from Magnific MCP.`, json: result, mimeType: "application/json" });
   }
 
   const specializedActions = new Set(["generate", "watch-generation", "collect-generation", "prepare-upscale", "upscale"]);
   if (action === "call" || (!specializedActions.has(action) && action.includes("_"))) {
-    const tools = await listMagnificTools(arisa, profile);
-    const tool = resolveMcpTool(args, tools);
-    const result = await callMagnific(arisa, profile, tool, forwardedArguments(args));
-    return toolOk({
-      text: `Magnific MCP tool ${tool} completed.`,
-      json: result,
-      mimeType: "application/json"
-    });
+    const result = await runMagnificClient(arisa, profile, args);
+    const tool = action === "call" ? clean(args.tool) : action;
+    return toolOk({ text: `Magnific MCP tool ${tool} completed.`, json: result, mimeType: "application/json" });
   }
 
   const stateDir = paths.getChatToolStateDir(chatId, TOOL_NAME);

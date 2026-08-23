@@ -8,6 +8,7 @@ import { createSecureFetch, validateRemoteUrl } from "./network-security.js";
 import { discoverOAuth, pollDeviceAuthorization, startDeviceAuthorization, validAccessToken } from "./oauth-device.js";
 import { oauthWatchTasks } from "./oauth-watch-plan.js";
 import { callMcpTool, listMcpTools } from "./mcp-session.js";
+import { availableTools, remoteArguments, resolveRemoteTool } from "./tool-routing.js";
 import { normalizeProfileName, openCredentials, readState, sealCredentials, writeState } from "./state-store.js";
 
 const TOOL_NAME = "mcp-client";
@@ -29,6 +30,7 @@ Actions via args.action:
   oauth-watch Internal one-shot OAuth watcher that reschedules only while pending
   tools       Connect and list MCP tools and schemas. args: profile
   call        Call one MCP tool. Requires confirm=true. args: profile, tool, arguments, confirm
+  <tool name> Call a discovered MCP tool directly. Requires profile and confirm=true
   remove      Delete a local profile and its encrypted credentials. args: profile
 
 Security:
@@ -47,16 +49,6 @@ function required(value, name) {
   const cleaned = String(value || "").trim();
   if (!cleaned) throw new Error(`${name} is required`);
   return cleaned;
-}
-
-function jsonObject(value, name = "arguments") {
-  if (value == null || value === "") return {};
-  if (typeof value === "object" && !Array.isArray(value)) return value;
-  try {
-    const parsed = JSON.parse(String(value));
-    if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) return parsed;
-  } catch {}
-  throw new Error(`${name} must be a JSON object`);
 }
 
 function profileSummary(name, profile) {
@@ -109,13 +101,14 @@ function compactResult(value) {
 function extensionFor(mimeType) {
   return new Map([
     ["image/png", ".png"], ["image/jpeg", ".jpg"], ["image/webp", ".webp"], ["image/gif", ".gif"],
-    ["audio/mpeg", ".mp3"], ["audio/ogg", ".ogg"], ["audio/wav", ".wav"], ["application/pdf", ".pdf"]
+    ["audio/mpeg", ".mp3"], ["audio/ogg", ".ogg"], ["audio/wav", ".wav"], ["audio/mp4", ".m4a"],
+    ["video/mp4", ".mp4"], ["video/webm", ".webm"], ["video/quicktime", ".mov"], ["application/pdf", ".pdf"]
   ]).get(mimeType) || ".bin";
 }
 
 async function materializeBinary(result, tmpDir, maxBytes) {
   const content = Array.isArray(result?.content) ? result.content : [];
-  const item = content.find((entry) => (entry?.type === "image" || entry?.type === "audio") && typeof entry.data === "string");
+  const item = content.find((entry) => ["image", "audio", "video"].includes(entry?.type) && typeof entry.data === "string");
   if (!item) return null;
   const bytes = Buffer.from(item.data, "base64");
   if (bytes.length > maxBytes) throw new Error(`MCP binary result exceeds the ${maxBytes}-byte limit`);
@@ -124,7 +117,8 @@ async function materializeBinary(result, tmpDir, maxBytes) {
   const fileName = `mcp-result-${Date.now()}${extensionFor(mimeType)}`;
   const filePath = path.join(tmpDir, fileName);
   await writeFile(filePath, bytes, { mode: 0o600 });
-  return { filePath, fileName, mimeType, kind: mimeType.startsWith("image/") ? "image" : "document" };
+  const kind = mimeType.startsWith("image/") ? "image" : mimeType.startsWith("audio/") ? "audio" : mimeType.startsWith("video/") ? "video" : "document";
+  return { filePath, fileName, mimeType, kind, ...(kind === "audio" ? { delivery: { method: "audio" } } : {}) };
 }
 
 async function authenticatedContext({ globalStateDir, stateDir, state, name, profile, fetchFn }) {
@@ -273,19 +267,15 @@ async function execute(request) {
     return toolOk({ text: `${result.tools?.length || 0} MCP tool(s) available from ${name}.`, json: compactResult(result), mimeType: "application/json" });
   }
 
-  if (action === "call") {
-    if (!truthy(args.confirm)) return toolError("MCP tool calls require confirm=true because remote tools may consume credits or cause side effects");
-    const tool = required(args.tool, "tool");
-    const argumentsValue = jsonObject(args.arguments);
-    const result = await callMcpTool({ endpoint, accessToken: auth.accessToken, fetchFn }, tool, argumentsValue);
-    const serializedSize = Buffer.byteLength(JSON.stringify(result));
-    if (serializedSize > security.maxResponseBytes) throw new Error(`MCP result exceeds the ${security.maxResponseBytes}-byte limit`);
-    const binary = await materializeBinary(result, tmpDir, security.maxResponseBytes);
-    if (binary) return toolOk({ ...binary, text: `MCP tool ${tool} returned a ${binary.mimeType} artifact.`, json: compactResult(result) });
-    return toolOk({ text: `MCP tool ${tool} completed.`, json: compactResult(result), mimeType: "application/json" });
-  }
-
-  return toolError(`Unsupported action: ${action}`);
+  if (!truthy(args.confirm)) return toolError("MCP tool calls require confirm=true because remote tools may consume credits or cause side effects");
+  const catalog = availableTools(await listMcpTools({ endpoint, accessToken: auth.accessToken, fetchFn }));
+  const tool = resolveRemoteTool(args, catalog);
+  const result = await callMcpTool({ endpoint, accessToken: auth.accessToken, fetchFn }, tool, remoteArguments(args));
+  const serializedSize = Buffer.byteLength(JSON.stringify(result));
+  if (serializedSize > security.maxResponseBytes) throw new Error(`MCP result exceeds the ${security.maxResponseBytes}-byte limit`);
+  const binary = await materializeBinary(result, tmpDir, security.maxResponseBytes);
+  if (binary) return toolOk({ ...binary, text: `MCP tool ${tool} returned a ${binary.mimeType} artifact.`, json: compactResult(result) });
+  return toolOk({ text: `MCP tool ${tool} completed.`, json: compactResult(result), mimeType: "application/json" });
 }
 
 async function main() {

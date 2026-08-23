@@ -11,7 +11,10 @@ Chat-scoped client for remote MCP servers over Streamable HTTP.
 - `oauth-poll`: manually finish a pending device authorization when needed.
 - `tools`: authenticate and return `tools/list` schemas.
 - `call`: execute one named remote tool. Requires `confirm=true`.
+- `<remote tool name>`: execute any discovered tool directly with its arguments. The live MCP catalog is authoritative, so upstream additions need no client release.
 - `remove`: remove the profile and encrypted local credentials.
+
+Tool discovery, exact-name validation, JSON argument conversion, result normalization, size limits, and standard embedded image/audio/video materialization are generic client responsibilities. Provider adapters should delegate these operations and retain only provider-specific orchestration and artifact resolution.
 
 ## Security
 

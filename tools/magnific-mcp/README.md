@@ -1,6 +1,6 @@
 # Magnific MCP
 
-Magnific adapter over the chat-scoped `mcp-client` profile. Every tool currently exposed by Magnific MCP is callable through `action=call` with `tool` and `arguments`, or directly by using the MCP tool name as the action. `action=tools` returns the live catalog and input schemas, so new upstream tools become available without another adapter release. The specialized image generation, upscale, reactive delivery, and typed image/audio/video download flows remain available.
+Thin Magnific adapter over the chat-scoped `mcp-client` profile. Generic tool discovery, exact-name validation, argument conversion, invocation, result normalization, and standard embedded-media materialization belong to `mcp-client`. This adapter delegates those operations while retaining Magnific-specific image generation, upscale, reactive delivery, creation download, and duplicate-delivery safeguards.
 
 Examples:
 

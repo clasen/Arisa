@@ -1,7 +1,7 @@
 {
   "name": "magnific-mcp",
-  "version": "0.4.0",
-  "toolDependencies": { "mcp-client": "^0.1.0" },
+  "version": "0.4.1",
+  "toolDependencies": { "mcp-client": "^0.2.0" },
   "description": "Invoke every tool exposed by Magnific MCP, including image, video, audio, design, 3D, library, stock, flow, and workspace operations, with typed artifact downloads.",
   "entry": "index.js",
   "input": ["image/jpeg", "image/png", "image/webp", "application/json", "text/plain"],

@@ -8,7 +8,6 @@ import { cancelPendingGenerationWatches, claimTerminalEvent, terminalEventClaime
 import { generationWatchTasks } from "../generation-watch-plan.js";
 import { startGeneration } from "../generation-request.js";
 import { findFirst, findUpload, mcpData } from "../magnific-api.js";
-import { forwardedArguments, resolveMcpTool, toolCatalog } from "../mcp-tools.js";
 import { publicHttpsUrl } from "../network.js";
 import { prunePreparations, readState, writeState } from "../state-store.js";
 
@@ -19,19 +18,6 @@ test("extracts structured MCP data and nested upload targets", () => {
   assert.equal(upload.path, "tmp/a");
   assert.equal(findFirst({ result: { creationIdentifier: "abc" } }, ["creationIdentifier"]), "abc");
   assert.equal(findFirst({ content: [{ type: "text", text: "status: completed\nurl: \"https://cdn.example/image.jpg?x=1\"" }] }, ["url"]), "https://cdn.example/image.jpg?x=1");
-});
-
-test("exposes and validates every live Magnific MCP tool", () => {
-  const catalog = toolCatalog({ ok: true, output: { json: { tools: [
-    { name: "video_generate", inputSchema: { type: "object" } },
-    { name: "audio_tts", inputSchema: { type: "object" } }
-  ] } } });
-  assert.equal(resolveMcpTool({ action: "video_generate" }, catalog), "video_generate");
-  assert.equal(resolveMcpTool({ action: "call", tool: "audio_tts" }, catalog), "audio_tts");
-  assert.deepEqual(forwardedArguments({ action: "video_generate", video: { clips: [] } }), { video: { clips: [] } });
-  assert.deepEqual(forwardedArguments({ action: "call", tool: "audio_tts", arguments: { text: "hello" } }), { text: "hello" });
-  assert.throws(() => resolveMcpTool({ action: "unknown_tool" }, catalog), /does not provide/);
-  assert.throws(() => forwardedArguments({ arguments: [] }), /must be an object/);
 });
 
 test("rejects private transfer URLs", async () => {
