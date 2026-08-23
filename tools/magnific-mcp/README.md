@@ -1,6 +1,13 @@
 # Magnific MCP
 
-Specialized Magnific adapter over the chat-scoped `mcp-client` profile. It generates and upscales images and materializes completed image, audio, or video creations as correctly typed Arisa artifacts. Its manifest includes audio, speech, TTS, voice, voiceover, ElevenLabs, video generation, image-to-video, text-to-video, lip-sync, talking-head, and video-upscale capability tags so Magnific media workflows remain discoverable.
+Magnific adapter over the chat-scoped `mcp-client` profile. Every tool currently exposed by Magnific MCP is callable through `action=call` with `tool` and `arguments`, or directly by using the MCP tool name as the action. `action=tools` returns the live catalog and input schemas, so new upstream tools become available without another adapter release. The specialized image generation, upscale, reactive delivery, and typed image/audio/video download flows remain available.
+
+Examples:
+
+- `action=video_plan`, with the plan fields as arguments
+- `action=video_generate`, with the complete upstream `video_generate` payload
+- `action=audio_tts`, with `text`, `voiceId`, and optional model settings
+- `action=call`, `tool=flows_run`, `arguments={...}`
 
 ## Generation flow
 
