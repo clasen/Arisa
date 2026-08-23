@@ -1,6 +1,6 @@
 # Magnific MCP
 
-Specialized Magnific adapter over the chat-scoped `mcp-client` profile. It generates and upscales images and materializes completed image, audio, or video creations as correctly typed Arisa artifacts. Its manifest includes audio, speech, TTS, voice, voiceover, and ElevenLabs capability tags so Magnific voiceovers remain discoverable when OpenAI TTS is unavailable.
+Specialized Magnific adapter over the chat-scoped `mcp-client` profile. It generates and upscales images and materializes completed image, audio, or video creations as correctly typed Arisa artifacts. Its manifest includes audio, speech, TTS, voice, voiceover, ElevenLabs, video generation, image-to-video, text-to-video, lip-sync, talking-head, and video-upscale capability tags so Magnific media workflows remain discoverable.
 
 ## Generation flow
 
