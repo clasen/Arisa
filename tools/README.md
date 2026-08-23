@@ -31,10 +31,10 @@ Receive explicitly shared, domain-scoped Chrome or Brave sessions through a temp
 
 ### [`campaign-draft-runner`](./campaign-draft-runner/)
 
-Run profile-driven outreach batches that discover public editorial contacts, filter prior recipients, verify domains, research coverage, and create Gmail drafts. It never sends mail.
+Run profile-driven outreach batches that expand bounded creative discovery after repeated unchanged cycles, avoid recently used queries and exhausted sources, verify domains, research coverage, and create Gmail drafts. It never sends mail.
 
 - **Category:** `communication`
-- **Tags:** `campaign` · `contacts` · `discovery` · `drafts` · `gmail` · `polling` · `outreach` · `pr` · `research` · `personalization` · `configurable`
+- **Tags:** `campaign` · `contacts` · `creative-discovery` · `discovery` · `drafts` · `gmail` · `polling` · `outreach` · `pr` · `research` · `personalization` · `configurable`
 - **Accepts:** `text/plain`, `application/json`
 - **Produces:** `application/json`, `text/plain`
 - **Setup:** optional `web-browser`; Gmail authorization is configured in `gmail-workspace`

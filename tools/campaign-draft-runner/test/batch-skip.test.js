@@ -81,6 +81,44 @@ test("unchanged batches skip until the forced review deadline", async () => {
   }
 });
 
+test("repeated unchanged skips trigger a bounded creative expansion review", async () => {
+  const stateDir = await mkdtemp(path.join(os.tmpdir(), "campaign-creative-review-"));
+  const now = Date.parse("2026-08-23T12:00:00.000Z");
+  try {
+    await recordFullBatchReview({
+      stateDir,
+      profileName: "example",
+      fingerprint: "same",
+      now
+    });
+    const first = await evaluateUnchangedBatch({
+      stateDir,
+      profileName: "example",
+      fingerprint: "same",
+      forceReviewAfterMs: 6 * 3600000,
+      explorationReviewAfterSkips: 2,
+      now: now + 3600000
+    });
+    assert.equal(first.skip, true);
+    assert.equal(first.skippedSinceFull, 1);
+
+    const expansion = await evaluateUnchangedBatch({
+      stateDir,
+      profileName: "example",
+      fingerprint: "same",
+      forceReviewAfterMs: 6 * 3600000,
+      explorationReviewAfterSkips: 2,
+      now: now + 2 * 3600000
+    });
+    assert.deepEqual(
+      { skip: expansion.skip, reason: expansion.reason, threshold: expansion.explorationReviewAfterSkips },
+      { skip: false, reason: "creative-expansion", threshold: 2 }
+    );
+  } finally {
+    await rm(stateDir, { recursive: true, force: true });
+  }
+});
+
 test("only clean empty full batches arm unchanged skipping", () => {
   const base = {
     action: "run-batch",

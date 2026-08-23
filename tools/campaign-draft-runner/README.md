@@ -8,7 +8,8 @@ The tool can:
 - select unused contacts from `pr-campaign`;
 - discover public editorial contacts through `web-browser`, following same-site contact and staff links when result pages do not expose an address;
 - reject previously used recipients and outlets;
-- skip expensive unchanged empty batches while forcing bounded periodic reviews;
+- skip expensive unchanged empty batches while forcing bounded periodic reviews or bounded creative expansions;
+- prefer creative queries not used within a configurable cooldown window;
 - verify email domains before drafting;
 - research coverage on the contact's own site;
 - render localized subject and body templates;
@@ -55,6 +56,11 @@ Minimal profile structure:
     "skipOutletsAlreadyUsed": true
   },
   "defaultLanguage": "en",
+  "batchSkip": {
+    "enabled": true,
+    "forceReviewAfterMinutes": 360,
+    "explorationReviewAfterSkips": 3
+  },
   "discovery": {
     "enabled": true,
     "webTool": "web-browser",
@@ -67,8 +73,9 @@ Minimal profile structure:
     "queries": ["topic publication editor contact"],
     "creativeDiscovery": {
       "enabled": true,
-      "queryBudgetPerRun": 1,
-      "pageBudgetPerRun": 3,
+      "queryBudgetPerRun": 2,
+      "pageBudgetPerRun": 6,
+      "queryCooldownHours": 24,
       "seeds": ["Comparable title"],
       "themes": ["adjacent audience theme"],
       "audiences": ["reviewer", "YouTube creator"],
@@ -119,6 +126,8 @@ Skipped output sets `stopCycle=true` and includes an explicit instruction not to
 
 State changes invalidate the fingerprint immediately. The default forced-review interval is six hours, bounded between 15 minutes and seven days, so external pages and same-count contact edits are eventually reconsidered. Set `UNCHANGED_BATCH_FORCE_MS` per chat, disable the feature with `UNCHANGED_BATCH_SKIP_ENABLED=false`, or use `forceReview=true` for one invocation. A profile may override the interval with `batchSkip.forceReviewAfterMinutes` or disable it with `batchSkip.enabled=false`.
 
+Profiles with creative discovery may set `batchSkip.explorationReviewAfterSkips` to trigger a full review after a bounded streak of unchanged skips, before the time-based review is due. The full review resets the streak. This increases creative exploration without repeating it on every scheduler tick. `CREATIVE_REVIEW_AFTER_SKIPS` provides an optional chat-level default; zero leaves the threshold disabled.
+
 Dry runs never use the skip. `untilDrafted` loops honor it because unchanged upstream state cannot produce a new result; use `forceReview=true` to bypass it. Runs with discovery errors or retryable selected contacts do not arm it. Skip state is chat/profile scoped and contains only a fingerprint, timestamps, aggregate counters, and a compact summary.
 
 Use `action: "reconcile-sent"` to run the same synchronization without discovery or drafting. `gmail-workspace` paginates sent mail, fetches message metadata concurrently, and passes recipients, subjects, timestamps, and Gmail message IDs to `pr-campaign` in one batch.
@@ -129,7 +138,7 @@ Set `selection.agentDecidesEligibility: true` when the calling agent reviews and
 
 Set `untilDrafted: "true"` on a non-dry run to retry discovery with rotating queries until at least one new draft is created. `retryDelaySeconds` controls the pause between attempts; `maxAttempts` and `maxRuntimeSeconds` bound the retry loop. The runner stops after one empty normal and creative discovery pass instead of repeating the same zero-yield work.
 
-When the normal pass leaves no eligible candidates, `discovery.creativeDiscovery` provides a bounded fallback. It builds and rotates queries from comparable titles (`seeds`), adjacent audience ideas (`themes`), outlet types (`audiences`), contact intents, and templates. The fallback has its own persistent cursor, query budget, page budget, and optional URL cooldown, so repeated zero-result runs explore new combinations rather than repeating the same searches. Existing email verification, provenance, deduplication, exclusions, and draft-only safeguards still apply.
+When the normal pass leaves no eligible candidates, `discovery.creativeDiscovery` provides a bounded fallback. It builds and rotates queries from comparable titles (`seeds`), adjacent audience ideas (`themes`), outlet types (`audiences`), contact intents, and templates. The fallback has its own persistent cursor, query budget, page budget, optional query cooldown, and optional URL cooldown, so repeated zero-result runs explore new combinations rather than repeating the same searches. `queryCooldownHours` prefers approaches not used recently while other active queries remain; if every active query is inside the cooldown, the runner fails open to the full active catalog instead of stalling. Existing email verification, provenance, deduplication, exclusions, and draft-only safeguards still apply.
 
 With `discovery.archiveEmptyQueries` enabled (the default), a completed query that yields no eligible contact is archived in chat-scoped discovery state and omitted from later rotations. Queries with search or page errors are not archived, so temporary provider failures remain retryable.
 

@@ -59,6 +59,7 @@ export async function evaluateUnchangedBatch({
   profileName,
   fingerprint,
   forceReviewAfterMs,
+  explorationReviewAfterSkips = 0,
   force = false,
   now = Date.now()
 }) {
@@ -71,9 +72,21 @@ export async function evaluateUnchangedBatch({
     return { skip: false, reason: "periodic-review", state };
   }
 
+  const skippedSinceFull = Number(state.skippedSinceFull || 0) + 1;
+  const explorationThreshold = Math.max(0, Number(explorationReviewAfterSkips) || 0);
+  if (explorationThreshold > 0 && skippedSinceFull >= explorationThreshold) {
+    return {
+      skip: false,
+      reason: "creative-expansion",
+      skippedSinceFull: Number(state.skippedSinceFull || 0),
+      explorationReviewAfterSkips: explorationThreshold,
+      state
+    };
+  }
+
   const updated = {
     ...state,
-    skippedSinceFull: Number(state.skippedSinceFull || 0) + 1,
+    skippedSinceFull,
     totalSkipped: Number(state.totalSkipped || 0) + 1,
     lastSkippedAt: new Date(now).toISOString()
   };

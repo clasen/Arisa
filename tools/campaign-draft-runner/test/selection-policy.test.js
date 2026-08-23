@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { mkdtemp, rm } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
-import { assessSearchQuality, batchSkipSettings, buildApprovedFactsBody, checkExhaustedSources, discoverContacts, getFactSheetStatus, isSelectable, normalizeCanonicalUrls, recordExhaustedSources, runTool, updateApprovedFacts, validateDraftContent } from "../index.js";
+import { activeQueries, assessSearchQuality, batchSkipSettings, buildApprovedFactsBody, checkExhaustedSources, discoverContacts, getFactSheetStatus, isSelectable, normalizeCanonicalUrls, recordExhaustedSources, runTool, updateApprovedFacts, validateDraftContent } from "../index.js";
 import { classifyToolTimeout } from "../operation-timeout.js";
 
 const contact = {
@@ -119,10 +119,34 @@ test("tool timeouts distinguish uncertain mutations from retry-safe reads", () =
 });
 
 test("unchanged skipping applies to untilDrafted runs but not dry runs", () => {
-  const config = { UNCHANGED_BATCH_SKIP_ENABLED: true, UNCHANGED_BATCH_FORCE_MS: 21600000 };
+  const config = { UNCHANGED_BATCH_SKIP_ENABLED: true, UNCHANGED_BATCH_FORCE_MS: 21600000, CREATIVE_REVIEW_AFTER_SKIPS: 4 };
   assert.equal(batchSkipSettings(config, {}, { untilDrafted: "true" }).enabled, true);
   assert.equal(batchSkipSettings(config, {}, { dryRun: "true" }).enabled, false);
   assert.equal(batchSkipSettings(config, { batchSkip: { enabled: false } }, {}).enabled, false);
+  assert.equal(batchSkipSettings(config, {}, {}).explorationReviewAfterSkips, 0);
+  assert.equal(batchSkipSettings(config, { discovery: { creativeDiscovery: { enabled: true } } }, {}).explorationReviewAfterSkips, 4);
+  assert.equal(batchSkipSettings(config, {
+    batchSkip: { explorationReviewAfterSkips: 2 },
+    discovery: { creativeDiscovery: { enabled: true } }
+  }, {}).explorationReviewAfterSkips, 2);
+});
+
+test("query cooldown prefers approaches not used recently and fails open when all are recent", () => {
+  const now = Date.parse("2026-08-23T12:00:00.000Z");
+  const catalog = ["recent query", "older query", "unused query"];
+  const state = {
+    archivedQueries: {},
+    queryStats: {
+      "recent query": { lastRunAt: new Date(now - 2 * 3600000).toISOString() },
+      "older query": { lastRunAt: new Date(now - 30 * 3600000).toISOString() }
+    }
+  };
+  assert.deepEqual(activeQueries(catalog, state, 24, now), ["older query", "unused query"]);
+  const allRecent = {
+    archivedQueries: {},
+    queryStats: Object.fromEntries(catalog.map((query) => [query, { lastRunAt: new Date(now - 3600000).toISOString() }]))
+  };
+  assert.deepEqual(activeQueries(catalog, allRecent, 24, now), catalog);
 });
 
 test("agent eligibility bypasses positive keyword gates", () => {

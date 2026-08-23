@@ -30,7 +30,7 @@ Usage:
   node index.js run --request-file <json>
 
 Actions via args.action:
-  run-batch   Reconcile Gmail Sent, skip unchanged empty batches, verify contacts, and create Gmail drafts only. args: profile?, limit?, dryRun?, forceReview?, untilDrafted?, retryDelaySeconds?, maxAttempts?, maxRuntimeSeconds?
+  run-batch   Reconcile Gmail Sent, skip unchanged empty batches, periodically expand creative discovery, verify contacts, and create Gmail drafts only. args: profile?, limit?, dryRun?, forceReview?, untilDrafted?, retryDelaySeconds?, maxAttempts?, maxRuntimeSeconds?
   reconcile-sent Reconcile manually sent Gmail messages into campaign state. args: profile?
   assess-search-quality Score the first search tranche and persist a five-cycle measurement window. args: profile?, searches=[{query,text}]
   sources-check Return which coverage/contact URLs remain exhausted within their 30-day window. args: profile?, urls=<JSON array>
@@ -45,7 +45,7 @@ Profiles live under the chat-scoped state directory:
 
 Profiles may enable web research to cite relevant articles or videos in the opening paragraph.
 When discovery.creativeDiscovery.enabled is true, zero-candidate runs automatically rotate through comparable titles, adjacent themes, audiences, and contact intents before returning no result.
-Clean empty runs arm a state fingerprint: identical later runs skip expensive discovery until state changes or the bounded periodic review is due. Use forceReview=true to bypass the skip once.
+Clean empty runs arm a state fingerprint: identical later runs skip expensive discovery until state changes, the bounded periodic review is due, or the profile's explorationReviewAfterSkips threshold triggers a creative expansion. Use forceReview=true to bypass the skip once.
 The runner is generic. Campaign-specific copy, keywords, language detection, and tool names belong in the profile JSON.`);
 }
 
@@ -436,18 +436,27 @@ function nextQueries(catalog, cursor, count) {
   return Array.from({ length: limit }, (_, offset) => catalog[(Number(cursor || 0) + offset) % catalog.length]);
 }
 
-function activeQueries(catalog, state) {
+function activeQueries(catalog, state, cooldownHours = 0, nowMs = Date.now()) {
   const archived = state.archivedQueries || {};
-  return catalog.filter((query) => !archived[query]);
+  const active = catalog.filter((query) => !archived[query]);
+  const cooldownMs = Math.max(0, Number(cooldownHours) || 0) * 3_600_000;
+  if (!cooldownMs) return active;
+  const available = active.filter((query) => {
+    const lastRunAt = Date.parse(state.queryStats?.[query]?.lastRunAt || "");
+    return !Number.isFinite(lastRunAt) || nowMs - lastRunAt >= cooldownMs;
+  });
+  return available.length ? available : active;
 }
 
 function nextDiscoveryQueries(settings, state) {
-  return nextQueries(activeQueries(queryCatalog(settings), state), state.cursor, settings.queryBudgetPerRun || settings.queriesPerRun || 2);
+  const catalog = activeQueries(queryCatalog(settings), state, settings.queryCooldownHours);
+  return nextQueries(catalog, state.cursor, settings.queryBudgetPerRun || settings.queriesPerRun || 2);
 }
 
 function nextCreativeQueries(settings, state) {
   const creative = settings.creativeDiscovery || {};
-  return nextQueries(activeQueries(creativeQueryCatalog(settings), state), state.creativeCursor, creative.queryBudgetPerRun || settings.queryBudgetPerRun || 4);
+  const catalog = activeQueries(creativeQueryCatalog(settings), state, creative.queryCooldownHours || settings.queryCooldownHours);
+  return nextQueries(catalog, state.creativeCursor, creative.queryBudgetPerRun || settings.queryBudgetPerRun || 4);
 }
 
 function seenUrlRecently(seenUrls, url, cooldownDays) {
@@ -481,7 +490,14 @@ async function discoverContacts(arisa, chatId, profile, allContacts, draftRecipi
   const { file, data: state } = await readDiscoveryState(chatId);
   const creativeMode = options.mode === "creative";
   const creativeSettings = settings.creativeDiscovery || {};
-  const catalog = activeQueries(creativeMode ? creativeQueryCatalog(settings) : queryCatalog(settings), state);
+  const queryCooldownHours = creativeMode
+    ? (creativeSettings.queryCooldownHours || settings.queryCooldownHours)
+    : settings.queryCooldownHours;
+  const catalog = activeQueries(
+    creativeMode ? creativeQueryCatalog(settings) : queryCatalog(settings),
+    state,
+    queryCooldownHours
+  );
   const queries = creativeMode ? nextCreativeQueries(settings, state) : nextDiscoveryQueries(settings, state);
   const cursorKey = creativeMode ? "creativeCursor" : "cursor";
   const oldSeen = Array.isArray(state.seenUrls)
@@ -643,7 +659,7 @@ async function discoverContacts(arisa, chatId, profile, allContacts, draftRecipi
     state.updatedAt = new Date().toISOString();
     await saveDiscoveryState(file, state);
   }
-  return { mode: creativeMode ? "creative" : "standard", queries, searches, pagesOpened, found: added.length, added, skippedUsed, skippedSeen, rejectedEmails, errors, archivedQueries: archivedThisRun, dryRun };
+  return { mode: creativeMode ? "creative" : "standard", queries, queryCooldownHours: Math.max(0, Number(queryCooldownHours) || 0), searches, pagesOpened, found: added.length, added, skippedUsed, skippedSeen, rejectedEmails, errors, archivedQueries: archivedThisRun, dryRun };
 }
 function researchTitleUsable(value) {
   const title = decodeHtmlEntities(value).replace(/[\r\n]+/g, " ").trim();
@@ -1010,12 +1026,16 @@ function batchSkipSettings(config, profile, args) {
   const configuredMs = Number(profileSettings.forceReviewAfterMinutes) > 0
     ? Number(profileSettings.forceReviewAfterMinutes) * 60_000
     : Number(config.UNCHANGED_BATCH_FORCE_MS || defaults.UNCHANGED_BATCH_FORCE_MS);
+  const explorationReviewAfterSkips = profile.discovery?.creativeDiscovery?.enabled === true
+    ? Number(profileSettings.explorationReviewAfterSkips || config.CREATIVE_REVIEW_AFTER_SKIPS || 0)
+    : 0;
   return {
     enabled: truthy(config.UNCHANGED_BATCH_SKIP_ENABLED)
       && profileSettings.enabled !== false
       && !truthy(args.dryRun),
     force: truthy(args.forceReview || args.force),
-    forceReviewAfterMs: Math.max(15 * 60_000, Math.min(7 * 86_400_000, configuredMs))
+    forceReviewAfterMs: Math.max(15 * 60_000, Math.min(7 * 86_400_000, configuredMs)),
+    explorationReviewAfterSkips: Math.max(0, Math.min(100, explorationReviewAfterSkips || 0))
   };
 }
 
@@ -1136,6 +1156,7 @@ async function handleRun(request) {
           profileName: profile.name,
           fingerprint: batchSnapshot.fingerprint,
           forceReviewAfterMs: skipSettings.forceReviewAfterMs,
+          explorationReviewAfterSkips: skipSettings.explorationReviewAfterSkips,
           force: skipSettings.force
         });
         if (batchSkip.skip) {
@@ -1342,4 +1363,4 @@ async function main() {
 const isDirectRun = process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url);
 if (isDirectRun) main();
 
-export { assessSearchQuality, batchSkipSettings, buildApprovedFactsBody, checkExhaustedSources, discoverContacts, getFactSheetStatus, isSelectable, normalizeCanonicalUrls, recordExhaustedSources, runTool, updateApprovedFacts, validateDraftContent };
+export { activeQueries, assessSearchQuality, batchSkipSettings, buildApprovedFactsBody, checkExhaustedSources, discoverContacts, getFactSheetStatus, isSelectable, normalizeCanonicalUrls, recordExhaustedSources, runTool, updateApprovedFacts, validateDraftContent };
