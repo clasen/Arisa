@@ -1,7 +1,7 @@
 {
   "version": 1,
   "repository": "https://github.com/clasen/Arisa.git",
-  "commit": "4ffcd6b3c88597fa5bf09113a86aae9add3e615f",
+  "commit": "410d18e354374b43a225c31be574deb4b8f69aba",
   "tools": {
     "browser-session-bridge": {
       "version": "0.1.0",
@@ -80,27 +80,26 @@
       }
     },
     "magnific-mcp": {
-      "version": "0.4.0",
+      "version": "0.4.1",
       "toolDependencies": {
-        "mcp-client": "^0.1.0"
+        "mcp-client": "^0.2.0"
       },
       "files": {
-        "README.md": "18bf406f84e9d297c02fcf50f1b49776e4929179a714c2296927ccceafc8eac5",
+        "README.md": "98327aacc89cadd761db2eb49f3892818c72d410f88b86a8b6fe904c4efb3630",
         "config.js": "98a629781a1b2541806050952aa78a1e6e1b1671a6f1df7ba36c70dd116936a7",
         "delivery-claims.js": "52f05a5bd1ece1ab21f7d9a49f362f9c55f101ef5723efd642dbecf0236921cd",
         "generation-request.js": "a6daa889b68fa188111b4389c6446daba87fc46fbddcf4bcccba817cf3f0b607",
         "generation-watch-close.js": "0dd780280eef870d2f11cb1800e6e9de19e5ead7b9d02b9983852cc8ddbdc79b",
         "generation-watch-plan.js": "eb60660341f254adc224181ca19dbbb969ef1d676aeaab60b71a8567f52648fe",
-        "index.js": "23669717fca82c9eeef0ba0ee1c1ec2c0dddd87dd5c799b933c013948d89f1f8",
-        "magnific-api.js": "39fa9a122577029111965c3e8487565c88ce46b61dec5ca685acf1c76cd3b636",
-        "mcp-tools.js": "333c8e04de2c51ef574c66d2c57dbfbccf657b38963a1f3f2d17b006d8d0d21f",
+        "index.js": "2eead50413d076173648623285ac65977ec56d77b1275f3ff801c70f900f4bb5",
+        "magnific-api.js": "062ba561037760de347542b5bd7db5def1f940e1d8f147a131e5603dfccd22ab",
         "media-output.js": "01aaaeffa64845a200261258dccedf3116f030fafd783db97e846582ec5c9a26",
         "network.js": "b45e43b49eea98ca7d80921ebfa6daf8b0a85d2079d4653f9eda682bc82101ae",
-        "package.json": "57ffea8d6789042703e1acb9e591e59ed6bfba352b42847d74ef64a23f1b630e",
+        "package.json": "1842a0efe6021e197a14b54f6661fb9ccdcd26e92aa09a5ac50af6d3cee4367a",
         "state-store.js": "c3ee744509f7a6be251cd895406bd1c70827f53cbdc1ac9d1c2a6e48479bfe1e",
-        "test/magnific-mcp.test.js": "79e14d60034ca99e05acd242624fb9c5221b4d534843da180b759ffa1d77d0ee",
+        "test/magnific-mcp.test.js": "3af971e5a92cf6bd34111b159723892b3a5310952b036386ae98d3592708ddd0",
         "test/media-output.test.js": "ba3802da6c3e7d3c6ef94fcceb10a0b8547921d0995aa24b8484ddb2fb1a28d9",
-        "tool.manifest.json": "43a769504adfce898ff891dd647d120fb97d469852f0fdf2261c9cbfdfecaecd"
+        "tool.manifest.json": "7d26e0a101c8df81bcfdf502d6864a157f0e690e5636ce297e28b1ed07f7abc2"
       }
     },
     "master-slave": {
@@ -140,20 +139,22 @@
       }
     },
     "mcp-client": {
-      "version": "0.1.0",
+      "version": "0.2.0",
+      "toolDependencies": {},
       "files": {
-        "README.md": "798125171049f939f4487e1a023cb3a11b3c28aae96b2687df1681a11bad8dc0",
+        "README.md": "f7317946d27742eebcc443d69e152c0f9f7e1d55b07192a3875cc1a0d623ce3a",
         "config.js": "b5b05fb242034e2d04b6301e848da9701c95be195ba1cdac2421964e9a7db8c9",
-        "index.js": "ba828f353ef23cd7acc3a064f859f553705836e4ede5d31ea0824a761cc88c2a",
+        "index.js": "eaca434b3f0a7697955e0dd4cf4aa8dd7c59ab297c10f646b8cc4ec3189311e3",
         "mcp-session.js": "51765b46f410e1cd49647235b611db0b10af20c9707efcacfbe0ff7dabe3c1ff",
         "network-security.js": "60a020d4e3c7a4784a5a4e7b7246ee34e63ac73ee2316e09a09d10668dc8a7bc",
         "oauth-device.js": "698aa9255bae47190c63527db7680aaab4f06392a108a0ff6444e32d31b7b89f",
         "oauth-watch-plan.js": "b1bbed52eeb0e2e50dd52d733897ebd70573fea3ff5f023b3c63347f92633d3e",
         "package-lock.json": "fd7b6bf4545de4056908bd656a4a4e21b9f84acc7b06d8c1d581a8c84c295e90",
-        "package.json": "16d423b77a32902671a751b1d673077c789a5bc3c79254bde296e4a4207fc4e3",
+        "package.json": "85ac369f959a40da258d268a3ab1d523abba7c225d5c44a903ddae0bcc512d1b",
         "state-store.js": "a8fb63096b8efdec8de1cb386eff371f1552f3fd71d96f25036e1c724285e0af",
-        "test/mcp-client.test.js": "188b253343f551303d1ee6ab2adc34e7153282461ba7399b598fe292e78a22a1",
-        "tool.manifest.json": "5659c398922c914c5bf893404519a30071ee685ab49f34a650ecafd585b4d6ec"
+        "test/mcp-client.test.js": "26a7fe3ffa33ad454eced32c7fab12975ac5c0914041dea68cb7e5467e753a10",
+        "tool-routing.js": "b3405c9879443cdc257a1e97d4968859a8654e62ff7cfb90ec3a7a992a62e311",
+        "tool.manifest.json": "2d64dc40453fba1d5a6743145f759a28b1f6d137fd84c0e15dd41745bd1692d7"
       }
     },
     "official-tool-sync": {
