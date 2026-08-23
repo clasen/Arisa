@@ -1,7 +1,7 @@
 {
   "version": 1,
   "repository": "https://github.com/clasen/Arisa.git",
-  "commit": "12544ec0c0cb8ae1635734f35bb0c8315d4c8bc2",
+  "commit": "83ae180478ceae542a39ed64dc6eaa48b9f308a5",
   "tools": {
     "browser-session-bridge": {
       "version": "0.1.0",
@@ -80,12 +80,12 @@
       }
     },
     "magnific-mcp": {
-      "version": "0.3.0",
+      "version": "0.3.1",
       "toolDependencies": {
         "mcp-client": "^0.1.0"
       },
       "files": {
-        "README.md": "c48cd94d1e3fb70f1fd3d947520541145019464e3b42fa4841833383a895aebe",
+        "README.md": "8ae53e3668c614bd387dc29fbf7d7bb9fb61e219f8cdf62b6697ffa83125fc69",
         "config.js": "98a629781a1b2541806050952aa78a1e6e1b1671a6f1df7ba36c70dd116936a7",
         "delivery-claims.js": "52f05a5bd1ece1ab21f7d9a49f362f9c55f101ef5723efd642dbecf0236921cd",
         "generation-request.js": "a6daa889b68fa188111b4389c6446daba87fc46fbddcf4bcccba817cf3f0b607",
@@ -95,11 +95,11 @@
         "magnific-api.js": "39fa9a122577029111965c3e8487565c88ce46b61dec5ca685acf1c76cd3b636",
         "media-output.js": "01aaaeffa64845a200261258dccedf3116f030fafd783db97e846582ec5c9a26",
         "network.js": "b45e43b49eea98ca7d80921ebfa6daf8b0a85d2079d4653f9eda682bc82101ae",
-        "package.json": "9a195ad1954250d962f0a844f87c41f761faf5aa9d6bafc018de60e72e520ae2",
+        "package.json": "a448b26afdf5957162bf253bcbdc7f47a80cf7ea83b48fde40e0eb2336c05ef7",
         "state-store.js": "c3ee744509f7a6be251cd895406bd1c70827f53cbdc1ac9d1c2a6e48479bfe1e",
         "test/magnific-mcp.test.js": "3af971e5a92cf6bd34111b159723892b3a5310952b036386ae98d3592708ddd0",
         "test/media-output.test.js": "ba3802da6c3e7d3c6ef94fcceb10a0b8547921d0995aa24b8484ddb2fb1a28d9",
-        "tool.manifest.json": "e18bab593b7d1259fd83813557d227f581882188b445ac2f3cfabaaa58737506"
+        "tool.manifest.json": "026fce653963f4c7f6b36079329ae49062071922feb7e75da7734d75cb1b63a1"
       }
     },
     "master-slave": {
