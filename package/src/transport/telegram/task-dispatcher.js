@@ -5,6 +5,13 @@ function errorMessage(error) {
   return error instanceof Error ? error.message : String(error);
 }
 
+function boundedTimeout(value, fallback) {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) && parsed > 0
+    ? Math.min(Math.round(parsed), 60 * 60_000)
+    : fallback;
+}
+
 function requireChatId(task) {
   const chatId = task.payload?.chatId;
   if (chatId == null || chatId === "") {
@@ -31,7 +38,7 @@ function failureDestination(task) {
 }
 
 function buildFailureNotice({ task, result, error }) {
-  const uncertain = result?.status === "outcome_uncertain";
+  const uncertain = result?.status === "outcome_uncertain" || result?.lastOutcome === "outcome_uncertain";
   const recurring = result?.terminalFailure === true && result?.status === "pending";
   const lines = [
     uncertain ? "⚠️ Arisa task outcome is uncertain" : "⚠️ Arisa task failed",
@@ -51,8 +58,12 @@ export function createTelegramTaskDispatcher({
   toolRegistry,
   resourceNotes,
   agentManager,
+  taskTimeouts = {},
   logger
 }) {
+  const agentTimeoutMs = boundedTimeout(taskTimeouts.agentTimeoutMs, 15 * 60_000);
+  const eventTimeoutMs = boundedTimeout(taskTimeouts.eventTimeoutMs, 5 * 60_000);
+
   async function dispatchAgentTask(task, chatId) {
     if (!task.payload.prompt) throw new NonRetryableTaskError("agent_task missing prompt");
     logger?.log("tasks", `running task ${task.id} for chat ${chatId}`);
@@ -60,7 +71,8 @@ export function createTelegramTaskDispatcher({
       chatId,
       prompt: await buildAsyncTaskPrompt({ task, artifactStore, toolRegistry, resourceNotes, logger }),
       label: `scheduled task ${task.id}`,
-      route: task.route
+      route: task.route,
+      timeoutMs: agentTimeoutMs
     });
   }
 
@@ -79,7 +91,8 @@ export function createTelegramTaskDispatcher({
       chatId,
       prompt: await buildAsyncEventPrompt(task, resourceNotes),
       label: `agent event ${task.id}`,
-      route: task.route
+      route: task.route,
+      timeoutMs: eventTimeoutMs
     });
   }
 
@@ -124,6 +137,16 @@ export function createTelegramTaskDispatcher({
   const runner = createTaskRunner({
     taskStore,
     dispatch: dispatchTask,
+    laneKey(task) {
+      if (task.kind === "poll_tool") {
+        return `poll:${task.payload?.chatId}:${task.payload?.toolName || task.id}`;
+      }
+      const destination = task.route?.transport === "telegram" ? task.route.destination : null;
+      if (!destination?.chatId || Number(destination.threadId) === 1) {
+        return `agent:${task.payload?.chatId}`;
+      }
+      return `agent:${destination.chatId}:${destination.threadId || 0}`;
+    },
     onTerminalFailure: notifyTerminalFailure,
     logger
   });

@@ -37,7 +37,16 @@ export const cliLogConfig = Object.freeze({
 
 export const serviceConfigDefaults = Object.freeze({
   shutdownTimeoutMs: 15_000,
-  shutdownPollIntervalMs: 100
+  shutdownPollIntervalMs: 100,
+  workerRestartLimit: 3,
+  workerRestartBackoffMs: 2_000,
+  workerRestartBackoffMaxMs: 60_000,
+  workerStableRuntimeMs: 60_000
+});
+
+export const taskConfigDefaults = Object.freeze({
+  agentTimeoutMs: 15 * 60_000,
+  eventTimeoutMs: 5 * 60_000
 });
 
 export const piConfigDefaults = Object.freeze({
@@ -77,6 +86,10 @@ export function applyConfigDefaults(config) {
     service: {
       ...serviceConfigDefaults,
       ...(config.service || {})
+    },
+    tasks: {
+      ...taskConfigDefaults,
+      ...(config.tasks || {})
     },
     pi: {
       ...piConfigDefaults,

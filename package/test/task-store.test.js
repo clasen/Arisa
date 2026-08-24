@@ -59,12 +59,37 @@ test("claims only due pending tasks and marks them running", async () => {
   assert.equal((await store.get("done")).status, "done");
 });
 
+test("claims overdue tasks chronologically and records actual execution start", async () => {
+  await resetHome();
+  const store = new TaskStore();
+  const older = new Date(Date.now() - 2_000).toISOString();
+  const newer = new Date(Date.now() - 1_000).toISOString();
+  await store.add({ id: "newer", kind: "agent_task", runAt: newer });
+  await store.add({ id: "older", kind: "agent_task", runAt: older });
+
+  const claimed = await store.claimDue(2);
+  assert.deepEqual(claimed.map((task) => task.id), ["older", "newer"]);
+  assert.ok(claimed.every((task) => task.claimedAt));
+  assert.equal(claimed[0].executionStartedAt, undefined);
+
+  const started = await store.markExecutionStarted("older");
+  assert.ok(started.executionStartedAt);
+});
+
 test("recovers interrupted running tasks for retry after restart", async () => {
   await resetHome();
   const store = new TaskStore();
   const runAt = new Date(Date.now() - 1000).toISOString();
 
   await store.add({ id: "interrupted-once", kind: "agent_task", runAt, status: "running" });
+  await store.add({
+    id: "claimed-not-started",
+    kind: "agent_task",
+    runAt,
+    status: "running",
+    attempts: 1,
+    claimedAt: new Date().toISOString()
+  });
   await store.add({
     id: "interrupted-recurring",
     kind: "poll_tool",
@@ -77,18 +102,22 @@ test("recovers interrupted running tasks for retry after restart", async () => {
 
   const recovered = await store.recoverInterrupted();
 
-  assert.deepEqual(recovered.map((task) => task.id), ["interrupted-once", "interrupted-recurring"]);
+  assert.deepEqual(recovered.map((task) => task.id), ["interrupted-once", "claimed-not-started", "interrupted-recurring"]);
   assert.equal(recovered[0].status, "outcome_uncertain");
   assert.equal(recovered[1].status, "pending");
-  assert.ok(Date.parse(recovered[1].runAt) > Date.now());
-  assert.ok(recovered.every((task) => task.lastError === "execution interrupted before confirmation"));
+  assert.equal(recovered[1].attempts, 0);
+  assert.equal(recovered[1].lastError, "execution interrupted before start");
+  assert.equal(recovered[2].status, "pending");
+  assert.ok(Date.parse(recovered[2].runAt) > Date.now());
+  assert.equal(recovered[0].lastError, "execution interrupted before confirmation");
+  assert.equal(recovered[2].lastError, "execution interrupted before confirmation");
   assert.equal((await store.get("still-pending")).status, "pending");
   assert.equal((await store.get("already-done")).status, "done");
 
   const restartedStore = new TaskStore();
   assert.deepEqual(
     (await restartedStore.claimDue()).map((task) => task.id),
-    ["still-pending"]
+    ["claimed-not-started", "still-pending"]
   );
 });
 
@@ -268,6 +297,29 @@ test("moves legacy Telegram routing out of task payloads", async () => {
     destination: { chatId: -1001, threadId: 87 }
   });
   assert.equal(task.payload.telegramContext, undefined);
+});
+
+test("keeps recurring tasks scheduled after an uncertain outcome without replaying the occurrence", async () => {
+  await resetHome();
+  const store = new TaskStore();
+  await store.add({
+    id: "recurring-uncertain",
+    kind: "agent_task",
+    status: "running",
+    attempts: 1,
+    recurrence: { type: "interval", everySeconds: 60 }
+  });
+
+  const task = await store.retryOrFail("recurring-uncertain", "deadline exceeded", {
+    retryable: false,
+    outcomeUncertain: true
+  });
+
+  assert.equal(task.status, "pending");
+  assert.equal(task.lastOutcome, "outcome_uncertain");
+  assert.equal(task.attempts, 0);
+  assert.equal(task.terminalFailure, true);
+  assert.ok(Date.parse(task.runAt) > Date.now());
 });
 
 test("records uncertain outcomes without retrying", async () => {

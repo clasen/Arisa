@@ -377,10 +377,11 @@ export async function createTelegramBot({ config, artifactStore, toolRegistry, t
     replaceQueued = false,
     busyMessageMode = "queue",
     waitForExecution = false,
+    onExecutionStart = null,
     coalesceQueued = false
   }) {
     const chatState = getChatState(chatId);
-    const receipt = waitForExecution ? createPromptExecutionReceipt() : null;
+    const receipt = waitForExecution ? createPromptExecutionReceipt(onExecutionStart) : null;
 
     if (chatState.processing) {
       const incomingRoute = ctx ? contextRoute(ctx) : null;
@@ -505,7 +506,7 @@ export async function createTelegramBot({ config, artifactStore, toolRegistry, t
     timer.unref?.();
   }
 
-  async function enqueueAsyncPrompt({ chatId, prompt, label, route: taskRoute }) {
+  async function enqueueAsyncPrompt({ chatId, prompt, label, route: taskRoute, timeoutMs }) {
     let ctx = { chat: { id: chatId }, api: bot.api };
     const destination = taskRoute?.transport === "telegram" ? taskRoute.destination : null;
     if (destination?.chatId && destination?.threadId) {
@@ -522,7 +523,32 @@ export async function createTelegramBot({ config, artifactStore, toolRegistry, t
     const route = contextRoute(ctx);
     const chatState = getChatState(route.sessionId);
     if (chatState.processing) await ensureQueuedTelegramTyping(chatState, ctx);
-    return enqueuePrompt({ chatId: route.sessionId, prompt, label, ctx, waitForExecution: true });
+    let timer = null;
+    const execution = enqueuePrompt({
+      chatId: route.sessionId,
+      prompt,
+      label,
+      ctx,
+      waitForExecution: true,
+      onExecutionStart: ({ reject }) => {
+        if (!Number.isFinite(timeoutMs) || timeoutMs <= 0) return;
+        timer = setTimeout(() => {
+          const error = new Error(`${label} exceeded its ${timeoutMs}ms execution deadline`);
+          error.retryable = false;
+          error.outcomeUncertain = true;
+          reject(error);
+          agentManager.abortSession(route.sessionId).catch((abortError) => {
+            logger?.error("tasks", `${label} abort failed: ${getErrorMessage(abortError)}`);
+          });
+        }, timeoutMs);
+        timer.unref?.();
+      }
+    });
+    execution.then(
+      () => { if (timer) clearTimeout(timer); },
+      () => { if (timer) clearTimeout(timer); }
+    );
+    return execution;
   }
 
   const { dispatchDueTasks } = createTelegramTaskDispatcher({
@@ -533,6 +559,7 @@ export async function createTelegramBot({ config, artifactStore, toolRegistry, t
     toolRegistry,
     resourceNotes,
     agentManager,
+    taskTimeouts: config.tasks,
     logger
   });
 

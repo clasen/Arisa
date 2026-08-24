@@ -176,6 +176,8 @@ arisa --silent           # run without verbose logs
 
 Authorized Telegram chats can run the same safe service lifecycle with `/restart`.
 
+Background mode runs the Telegram/Pi worker under a lightweight supervisor. Unexpected worker exits use bounded exponential restart backoff. Scheduled agent tasks are serialized FIFO per conversation while different conversations remain independent; execution deadlines default to 15 minutes for scheduled prompts and 5 minutes for agent events. A timed-out turn is marked outcome-uncertain and is never replayed automatically. These policies can be overridden with `service.workerRestart*` and `tasks.*TimeoutMs` in the Arisa config.
+
 Runtime model override (current process only):
 
 ```bash

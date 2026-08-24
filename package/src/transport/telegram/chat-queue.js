@@ -31,14 +31,24 @@ export function createChatStateStore() {
   };
 }
 
-export function createPromptExecutionReceipt() {
+export function createPromptExecutionReceipt(onStart = null) {
   let resolve;
   let reject;
+  let started = false;
   const promise = new Promise((resolvePromise, rejectPromise) => {
     resolve = resolvePromise;
     reject = rejectPromise;
   });
-  return { promise, resolve, reject };
+  return {
+    promise,
+    resolve,
+    reject,
+    start() {
+      if (started) return;
+      started = true;
+      onStart?.({ resolve, reject, promise });
+    }
+  };
 }
 
 function rejectQueuedReceipts(chatState, error) {
@@ -169,6 +179,7 @@ export async function drainChatPromptQueue({
         chatState.continueAfterClose = false;
       }
       try {
+        currentReceipt?.start?.();
         await processPrompt({ prompt: currentPrompt, ctx: currentCtx, receipt: currentReceipt });
         currentReceipt?.resolve({ status: "completed" });
       } catch (error) {

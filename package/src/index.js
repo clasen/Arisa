@@ -5,6 +5,7 @@ import { applyRuntimeOverrides, createApp } from "./runtime/create-app.js";
 import { loadConfig } from "./core/config/config-store.js";
 import { createLogger } from "./runtime/logger.js";
 import { getServiceStatus, handoffServiceRestart, registerServiceProcess, restartService, serviceEntryFile, startService, stopService, unregisterServiceProcess } from "./runtime/service-manager.js";
+import { createServiceSupervisor } from "./runtime/service-supervisor.js";
 import { flushArisaHome } from "./runtime/flush.js";
 import { readPackageVersion, showServiceLogs } from "./runtime/log-viewer.js";
 import { arisaPackageDir } from "./runtime/paths.js";
@@ -19,6 +20,7 @@ const command = cli.positionals[0] || "run";
 const forceBootstrap = Boolean(cli.flags.bootstrap);
 const verbose = !cli.flags.silent;
 const serviceRunner = Boolean(cli.flags["service-runner"]);
+const serviceWorker = Boolean(cli.flags["service-worker"]);
 const slaveCommand = command === "slave";
 const slaveServiceRunner = slaveCommand && serviceRunner;
 const runtimeOverrides = toNestedOverrides(cli.nestedFlags);
@@ -233,6 +235,24 @@ async function main() {
 
   if (serviceRunner) {
     await registerServiceProcess();
+    const persistedConfig = await loadConfig();
+    const workerArgs = [serviceEntryFile, "--service-worker", ...toServiceRunnerArgs(cli.nestedFlags)];
+    if (!verbose) workerArgs.push("--silent");
+    const supervisor = createServiceSupervisor({
+      command: process.execPath,
+      args: workerArgs,
+      restartLimit: persistedConfig.service.workerRestartLimit,
+      restartBackoffMs: persistedConfig.service.workerRestartBackoffMs,
+      restartBackoffMaxMs: persistedConfig.service.workerRestartBackoffMaxMs,
+      stableRuntimeMs: persistedConfig.service.workerStableRuntimeMs,
+      logger
+    });
+    activeApp = supervisor;
+    await supervisor.start();
+    return;
+  }
+
+  if (serviceWorker) {
     await runForeground();
     return;
   }

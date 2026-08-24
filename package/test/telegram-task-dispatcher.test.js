@@ -50,10 +50,31 @@ test("confirms an agent task only after prompt execution resolves", async () => 
   await new Promise((resolve) => setImmediate(resolve));
   assert.equal(calls[0][0], "enqueue");
   assert.deepEqual(calls[0][1].route, { transport: "telegram", destination: { chatId: -1001, threadId: 9 } });
+  assert.equal(calls[0][1].timeoutMs, 15 * 60_000);
   assert.equal(calls.some(([name]) => name === "complete"), false);
   confirmExecution();
   await running;
   assert.deepEqual(calls.at(-1), ["complete", "task-1"]);
+});
+
+test("passes bounded execution deadlines to scheduled prompts", async () => {
+  const { calls, dispatcher } = createHarness({
+    dependencies: { taskTimeouts: { agentTimeoutMs: 900, eventTimeoutMs: 300 } }
+  });
+  await dispatcher.runClaimedTask({
+    id: "deadline-task",
+    kind: "agent_task",
+    payload: { chatId: 123, prompt: "work" }
+  });
+  await dispatcher.runClaimedTask({
+    id: "deadline-event",
+    kind: "agent_event",
+    payload: { chatId: 123, prompt: "event" }
+  });
+
+  const enqueues = calls.filter(([name]) => name === "enqueue");
+  assert.equal(enqueues[0][1].timeoutMs, 900);
+  assert.equal(enqueues[1][1].timeoutMs, 300);
 });
 
 test("acknowledges an agent event before executing it", async () => {
@@ -153,6 +174,36 @@ test("notifies the routed Telegram topic once retries are exhausted", async () =
     { message_thread_id: 87 }
   ]);
   assert.equal(calls.at(-1)[2].includes("private payload"), false);
+});
+
+test("serializes tasks within one destination while independent destinations continue", async () => {
+  const tasks = [
+    { id: "first", kind: "agent_task", payload: { chatId: 123, prompt: "first" }, route: { transport: "telegram", destination: { chatId: -1001, threadId: 87 } } },
+    { id: "second", kind: "agent_task", payload: { chatId: 123, prompt: "second" }, route: { transport: "telegram", destination: { chatId: -1001, threadId: 87 } } },
+    { id: "other", kind: "agent_task", payload: { chatId: 123, prompt: "other" }, route: { transport: "telegram", destination: { chatId: -1001, threadId: 23 } } }
+  ];
+  let releaseFirst;
+  const firstExecution = new Promise((resolve) => { releaseFirst = resolve; });
+  const { calls, dispatcher } = createHarness({
+    taskStore: { async claimDue() { return tasks; } },
+    dependencies: {
+      enqueueAsyncPrompt: async (input) => {
+        calls.push(["enqueue", input.label]);
+        if (input.label.includes("first")) await firstExecution;
+      }
+    }
+  });
+
+  const dispatching = dispatcher.dispatchDueTasks();
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.ok(calls.some((call) => call[0] === "enqueue" && call[1].includes("first")));
+  assert.ok(calls.some((call) => call[0] === "enqueue" && call[1].includes("other")));
+  assert.equal(calls.some((call) => call[0] === "enqueue" && call[1].includes("second")), false);
+
+  releaseFirst();
+  await dispatching;
+  const enqueueOrder = calls.filter((call) => call[0] === "enqueue").map((call) => call[1]);
+  assert.ok(enqueueOrder.indexOf("scheduled task first") < enqueueOrder.indexOf("scheduled task second"));
 });
 
 test("due-task dispatch retries one failure without blocking another task", async () => {

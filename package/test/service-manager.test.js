@@ -1,7 +1,9 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { EventEmitter } from "node:events";
 import { createTelegramRestartHandler, telegramCommands } from "../src/transport/telegram/bot.js";
 import { handoffServiceRestart, restartService, serviceEntryFile, waitForServiceStop } from "../src/runtime/service-manager.js";
+import { createServiceSupervisor } from "../src/runtime/service-supervisor.js";
 
 test("registers maintenance as native Telegram commands", () => {
   assert.equal(
@@ -223,6 +225,52 @@ test("restart does not start a second service when shutdown times out", async ()
   );
 
   assert.equal(started, false);
+});
+
+test("accepts restart handoff from a worker owned by the active supervisor", async () => {
+  let spawned = false;
+  await handoffServiceRestart({}, {
+    ensureHome: async () => {},
+    getStatus: async () => ({ running: true, pid: 77 }),
+    openLog: async () => ({ fd: 17, close: async () => {} }),
+    spawnProcess: () => ({ pid: 84, unref() { spawned = true; } }),
+    environment: { ARISA_SUPERVISOR_PID: "77" },
+    currentPid: 41
+  });
+  assert.equal(spawned, true);
+});
+
+test("supervisor restarts an unexpectedly exited worker and forwards shutdown", async () => {
+  const children = [];
+  const delays = [];
+  const spawnProcess = () => {
+    const child = new EventEmitter();
+    child.pid = 100 + children.length;
+    child.kill = (signal) => {
+      child.killedWith = signal;
+      queueMicrotask(() => child.emit("exit", 0, signal));
+    };
+    children.push(child);
+    return child;
+  };
+  const supervisor = createServiceSupervisor({
+    command: "node",
+    args: ["worker.js"],
+    restartLimit: 2,
+    restartBackoffMs: 5,
+    restartBackoffMaxMs: 20,
+    stableRuntimeMs: 60_000,
+    spawnProcess,
+    wait: async (ms) => { delays.push(ms); }
+  });
+  const running = supervisor.start();
+  children[0].emit("exit", 1, null);
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(children.length, 2);
+  assert.deepEqual(delays, [5]);
+  await supervisor.stop();
+  await running;
+  assert.equal(children[1].killedWith, "SIGTERM");
 });
 
 test("requires explicit positive shutdown timing policy", async () => {

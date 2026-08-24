@@ -144,6 +144,9 @@ function normalizeTask(task, defaults = {}) {
       ...(defaults.source || {}),
       ...(task.source || {})
     },
+    ...(task.startedAt ? { startedAt: task.startedAt } : {}),
+    ...(task.claimedAt ? { claimedAt: task.claimedAt } : {}),
+    ...(task.executionStartedAt ? { executionStartedAt: task.executionStartedAt } : {}),
     attempts: task.attempts || 0,
     retry: task.retry || defaults.retry
   });
@@ -228,21 +231,37 @@ export class TaskStore {
   async claimDue(limit = 10) {
     return this.mutate(async (tasks) => {
       const now = Date.now();
-      const due = [];
+      const due = tasks
+        .filter((task) => task.status === "pending"
+          && task.runAt
+          && !Number.isNaN(Date.parse(task.runAt))
+          && Date.parse(task.runAt) <= now)
+        .sort((left, right) => Date.parse(left.runAt) - Date.parse(right.runAt)
+          || Date.parse(left.createdAt || 0) - Date.parse(right.createdAt || 0)
+          || String(left.id).localeCompare(String(right.id)))
+        .slice(0, limit);
 
-      for (const task of tasks) {
-        if (due.length >= limit) break;
-        if (task.status !== "pending") continue;
-        if (!task.runAt || Number.isNaN(Date.parse(task.runAt))) continue;
-        if (Date.parse(task.runAt) > now) continue;
+      const claimedAt = new Date(now).toISOString();
+      for (const task of due) {
         task.status = "running";
         task.attempts += 1;
-        task.startedAt = new Date(now).toISOString();
-        task.updatedAt = task.startedAt;
-        due.push(structuredClone(task));
+        task.startedAt = claimedAt;
+        task.claimedAt = claimedAt;
+        delete task.executionStartedAt;
+        task.updatedAt = claimedAt;
       }
 
-      return { result: due, changed: due.length > 0 };
+      return { result: structuredClone(due), changed: due.length > 0 };
+    });
+  }
+
+  async markExecutionStarted(taskId) {
+    return this.mutate(async (tasks) => {
+      const task = tasks.find((item) => item.id === taskId);
+      if (!task || task.status !== "running") return { result: null, changed: false };
+      task.executionStartedAt = new Date().toISOString();
+      task.updatedAt = task.executionStartedAt;
+      return { result: structuredClone(task) };
     });
   }
 
@@ -255,12 +274,29 @@ export class TaskStore {
       for (const task of tasks) {
         if (task.status === "running") {
           const interruptedAt = new Date(now).toISOString();
+          if (task.claimedAt && !task.executionStartedAt) {
+            task.status = "pending";
+            task.attempts = Math.max(0, Number(task.attempts || 0) - 1);
+            task.lastError = "execution interrupted before start";
+            task.lastFailedAt = interruptedAt;
+            task.updatedAt = interruptedAt;
+            task.lastClaimedAt = task.claimedAt;
+            delete task.startedAt;
+            delete task.claimedAt;
+            recovered.push(structuredClone(task));
+            continue;
+          }
           task.lastError = "execution interrupted before confirmation";
           task.lastFailedAt = interruptedAt;
           task.updatedAt = interruptedAt;
+          if (task.claimedAt) task.lastClaimedAt = task.claimedAt;
+          if (task.executionStartedAt) task.lastExecutionStartedAt = task.executionStartedAt;
+          delete task.claimedAt;
+          delete task.executionStartedAt;
           if (task.kind === "poll_tool") {
             task.status = "pending";
             task.runAt = new Date(now + retryDelayMs(task)).toISOString();
+            delete task.startedAt;
           } else {
             const nextRunAt = computeNextRunAt(task, now);
             if (nextRunAt) {
@@ -268,6 +304,7 @@ export class TaskStore {
               task.runAt = nextRunAt;
               task.attempts = 0;
               task.lastOutcome = "outcome_uncertain";
+              delete task.startedAt;
             } else {
               task.status = "outcome_uncertain";
               task.error = task.lastError;
@@ -294,10 +331,14 @@ export class TaskStore {
       const nextRunAt = computeNextRunAt(task, now);
       task.lastCompletedAt = completedAt;
       task.lastRunAt = completedAt;
+      if (task.claimedAt) task.lastClaimedAt = task.claimedAt;
+      if (task.executionStartedAt) task.lastExecutionStartedAt = task.executionStartedAt;
       delete task.lastError;
       delete task.error;
       delete task.lastOutcome;
       delete task.consecutiveFailures;
+      delete task.claimedAt;
+      delete task.executionStartedAt;
       if (nextRunAt) {
         task.status = "pending";
         task.runAt = nextRunAt;
@@ -319,12 +360,28 @@ export class TaskStore {
       if (!task) return { result: null, changed: false };
       const message = error instanceof Error ? error.message : String(error);
       if (outcomeUncertain) {
-        const uncertainAt = new Date().toISOString();
+        const now = Date.now();
+        const uncertainAt = new Date(now).toISOString();
+        const nextRunAt = computeNextRunAt(task, now);
+        task.lastError = message;
+        task.lastFailedAt = uncertainAt;
+        task.updatedAt = uncertainAt;
+        if (task.claimedAt) task.lastClaimedAt = task.claimedAt;
+        if (task.executionStartedAt) task.lastExecutionStartedAt = task.executionStartedAt;
+        delete task.claimedAt;
+        delete task.executionStartedAt;
+        if (nextRunAt) {
+          task.status = "pending";
+          task.runAt = nextRunAt;
+          task.attempts = 0;
+          task.lastOutcome = "outcome_uncertain";
+          delete task.startedAt;
+          delete task.error;
+          return { result: { ...structuredClone(task), terminalFailure: true } };
+        }
         task.status = "outcome_uncertain";
         task.error = message;
-        task.lastError = message;
         task.uncertainAt = uncertainAt;
-        task.updatedAt = uncertainAt;
         compactTerminalTask(task);
         return { result: structuredClone(task) };
       }
@@ -343,7 +400,11 @@ export class TaskStore {
         task.lastFailedAt = failedAt;
         task.consecutiveFailures = Number(task.consecutiveFailures || 0) + 1;
         task.updatedAt = failedAt;
+        if (task.claimedAt) task.lastClaimedAt = task.claimedAt;
+        if (task.executionStartedAt) task.lastExecutionStartedAt = task.executionStartedAt;
         delete task.startedAt;
+        delete task.claimedAt;
+        delete task.executionStartedAt;
         delete task.error;
         return { result: { ...structuredClone(task), terminalFailure: true } };
       }
@@ -354,6 +415,11 @@ export class TaskStore {
       task.lastError = message;
       task.lastFailedAt = new Date(now).toISOString();
       task.updatedAt = task.lastFailedAt;
+      if (task.claimedAt) task.lastClaimedAt = task.claimedAt;
+      if (task.executionStartedAt) task.lastExecutionStartedAt = task.executionStartedAt;
+      delete task.startedAt;
+      delete task.claimedAt;
+      delete task.executionStartedAt;
       return { result: structuredClone(task) };
     });
   }

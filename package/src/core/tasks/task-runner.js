@@ -10,7 +10,7 @@ export class NonRetryableTaskError extends Error {
   }
 }
 
-export function createTaskRunner({ taskStore, dispatch, onTerminalFailure, logger, claimLimit = 10 }) {
+export function createTaskRunner({ taskStore, dispatch, laneKey = (task) => task.id, onTerminalFailure, logger, claimLimit = 10 }) {
   if (!taskStore || typeof dispatch !== "function") {
     throw new Error("Task runner requires taskStore and dispatch");
   }
@@ -27,8 +27,11 @@ export function createTaskRunner({ taskStore, dispatch, onTerminalFailure, logge
     }
   }
 
-  async function runClaimedTask(task) {
+  const lanes = new Map();
+
+  async function executeClaimedTask(task) {
     try {
+      await taskStore.markExecutionStarted?.(task.id);
       await dispatch(task);
       await taskStore.complete(task.id);
       logger?.log("tasks", `task ${task.id} completed after confirmed execution`);
@@ -42,6 +45,18 @@ export function createTaskRunner({ taskStore, dispatch, onTerminalFailure, logge
       await reportTerminalFailure(task, updated, error);
       return { taskId: task.id, status, error: errorMessage(error) };
     }
+  }
+
+  function runClaimedTask(task) {
+    const key = String(laneKey(task));
+    const previous = lanes.get(key) || Promise.resolve();
+    const running = previous.catch(() => {}).then(() => executeClaimedTask(task));
+    lanes.set(key, running);
+    running.then(
+      () => { if (lanes.get(key) === running) lanes.delete(key); },
+      () => { if (lanes.get(key) === running) lanes.delete(key); }
+    );
+    return running;
   }
 
   async function dispatchDueTasks() {

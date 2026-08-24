@@ -199,6 +199,16 @@ export class AgentManager {
     this.sessionLifecycle.closeCached(String(chatId));
   }
 
+  async abortSession(chatId) {
+    const sessionKey = String(chatId);
+    const context = this.sessions.get(sessionKey);
+    try {
+      await context?.session?.abort?.();
+    } finally {
+      await this.sessionLifecycle.closeCached(sessionKey);
+    }
+  }
+
   getRuntimeDiagnostic() {
     return this.sessionLifecycle.getDiagnostic();
   }

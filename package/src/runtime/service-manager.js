@@ -78,7 +78,9 @@ export async function handoffServiceRestart({ verbose = true, cliArgs = [] } = {
 } = {}) {
   await ensureHome();
   const status = await getStatus();
-  if (!status.running || status.pid !== currentPid) {
+  const supervisorPid = Number.parseInt(environment.ARISA_SUPERVISOR_PID || "", 10);
+  const isActiveWorker = Number.isSafeInteger(supervisorPid) && supervisorPid === status.pid;
+  if (!status.running || (status.pid !== currentPid && !isActiveWorker)) {
     throw new Error("Service restart handoff requires the active background service process");
   }
   const logHandle = await openLog(serviceLogFile, "a");
