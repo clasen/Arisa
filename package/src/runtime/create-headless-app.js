@@ -14,7 +14,7 @@ export async function createHeadlessApp({
   configLoader = loadConfig,
   artifactStoreFactory = () => new ArtifactStore(),
   taskStoreFactory = () => new TaskStore(),
-  toolRegistryFactory = () => new ToolRegistry({ logger }),
+  toolRegistryFactory = (options) => new ToolRegistry(options),
   supervisorFactory = (options) => createToolProcessSupervisor(options),
   capabilitiesFactory = (options) => createArisaCapabilities(options),
   ipcServerFactory = (options) => createIpcServer(options)
@@ -23,7 +23,7 @@ export async function createHeadlessApp({
   const config = await configLoader();
   const artifactStore = artifactStoreFactory();
   const taskStore = taskStoreFactory();
-  const toolRegistry = toolRegistryFactory();
+  const toolRegistry = toolRegistryFactory({ logger, executionPolicy: config.toolExecution });
   await toolRegistry.load();
   const toolProcessSupervisor = supervisorFactory({ logger, policy: config.daemons, toolRegistry });
   const toolExecutor = createHeadlessToolExecutor({ artifactStore, taskStore, toolRegistry });

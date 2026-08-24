@@ -16,6 +16,12 @@ export const daemonConfigDefaults = Object.freeze({
   ipcFrameBytes: 1_048_576
 });
 
+export const toolExecutionConfigDefaults = Object.freeze({
+  defaultCapacity: 2,
+  maxQueuedPerClass: 100,
+  capacities: Object.freeze({})
+});
+
 export const telegramConfigDefaults = Object.freeze({
   modelPickerPageSize: 8,
   busyMessageMode: "steer",
@@ -78,6 +84,14 @@ export function applyConfigDefaults(config) {
     telegram: {
       ...telegramConfigDefaults,
       ...(config.telegram || {})
+    },
+    toolExecution: {
+      ...toolExecutionConfigDefaults,
+      ...(config.toolExecution || {}),
+      capacities: {
+        ...toolExecutionConfigDefaults.capacities,
+        ...(config.toolExecution?.capacities || {})
+      }
     },
     doctor: {
       ...doctorConfigDefaults,

@@ -157,6 +157,22 @@ test("lists optional semantic metadata with stable defaults", async () => {
 
   assert.equal(registry.list()[0].category, null);
   assert.deepEqual(registry.list()[0].keywords, []);
+  assert.equal(registry.get("fake-tool").execution, null);
+});
+
+test("loads weighted execution metadata from the tool manifest", async () => {
+  await resetHome();
+  await createFakeTool("heavy-tool", {
+    execution: { resourceClass: "browser", weight: 2 }
+  });
+
+  const registry = new ToolRegistry();
+  await registry.load();
+
+  assert.deepEqual(registry.get("heavy-tool").execution, {
+    resourceClass: "browser",
+    weight: 2
+  });
 });
 
 test("shows semantic metadata in tool help", async () => {
@@ -191,6 +207,31 @@ test("reports dependency status in help and blocks a tool with a missing depende
     () => registry.run({ name: "dependent-tool", request: { args: {} } }),
     /Tool dependency missing/
   );
+});
+
+test("wraps declared tool runs in the shared execution governor", async () => {
+  await resetHome();
+  await createFakeTool("heavy-tool", {
+    execution: { resourceClass: "browser", weight: 1 }
+  });
+  const calls = [];
+  const executionGovernor = {
+    acquire: async (execution, label) => {
+      calls.push({ type: "acquire", execution, label });
+      return { release: () => calls.push({ type: "release", label }) };
+    },
+    snapshot: () => ({ resources: {} })
+  };
+  const registry = new ToolRegistry({ executionGovernor });
+  await registry.load();
+
+  const result = await registry.run({ name: "heavy-tool", request: { args: {} } });
+
+  assert.equal(result.ok, true);
+  assert.deepEqual(calls, [
+    { type: "acquire", execution: { resourceClass: "browser", weight: 1 }, label: "heavy-tool" },
+    { type: "release", label: "heavy-tool" }
+  ]);
 });
 
 test("runs a registered tool process with an enriched request and cleans up request files", async () => {

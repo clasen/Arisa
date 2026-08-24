@@ -11,6 +11,7 @@ import { daemonConfigDefaults } from "../config/config-defaults.js";
 import { SkillRegistry } from "../skills/skill-registry.js";
 import { ToolUsageStore } from "./tool-usage-store.js";
 import { inspectToolDependencies, normalizeToolDependencies } from "./tool-dependencies.js";
+import { normalizeToolExecution, WeightedResourceGovernor } from "./weighted-resource-governor.js";
 
 function toolEnv() {
   return { ...process.env, ARISA_PACKAGE_DIR: arisaPackageDir, ARISA_IPC_SOCKET: arisaIpcSocketFile };
@@ -272,7 +273,9 @@ export class ToolRegistry {
     resolveOfficialToolNames = readOfficialToolNames,
     helpTimeoutMs = defaultToolHelpTimeoutMs,
     runTimeoutMs = defaultToolRunTimeoutMs,
-    killGraceMs = defaultToolKillGraceMs
+    killGraceMs = defaultToolKillGraceMs,
+    executionPolicy,
+    executionGovernor
   } = {}) {
     this.logger = logger;
     this.helpTimeoutMs = positiveDuration(helpTimeoutMs, defaultToolHelpTimeoutMs);
@@ -282,6 +285,10 @@ export class ToolRegistry {
     this.skillRegistry = new SkillRegistry();
     this.usageStore = usageStore;
     this.resolveOfficialToolNames = resolveOfficialToolNames;
+    this.executionGovernor = executionGovernor || new WeightedResourceGovernor({
+      policy: executionPolicy,
+      logger
+    });
   }
 
   async buildSnapshot() {
@@ -308,6 +315,7 @@ export class ToolRegistry {
         snapshot.set(manifest.name, {
           ...manifest,
           toolDependencies: normalizeToolDependencies(manifest.toolDependencies),
+          execution: normalizeToolExecution(manifest.execution),
           category: normalizeCategory(manifest.category),
           keywords: normalizeKeywords(manifest.keywords),
           skillHints,
@@ -450,6 +458,10 @@ export class ToolRegistry {
     return inspectToolDependencies(this.tools, name);
   }
 
+  executionDiagnostic() {
+    return this.executionGovernor.snapshot();
+  }
+
   async usage(chatId) {
     const [counts, officialNames] = await Promise.all([
       this.usageStore.counts(chatId),
@@ -475,14 +487,16 @@ export class ToolRegistry {
     await this.usageStore.record(chatId, name).catch((error) => {
       this.logger?.error("tools", `could not record ${name} usage: ${error?.message || String(error)}`);
     });
-    this.logger?.log("tools", `running ${name}`);
     const tmpDir = chatId != null ? getChatToolTmpDir(chatId, name) : getToolTmpDir(name);
-    await mkdir(tmpDir, { recursive: true });
     const requestFile = path.join(tmpDir, `.request-${Date.now()}-${randomUUID()}.json`);
-    const skills = await this.resolveSkills(name);
-    const enrichedRequest = { ...request, chatId, skills };
+    let lease = null;
     let result;
     try {
+      lease = await this.executionGovernor.acquire(tool.execution, name);
+      this.logger?.log("tools", `running ${name}`);
+      await mkdir(tmpDir, { recursive: true });
+      const skills = await this.resolveSkills(name);
+      const enrichedRequest = { ...request, chatId, skills };
       if (tool.daemon?.protocol === "arisa-daemon-v1") {
         const scope = tool.daemon.scope === "chat"
           ? { type: "chat", chatId }
@@ -538,6 +552,7 @@ export class ToolRegistry {
         error: error?.message || `Invalid tool response for ${name}`
       });
     } finally {
+      lease?.release();
       await unlink(requestFile).catch(() => {});
       await rmdir(tmpDir).catch(() => {});
       if (chatId != null) {

@@ -9,6 +9,10 @@
     "text/plain"
   ],
   "configSchema": {},
+  "execution": {
+    "resourceClass": "browser",
+    "weight": 1
+  },
   "category": "web",
   "keywords": [
     "browse",

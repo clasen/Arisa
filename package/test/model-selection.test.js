@@ -10,7 +10,12 @@ import {
   selectChatSpeed,
   selectChatThinkingLevel
 } from "../src/core/agent/model-selection.js";
-import { applyConfigDefaults, piConfigDefaults, telegramConfigDefaults } from "../src/core/config/config-defaults.js";
+import {
+  applyConfigDefaults,
+  piConfigDefaults,
+  telegramConfigDefaults,
+  toolExecutionConfigDefaults
+} from "../src/core/config/config-defaults.js";
 import {
   clampModelThinkingLevel,
   listModelThinkingLevels,
@@ -295,6 +300,9 @@ test("centralizes Telegram and Pi defaults in config", () => {
 
   assert.equal(config.telegram.modelPickerPageSize, telegramConfigDefaults.modelPickerPageSize);
   assert.equal(config.telegram.busyMessageMode, "steer");
+  assert.equal(config.toolExecution.defaultCapacity, toolExecutionConfigDefaults.defaultCapacity);
+  assert.equal(config.toolExecution.maxQueuedPerClass, 100);
+  assert.deepEqual(config.toolExecution.capacities, {});
   assert.equal(config.pi.thinkingLevel, piConfigDefaults.thinkingLevel);
   assert.equal(config.pi.speed, piConfigDefaults.speed);
 });
