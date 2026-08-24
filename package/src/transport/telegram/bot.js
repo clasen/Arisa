@@ -19,6 +19,11 @@ import { createTelegramToolsCommandHandler } from "./telegram-tools-command.js";
 import { createTelegramWorkspaceController } from "./telegram-workspace-controller.js";
 import { resolveTelegramWorkspaceRoute } from "./workspace-group.js";
 import {
+  appendGeneralReplyRoutingInstruction,
+  routeGeneralWorkspaceReply,
+  workspaceReplyTopics
+} from "./reply-topic-routing.js";
+import {
   buildNewSessionPrompt,
   buildPrompt,
   buildReactionPrompt,
@@ -276,7 +281,11 @@ export async function createTelegramBot({ config, artifactStore, toolRegistry, t
     if (normalizationRequired && !transcript) {
       logger?.log("telegram", `media normalization unavailable for chat ${route.transportChatId}: ${toolResult?.error || toolResult?.missingConfig?.join(", ") || "unknown error"}`);
     }
-    return buildPrompt({ ctx, artifact, transcript, toolResult });
+    const prompt = buildPrompt({ ctx, artifact, transcript, toolResult });
+    const topics = route.workspace && route.threadId == null
+      ? workspaceReplyTopics(config, route.transportChatId, route.generalTopicId)
+      : [];
+    return appendGeneralReplyRoutingInstruction(prompt, topics);
   }
 
   const {
@@ -354,13 +363,22 @@ export async function createTelegramBot({ config, artifactStore, toolRegistry, t
       }
       executionReceipt?.resolve({ status: "executed" });
       if (text) {
-        await createWorkspaceAccessGuard(route)();
+        const routedReply = routeGeneralWorkspaceReply({ config, route, text });
+        if (!routedReply.text) return;
+        const deliveryRoute = routedReply.route;
+        const deliveryOptions = (extra = {}) => deliveryRoute.workspace && deliveryRoute.threadId
+          ? { ...extra, message_thread_id: deliveryRoute.threadId }
+          : extra;
+        await createWorkspaceAccessGuard(deliveryRoute)();
+        if (routedReply.topic) {
+          logger?.log("telegram", `routing General reply to topic ${routedReply.topic.threadId} (${routedReply.topic.name})`);
+        }
         await sendTextReply({
-          sendText: (message, extra) => bot.api.sendMessage(route.transportChatId, message, messageOptions(extra)),
-          sendDocument: (file, extra) => bot.api.sendDocument(route.transportChatId, file, messageOptions(extra)),
+          sendText: (message, extra) => bot.api.sendMessage(deliveryRoute.transportChatId, message, deliveryOptions(extra)),
+          sendDocument: (file, extra) => bot.api.sendDocument(deliveryRoute.transportChatId, file, deliveryOptions(extra)),
           chatId: sessionId,
-          artifactChatId: route.scopeChatId,
-          text
+          artifactChatId: deliveryRoute.scopeChatId,
+          text: routedReply.text
         });
       }
     };

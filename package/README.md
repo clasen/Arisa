@@ -61,6 +61,26 @@ The result is a toolset shaped by how you actually use the assistant, not by def
 - while a chat is busy, concurrent text steers Pi's active run by default
 - set `telegram.busyMessageMode` to `"queue"` to keep concurrent text messages in order; override one chat with `telegram.chatMeta[chatId].busyMessageMode`
 - media and normalized audio stay queued, and failed steering falls back to the ordered queue
+- an owner-workspace General topic may route only the assistant's visible reply to a configured topic; the incoming message and General session remain unchanged, and ambiguous replies stay in General
+
+Configure conservative General reply destinations under the workspace group. Topic ids must already exist in Telegram:
+
+```json
+{
+  "telegram": {
+    "ownerWorkspaceGroups": {
+      "-100123": {
+        "ownerChatId": 42,
+        "generalTopicId": 1,
+        "replyTopics": {
+          "23": { "name": "Stories", "description": "Published stories and editorial work" },
+          "114": { "name": "CORE", "description": "Arisa core engineering" }
+        }
+      }
+    }
+  }
+}
+```
 
 ### Tool model
 No tools ship with the core. All installed tools live under `~/.arisa/tools/<tool-name>`, whether they come from the [official catalog](https://github.com/clasen/Arisa/tree/main/tools), from another source the user chooses, or are created by the agent itself.
