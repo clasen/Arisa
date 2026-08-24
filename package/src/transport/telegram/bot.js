@@ -20,9 +20,10 @@ import { createTelegramWorkspaceController } from "./telegram-workspace-controll
 import { resolveTelegramWorkspaceRoute } from "./workspace-group.js";
 import {
   appendGeneralReplyRoutingInstruction,
-  routeGeneralWorkspaceReply,
-  workspaceReplyTopics
+  isGeneralWorkspaceRoute,
+  routeGeneralWorkspaceReply
 } from "./reply-topic-routing.js";
+import { migrateLegacyReplyTopics, WorkspaceTopicStore } from "./workspace-topic-store.js";
 import {
   buildNewSessionPrompt,
   buildPrompt,
@@ -179,6 +180,7 @@ export async function createTelegramBot({ config, artifactStore, toolRegistry, t
   const bot = new Bot(config.telegram.token);
   const perChatState = createChatStateStore();
   const sessionSeeds = new SessionSeedStore();
+  const workspaceTopics = new WorkspaceTopicStore();
   const notifiedPromptErrors = new WeakSet();
   let taskTimer = null;
   const { authorizeContext, contextRoute, registerRoute } = createTelegramWorkspaceController({
@@ -282,10 +284,12 @@ export async function createTelegramBot({ config, artifactStore, toolRegistry, t
       logger?.log("telegram", `media normalization unavailable for chat ${route.transportChatId}: ${toolResult?.error || toolResult?.missingConfig?.join(", ") || "unknown error"}`);
     }
     const prompt = buildPrompt({ ctx, artifact, transcript, toolResult });
-    const topics = route.workspace && route.threadId == null
-      ? workspaceReplyTopics(config, route.transportChatId, route.generalTopicId)
-      : [];
-    return appendGeneralReplyRoutingInstruction(prompt, topics);
+    if (!isGeneralWorkspaceRoute(route)) return prompt;
+    const [topics, recentProposals] = await Promise.all([
+      workspaceTopics.listTopics(route.ownerChatId, route.transportChatId),
+      workspaceTopics.listRecentProposals(route.ownerChatId, route.transportChatId)
+    ]);
+    return appendGeneralReplyRoutingInstruction(prompt, topics, recentProposals);
   }
 
   const {
@@ -299,6 +303,7 @@ export async function createTelegramBot({ config, artifactStore, toolRegistry, t
     agentManager,
     artifactStore,
     sessionSeeds,
+    workspaceTopics,
     getChatState,
     buildTopicInitializationHandoff,
     logger
@@ -363,7 +368,14 @@ export async function createTelegramBot({ config, artifactStore, toolRegistry, t
       }
       executionReceipt?.resolve({ status: "executed" });
       if (text) {
-        const routedReply = routeGeneralWorkspaceReply({ config, route, text });
+        const topics = route.workspace && route.ownerChatId
+          ? await workspaceTopics.listTopics(route.ownerChatId, route.transportChatId)
+          : [];
+        const routedReply = routeGeneralWorkspaceReply({ route, text, topics });
+        if (routedReply.proposal) {
+          await workspaceTopics.recordProposal(route.ownerChatId, route.transportChatId, routedReply.proposal);
+          logger?.log("telegram", `recorded topic proposal ${routedReply.proposal} for workspace ${route.transportChatId}`);
+        }
         if (!routedReply.text) return;
         const deliveryRoute = routedReply.route;
         const deliveryOptions = (extra = {}) => deliveryRoute.workspace && deliveryRoute.threadId
@@ -491,6 +503,13 @@ export async function createTelegramBot({ config, artifactStore, toolRegistry, t
       label: `message ${ctx.msg.message_id}`,
       ctx
     });
+  }
+
+  async function migrateConfiguredReplyTopics() {
+    const migratedGroups = await migrateLegacyReplyTopics(config, workspaceTopics);
+    if (!migratedGroups) return;
+    await saveConfig(config);
+    logger?.log("telegram", `migrated configured reply topics for ${migratedGroups} workspace group(s)`);
   }
 
   async function sendStartupMessages() {
@@ -782,6 +801,9 @@ export async function createTelegramBot({ config, artifactStore, toolRegistry, t
   bot.on("message", async (ctx) => {
     const auth = await authorizeContext(ctx);
     if (!auth.ok) return;
+    await workspaceTopics.observeMessage(contextRoute(ctx), ctx.message).catch((error) => {
+      logger?.error("telegram", `workspace topic observation failed: ${getErrorMessage(error)}`);
+    });
     if (!isProcessableTelegramMessage(ctx.message)) return;
 
     const command = getTelegramCommand(ctx);
@@ -810,6 +832,7 @@ export async function createTelegramBot({ config, artifactStore, toolRegistry, t
   return {
     async start({ skipAgentStartupPrompts = false } = {}) {
       config.telegram.chatMeta ||= {};
+      await migrateConfiguredReplyTopics();
       await bot.api.setMyCommands(telegramCommands);
       if (!taskTimer) {
         taskTimer = setInterval(() => {

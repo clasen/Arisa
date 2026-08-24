@@ -61,26 +61,11 @@ The result is a toolset shaped by how you actually use the assistant, not by def
 - while a chat is busy, concurrent text steers Pi's active run by default
 - set `telegram.busyMessageMode` to `"queue"` to keep concurrent text messages in order; override one chat with `telegram.chatMeta[chatId].busyMessageMode`
 - media and normalized audio stay queued, and failed steering falls back to the ordered queue
-- an owner-workspace General topic may route only the assistant's visible reply to a configured topic; the incoming message and General session remain unchanged, and ambiguous replies stay in General
-
-Configure conservative General reply destinations under the workspace group. Topic ids must already exist in Telegram:
-
-```json
-{
-  "telegram": {
-    "ownerWorkspaceGroups": {
-      "-100123": {
-        "ownerChatId": 42,
-        "generalTopicId": 1,
-        "replyTopics": {
-          "23": { "name": "Stories", "description": "Published stories and editorial work" },
-          "114": { "name": "CORE", "description": "Arisa core engineering" }
-        }
-      }
-    }
-  }
-}
-```
+- an owner-workspace General topic may route only the assistant's visible reply to a matching topic; the incoming message and General session remain unchanged, and ambiguous replies stay in General
+- reply classification never runs in private chats or outside General
+- each owner workspace keeps a dynamic, chat-scoped topic registry; Arisa learns topic creation, rename, close, and reopen events, and records the context of topics it creates or initializes
+- when a substantial theme recurs in General without a matching topic, Arisa may occasionally propose a new one; creation still requires explicit user confirmation
+- legacy `replyTopics` configuration is imported once into the dynamic registry and then removed
 
 ### Tool model
 No tools ship with the core. All installed tools live under `~/.arisa/tools/<tool-name>`, whether they come from the [official catalog](https://github.com/clasen/Arisa/tree/main/tools), from another source the user chooses, or are created by the agent itself.

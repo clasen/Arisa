@@ -24,6 +24,7 @@ export function createTelegramSessionBridgeController({
   agentManager,
   artifactStore,
   sessionSeeds,
+  workspaceTopics,
   getChatState,
   buildTopicInitializationHandoff,
   logger
@@ -61,6 +62,12 @@ export function createTelegramSessionBridgeController({
         throw new Error("The General topic already uses the owner's private session and cannot be reinitialized here.");
       }
       const handoff = buildTopicInitializationHandoff({ name, context });
+      await workspaceTopics.upsertTopic(route.ownerChatId, route.transportChatId, {
+        threadId: messageThreadId,
+        name,
+        description: context,
+        source: "arisa-initialized"
+      });
       await sessionSeeds.set(initializedSessionId, handoff);
       agentManager.resetSession(initializedSessionId, { handoff });
       await agentManager.waitForSessionClose(initializedSessionId);

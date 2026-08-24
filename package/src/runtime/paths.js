@@ -65,6 +65,10 @@ export function getChatToolResourceNotesFile(chatId) {
   return path.join(getChatDir(chatId), "state", "tool-resource-notes.json");
 }
 
+export function getChatTelegramWorkspacesFile(chatId) {
+  return path.join(getChatDir(chatId), "state", "telegram-workspaces.json");
+}
+
 export function getChatToolStateDir(chatId, toolName) {
   return path.join(getChatDir(chatId), "state", "tools", requireToolName(toolName));
 }

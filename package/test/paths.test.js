@@ -10,6 +10,7 @@ import {
   createIpcSocketPath,
   getChatArtifactsDir,
   getChatSessionSeedFile,
+  getChatTelegramWorkspacesFile,
   getChatToolConfigPath,
   getChatToolUsageFile,
   getChatToolStateDir,
@@ -36,6 +37,13 @@ test("keeps tool usage scoped below the chat state directory", () => {
   assert.equal(
     getChatToolUsageFile("chat-1"),
     path.join(chatsDir, "chat-1", "state", "tool-usage.json")
+  );
+});
+
+test("keeps Telegram workspace topics scoped below the owner chat state directory", () => {
+  assert.equal(
+    getChatTelegramWorkspacesFile("chat-1"),
+    path.join(chatsDir, "chat-1", "state", "telegram-workspaces.json")
   );
 });
 
