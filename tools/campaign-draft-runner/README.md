@@ -116,7 +116,7 @@ Minimal profile structure:
 
 Use `action: "status"` to reconcile Gmail Sent, then inspect campaign and Gmail draft counts. The first reconciliation scans the configured sent-mail query. Later runs use the newest Gmail timestamp and persist message IDs in chat-scoped state. This records drafts sent manually as contacted without reopening them or changing terminal statuses such as bounced, opted-out, wrong-fit, and successful publication.
 
-When `TELEMETRY_ENABLED` is true and `telemetry-ledger` is installed, each run records business-operation latency, confirmed non-dry-run draft counts, and whether an unchanged batch was skipped. Telemetry is optional and fail-open: recording failures never change the campaign result. The integration emits only bounded aggregate dimensions such as profile, action, and status; it never records addresses, copy, or source content.
+When `TELEMETRY_ENABLED` is true and `telemetry-ledger` is installed, each run records business-operation latency, confirmed non-dry-run draft counts, and whether an unchanged batch was skipped. Full reviews also record drafts per review and candidates found under one of four bounded strategies: `existing-pool`, `standard-discovery`, `creative-discovery`, or `unchanged-skip`. The last strategy is excluded from full-review yield so cheap skips cannot improve it artificially. Outcomes are bounded to `drafted`, `candidate-only`, or `zero-result`. Compare at least two complete windows before reallocating the fixed exploration budget; do not reduce run frequency from sparse samples. Telemetry is optional and fail-open: recording failures never change the campaign result. It never records addresses, queries, copy, or source content.
 
 ## Unchanged batch skipping
 

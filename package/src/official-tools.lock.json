@@ -31,9 +31,9 @@
       }
     },
     "campaign-draft-runner": {
-      "version": "0.5.1",
+      "version": "0.5.2",
       "files": {
-        "README.md": "2c977357f774c6bc3369460ba9cd784c9b75b5f12b338e089e634e09f2a8cbcd",
+        "README.md": "c5c91bad056e5ffc5a17624074d766d3489a502dd84e176286a515980f32fb7a",
         "batch-skip.js": "ad428464b739e7355e00ac7cf399247ce611fcef0470d97a73893701e5b07627",
         "config.js": "9b9c2d9686cebf17c3ba2630088c7028281883608f61054e733283aeb8d383cb",
         "index.js": "669bf964a0e1e1a0bacc5997c6e49539022649f405543e5914ba01aa11a99330",
@@ -42,11 +42,11 @@
         "product-facts.js": "69339e20e7b70a6b9833878d72b10b70ea4ede4aa448097975d0961b6aaced59",
         "search-quality.js": "ab5412d45d5144e976cccef52992e634c11aca0e21b73fd53f9dc2d489c56dd7",
         "source-exhaustion.js": "407f940f5205eb01715a797672d0dad8bd0b0b897024b5fcb87052a062ecd054",
-        "telemetry.js": "984772e73d1cbb761771d6f62954a604333a301182ee74368a41ffab762da367",
+        "telemetry.js": "b3ededa1277d5028f7a8299926e16bb4dc06d70c470d3b97352c29080cfc0974",
         "test/batch-skip.test.js": "638d185dc0b38900afe6ee9058e733ae36583d0762a0ff0347fdf245df064abc",
         "test/selection-policy.test.js": "1283f18b861925aee810d156eb64c54b147304ff7352a8f83b9c2311e1f51de2",
-        "test/telemetry.test.js": "daa84b83658226ecd979f15d4e12d94740ffe5280d467ad29677fc1d77734a5b",
-        "tool.manifest.json": "066752babf3de70f98aa5dee46d60338d0a124c0f643f475a13d276bef9e7d52"
+        "test/telemetry.test.js": "8e52a43fa9eb08fa0f3be124b72b7cd39258666cb88311b1df6978037372c257",
+        "tool.manifest.json": "cb5eff1b5fd85d97c704e0287f1527c9763b320cacac22093e3aceeba4f7f256"
       }
     },
     "creator-scout": {
