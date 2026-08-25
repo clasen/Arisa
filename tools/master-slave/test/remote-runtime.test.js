@@ -177,7 +177,7 @@ test("pairs, reconnects, authorizes, configures, reads, deduplicates, and revoke
         artifacts: { get: async () => ({ path: artifactFile, name: "result.bin" }) },
         tools: {
           installOfficial: async ({ name }) => ({ toolName: name, installed: true }),
-          list: async () => [],
+          list: async () => ({ tools: [] }),
           run: async () => ({ ok: true, output: { artifactId: "artifact-1", mimeType: "application/octet-stream" } })
         }
       };

@@ -327,6 +327,12 @@ export async function bootstrapSlaveConnection({ url, state, identity, profile, 
   }
 }
 
+function toolListItems(result) {
+  if (Array.isArray(result)) return result;
+  if (Array.isArray(result?.tools)) return result.tools;
+  throw new Error("Arisa tool list response is invalid");
+}
+
 async function loadProfile({ state, arisa, config, arisaVersion }) {
   const slave = await state.readSlave();
   const policy = resolveSlavePolicy({
@@ -335,7 +341,7 @@ async function loadProfile({ state, arisa, config, arisaVersion }) {
     root: process.geteuid?.() === 0
   });
   const client = typeof arisa === "function" ? arisa(null) : arisa;
-  const tools = buildSafeToolCatalog((await client.tools.list()).slice(0, config.maxCatalogTools));
+  const tools = buildSafeToolCatalog(toolListItems(await client.tools.list()).slice(0, config.maxCatalogTools));
   return buildSafeSlaveProfile({
     slaveId: slave?.slaveId || "",
     name: policy.name || config.name || os.hostname(),
@@ -465,7 +471,9 @@ export class SlaveNetworkRuntime {
           }
         }
       };
-    } else if (job.operation === "tool.list") result = { status: "completed", result: buildSafeToolCatalog(await jobArisa().tools.list()) };
+    } else if (job.operation === "tool.list") {
+      result = { status: "completed", result: buildSafeToolCatalog(toolListItems(await jobArisa().tools.list())) };
+    }
     else if (job.operation === "tool.install") {
       const tool = String(job.args.tool || "");
       if (!tool || job.args.confirmToolName !== tool) {

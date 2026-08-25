@@ -1,6 +1,6 @@
 {
   "name": "master-slave",
-  "version": "0.1.4",
+  "version": "0.1.5",
   "description": "Pair an Arisa Master with deterministic headless Arisa Slave hosts over an authenticated encrypted direct TCP connection.",
   "entry": "index.js",
   "daemon": {
