@@ -223,7 +223,10 @@ export class MasterNetworkRuntime {
           await this.state.savePeer({ ...peer, connectionState: "offline", disconnectedAt });
           await this.onConnectionEvent?.({ type: "disconnected", peer: { ...peer, disconnectedAt } });
         });
-      }).catch(() => socket.destroy());
+      }).catch((error) => {
+        console.error(`[master-slave] incoming connection rejected: ${error?.message || String(error)}`);
+        socket.destroy();
+      });
     });
     await new Promise((resolve, reject) => {
       this.server.once("error", reject);
