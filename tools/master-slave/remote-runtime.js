@@ -365,11 +365,24 @@ export class SlaveNetworkRuntime {
     this.onConnectionEvent = onConnectionEvent;
     this.running = false;
     this.connection = null;
+    this.connectedAt = null;
+    this.disconnectedAt = null;
+    this.lastConnectionError = null;
     this.processes = new SlaveProcessExecutor({
       roots: config.roots,
       maxOutputBytes: config.maxJobOutputBytes,
       maxTimeoutMs: config.maxProcessTimeoutMs
     });
+  }
+
+  diagnostic() {
+    return {
+      running: this.running,
+      connected: Boolean(this.connection),
+      connectedAt: this.connectedAt,
+      disconnectedAt: this.disconnectedAt,
+      lastConnectionError: this.lastConnectionError
+    };
   }
 
   async #profile() {
@@ -555,13 +568,22 @@ export class SlaveNetworkRuntime {
           maxFrameBytes: this.config.maxFrameBytes
         });
         this.connection = connected.connection;
+        this.connectedAt = new Date().toISOString();
+        this.lastConnectionError = null;
         this.#attach(this.connection);
         attempt = 0;
         await this.onConnectionEvent?.({ type: "connected" });
         await new Promise((resolve) => socket.once("close", resolve));
       } catch (error) {
+        this.lastConnectionError = {
+          at: new Date().toISOString(),
+          message: String(error?.message || error).slice(0, 500),
+          code: typeof error?.code === "string" ? error.code.slice(0, 100) : null
+        };
+        console.error(`[master-slave] Slave connection failed: ${this.lastConnectionError.message}`);
         await this.onConnectionEvent?.({ type: "disconnected", error });
       } finally {
+        if (this.connection) this.disconnectedAt = new Date().toISOString();
         this.connection = null;
       }
       if (!this.running) return;
@@ -573,6 +595,7 @@ export class SlaveNetworkRuntime {
 
   stop() {
     this.running = false;
+    if (this.connection) this.disconnectedAt = new Date().toISOString();
     this.connection?.close();
     this.connection = null;
   }

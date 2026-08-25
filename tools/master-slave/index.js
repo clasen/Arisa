@@ -321,6 +321,7 @@ async function diagnostic() {
     endpoint: role === "master" ? config.publicEndpoint : slave?.endpoint || null,
     identityFingerprint: activeIdentity ? runtimeIdentityDiagnostic(activeIdentity) : null,
     paired: role === "slave" ? Boolean(slave?.paired) : null,
+    network: role === "slave" ? activeNetwork?.diagnostic?.() || null : null,
     toolCount: (await arisaClient().tools.list().catch(() => [])).length,
     jobs: {
       active: jobs.filter((job) => job.status === "accepted").length,
@@ -448,7 +449,14 @@ async function runDaemon() {
   await daemon.workLoop({
     healthCheck: async () => {
       if (role === "master" && !activeNetwork.server?.listening) throw new Error("Master TCP listener is not active");
-      if (role === "slave" && !(await state.readSlave())?.paired) throw new Error("Slave is not paired");
+      if (role === "slave") {
+        if (!(await state.readSlave())?.paired) throw new Error("Slave is not paired");
+        const network = activeNetwork.diagnostic();
+        if (!network.running) throw new Error("Slave network runtime is stopped");
+        if (!network.connected) {
+          throw new Error(network.lastConnectionError?.message || "Slave is not connected to its Master");
+        }
+      }
       return { message: `${role} network runtime is healthy` };
     },
     recover: async () => {

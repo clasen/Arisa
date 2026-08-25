@@ -191,6 +191,9 @@ test("pairs, reconnects, authorizes, configures, reads, deduplicates, and revoke
   });
   assert.equal(connectionEvents.filter((event) => event.type === "connected" && event.paired === true).length, 1);
   assert.ok(connectionEvents.some((event) => event.type === "connected" && event.paired === false));
+  assert.equal(slave.diagnostic().running, true);
+  assert.equal(slave.diagnostic().connected, true);
+  assert.equal(slave.diagnostic().lastConnectionError, null);
 
   const configured = await within("configure job", master.run(job(peer.slaveId, "slave.configure", {
     name: "configured",
@@ -230,4 +233,40 @@ test("pairs, reconnects, authorizes, configures, reads, deduplicates, and revoke
   await master.revoke(peer.slaveId);
   await waitFor(async () => (await slaveState.readSlave())?.paired === false);
   assert.equal((await masterState.getPeer(peer.slaveId)).revoked, true);
+});
+
+test("Slave diagnostics retain a bounded reconnect failure", async (t) => {
+  const directory = await mkdtemp(path.join(os.tmpdir(), "arisa-slave-diagnostic-"));
+  t.after(() => rm(directory, { recursive: true, force: true }));
+  const state = new MasterSlaveStateStore(directory);
+  const port = await reservePort();
+  await state.writeSlave({
+    slaveId: "diagnostic-slave",
+    paired: true,
+    endpoint: `tcp://127.0.0.1:${port}`,
+    masterIdentityPublicKey: Buffer.alloc(32).toString("base64")
+  });
+  const runtime = new SlaveNetworkRuntime({
+    config: {
+      maxFrameBytes: 1_048_576,
+      maxJobOutputBytes: 1_048_576,
+      maxProcessTimeoutMs: 1_000,
+      reconnectMinMs: 5,
+      reconnectMaxMs: 10,
+      roots: [],
+      capabilities: []
+    },
+    state,
+    identity: await createRuntimeIdentity(state),
+    arisa: () => ({ tools: { list: async () => [] } }),
+    arisaVersion: "test"
+  });
+  runtime.start().catch(() => {});
+  t.after(() => runtime.stop());
+
+  const diagnostic = await waitFor(() => runtime.diagnostic().lastConnectionError && runtime.diagnostic());
+  assert.equal(diagnostic.running, true);
+  assert.equal(diagnostic.connected, false);
+  assert.match(diagnostic.lastConnectionError.message, /ECONNREFUSED/);
+  assert.ok(diagnostic.lastConnectionError.message.length <= 500);
 });
