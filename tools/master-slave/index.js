@@ -338,6 +338,7 @@ async function diagnostic() {
 }
 
 async function processRequest(request, context = { emit: async () => {} }) {
+  request = normalizeRemoteCommandRequest(request);
   const action = request.args?.action;
   if (action === "slave.status" || action === "master.status") return toolOk({ json: await diagnostic() });
   if (action === "slave.unpair") {

@@ -73,6 +73,19 @@ test("executes argv directly without a shell and streams bounded chunks", async 
   assert.deepEqual(chunks.map((chunk) => chunk.sequence), [1]);
 });
 
+test("defaults process cwd to the first allowed root", async (t) => {
+  const { root } = await fixture(t);
+  const executor = new SlaveProcessExecutor({ roots: [root], maxOutputBytes: 1024, maxTimeoutMs: 5_000 });
+  const result = await executor.execute({
+    jobId: "job-default-cwd",
+    executable: process.execPath,
+    argv: ["--input-type=module", "--eval", "process.stdout.write(process.cwd())"],
+    timeoutMs: 2_000
+  });
+  assert.equal(result.status, "completed");
+  assert.equal(result.chunks.map((chunk) => chunk.data).join(""), await realpath(root));
+});
+
 test("marks timed out processes as expired", async (t) => {
   const { root } = await fixture(t);
   const executor = new SlaveProcessExecutor({ roots: [root], maxOutputBytes: 1024, maxTimeoutMs: 5_000 });

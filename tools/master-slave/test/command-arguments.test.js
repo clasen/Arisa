@@ -50,6 +50,17 @@ test("normalizes string-safe Slave policy fields", () => {
   assert.equal(request.args.fullHost, false);
   assert.equal("rootsJson" in request.args, false);
   assert.equal("capabilitiesJson" in request.args, false);
+
+  const directStringFields = normalizeRemoteCommandRequest({
+    args: {
+      action: "configure_slave",
+      roots: '["/srv"]',
+      capabilities: '["inspect"]',
+      fullHost: "false"
+    }
+  });
+  assert.deepEqual(directStringFields.args.roots, ["/srv"]);
+  assert.deepEqual(directStringFields.args.capabilities, ["inspect"]);
 });
 
 test("rejects malformed string-safe Slave policy fields", () => {

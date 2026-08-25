@@ -114,7 +114,7 @@ export class SlaveProcessExecutor {
     }
     if (typeof executable !== "string" || !executable.trim()) throw new Error("process.exec executable is required");
     const args = requireArgv(argv);
-    const allowedCwd = await resolveAllowedPath(cwd, this.roots);
+    const allowedCwd = await resolveAllowedPath(cwd ?? this.roots[0], this.roots);
     const effectiveTimeoutMs = requirePositiveInteger(timeoutMs, "timeoutMs");
     if (effectiveTimeoutMs > this.maxTimeoutMs) {
       throw new Error(`process.exec timeout exceeds policy limit of ${this.maxTimeoutMs}ms`);

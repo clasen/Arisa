@@ -17,7 +17,8 @@ function resolveStringArray({ value, json, label }) {
   if (value !== undefined && json !== undefined) {
     throw new Error(`${label} accepts either a structured value or its Json field, not both`);
   }
-  const resolved = json === undefined ? (value ?? []) : parseJson(json, `${label}Json`);
+  const candidate = json === undefined ? (value ?? []) : parseJson(json, `${label}Json`);
+  const resolved = typeof candidate === "string" ? parseJson(candidate, label) : candidate;
   if (!Array.isArray(resolved) || resolved.some((item) => typeof item !== "string")) {
     throw new Error(`${label} must be an array of strings`);
   }
