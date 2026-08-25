@@ -69,6 +69,8 @@ test("every bundled official tool lock matches the catalog source", async () => 
       { files: Object.keys(entry.files).length },
       name
     );
+    const manifest = JSON.parse(await readFile(path.join(source, "tool.manifest.json"), "utf8"));
+    assert.equal(manifest.version ?? null, entry.version ?? null, `${name} version`);
   }
 });
 

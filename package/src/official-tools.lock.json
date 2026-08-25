@@ -1,7 +1,7 @@
 {
   "version": 1,
   "repository": "https://github.com/clasen/Arisa.git",
-  "commit": "410d18e354374b43a225c31be574deb4b8f69aba",
+  "commit": "f5702971f09b70c28b239d8c32fa30cb069c0e38",
   "tools": {
     "browser-session-bridge": {
       "version": "0.1.0",
@@ -135,7 +135,7 @@
         "test/profile-catalog.test.js": "d8e297bee413d53ec13f2e1779c13f2e019cb8304976d567eab0e9f1ca36637c",
         "test/remote-runtime.test.js": "1161bd653dc47b9b8219bf848d0d395ce390f2bb7b58ea41e3e4270b1d504798",
         "test/slave-operations.test.js": "a84526ad7554c7d03192a68655b4637bec18750559a5c3436f7471e912ca74cc",
-        "tool.manifest.json": "abf24c67b1d9ef0331ded59e04dcc092772419e74691c0d753ab51b40286d6f6"
+        "tool.manifest.json": "b0b4caee5e818cebc537eadaed852a511f4f65c562b5cd5709cc77edbe33ee15"
       }
     },
     "mcp-client": {
