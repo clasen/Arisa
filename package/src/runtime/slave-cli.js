@@ -148,6 +148,7 @@ export function formatSlaveStatus({ systemd, diagnostic }) {
     `Endpoint: ${diagnostic?.endpoint || "not configured"}`,
     `Identity: ${diagnostic?.identityFingerprint || diagnostic?.identity || "not configured"}`,
     `Paired: ${diagnostic?.paired === true ? "yes" : diagnostic?.paired === false ? "no" : "unknown"}`,
+    `Connected: ${diagnostic?.network?.connected === true ? "yes" : diagnostic?.network?.connected === false ? "no" : "unknown"}`,
     `Tools: ${Number.isSafeInteger(diagnostic?.toolCount) ? diagnostic.toolCount : "unknown"}`,
     `Jobs: active=${jobs.active ?? "unknown"}, queued=${jobs.queued ?? "unknown"}, failed=${jobs.failed ?? "unknown"}`,
     `Pending secrets: ${Number.isSafeInteger(diagnostic?.pendingSecrets) ? diagnostic.pendingSecrets : "unknown"}`

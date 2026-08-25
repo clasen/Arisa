@@ -278,6 +278,25 @@ test("describes an intentionally stopped on-demand daemon without treating it as
   assert.equal(diagnostic.lastError, null);
 });
 
+test("keeps auto-start ingress daemons in bounded backoff after the burst retry limit", async () => {
+  const runtime = runtimeFor({ type: "global" }, { autoStart: true });
+  await writeDaemonStatus(runtime.paths, {
+    state: "starting",
+    pid: null,
+    message: "Network unavailable during boot",
+    restartAttempts: policy.restartLimit,
+    restartRequested: false,
+    lastError: { phase: "health", message: "connect ENETUNREACH" }
+  });
+
+  assert.equal(await superviseDaemon(runtime.registration, policy), "restart-scheduled");
+  const status = await readJson(runtime.paths.statusFile, {});
+  assert.equal(status.state, "restarting");
+  assert.equal(status.restartAttempts, policy.restartLimit);
+  assert.equal(status.restartRequested, true);
+  assert.ok(Date.parse(status.nextRestartAt) > Date.now());
+});
+
 test("keeps a terminal daemon failure stable until it receives explicit attention", async () => {
   const runtime = runtimeFor({ type: "global" }, { autoStart: true });
   await writeDaemonStatus(runtime.paths, {
@@ -286,6 +305,7 @@ test("keeps a terminal daemon failure stable until it receives explicit attentio
     message: "Daemon restart limit reached: synthetic crash",
     restartAttempts: policy.restartLimit + 1,
     restartRequested: false,
+    nextRestartAt: null,
     lastError: { phase: "restart", message: "synthetic crash token=private-value", code: "SYNTHETIC" }
   });
 

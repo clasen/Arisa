@@ -69,6 +69,10 @@ Actions:
 run_slave_command:
   executable=<path-or-name> argvJson='["arg1","arg2"]'
   argvJson is validated as a bounded JSON array of strings and runs without a shell.
+
+configure_slave:
+  rootsJson='["/allowed/root"]' capabilitiesJson='["inspect","exec"]' fullHost=false
+  JSON fields support string-only tool transports; direct CLI callers may pass arrays.
 `);
 }
 

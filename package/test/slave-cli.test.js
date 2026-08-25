@@ -6,7 +6,7 @@ import test from "node:test";
 import { createHeadlessApp } from "../src/runtime/create-headless-app.js";
 import { parseSlaveBootstrapUrl } from "../src/runtime/slave-bootstrap-url.js";
 import { withSecureRequestFile } from "../src/runtime/secure-request-file.js";
-import { ensureMasterSlaveTool, runSlaveBootstrap, runSlaveCli } from "../src/runtime/slave-cli.js";
+import { ensureMasterSlaveTool, formatSlaveStatus, runSlaveBootstrap, runSlaveCli } from "../src/runtime/slave-cli.js";
 import {
   buildSlaveSystemdUnit,
   getSlavePaths,
@@ -102,6 +102,25 @@ test("escapes systemd WorkingDirectory paths without quoting the entire value", 
   });
   assert.match(unit, /^WorkingDirectory=\/srv\/arisa\\x20slave$/m);
   assert.match(unit, /^StandardOutput=append:\/srv\/arisa\\x20slave\/state\/arisa-slave\.log$/m);
+});
+
+test("reports Master connectivity separately from pairing and daemon readiness", () => {
+  const text = formatSlaveStatus({
+    systemd: { running: true, status: "active" },
+    diagnostic: {
+      daemon: { state: "ready" },
+      role: "slave",
+      endpoint: "tcp://198.51.100.12:4719",
+      paired: true,
+      network: { connected: false },
+      toolCount: 1,
+      jobs: { active: 0, queued: 0, failed: 0 },
+      pendingSecrets: 0
+    }
+  });
+  assert.match(text, /Daemon: ready/);
+  assert.match(text, /Paired: yes/);
+  assert.match(text, /Connected: no/);
 });
 
 test("refuses to replace the PID of an active Slave host", async (t) => {

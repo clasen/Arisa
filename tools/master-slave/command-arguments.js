@@ -1,12 +1,34 @@
 const MAX_ARGV_ITEMS = 256;
 const MAX_ARGUMENT_BYTES = 16_384;
 
-function parseArgvJson(value) {
+function parseJson(value, label) {
   try {
     return JSON.parse(value);
   } catch {
-    throw new Error("run_slave_command argvJson must be valid JSON");
+    throw new Error(`${label} must be valid JSON`);
   }
+}
+
+function parseArgvJson(value) {
+  return parseJson(value, "run_slave_command argvJson");
+}
+
+function resolveStringArray({ value, json, label }) {
+  if (value !== undefined && json !== undefined) {
+    throw new Error(`${label} accepts either a structured value or its Json field, not both`);
+  }
+  const resolved = json === undefined ? (value ?? []) : parseJson(json, `${label}Json`);
+  if (!Array.isArray(resolved) || resolved.some((item) => typeof item !== "string")) {
+    throw new Error(`${label} must be an array of strings`);
+  }
+  return resolved;
+}
+
+function resolveBoolean(value, label) {
+  if (value === undefined || typeof value === "boolean") return value;
+  if (value === "true") return true;
+  if (value === "false") return false;
+  throw new Error(`${label} must be true or false`);
 }
 
 export function resolveCommandArgv({ argv, argvJson } = {}) {
@@ -36,14 +58,28 @@ export function resolveCommandTimeout(value) {
 }
 
 export function normalizeRemoteCommandRequest(request) {
-  if (request?.args?.action !== "run_slave_command") return request;
-  const { argvJson, ...args } = request.args;
-  return {
-    ...request,
-    args: {
-      ...args,
-      argv: resolveCommandArgv({ argv: args.argv, argvJson }),
-      timeoutMs: resolveCommandTimeout(args.timeoutMs)
-    }
-  };
+  if (request?.args?.action === "run_slave_command") {
+    const { argvJson, ...args } = request.args;
+    return {
+      ...request,
+      args: {
+        ...args,
+        argv: resolveCommandArgv({ argv: args.argv, argvJson }),
+        timeoutMs: resolveCommandTimeout(args.timeoutMs)
+      }
+    };
+  }
+  if (request?.args?.action === "configure_slave") {
+    const { rootsJson, capabilitiesJson, ...args } = request.args;
+    return {
+      ...request,
+      args: {
+        ...args,
+        roots: resolveStringArray({ value: args.roots, json: rootsJson, label: "roots" }),
+        capabilities: resolveStringArray({ value: args.capabilities, json: capabilitiesJson, label: "capabilities" }),
+        fullHost: resolveBoolean(args.fullHost, "fullHost")
+      }
+    };
+  }
+  return request;
 }

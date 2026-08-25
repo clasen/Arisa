@@ -36,6 +36,31 @@ test("normalizes string-safe command timeouts", () => {
   assert.throws(() => resolveCommandTimeout("0"), /positive integer/);
 });
 
+test("normalizes string-safe Slave policy fields", () => {
+  const request = normalizeRemoteCommandRequest({
+    args: {
+      action: "configure_slave",
+      rootsJson: '["/usr"]',
+      capabilitiesJson: '["inspect","exec"]',
+      fullHost: "false"
+    }
+  });
+  assert.deepEqual(request.args.roots, ["/usr"]);
+  assert.deepEqual(request.args.capabilities, ["inspect", "exec"]);
+  assert.equal(request.args.fullHost, false);
+  assert.equal("rootsJson" in request.args, false);
+  assert.equal("capabilitiesJson" in request.args, false);
+});
+
+test("rejects malformed string-safe Slave policy fields", () => {
+  assert.throws(() => normalizeRemoteCommandRequest({
+    args: { action: "configure_slave", rootsJson: '{}', capabilitiesJson: '[]', fullHost: "false" }
+  }), /roots must be an array of strings/);
+  assert.throws(() => normalizeRemoteCommandRequest({
+    args: { action: "configure_slave", rootsJson: '[]', capabilitiesJson: '[]', fullHost: "sometimes" }
+  }), /fullHost must be true or false/);
+});
+
 test("does not rewrite unrelated requests", () => {
   const request = { args: { action: "list_slaves", argvJson: "ignored" } };
   assert.equal(normalizeRemoteCommandRequest(request), request);

@@ -97,7 +97,7 @@ async function tryInternalRecovery(record, paths, policy) {
 async function scheduleRestart(record, paths, status, policy, reason) {
   const current = await readJson(paths.statusFile, status);
   const restartAttempts = Number(current.restartAttempts || 0) + 1;
-  if (restartAttempts > policy.restartLimit) {
+  if (restartAttempts > policy.restartLimit && !record.autoStart) {
     await stopManagedDaemon(
       { toolName: record.toolName, scope: record.scope },
       { state: null }
@@ -115,6 +115,9 @@ async function scheduleRestart(record, paths, status, policy, reason) {
     return "failed";
   }
 
+  const retainedAttempts = record.autoStart && restartAttempts > policy.restartLimit
+    ? policy.restartLimit
+    : restartAttempts;
   const delayMs = retryDelay(restartAttempts, policy);
   await stopManagedDaemon(
     { toolName: record.toolName, scope: record.scope },
@@ -124,7 +127,7 @@ async function scheduleRestart(record, paths, status, policy, reason) {
     state: "restarting",
     pid: null,
     heartbeatAt: null,
-    restartAttempts,
+    restartAttempts: retainedAttempts,
     restartRequested: true,
     nextRestartAt: new Date(Date.now() + delayMs).toISOString(),
     lastError: errorRecord("restart", reason),
