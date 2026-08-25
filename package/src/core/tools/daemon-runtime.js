@@ -127,24 +127,46 @@ async function connectDaemon(paths, request, { timeoutMs, onEvent, maxFrameBytes
         let sequence = 0;
         let terminalSeen = false;
         let settled = false;
+        let submitted = false;
+        let timeoutTriggered = false;
         let observerChain = Promise.resolve();
         const remainingMs = Math.max(1, timeoutMs - (Date.now() - startedAt));
-        const timer = setTimeout(() => finish(reject, Object.assign(
+        let cancelTimer;
+        const timeoutError = Object.assign(
           new Error(`${paths.toolName} daemon job timed out after ${timeoutMs}ms`),
           { code: "DAEMON_JOB_TIMEOUT" }
-        )), remainingMs);
+        );
+        const timer = setTimeout(() => {
+          timeoutTriggered = true;
+          if (submitted && !socket.destroyed && socket.writable) {
+            const frame = `${JSON.stringify({
+              version: DAEMON_PROTOCOL_VERSION,
+              type: "cancel",
+              jobId: request.jobId,
+              capabilityToken: token
+            })}\n`;
+            socket.end(frame, () => finish(reject, timeoutError));
+            cancelTimer = setTimeout(() => finish(reject, timeoutError), 50);
+            cancelTimer.unref?.();
+            return;
+          }
+          finish(reject, timeoutError);
+        }, remainingMs);
         timer.unref?.();
 
         function finish(fn, value) {
           if (settled) return;
           settled = true;
           clearTimeout(timer);
+          clearTimeout(cancelTimer);
           socket.destroy();
           fn(value);
         }
 
         socket.setEncoding("utf8");
         socket.once("connect", () => {
+          if (timeoutTriggered) return;
+          submitted = true;
           socket.write(`${JSON.stringify({
             version: DAEMON_PROTOCOL_VERSION,
             type: "submit",
@@ -181,18 +203,24 @@ async function connectDaemon(paths, request, { timeoutMs, onEvent, maxFrameBytes
             observerChain = observerChain.then(() => onEvent?.(frame));
             if (terminalSeen) {
               observerChain.then(() => {
+                if (timeoutTriggered) {
+                  finish(reject, timeoutError);
+                  return;
+                }
                 try {
                   finish(resolve, terminalResult(frame));
                 } catch (error) {
                   finish(reject, error);
                 }
-              }, (error) => finish(reject, error));
+              }, (error) => finish(reject, timeoutTriggered ? timeoutError : error));
             }
           }
         });
         socket.once("error", (error) => finish(reject, error));
         socket.once("close", () => {
-          if (!settled) finish(reject, new Error("Daemon IPC connection closed before terminal result"));
+          if (!settled) finish(reject, timeoutTriggered
+            ? timeoutError
+            : new Error("Daemon IPC connection closed before terminal result"));
         });
       });
     } catch (error) {
@@ -369,6 +397,8 @@ export function createDaemonRuntime({
       streamBufferBytes: policy.streamBufferBytes || 1_048_576
     };
     const subscribers = new Map();
+    const activeJobs = new Map();
+    const cancelledJobs = new Set();
     let lastActivity = Date.now();
     let processing = false;
     let exiting = false;
@@ -405,6 +435,9 @@ export function createDaemonRuntime({
 
     async function execute(job) {
       let sequence = 1;
+      const controller = new AbortController();
+      activeJobs.set(job.id, controller);
+      if (cancelledJobs.delete(job.id)) controller.abort();
       await publish(daemonFrame(job.id, "accepted", sequence, {}));
       const emit = async (type, payload = {}) => {
         if (!['progress', 'chunk'].includes(type)) throw new Error(`Invalid non-terminal daemon event type: ${type}`);
@@ -439,7 +472,10 @@ export function createDaemonRuntime({
           output = { recovered: recovered !== false };
         } else {
           lastActivity = Date.now();
-          output = await processJob(job.payload, { emit, jobId: job.id });
+          if (controller.signal.aborted) {
+            throw Object.assign(new Error(`Daemon job cancelled: ${job.id}`), { code: "DAEMON_JOB_CANCELLED" });
+          }
+          output = await processJob(job.payload, { emit, jobId: job.id, signal: controller.signal });
           await writeStatus({ lastSuccessfulJobAt: new Date().toISOString() });
           lastActivity = Date.now();
         }
@@ -466,6 +502,9 @@ export function createDaemonRuntime({
           error: error?.message || String(error),
           code: error?.code || null
         }));
+      } finally {
+        activeJobs.delete(job.id);
+        cancelledJobs.delete(job.id);
       }
     }
 
@@ -522,13 +561,18 @@ export function createDaemonRuntime({
             return;
           }
           if (notification.version !== DAEMON_PROTOCOL_VERSION
-            || notification.type !== "submit"
+            || !["submit", "cancel"].includes(notification.type)
             || typeof notification.jobId !== "string"
             || notification.capabilityToken !== capabilityToken) {
             socket.destroy();
             return;
           }
           const { jobId } = notification;
+          if (notification.type === "cancel") {
+            cancelledJobs.add(jobId);
+            activeJobs.get(jobId)?.abort();
+            continue;
+          }
           if (!subscribers.has(jobId)) subscribers.set(jobId, new Set());
           subscribers.get(jobId).add(socket);
           subscribedJobs.add(jobId);

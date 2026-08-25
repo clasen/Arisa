@@ -5,6 +5,7 @@ import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import defaults from "./config.js";
 import { SlaveBatchRunner } from "./batch-runner.js";
+import { bindBatchCancellation } from "./batch-cancellation.js";
 import { normalizeRemoteCommandRequest, resolveCommandArgv, resolveCommandTimeout } from "./command-arguments.js";
 import { ChatMasterSlaveStore } from "./chat-state-store.js";
 import {
@@ -195,6 +196,7 @@ async function runRemoteBatch(request, context) {
     }
   });
   activeBatches.set(batch.batchId, runner);
+  const unbindCancellation = bindBatchCancellation(runner, batch.batchId, context.signal);
   try {
     const completed = await runner.run(batch);
     if (completed.jobs.length !== 1 || completed.jobs[0].status !== "completed") return completed;
@@ -224,6 +226,7 @@ async function runRemoteBatch(request, context) {
       }
     };
   } finally {
+    unbindCancellation();
     activeBatches.delete(batch.batchId);
   }
 }

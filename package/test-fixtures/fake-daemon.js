@@ -43,6 +43,11 @@ await runtime.workLoop({
   recover,
   processJob: async (payload, execution) => {
     if (payload.action === "fail") throw new Error("synthetic job failure");
+    if (payload.action === "hang-until-cancelled") {
+      await new Promise((_, reject) => execution.signal.addEventListener("abort", () => {
+        reject(Object.assign(new Error("synthetic job cancelled"), { code: "DAEMON_JOB_CANCELLED" }));
+      }, { once: true }));
+    }
     if (payload.action === "stream") {
       await execution.emit("progress", { percent: 50 });
       await execution.emit("chunk", { text: "partial" });

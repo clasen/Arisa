@@ -99,14 +99,15 @@
       }
     },
     "master-slave": {
-      "version": "0.1.7",
+      "version": "0.1.8",
       "files": {
-        "README.md": "9755dd59d01680236d12b57f87e4bc52568649a0e63b1a96065baf800d8dc1c8",
+        "README.md": "cbd372ced46f07cd553b3a87e9477f4dd85b77e625d12435e72e340210149d62",
+        "batch-cancellation.js": "b9ca57dfcca4f1a672d5435536b7eb83547dba98ed3fd09f34376f1d995bb97f",
         "batch-runner.js": "97756a03b36278cd0315cc16da0c34a7821c322149c51ba6666f1c5081dbecbc",
         "chat-state-store.js": "50de39aa33432733bb688eb01968e314a32b169324a66d0f0089b2a19ed9c880",
         "command-arguments.js": "a67b81b95dadb06fd99a1692e2b52984a02cef5b4cfde59d7863e64c747f5d5e",
         "config.js": "ff1c1cb6701ae1da7a6eb1519ba96a416e48daa73c2155a6f93cf5d64f65cef8",
-        "index.js": "d00dfd7669cbb24d85bf32ee11ab21c805329182d0bba9068912c75bca58961a",
+        "index.js": "f1ddc4660ff992714b484d353b636f20cc497f59de4afd390f1c20fd4ad5ba4b",
         "lib/bootstrap-url.js": "f05925cc0f0dff0882f94f9908c6f2c80aa8632cd51f63389381dcbb0f73afb3",
         "lib/encrypted-frames.js": "47e1b11fafdbbcdfd86a0993a47a774e4f37d6386edeaf8ec1c8511b109728cf",
         "lib/handshake-crypto.js": "9728b117aad7de53f5f0e255c0fd865ee1a19633368730a7634334d374094578",
@@ -116,10 +117,11 @@
         "lib/secure-store.js": "b8f365197f8e60d7f81fde6ed1cfc8851b603f6b0783e4cdc9036bb5c99726e1",
         "master-domain.js": "10b7dfb43eb9939eb5baec54f742076cc73a2add6589a0ff57c51bc79c236faf",
         "network-session.js": "db2d81a7ef47af29236d963b98e21414a11fef68e8b20895126eaad3f696ba3d",
-        "package.json": "1f14897232b405300927a7494bd18900bdd7b2eeddea0ceaeb88707c8cb26a01",
+        "package.json": "ea2b9d075b9503fcc527f200454eb536b891e5f0e375220853790cb5138ff39f",
         "remote-runtime.js": "87c53c012b1f9d032af4028b8f92d2c8a84b9730e39e32f3dfcbd60e8d021c20",
         "slave-operations.js": "5a8967e2006f3f30ee221614d25fbf7863ffd9c717fd7eeeb0ba981c8c8c367a",
         "state-store.js": "c56849a3f1b9c990128276e17963034a7836abacedc44f2e500d5732ebf9e451",
+        "test/batch-cancellation.test.js": "4fdbb50d6fc895c7f7c93ca56c712a81633de7aecc0c767192ae8abeff950fac",
         "test/batch-runner.test.js": "69f69150eadd18c1ad1bc54f429e6cb5bc0c4492e3c6a6e76c2ce6827780ae41",
         "test/bootstrap-url.test.js": "62c112b1a38c59ea2c77f797e32873667b52db32386da661a6ae8410490126fe",
         "test/command-arguments.test.js": "bc50a1fe3d6474a5daeb7c76a96ba960f4f5e37d8742090b756c152490d8d01c",
@@ -131,7 +133,7 @@
         "test/profile-catalog.test.js": "d8e297bee413d53ec13f2e1779c13f2e019cb8304976d567eab0e9f1ca36637c",
         "test/remote-runtime.test.js": "887705a9c15d979353b3db922f471b67d9607c2c6e0e8c7cebd83618a83597df",
         "test/slave-operations.test.js": "c826be39bee62ec1b85645324971347cbe6a71e72e383619bc2c7a74f7c0f55b",
-        "tool.manifest.json": "26ae9907720e1893454b3bd3a6dda44207d7cc180459665088037c5d605530aa"
+        "tool.manifest.json": "06abac735264030740d728a6e0da7c89e94ea6b9f90db8c459087c4465858138"
       }
     },
     "mcp-client": {

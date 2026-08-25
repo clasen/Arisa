@@ -117,6 +117,27 @@ test("streams ordered daemon events and persists the terminal result", async () 
   await runtime.stop();
 });
 
+test("cancels a timed-out job without restarting the shared daemon", async () => {
+  const runtime = runtimeFor({ type: "global" });
+  const jobId = "job-cancelled-on-timeout";
+  await assert.rejects(
+    () => runtime.submit({ action: "hang-until-cancelled" }, { timeoutMs: 80, jobId }),
+    (error) => error.code === "DAEMON_JOB_TIMEOUT"
+  );
+
+  const terminal = await waitFor(async () => {
+    const result = await readJson(path.join(runtime.paths.commandsDir, `${jobId}.result.json`), null);
+    return result?.terminal || null;
+  });
+  assert.equal(terminal.type, "failed");
+  assert.equal(terminal.payload.code, "DAEMON_JOB_CANCELLED");
+  const pid = await runtime.getPid();
+  assert.equal(isProcessAlive(pid), true);
+  assert.deepEqual(await runtime.submit({ value: "after-timeout" }, { timeoutMs: 1_000 }), { echo: "after-timeout" });
+  assert.equal(await runtime.getPid(), pid);
+  await runtime.stop();
+});
+
 test("deduplicates repeated notifications for one durable job id", async () => {
   const runtime = runtimeFor({ type: "global" });
   const jobId = "job-deduplicated";

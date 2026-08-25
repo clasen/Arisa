@@ -113,8 +113,11 @@ Managed daemons become ready only after their tool-defined health operation succ
 Daemon tools may opt into the `arisa-daemon-v1` local protocol for immediate
 multiplexed jobs and incremental NDJSON events over a capability-protected local
 socket. The runtime persists request, accepted and terminal records so a restart
-can recover queued work and will not silently repeat an accepted effect. Legacy
-daemon tools continue to use the existing request-file contract.
+can recover queued work and will not silently repeat an accepted effect. When a
+client deadline expires, the runtime sends a scoped cancellation signal to that
+job before closing the request; cooperative tools can stop it without restarting
+the shared daemon or interrupting unrelated sessions. Legacy daemon tools
+continue to use the existing request-file contract.
 
 ### Arisa Master and Slave
 

@@ -28,7 +28,8 @@ profile, and executes only deterministic operations allowed by its stored policy
   configured timeout and output limits.
 - Accepted jobs are persisted before effects. Repeated job IDs return the stored
   terminal result, while interrupted accepted jobs fail closed instead of being
-  executed again.
+  executed again. A local daemon deadline cancels only its matching remote batch;
+  it does not restart the shared Master transport or disconnect other Slaves.
 - Completed command results include bounded UTF-8 `stdout` and `stderr` assembled
   from the authenticated output stream, avoiding a second remote file read.
 
