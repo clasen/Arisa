@@ -1,7 +1,7 @@
 {
   "version": 1,
   "repository": "https://github.com/clasen/Arisa.git",
-  "commit": "f5702971f09b70c28b239d8c32fa30cb069c0e38",
+  "commit": "39ca72b6a7bdb73fc59938941521d196b00dbf55",
   "tools": {
     "browser-session-bridge": {
       "version": "0.1.0",
@@ -99,14 +99,14 @@
       }
     },
     "master-slave": {
-      "version": "0.1.5",
+      "version": "0.1.6",
       "files": {
         "README.md": "9755dd59d01680236d12b57f87e4bc52568649a0e63b1a96065baf800d8dc1c8",
         "batch-runner.js": "97756a03b36278cd0315cc16da0c34a7821c322149c51ba6666f1c5081dbecbc",
         "chat-state-store.js": "50de39aa33432733bb688eb01968e314a32b169324a66d0f0089b2a19ed9c880",
-        "command-arguments.js": "ef00f814dee6105e1cd3b8929e974bc071117f162b17e3dcc3dc0ea68e8b1e92",
+        "command-arguments.js": "6bdf203489ed496947648eea8e3ebc5f8460b1f1da7af0d017925a8bdd240fc1",
         "config.js": "ff1c1cb6701ae1da7a6eb1519ba96a416e48daa73c2155a6f93cf5d64f65cef8",
-        "index.js": "630a114b0e9bf8e87bb1dca7c0f6db359570c49d5b73a57ec77101420cee9f57",
+        "index.js": "03644ba0a2460d317fbd42f4c2ebf9579760e579e9f1c907f14ea15d3f9675c1",
         "lib/bootstrap-url.js": "f05925cc0f0dff0882f94f9908c6f2c80aa8632cd51f63389381dcbb0f73afb3",
         "lib/encrypted-frames.js": "47e1b11fafdbbcdfd86a0993a47a774e4f37d6386edeaf8ec1c8511b109728cf",
         "lib/handshake-crypto.js": "9728b117aad7de53f5f0e255c0fd865ee1a19633368730a7634334d374094578",
@@ -116,13 +116,13 @@
         "lib/secure-store.js": "b8f365197f8e60d7f81fde6ed1cfc8851b603f6b0783e4cdc9036bb5c99726e1",
         "master-domain.js": "10b7dfb43eb9939eb5baec54f742076cc73a2add6589a0ff57c51bc79c236faf",
         "network-session.js": "db2d81a7ef47af29236d963b98e21414a11fef68e8b20895126eaad3f696ba3d",
-        "package.json": "9cb2f40993bfbebad587675bc9d2d1de25a295c749806cda2585ba71c6c95727",
+        "package.json": "e9137059a4c6a007f08905602726bcf2d83e822ab1fa12b8f1c8ab727cee3752",
         "remote-runtime.js": "87c53c012b1f9d032af4028b8f92d2c8a84b9730e39e32f3dfcbd60e8d021c20",
         "slave-operations.js": "fec2e8addfff98f080284f24f722c1516124e5f6d12d8c03bb3c9cc0c475d1d6",
         "state-store.js": "c56849a3f1b9c990128276e17963034a7836abacedc44f2e500d5732ebf9e451",
         "test/batch-runner.test.js": "69f69150eadd18c1ad1bc54f429e6cb5bc0c4492e3c6a6e76c2ce6827780ae41",
         "test/bootstrap-url.test.js": "62c112b1a38c59ea2c77f797e32873667b52db32386da661a6ae8410490126fe",
-        "test/command-arguments.test.js": "360c087edd0a589b28111bb82d06e3e73e93a6b22da0a57cb96f0a7e92a9bd5f",
+        "test/command-arguments.test.js": "e293a84313ba05f169f78e9c3b6de9ae34972dd80e4b34c3d653dba78cb6bb58",
         "test/encrypted-frames.test.js": "cfb3195d3a58df7dc570bc7840a21c1841a53e0abc8b92840e0c24ed3435bcc1",
         "test/handshake-crypto.test.js": "f11d6e95658f2055d8256bd7dfb66b39bedf95bf62a3cec5525b109bb6f9bc95",
         "test/master-domain.test.js": "7298766db3e6b186cca0109f352766e1bf417a8af12a58dd1c2b78fd1a61ff24",
@@ -131,7 +131,7 @@
         "test/profile-catalog.test.js": "d8e297bee413d53ec13f2e1779c13f2e019cb8304976d567eab0e9f1ca36637c",
         "test/remote-runtime.test.js": "887705a9c15d979353b3db922f471b67d9607c2c6e0e8c7cebd83618a83597df",
         "test/slave-operations.test.js": "a84526ad7554c7d03192a68655b4637bec18750559a5c3436f7471e912ca74cc",
-        "tool.manifest.json": "ca533f7bf154f56f2b281fc1ffef4a772444c0a8f75a7c31802f786658fc21b5"
+        "tool.manifest.json": "7083f6b3023a6918d31f29a06b2250e49efacf77b580b688dad348bc0f841ce6"
       }
     },
     "mcp-client": {
