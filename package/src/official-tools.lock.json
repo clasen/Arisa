@@ -31,11 +31,7 @@
       }
     },
     "campaign-draft-runner": {
-      "version": "0.5.0",
-      "toolDependencies": {
-        "pr-campaign": "^0.1.0",
-        "gmail-workspace": "^0.1.0"
-      },
+      "version": "0.5.1",
       "files": {
         "README.md": "2c977357f774c6bc3369460ba9cd784c9b75b5f12b338e089e634e09f2a8cbcd",
         "batch-skip.js": "ad428464b739e7355e00ac7cf399247ce611fcef0470d97a73893701e5b07627",
@@ -50,7 +46,7 @@
         "test/batch-skip.test.js": "638d185dc0b38900afe6ee9058e733ae36583d0762a0ff0347fdf245df064abc",
         "test/selection-policy.test.js": "1283f18b861925aee810d156eb64c54b147304ff7352a8f83b9c2311e1f51de2",
         "test/telemetry.test.js": "daa84b83658226ecd979f15d4e12d94740ffe5280d467ad29677fc1d77734a5b",
-        "tool.manifest.json": "71520f3be858b9c2193223e370c10d938484a2af9281087e6dc14410b45cb2ae"
+        "tool.manifest.json": "066752babf3de70f98aa5dee46d60338d0a124c0f643f475a13d276bef9e7d52"
       }
     },
     "creator-scout": {

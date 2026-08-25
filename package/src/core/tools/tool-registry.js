@@ -1,7 +1,7 @@
 import { mkdir, readdir, readFile, rmdir, unlink, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { spawn } from "node:child_process";
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { arisaIpcSocketFile, arisaPackageDir, getToolConfigPath, getToolStateDir, getToolTmpDir, getChatToolTmpDir, toolsDir as userToolsRoot } from "../../runtime/paths.js";
 import { loadToolConfig, parseConfigModule, writeToolConfig } from "./tool-config.js";
 import { normalizeToolResult } from "./tool-result.js";
@@ -23,6 +23,19 @@ const defaultToolKillGraceMs = 2_000;
 
 function positiveDuration(value, fallback) {
   return Number.isFinite(value) && value > 0 ? value : fallback;
+}
+
+function canonicalRequestValue(value) {
+  if (Array.isArray(value)) return value.map(canonicalRequestValue);
+  if (value && typeof value === "object") {
+    return Object.fromEntries(Object.keys(value).sort().map((key) => [key, canonicalRequestValue(value[key])]));
+  }
+  return value === undefined ? null : value;
+}
+
+function concurrentExecutionKey(name, chatId, request) {
+  const serialized = JSON.stringify(canonicalRequestValue({ name, chatId: chatId == null ? null : String(chatId), request }));
+  return createHash("sha256").update(serialized).digest("hex");
 }
 
 function waitForToolProcess(child, { timeoutMs, killGraceMs, label }) {
@@ -289,6 +302,7 @@ export class ToolRegistry {
       policy: executionPolicy,
       logger
     });
+    this.concurrentExecutions = new Map();
   }
 
   async buildSnapshot() {
@@ -476,7 +490,25 @@ export class ToolRegistry {
       .sort((left, right) => left.name.localeCompare(right.name));
   }
 
-  async run({ name, request, chatId = null, onEvent = null }) {
+  async run(invocation) {
+    const tool = this.get(invocation.name);
+    if (!tool?.execution?.deduplicateConcurrent) return this.runOnce(invocation);
+    const key = concurrentExecutionKey(invocation.name, invocation.chatId, invocation.request);
+    const active = this.concurrentExecutions.get(key);
+    if (active) {
+      this.logger?.log("tools", `joined concurrent duplicate ${invocation.name}`);
+      return active;
+    }
+    const execution = this.runOnce(invocation);
+    this.concurrentExecutions.set(key, execution);
+    try {
+      return await execution;
+    } finally {
+      if (this.concurrentExecutions.get(key) === execution) this.concurrentExecutions.delete(key);
+    }
+  }
+
+  async runOnce({ name, request, chatId = null, onEvent = null }) {
     const tool = this.get(name);
     if (!tool) throw new Error(`Tool not found: ${name}`);
     const dependencyIssue = this.dependencyIssues(name)[0];

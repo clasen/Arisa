@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { access, mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { access, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
@@ -171,7 +171,8 @@ test("loads weighted execution metadata from the tool manifest", async () => {
 
   assert.deepEqual(registry.get("heavy-tool").execution, {
     resourceClass: "browser",
-    weight: 2
+    weight: 2,
+    deduplicateConcurrent: false
   });
 });
 
@@ -229,9 +230,47 @@ test("wraps declared tool runs in the shared execution governor", async () => {
 
   assert.equal(result.ok, true);
   assert.deepEqual(calls, [
-    { type: "acquire", execution: { resourceClass: "browser", weight: 1 }, label: "heavy-tool" },
+    {
+      type: "acquire",
+      execution: { resourceClass: "browser", weight: 1, deduplicateConcurrent: false },
+      label: "heavy-tool"
+    },
     { type: "release", label: "heavy-tool" }
   ]);
+});
+
+test("joins exact concurrent duplicates only for tools that opt in", async () => {
+  await resetHome();
+  const dir = await createFakeTool("single-flight-tool", {
+    execution: { resourceClass: "orchestrator", weight: 1, deduplicateConcurrent: true }
+  });
+  await writeFile(path.join(dir, "index.js"), `import { appendFile, readFile } from "node:fs/promises";
+const requestFile = process.argv[process.argv.indexOf("--request-file") + 1];
+const request = JSON.parse(await readFile(requestFile, "utf8"));
+await appendFile(request.args.counterFile, "x");
+await new Promise((resolve) => setTimeout(resolve, 100));
+process.stdout.write(JSON.stringify({ ok: true, output: { text: request.args.value } }));
+`, "utf8");
+  const counterFile = path.join(homeDir, "single-flight-count.txt");
+  const registry = new ToolRegistry({ executionPolicy: { capacities: { orchestrator: 1 } } });
+  await registry.load();
+  const invocation = {
+    name: "single-flight-tool",
+    chatId: "123",
+    request: { args: { counterFile, value: "same" } }
+  };
+
+  const [first, second] = await Promise.all([registry.run(invocation), registry.run(invocation)]);
+
+  assert.deepEqual(second, first);
+  assert.equal(await readFile(counterFile, "utf8"), "x");
+  await Promise.all([
+    registry.run({ ...invocation, request: { args: { counterFile, value: "cross-chat" } } }),
+    registry.run({ ...invocation, chatId: "456", request: { args: { counterFile, value: "cross-chat" } } })
+  ]);
+  assert.equal(await readFile(counterFile, "utf8"), "xxx");
+  await registry.run({ ...invocation, request: { args: { counterFile, value: "different" } } });
+  assert.equal(await readFile(counterFile, "utf8"), "xxxx");
 });
 
 test("runs a registered tool process with an enriched request and cleans up request files", async () => {

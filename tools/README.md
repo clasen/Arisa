@@ -481,7 +481,7 @@ The IPC client supports explicit capabilities only: tools, artifacts, tasks, age
 
 Every tool must have:
 
-- **`tool.manifest.json`**: name, description, entry point, accepted input/output MIME types, config schema, category, and `keywords` used as discovery tags. A resource-intensive leaf tool may also declare `execution.resourceClass` and a positive integer `execution.weight`; Arisa then applies the shared weighted capacity for that class while leaving undeclared lightweight tools unconstrained.
+- **`tool.manifest.json`**: name, description, entry point, accepted input/output MIME types, config schema, category, and `keywords` used as discovery tags. A resource-intensive tool may also declare `execution.resourceClass` and a positive integer `execution.weight`; Arisa then applies the shared weighted capacity for that class while leaving undeclared lightweight tools unconstrained. Use a separate class for an orchestrator and its nested leaf tools to avoid holding the capacity that a dependency needs. `execution.deduplicateConcurrent: true` is an explicit opt-in for joining exact same-chat requests only while the first execution remains active.
 - **`index.js`**: the executable entry point. It must handle `--help` and `run --request-file <json>`.
 - **`config.js`**: default config values merged with user-supplied secrets at runtime.
 - **`package.json`**: isolated dependencies. Tools run in their own `node_modules`.

@@ -24,7 +24,11 @@ export function normalizeToolExecution(execution) {
   if (!resourceClass) throw new Error("Tool execution resourceClass is required");
   const weight = positiveInteger(execution.weight, 0);
   if (!weight) throw new Error("Tool execution weight must be a positive integer");
-  return { resourceClass, weight };
+  return {
+    resourceClass,
+    weight,
+    deduplicateConcurrent: execution.deduplicateConcurrent === true
+  };
 }
 
 export function normalizeToolExecutionPolicy(policy = {}) {

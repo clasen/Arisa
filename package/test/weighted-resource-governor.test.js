@@ -15,8 +15,14 @@ function deferred() {
 test("normalizes manifest weights and configurable class capacities", () => {
   assert.deepEqual(normalizeToolExecution({ resourceClass: "browser", weight: 2 }), {
     resourceClass: "browser",
-    weight: 2
+    weight: 2,
+    deduplicateConcurrent: false
   });
+  assert.equal(normalizeToolExecution({
+    resourceClass: "orchestrator",
+    weight: 1,
+    deduplicateConcurrent: true
+  }).deduplicateConcurrent, true);
   assert.equal(normalizeToolExecution(undefined), null);
   assert.throws(() => normalizeToolExecution({ resourceClass: "Browser!", weight: 1 }), /Invalid tool execution resource class/);
   assert.throws(() => normalizeToolExecution({ resourceClass: "browser", weight: 0 }), /positive integer/);
