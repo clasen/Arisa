@@ -84,6 +84,7 @@ test("installs a verified staged tree without overwriting an existing tool", asy
   const { root, source, files } = await fixture(t);
   const destination = path.join(root, "installed", "master-slave");
   const checkout = async ({ checkoutDir }) => {
+    assert.equal(path.dirname(path.dirname(checkoutDir)), path.dirname(destination));
     await mkdir(path.join(checkoutDir, "tools"), { recursive: true });
     await cp(source, path.join(checkoutDir, "tools", "master-slave"), { recursive: true });
   };
@@ -92,7 +93,6 @@ test("installs a verified staged tree without overwriting an existing tool", asy
     toolName: "master-slave",
     lock: lock(files),
     destination,
-    scratchRoot: root,
     checkout,
     installDependencies: async () => { lifecycle.push("dependencies"); },
     validate: async () => { lifecycle.push("validate"); }

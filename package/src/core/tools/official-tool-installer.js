@@ -11,7 +11,6 @@ import {
   rename,
   rm
 } from "node:fs/promises";
-import os from "node:os";
 import path from "node:path";
 import { getToolDir } from "../../runtime/paths.js";
 import { normalizeToolDependencies, resolveToolDependencyPlan, satisfiesToolVersion } from "./tool-dependencies.js";
@@ -181,7 +180,7 @@ export async function installLockedOfficialTool({
   toolName,
   lock,
   destination,
-  scratchRoot = os.tmpdir(),
+  scratchRoot,
   checkout = checkoutRepository,
   installDependencies = installPackageDependencies,
   validate = validateEntrypoint
@@ -190,7 +189,9 @@ export async function installLockedOfficialTool({
   if (await exists(destination)) {
     throw new Error(`Refusing to overwrite installed tool: ${destination}`);
   }
-  const scratch = await mkdtemp(path.join(scratchRoot, `arisa-${toolName}-`));
+  const stagingRoot = scratchRoot || path.dirname(destination);
+  await mkdir(stagingRoot, { recursive: true });
+  const scratch = await mkdtemp(path.join(stagingRoot, `.arisa-${toolName}-`));
   const checkoutDir = path.join(scratch, "repository");
   const stageDir = path.join(scratch, "stage");
   try {
