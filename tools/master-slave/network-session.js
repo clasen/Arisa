@@ -14,6 +14,14 @@ import {
 import { decryptFrame, encryptFrame, PROTOCOL_VERSION } from "./lib/encrypted-frames.js";
 
 export const HANDSHAKE_FRAME_BYTES = 65_536;
+export const TCP_KEEPALIVE_INITIAL_DELAY_MS = 15_000;
+
+export function configureTransportSocket(socket) {
+  socket.setNoDelay(true);
+  socket.setKeepAlive(true, TCP_KEEPALIVE_INITIAL_DELAY_MS);
+  return socket;
+}
+
 export const MESSAGE_TYPES = Object.freeze({
   PAIR_CONFIRM: 1,
   PAIR_ACK: 2,
@@ -262,7 +270,7 @@ export async function acceptMasterHandshake(socket, {
   persistPeer,
   maxFrameBytes
 }) {
-  socket.setNoDelay(true);
+  configureTransportSocket(socket);
   const reader = new SocketReader(socket);
   const hello = await readPlain(reader);
   const peer = hello.mode === "reconnect" ? await resolvePeer(hello.slaveId) : null;
@@ -330,7 +338,7 @@ async function connectSlaveHandshakeInternal(socket, {
   expectedMasterPublicKey = null,
   maxFrameBytes
 }) {
-  socket.setNoDelay(true);
+  configureTransportSocket(socket);
   const reader = new SocketReader(socket);
   const mode = secret ? "pair" : "reconnect";
   const ephemeral = generateEphemeralKeyPair();

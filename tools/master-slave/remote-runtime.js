@@ -95,8 +95,23 @@ function writeSocketClose(server) {
   return new Promise((resolve) => server.close(resolve));
 }
 
-function createPendingConnection(connection, { maxJobOutputBytes }) {
+export function createPendingConnection(connection, { maxJobOutputBytes, jobResponseTimeoutMs }) {
   const pending = new Map();
+
+  function armTimeout(jobId, request) {
+    clearTimeout(request.timer);
+    request.timer = setTimeout(() => {
+      if (pending.get(jobId) !== request) return;
+      pending.delete(jobId);
+      const error = Object.assign(
+        new Error(`Remote job timed out after ${request.timeoutMs}ms; closing the stale Slave connection`),
+        { code: "REMOTE_JOB_TIMEOUT" }
+      );
+      request.reject(error);
+      connection.close();
+    }, request.timeoutMs);
+    request.timer.unref?.();
+  }
   connection.on("message", (message) => {
     if (message.type === MESSAGE_TYPES.HEARTBEAT) {
       connection.send(MESSAGE_TYPES.HEARTBEAT, { acknowledgedAt: new Date().toISOString() }).catch(() => {});
@@ -107,6 +122,7 @@ function createPendingConnection(connection, { maxJobOutputBytes }) {
     if (!request) return;
     if (message.type !== MESSAGE_TYPES.JOB_EVENT) return;
     const event = message.payload;
+    armTimeout(jobId, request);
     if (event.status === "chunk" && ["artifact", "remote_text"].includes(event.chunk?.channel)) {
       const chunk = Buffer.from(String(event.chunk.data || ""), "base64");
       request.artifactBytes += chunk.length;
@@ -123,6 +139,7 @@ function createPendingConnection(connection, { maxJobOutputBytes }) {
     request.onEvent?.(event);
     if (!["completed", "failed", "cancelled", "expired"].includes(event.status)) return;
     pending.delete(jobId);
+    clearTimeout(request.timer);
     if (event.status === "completed") {
       const artifact = event.result?.output?.remoteArtifact || event.result?.remoteArtifact;
       if (artifact) artifact.contentBase64 = Buffer.concat(request.contentChunks.artifact).toString("base64");
@@ -140,24 +157,37 @@ function createPendingConnection(connection, { maxJobOutputBytes }) {
     }
   });
   connection.on("protocolError", (error) => {
-    for (const request of pending.values()) request.reject(error);
+    for (const request of pending.values()) {
+      clearTimeout(request.timer);
+      request.reject(error);
+    }
     pending.clear();
   });
   connection.start();
   return {
     async run(job, { onEvent } = {}) {
       if (pending.has(job.jobId)) throw new Error(`Remote job is already active: ${job.jobId}`);
-      const result = new Promise((resolve, reject) => pending.set(job.jobId, {
-        resolve,
-        reject,
-        onEvent,
-        artifactBytes: 0,
-        contentChunks: { artifact: [], remote_text: [] }
-      }));
+      const requestedTimeoutMs = Number(job.args?.timeoutMs || 0);
+      const timeoutMs = Math.max(jobResponseTimeoutMs, requestedTimeoutMs > 0 ? requestedTimeoutMs + 5_000 : 0);
+      let request;
+      const result = new Promise((resolve, reject) => {
+        request = {
+          resolve,
+          reject,
+          onEvent,
+          timeoutMs,
+          timer: null,
+          artifactBytes: 0,
+          contentChunks: { artifact: [], remote_text: [] }
+        };
+        pending.set(job.jobId, request);
+      });
+      armTimeout(job.jobId, request);
       try {
         await connection.send(MESSAGE_TYPES.JOB_REQUEST, job);
       } catch (error) {
         pending.delete(job.jobId);
+        clearTimeout(request.timer);
         throw error;
       }
       return result;
@@ -188,6 +218,7 @@ export class MasterNetworkRuntime {
   constructor({ config, state, identity, pairingStore, onConnectionEvent } = {}) {
     requireMasterConfig(config);
     this.config = config;
+    this.jobResponseTimeoutMs = requirePositive(config.jobResponseTimeoutMs ?? 30_000, "jobResponseTimeoutMs");
     this.state = state;
     this.identity = identity;
     this.pairingStore = pairingStore;
@@ -213,7 +244,10 @@ export class MasterNetworkRuntime {
       }).then(async ({ connection, peer, paired }) => {
         const existing = this.connections.get(peer.slaveId);
         existing?.close();
-        const remote = createPendingConnection(connection, { maxJobOutputBytes: this.config.maxJobOutputBytes });
+        const remote = createPendingConnection(connection, {
+          maxJobOutputBytes: this.config.maxJobOutputBytes,
+          jobResponseTimeoutMs: this.jobResponseTimeoutMs
+        });
         this.connections.set(peer.slaveId, remote);
         await this.onConnectionEvent?.({ type: "connected", peer, paired });
         socket.once("close", async () => {

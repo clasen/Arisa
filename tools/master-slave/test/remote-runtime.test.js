@@ -1,12 +1,14 @@
 import assert from "node:assert/strict";
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import net from "node:net";
+import { EventEmitter } from "node:events";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
 import {
   bootstrapSlaveConnection,
   createPairingStore,
+  createPendingConnection,
   createRuntimeIdentity,
   MasterNetworkRuntime,
   notifySlavePairing,
@@ -105,6 +107,25 @@ test("notifies authorized chats after pairing but stays silent on reconnect", as
   assert.deepEqual(notifications.map(({ chatId }) => chatId), ["123", "456"]);
   assert.ok(notifications.every(({ event }) => event.resourceId === peer.slaveId));
   assert.match(notifications[0].event.prompt, /finished pairing.*Notify the user now.*added successfully and is online/i);
+});
+
+test("closes a stale connection after bounded remote job inactivity", async () => {
+  class FakeConnection extends EventEmitter {
+    closed = false;
+    start() {}
+    async send() {}
+    close() { this.closed = true; }
+  }
+  const connection = new FakeConnection();
+  const remote = createPendingConnection(connection, {
+    maxJobOutputBytes: 1_024,
+    jobResponseTimeoutMs: 20
+  });
+  await assert.rejects(
+    () => remote.run({ jobId: "stale-job", args: {} }),
+    (error) => error.code === "REMOTE_JOB_TIMEOUT"
+  );
+  assert.equal(connection.closed, true);
 });
 
 test("pairs, reconnects, authorizes, configures, reads, deduplicates, and revokes", async (t) => {

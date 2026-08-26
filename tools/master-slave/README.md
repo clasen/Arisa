@@ -69,7 +69,9 @@ node index.js daemon
 
 The daemon entry remains the transport owner. Public `run --request-file` calls
 must submit through Arisa's managed daemon runtime rather than constructing a
-second listener or client.
+second listener or client. Transport sockets use bounded TCP keepalive, stale
+remote jobs close their connection after bounded inactivity, and a previously
+stable Slave retries reconnecting with a short capped backoff.
 
 `run_slave_command` accepts structured `argv` arrays from direct CLI callers. For
 Arisa tool calls, where argument fields are strings, pass the same array as

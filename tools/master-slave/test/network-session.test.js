@@ -5,8 +5,10 @@ import { createBootstrapSecret } from "../lib/bootstrap-url.js";
 import { generateIdentity } from "../lib/handshake-crypto.js";
 import {
   acceptMasterHandshake,
+  configureTransportSocket,
   connectSlaveHandshake,
-  MESSAGE_TYPES
+  MESSAGE_TYPES,
+  TCP_KEEPALIVE_INITIAL_DELAY_MS
 } from "../network-session.js";
 
 const maxFrameBytes = 1_048_576;
@@ -22,6 +24,19 @@ async function listen(server) {
 async function closeServer(server) {
   await new Promise((resolve) => server.close(resolve));
 }
+
+test("configures low-latency TCP keepalive on transport sockets", () => {
+  const calls = [];
+  const socket = {
+    setNoDelay: (value) => calls.push(["noDelay", value]),
+    setKeepAlive: (enabled, delay) => calls.push(["keepAlive", enabled, delay])
+  };
+  assert.equal(configureTransportSocket(socket), socket);
+  assert.deepEqual(calls, [
+    ["noDelay", true],
+    ["keepAlive", true, TCP_KEEPALIVE_INITIAL_DELAY_MS]
+  ]);
+});
 
 test("pairs once, binds the chat, and exchanges encrypted bidirectional messages", async (t) => {
   const masterIdentity = generateIdentity();

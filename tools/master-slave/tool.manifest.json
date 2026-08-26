@@ -1,6 +1,6 @@
 {
   "name": "master-slave",
-  "version": "0.1.8",
+  "version": "0.1.9",
   "description": "Pair an Arisa Master with deterministic headless Arisa Slave hosts over an authenticated encrypted direct TCP connection.",
   "entry": "index.js",
   "daemon": {
@@ -77,6 +77,11 @@
       "type": "number",
       "required": false,
       "prompt": "Lifetime of an issued remote job in milliseconds."
+    },
+    "jobResponseTimeoutMs": {
+      "type": "number",
+      "required": false,
+      "prompt": "Maximum inactivity allowed while waiting for a remote job response before closing the stale connection."
     },
     "batchConcurrency": {
       "type": "number",
