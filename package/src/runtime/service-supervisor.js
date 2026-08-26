@@ -22,6 +22,7 @@ export function createServiceSupervisor({
   restartBackoffMaxMs = 60_000,
   stableRuntimeMs = 60_000,
   logger,
+  onUnexpectedExit = null,
   spawnProcess = spawn,
   wait = sleep
 }) {
@@ -65,6 +66,19 @@ export function createServiceSupervisor({
       }
 
       const delay = Math.min(maximumBackoffMs, initialBackoffMs * (2 ** (consecutiveFailures - 1)));
+      try {
+        await onUnexpectedExit?.({
+          occurredAt: new Date().toISOString(),
+          runtimeMs,
+          restartDelayMs: delay,
+          consecutiveFailures,
+          code: outcome.code ?? null,
+          signal: outcome.signal || null,
+          detail
+        });
+      } catch (error) {
+        logger?.error("service", `worker recovery report failed: ${errorMessage(error)}`);
+      }
       logger?.log("service", `restarting worker in ${delay}ms`);
       await Promise.race([
         wait(delay),

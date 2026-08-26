@@ -6,6 +6,7 @@ import { loadConfig } from "./core/config/config-store.js";
 import { createLogger } from "./runtime/logger.js";
 import { getServiceStatus, handoffServiceRestart, registerServiceProcess, restartService, serviceEntryFile, startService, stopService, unregisterServiceProcess } from "./runtime/service-manager.js";
 import { createServiceSupervisor } from "./runtime/service-supervisor.js";
+import { recordUnexpectedWorkerExit } from "./runtime/worker-recovery-report.js";
 import { flushArisaHome } from "./runtime/flush.js";
 import { readPackageVersion, showServiceLogs } from "./runtime/log-viewer.js";
 import { arisaPackageDir } from "./runtime/paths.js";
@@ -245,7 +246,8 @@ async function main() {
       restartBackoffMs: persistedConfig.service.workerRestartBackoffMs,
       restartBackoffMaxMs: persistedConfig.service.workerRestartBackoffMaxMs,
       stableRuntimeMs: persistedConfig.service.workerStableRuntimeMs,
-      logger
+      logger,
+      onUnexpectedExit: recordUnexpectedWorkerExit
     });
     activeApp = supervisor;
     await supervisor.start();

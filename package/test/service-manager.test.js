@@ -243,6 +243,7 @@ test("accepts restart handoff from a worker owned by the active supervisor", asy
 test("supervisor restarts an unexpectedly exited worker and forwards shutdown", async () => {
   const children = [];
   const delays = [];
+  const reports = [];
   const spawnProcess = () => {
     const child = new EventEmitter();
     child.pid = 100 + children.length;
@@ -261,13 +262,17 @@ test("supervisor restarts an unexpectedly exited worker and forwards shutdown", 
     restartBackoffMaxMs: 20,
     stableRuntimeMs: 60_000,
     spawnProcess,
-    wait: async (ms) => { delays.push(ms); }
+    wait: async (ms) => { delays.push(ms); },
+    onUnexpectedExit: async (report) => { reports.push(report); }
   });
   const running = supervisor.start();
   children[0].emit("exit", 1, null);
   await new Promise((resolve) => setImmediate(resolve));
   assert.equal(children.length, 2);
   assert.deepEqual(delays, [5]);
+  assert.equal(reports.length, 1);
+  assert.equal(reports[0].code, 1);
+  assert.equal(reports[0].restartDelayMs, 5);
   await supervisor.stop();
   await running;
   assert.equal(children[1].killedWith, "SIGTERM");

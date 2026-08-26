@@ -10,6 +10,7 @@ import { formatDoctorReport } from "../../runtime/doctor.js";
 import { ToolResourceNoteStore } from "../../core/tools/tool-resource-note-store.js";
 import { formatUpdateReport } from "../../runtime/update-manager.js";
 import { cancelRestartReceipt, deliverRestartReceipt, prepareRestartReceipt } from "../../runtime/restart-receipt.js";
+import { consumeWorkerRecoveryReport, loadWorkerRecoveryReport } from "../../runtime/worker-recovery-report.js";
 import { buildUpdatePicker, createTelegramUpdateCallbackHandler } from "./update-command.js";
 import { createTelegramModelControls } from "./model-controls.js";
 import { createTelegramModelCallbackHandler } from "./model-callback.js";
@@ -513,14 +514,27 @@ export async function createTelegramBot({ config, artifactStore, toolRegistry, t
   }
 
   async function sendStartupMessages() {
+    let recovery = null;
+    try {
+      recovery = await loadWorkerRecoveryReport();
+    } catch (error) {
+      logger?.log("telegram", `worker recovery report load failed: ${error instanceof Error ? error.message : String(error)}`);
+    }
+    let recoveryDelivered = false;
     for (const chatId of config.telegram.authorizedChatIds || []) {
       try {
         logger?.log("telegram", `sending startup message for chat ${chatId}`);
         const chatMeta = config.telegram.chatMeta[chatId] || {};
-        await bot.api.sendMessage(chatId, buildStartupMessage(chatMeta));
+        await bot.api.sendMessage(chatId, recovery?.text || buildStartupMessage(chatMeta));
+        if (recovery) recoveryDelivered = true;
       } catch (error) {
         logger?.log("telegram", `startup message failed for chat ${chatId}: ${error instanceof Error ? error.message : String(error)}`);
       }
+    }
+    if (recovery && recoveryDelivered) {
+      await consumeWorkerRecoveryReport(recovery.report.id).catch((error) => {
+        logger?.log("telegram", `worker recovery report cleanup failed: ${error instanceof Error ? error.message : String(error)}`);
+      });
     }
     try {
       const result = await deliverRestartReceipt((chatId, text, options) => bot.api.sendMessage(chatId, text, options));
