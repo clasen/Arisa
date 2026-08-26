@@ -12,6 +12,12 @@ import pkg from "whatsapp-web.js";
 import defaults from "./config.js";
 import { cacheBudgetBytes, chromiumCacheArgs, chromiumCacheUsage, pruneChromiumCaches } from "./browser-cache.js";
 import { burstBypassNames, createMessageBurstCoordinator } from "./message-burst.js";
+import {
+  classifyIncomingWake,
+  normalizeWakeGateMode,
+  updateWakeGateMetrics,
+  wakeGateResourceIds
+} from "./incoming-wake-gate.js";
 
 const toolDir = path.dirname(fileURLToPath(import.meta.url));
 const arisaPackageDir = process.env.ARISA_PACKAGE_DIR || path.resolve(toolDir, "../../package");
@@ -465,6 +471,28 @@ async function writePendingBursts(chatId, state) {
   await writeJson(pendingBurstsFileForChat(chatId), state);
 }
 
+function wakeGateMetricsFileForChat(chatId) {
+  return path.join(getChatToolStateDir(chatId, toolName), "wake-gate-metrics.json");
+}
+
+async function classifyWakeGate(chatId, items) {
+  const mode = normalizeWakeGateMode(config.INCOMING_WAKE_GATE_MODE);
+  const resourceId = String(items[0]?.message?.from || "");
+  const enabled = mode !== "off" && wakeGateResourceIds(config.INCOMING_WAKE_GATE_RESOURCES).has(resourceId);
+  if (!enabled) return { enabled: false, mode: "off", wake: true, reason: "not-configured" };
+  const decision = classifyIncomingWake(items, {
+    bypassNames: burstBypassNames(config.INCOMING_BURST_BYPASS_NAMES)
+  });
+  const metricsFile = wakeGateMetricsFileForChat(chatId);
+  const current = await readJson(metricsFile, {});
+  await writeJson(metricsFile, updateWakeGateMetrics(current, {
+    mode,
+    decision,
+    messageCount: items.length
+  }));
+  return { enabled: true, mode, ...decision };
+}
+
 function burstCoordinatorForChat(chatId) {
   const normalizedChatId = normalizeChatId(chatId);
   if (!burstCoordinators.has(normalizedChatId)) {
@@ -641,7 +669,9 @@ function incomingBurstTask(chatId, items, burst = {}) {
       coalescingDelayMs: Math.max(0, Number(burst.enqueuedAt || Date.now()) - Number(burst.firstAt || burst.enqueuedAt || Date.now())),
       bypassLatencyMs: burst.mode === "bypass"
         ? Math.max(0, Number(burst.enqueuedAt || Date.now()) - Number(burst.bypassAt || burst.enqueuedAt || Date.now()))
-        : null
+        : null,
+      wakeGateMode: burst.wakeGate?.mode || "off",
+      wakeGateReason: burst.wakeGate?.reason || "not-configured"
     }
   };
 }
@@ -649,9 +679,21 @@ function incomingBurstTask(chatId, items, burst = {}) {
 async function enqueueArisaTaskForIncomingBurst(chatId, items, burst = {}) {
   const numericChatId = Number(chatId);
   const messageIds = items.map((item) => item.message.id);
-  const task = incomingBurstTask(numericChatId, items, burst);
+  const existingTasks = await readTasks();
+  if (messageIds.every((id) => hasIncomingMessageTask(existingTasks, numericChatId, id))) return;
+  const wakeGate = await classifyWakeGate(chatId, items);
+  if (wakeGate.enabled && wakeGate.mode === "enforce" && !wakeGate.wake) {
+    await writeChatStatus(chatId, {
+      state: "ready",
+      live: true,
+      pid: process.pid,
+      message: `WhatsApp is ready. Wake gate stored ${messageIds.length} passive message(s) without waking Arisa.`
+    });
+    return { suppressed: true, messageCount: messageIds.length, reason: wakeGate.reason };
+  }
+  const task = incomingBurstTask(numericChatId, items, { ...burst, wakeGate });
   for (let attempt = 0; attempt < 3; attempt += 1) {
-    const tasks = await readTasks();
+    const tasks = attempt === 0 ? existingTasks : await readTasks();
     if (messageIds.every((id) => hasIncomingMessageTask(tasks, numericChatId, id))) return;
     tasks.push(task);
     await writeTasks(tasks);
