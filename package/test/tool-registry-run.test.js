@@ -9,6 +9,8 @@ process.env.HOME = homeDir;
 process.env.USERPROFILE = homeDir;
 
 const { ToolRegistry, createToolOutputParser, isolatedToolProcessInvocation } = await import("../src/core/tools/tool-registry.js");
+const { createToolOutputParser: directToolOutputParser } = await import("../src/core/tools/tool-process-output.js");
+const { isolatedToolProcessInvocation: directToolProcessInvocation } = await import("../src/core/tools/tool-process-runner.js");
 const {
   arisaHomeDir,
   arisaPackageDir,
@@ -97,6 +99,11 @@ setInterval(() => {}, 1_000);
 `, "utf8");
   return dir;
 }
+
+test("preserves process helpers through the ToolRegistry compatibility facade", () => {
+  assert.equal(createToolOutputParser, directToolOutputParser);
+  assert.equal(isolatedToolProcessInvocation, directToolProcessInvocation);
+});
 
 test("wraps declared Linux tool processes in a memory-limited cgroup", () => {
   assert.deepEqual(isolatedToolProcessInvocation(

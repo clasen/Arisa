@@ -1,47 +1,25 @@
-import { existsSync } from "node:fs";
 import { mkdir, readdir, readFile, rmdir, unlink, writeFile } from "node:fs/promises";
 import path from "node:path";
-import { spawn } from "node:child_process";
 import { createHash, randomUUID } from "node:crypto";
-import { arisaIpcSocketFile, arisaPackageDir, getToolConfigPath, getToolStateDir, getToolTmpDir, getChatToolTmpDir, toolsDir as userToolsRoot } from "../../runtime/paths.js";
+import { getToolConfigPath, getToolStateDir, getToolTmpDir, getChatToolTmpDir, toolsDir as userToolsRoot } from "../../runtime/paths.js";
 import { loadToolConfig, parseConfigModule, writeToolConfig } from "./tool-config.js";
 import { normalizeToolResult } from "./tool-result.js";
 import { readDaemonDiagnostic } from "./daemon-processes.js";
-import { createDaemonRuntime, DAEMON_EVENT_TYPES, DAEMON_PROTOCOL_VERSION } from "./daemon-runtime.js";
+import { createDaemonRuntime } from "./daemon-runtime.js";
 import { daemonConfigDefaults } from "../config/config-defaults.js";
 import { SkillRegistry } from "../skills/skill-registry.js";
 import { ToolUsageStore } from "./tool-usage-store.js";
 import { inspectToolDependencies, normalizeToolDependencies } from "./tool-dependencies.js";
 import { normalizeToolExecution, WeightedResourceGovernor } from "./weighted-resource-governor.js";
+import {
+  isolatedToolProcessInvocation,
+  runToolHelpProcess,
+  runToolProcess,
+  toolProcessEnv
+} from "./tool-process-runner.js";
 
-function toolEnv() {
-  return { ...process.env, ARISA_PACKAGE_DIR: arisaPackageDir, ARISA_IPC_SOCKET: arisaIpcSocketFile };
-}
-
-export function isolatedToolProcessInvocation(nodeArgs, execution, {
-  platform = process.platform,
-  systemdAvailable = existsSync("/run/systemd/system"),
-  oomAdjustAvailable = existsSync("/usr/bin/choom")
-} = {}) {
-  if (!execution?.maxMemoryMb || platform !== "linux" || !systemdAvailable) {
-    return { command: "node", args: nodeArgs, isolated: false };
-  }
-  return {
-    command: "systemd-run",
-    args: [
-      "--scope",
-      "--quiet",
-      "--collect",
-      "-p", `MemoryMax=${execution.maxMemoryMb}M`,
-      "-p", "MemorySwapMax=0",
-      "--",
-      ...(oomAdjustAvailable ? ["choom", "-n", "500", "--"] : []),
-      "node",
-      ...nodeArgs
-    ],
-    isolated: true
-  };
-}
+export { createToolOutputParser } from "./tool-process-output.js";
+export { isolatedToolProcessInvocation } from "./tool-process-runner.js";
 
 const defaultToolHelpTimeoutMs = 10_000;
 const defaultToolRunTimeoutMs = 30 * 60_000;
@@ -64,244 +42,12 @@ function concurrentExecutionKey(name, chatId, request) {
   return createHash("sha256").update(serialized).digest("hex");
 }
 
-function terminateToolProcess(child, signal) {
-  if (process.platform !== "win32" && Number.isInteger(child.pid)) {
-    try {
-      process.kill(-child.pid, signal);
-      return;
-    } catch {}
-  }
-  child.kill(signal);
-}
-
-function waitForToolProcess(child, { timeoutMs, killGraceMs, label }) {
-  return new Promise((resolve, reject) => {
-    let timedOut = false;
-    let forceTimer = null;
-    const timeout = setTimeout(() => {
-      timedOut = true;
-      terminateToolProcess(child, "SIGTERM");
-      forceTimer = setTimeout(() => terminateToolProcess(child, "SIGKILL"), killGraceMs);
-    }, timeoutMs);
-
-    const finish = (callback, value) => {
-      clearTimeout(timeout);
-      clearTimeout(forceTimer);
-      callback(value);
-    };
-
-    child.once("error", (error) => finish(reject, error));
-    child.once("close", (code) => {
-      if (!timedOut) {
-        finish(resolve, code);
-        return;
-      }
-      const error = new Error(`${label} timed out after ${timeoutMs}ms`);
-      error.code = "TOOL_PROCESS_TIMEOUT";
-      finish(reject, error);
-    });
-  });
-}
-
-async function runProcess(command, args, {
-  timeoutMs,
-  killGraceMs,
-  label,
-  maxOutputBytes = daemonConfigDefaults.ipcFrameBytes,
-  ...options
-} = {}) {
-  const child = spawn(command, args, {
-    detached: process.platform !== "win32",
-    ...options,
-    stdio: ["ignore", "pipe", "pipe"]
-  });
-  let stdout = "";
-  let stderr = "";
-  let outputBytes = 0;
-  let outputError = null;
-  let forceTimer = null;
-  const append = (current, chunk) => {
-    if (outputError) return current;
-    outputBytes += chunk.length;
-    if (outputBytes > maxOutputBytes) {
-      outputError = new Error(`${label} output exceeds ${maxOutputBytes} bytes`);
-      outputError.code = "TOOL_OUTPUT_LIMIT";
-      terminateToolProcess(child, "SIGTERM");
-      forceTimer = setTimeout(() => terminateToolProcess(child, "SIGKILL"), killGraceMs);
-      forceTimer.unref?.();
-      return current;
-    }
-    return current + chunk.toString("utf8");
-  };
-  child.stdout.on("data", (chunk) => { stdout = append(stdout, chunk); });
-  child.stderr.on("data", (chunk) => { stderr = append(stderr, chunk); });
-  const code = await waitForToolProcess(child, { timeoutMs, killGraceMs, label });
-  clearTimeout(forceTimer);
-  if (outputError) throw outputError;
-  return { code, stdout, stderr };
-}
-
 function requirementNames(requirements) {
   if (Array.isArray(requirements)) {
     return requirements.map((item) => typeof item === "string" ? item : item?.name).filter(Boolean);
   }
   if (requirements && typeof requirements === "object") return Object.keys(requirements);
   return [];
-}
-
-export function createToolOutputParser(name, {
-  onEvent,
-  maxFrameBytes = 1_048_576,
-  maxOutputBytes = maxFrameBytes
-} = {}) {
-  let buffer = "";
-  let mode = "unknown";
-  let rawOutput = "";
-  let rawOutputBytes = 0;
-  let terminalResult = null;
-  let activeJobId = null;
-  let sequence = 0;
-  let terminalSeen = false;
-
-  async function parseEvent(line) {
-    let event;
-    try {
-      event = JSON.parse(line);
-    } catch {
-      throw new Error(`Invalid NDJSON from ${name}`);
-    }
-    if (event?.version !== DAEMON_PROTOCOL_VERSION || !DAEMON_EVENT_TYPES.includes(event?.type)) {
-      throw new Error(`Invalid versioned tool event from ${name}`);
-    }
-    if (typeof event.jobId !== "string" || !event.jobId) throw new Error(`Tool event from ${name} is missing jobId`);
-    if (activeJobId == null) activeJobId = event.jobId;
-    if (event.jobId !== activeJobId) throw new Error(`Tool ${name} multiplexed an unexpected jobId`);
-    if (!Number.isSafeInteger(event.sequence) || event.sequence !== sequence + 1) {
-      throw new Error(`Invalid tool event sequence from ${name}: ${event.sequence}`);
-    }
-    if (terminalSeen) throw new Error(`Tool ${name} emitted more than one terminal event`);
-    sequence = event.sequence;
-    terminalSeen = event.type === "completed" || event.type === "failed";
-    await onEvent?.(event);
-    if (terminalSeen) {
-      terminalResult = event.type === "completed"
-        ? event.payload?.result ?? event.payload?.output ?? event.payload
-        : { ok: false, error: event.payload?.error || `Tool failed: ${name}`, ...(event.payload?.code ? { code: event.payload.code } : {}) };
-    }
-  }
-
-  async function consumeLine(line) {
-    if (Buffer.byteLength(line, "utf8") > maxFrameBytes) throw new Error(`Tool event from ${name} exceeds ${maxFrameBytes} bytes`);
-    if (mode === "unknown") {
-      let candidate;
-      try {
-        candidate = JSON.parse(line);
-      } catch {
-        mode = "legacy";
-        return;
-      }
-      if (candidate?.version === DAEMON_PROTOCOL_VERSION && DAEMON_EVENT_TYPES.includes(candidate?.type)) {
-        mode = "ndjson";
-        rawOutput = "";
-        return parseEvent(line);
-      }
-      mode = "legacy";
-      return;
-    }
-    if (mode === "legacy") return;
-    return parseEvent(line);
-  }
-
-  return {
-    async push(chunk) {
-      const text = chunk.toString("utf8");
-      if (mode !== "ndjson") {
-        rawOutputBytes += Buffer.byteLength(text, "utf8");
-        if (rawOutputBytes > maxOutputBytes) {
-          const error = new Error(`Tool output from ${name} exceeds ${maxOutputBytes} bytes`);
-          error.code = "TOOL_OUTPUT_LIMIT";
-          throw error;
-        }
-        rawOutput += text;
-      }
-      if (mode === "legacy") return;
-      buffer += text;
-      if (Buffer.byteLength(buffer, "utf8") > maxFrameBytes && !buffer.includes("\n")) {
-        throw new Error(`Tool event from ${name} exceeds ${maxFrameBytes} bytes`);
-      }
-      let newlineIndex = buffer.indexOf("\n");
-      while (newlineIndex !== -1) {
-        const line = buffer.slice(0, newlineIndex).trim();
-        buffer = buffer.slice(newlineIndex + 1);
-        if (line) await consumeLine(line);
-        newlineIndex = buffer.indexOf("\n");
-      }
-    },
-    async finish() {
-      const tail = buffer.trim();
-      buffer = "";
-      if (tail) await consumeLine(tail);
-      if (mode !== "ndjson") return { mode: "legacy", output: rawOutput };
-      if (!terminalSeen) throw new Error(`Tool ${name} ended without a terminal event`);
-      return { mode: "ndjson", result: terminalResult };
-    }
-  };
-}
-
-async function runToolProcess(command, args, {
-  onEvent,
-  maxFrameBytes,
-  maxOutputBytes,
-  parserName,
-  timeoutMs,
-  killGraceMs,
-  label,
-  ...options
-} = {}) {
-  const child = spawn(command, args, {
-    detached: process.platform !== "win32",
-    ...options,
-    stdio: ["ignore", "pipe", "pipe"]
-  });
-  const parser = createToolOutputParser(parserName || path.basename(args[0] || command), { onEvent, maxFrameBytes, maxOutputBytes });
-  const stderrChunks = [];
-  let stderrBytes = 0;
-  let stdoutError = null;
-  let outputForceTimer = null;
-  const stdoutTask = (async () => {
-    try {
-      for await (const chunk of child.stdout) await parser.push(chunk);
-      return parser.finish();
-    } catch (error) {
-      stdoutError = error;
-      terminateToolProcess(child, "SIGTERM");
-      outputForceTimer = setTimeout(() => terminateToolProcess(child, "SIGKILL"), killGraceMs);
-      outputForceTimer.unref?.();
-      return null;
-    }
-  })();
-  const stderrTask = (async () => {
-    for await (const chunk of child.stderr) {
-      if (stderrBytes >= maxFrameBytes) continue;
-      const accepted = chunk.subarray(0, maxFrameBytes - stderrBytes);
-      stderrChunks.push(accepted);
-      stderrBytes += accepted.length;
-    }
-    return Buffer.concat(stderrChunks).toString("utf8");
-  })();
-  child.stdout.resume();
-  child.stderr.resume();
-  let code;
-  try {
-    code = await waitForToolProcess(child, { timeoutMs, killGraceMs, label });
-  } catch (error) {
-    await Promise.allSettled([stdoutTask, stderrTask]);
-    throw error;
-  }
-  const [parsed, stderr] = await Promise.all([stdoutTask, stderrTask]);
-  clearTimeout(outputForceTimer);
-  if (stdoutError) throw stdoutError;
-  return { code, parsed, stderr };
 }
 
 function normalizeCategory(category) {
@@ -510,9 +256,9 @@ export class ToolRegistry {
     const tool = this.get(name);
     if (!tool) throw new Error(`Tool not found: ${name}`);
     const helpHeapMb = tool.execution?.maxHeapMb || 192;
-    const result = await runProcess("node", [`--max-old-space-size=${helpHeapMb}`, tool.entry, "--help"], {
+    const result = await runToolHelpProcess("node", [`--max-old-space-size=${helpHeapMb}`, tool.entry, "--help"], {
       cwd: tool.dir,
-      env: toolEnv(),
+      env: toolProcessEnv(),
       timeoutMs: this.helpTimeoutMs,
       killGraceMs: this.killGraceMs,
       maxOutputBytes: tool.execution?.maxOutputBytes || daemonConfigDefaults.ipcFrameBytes,
@@ -656,7 +402,7 @@ export class ToolRegistry {
         }
         const processResult = await runToolProcess(processInvocation.command, processInvocation.args, {
           cwd: tool.dir,
-          env: toolEnv(),
+          env: toolProcessEnv(),
           onEvent,
           parserName: name,
           maxFrameBytes: daemonConfigDefaults.ipcFrameBytes,
