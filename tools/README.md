@@ -41,6 +41,17 @@ Run profile-driven outreach batches that expand bounded creative discovery after
 - **Tool dependencies:** `pr-campaign@^0.1.0`, `gmail-workspace@^0.1.0`
 - **Install footprint:** **Medium**, two tool dependencies and Gmail setup
 
+### [`change-plan-runner`](./change-plan-runner/)
+
+Orchestrate one owner-approved workspace plan as sequential, resumable agent batches with evidence gates and optional Git verification.
+
+- **Category:** `developer`
+- **Tags:** `architecture` · `automation` · `batch` · `change-plan` · `migration` · `no-git` · `orchestration` · `tool-creation` · `workspace`
+- **Accepts:** `text/plain`, `application/json`
+- **Produces:** `application/json`, `text/plain`
+- **Setup:** none; Git is optional
+- **Install footprint:** **Low**, no npm dependencies and no required external binaries
+
 ### [`context-vault`](./context-vault/)
 
 Store, search, update, and forget chat-scoped user context and preferences with hybrid multilingual semantic and lexical recall plus prior Pi session fallback.

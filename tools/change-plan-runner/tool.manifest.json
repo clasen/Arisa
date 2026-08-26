@@ -1,0 +1,66 @@
+{
+  "name": "change-plan-runner",
+  "version": "0.2.0",
+  "description": "Orchestrate an owner-approved workspace plan as sequential, resumable agent batches with evidence gates and optional Git verification.",
+  "entry": "index.js",
+  "input": [
+    "application/json",
+    "text/plain"
+  ],
+  "output": [
+    "application/json",
+    "text/plain"
+  ],
+  "configSchema": {
+    "MAX_BATCHES": {
+      "type": "number",
+      "required": false,
+      "prompt": "Maximum batches accepted in one plan."
+    },
+    "NEXT_BATCH_DELAY_SECONDS": {
+      "type": "number",
+      "required": false,
+      "prompt": "Delay before dispatching the next approved agent batch."
+    },
+    "GIT_MODE": {
+      "type": "string",
+      "required": false,
+      "prompt": "Git policy: auto, required, or disabled."
+    },
+    "REQUIRE_CLEAN_TREE": {
+      "type": "boolean",
+      "required": false,
+      "prompt": "When Git is enabled, require a clean worktree at batch boundaries."
+    },
+    "REQUIRE_COMMIT": {
+      "type": "boolean",
+      "required": false,
+      "prompt": "When Git is enabled, require every batch to produce a distinct commit."
+    },
+    "REQUIRE_PUSH": {
+      "type": "boolean",
+      "required": false,
+      "prompt": "When Git is enabled, require each completed batch commit on its upstream branch."
+    }
+  },
+  "category": "developer",
+  "keywords": [
+    "architecture",
+    "automation",
+    "batch",
+    "change-plan",
+    "coding",
+    "commit",
+    "developer",
+    "migration",
+    "no-git",
+    "orchestration",
+    "plan",
+    "refactor",
+    "repository",
+    "tool-creation",
+    "tests",
+    "workflow",
+    "workspace"
+  ]
+}
