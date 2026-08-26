@@ -23,8 +23,9 @@ function burstKey(ownerChatId, message) {
   return `${ownerChatId}:${message.from}`;
 }
 
-function burstItem(message, artifact, transcript) {
+function burstItem(message, artifact, transcript, capturedAt) {
   return {
+    capturedAt,
     message,
     artifact: artifact ? {
       id: artifact.id,
@@ -77,7 +78,7 @@ export function createMessageBurstCoordinator({
         schedule(ownerChatId, key, burst.dueAt);
         return false;
       }
-      await enqueue(ownerChatId, burst.items);
+      await enqueue(ownerChatId, burst.items, { mode: "window", firstAt: burst.firstAt, enqueuedAt: now() });
       delete state.bursts[key];
       await writeState(ownerChatId, state);
       return true;
@@ -89,17 +90,20 @@ export function createMessageBurstCoordinator({
       const state = await readState(ownerChatId);
       state.bursts ||= {};
       const key = burstKey(ownerChatId, message);
-      const existing = state.bursts[key]?.items || [];
-      const items = [...existing, burstItem(message, artifact, transcript)].slice(-50);
+      const existingBurst = state.bursts[key];
+      const capturedAt = now();
+      const existing = existingBurst?.items || [];
+      const items = [...existing, burstItem(message, artifact, transcript, capturedAt)].slice(-50);
       const text = transcript || message.body || "";
       const bypass = explicitlyInvokesBypassName(text, bypassNames);
-      const dueAt = bypass ? now() : now() + delayMs;
-      state.bursts[key] = { dueAt, items };
+      const dueAt = bypass ? capturedAt : capturedAt + delayMs;
+      const firstAt = existingBurst?.firstAt || capturedAt;
+      state.bursts[key] = { dueAt, firstAt, items };
       await writeState(ownerChatId, state);
       if (bypass || delayMs === 0) {
         if (timers.has(key)) clearTimer(timers.get(key));
         timers.delete(key);
-        await enqueue(ownerChatId, items);
+        await enqueue(ownerChatId, items, { mode: "bypass", firstAt, bypassAt: capturedAt, enqueuedAt: now() });
         delete state.bursts[key];
         await writeState(ownerChatId, state);
         return { bypassed: true, count: items.length };

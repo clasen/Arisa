@@ -31,12 +31,12 @@
       }
     },
     "campaign-draft-runner": {
-      "version": "0.5.3",
+      "version": "0.5.4",
       "files": {
         "README.md": "5e4d8c3a29ee1cbf893d7574cec069d579b477a0e899bb0a6e28521cd690a325",
         "batch-skip.js": "ad428464b739e7355e00ac7cf399247ce611fcef0470d97a73893701e5b07627",
         "config.js": "9b9c2d9686cebf17c3ba2630088c7028281883608f61054e733283aeb8d383cb",
-        "discovery-operations.js": "54e1864a1704e14e76ede3819f98b54f9544ba9f12969ea4310454341714001b",
+        "discovery-operations.js": "a5e9f046358938a07ffba039085c5c48f829c6a2e05362d0d0230a37a3c47f60",
         "index.js": "023a4088bc24ff52acdb55609430e4e063f80f8a6aab79541cc1639c439e42c5",
         "operation-timeout.js": "9b1ced30ec9ed710bb9118b91f6f3feded5111a08e1e21abf163e4cfb91d7ad2",
         "package.json": "a25b7ed1dd2c30cd68c3c10feb8ee1752cac8cd55cd4344690ffad649e231ec1",
@@ -45,10 +45,10 @@
         "source-exhaustion.js": "407f940f5205eb01715a797672d0dad8bd0b0b897024b5fcb87052a062ecd054",
         "telemetry.js": "b3ededa1277d5028f7a8299926e16bb4dc06d70c470d3b97352c29080cfc0974",
         "test/batch-skip.test.js": "638d185dc0b38900afe6ee9058e733ae36583d0762a0ff0347fdf245df064abc",
-        "test/discovery-operations.test.js": "d803d192c43fe6431e62e05630d133a53d4f97a159ac04a54ad7d85a3d13f849",
+        "test/discovery-operations.test.js": "bc3e7c877911278bf87ef2a5844990721570a4957b78478e2e916be869bc2159",
         "test/selection-policy.test.js": "1283f18b861925aee810d156eb64c54b147304ff7352a8f83b9c2311e1f51de2",
         "test/telemetry.test.js": "8e52a43fa9eb08fa0f3be124b72b7cd39258666cb88311b1df6978037372c257",
-        "tool.manifest.json": "7d489a14d9681b59616fd4ded89a7ce7913564c5ce1a73a3961f2eaacdb68f82"
+        "tool.manifest.json": "a9cb0b3825749cb3fc91dce6d18adbd63bb43dc42d14e3538a2bf0ebb789679a"
       }
     },
     "creator-scout": {
@@ -258,17 +258,17 @@
       }
     },
     "whatsapp-web": {
-      "version": "1.3.1",
+      "version": "1.3.2",
       "files": {
         "apply-whatsapp-web-compat.js": "8216698bf6d435d516ef8d10e47ea1fa636e81794ec66cde7e52a029f1bd89a0",
         "browser-cache.js": "f71c20f9ab5f04d9d46c5e2551b348d47baba89a10a07173070298098a6d5551",
         "config.js": "ef496af6be467909aee5179f67a4f4bcdcd2a423072dcf45111e0dcf8aa40456",
-        "index.js": "74a85bc904c6ccb130c503773cf87bcc698ad2e6bc61d745a008c2ca2b8b1b04",
-        "message-burst.js": "80f6af4d23e8fa359436563b21a48d3111868dd5d12cd48570b2e7289df23c01",
-        "package.json": "f76b67e5417a1b244531fb34f7fb9db532cd13522efde8bbba6edc1a71afb9d3",
+        "index.js": "b4f961ed2f14a05ed95528e1f3d803d3f6ca649d81c8b77823870f85d6dbaa1d",
+        "message-burst.js": "46b1d855ba96be6cb1a08c8b1bb2262528eb69451ba921cf6ab11942e5cc5903",
+        "package.json": "22a45256a2fc4be1533538b9976359e7a6a1ca90e49bf52110b10e55532efb61",
         "test/browser-cache.test.mjs": "636b91c16c9d4a67f38d625293fe371eb3d2e91818d131cacdec15e5bb255a69",
-        "test/message-burst.test.mjs": "1f22a93b47ea3edcdf907f62026c131405f80abd7850d6145fe00bee59c53731",
-        "tool.manifest.json": "36e8d9139a6c5d1e38087e46a62ceccbed44a5b9734248bcd7385e153e8bc6ab"
+        "test/message-burst.test.mjs": "bd27e575f2a05d2e4b38aed6545359016d5c1ce2cbc073f8959561779953ba2c",
+        "tool.manifest.json": "b284efaadb943f1fd6510446f8b30927ad266079dde9bfdd4961a2efb6cbbe5c"
       }
     }
   }

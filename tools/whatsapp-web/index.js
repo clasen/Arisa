@@ -616,7 +616,7 @@ function incomingMessageTask(chatId, message, artifact = null, transcript = "") 
   return incomingBurstTask(chatId, [{ message, artifact, transcript }]);
 }
 
-function incomingBurstTask(chatId, items) {
+function incomingBurstTask(chatId, items, burst = {}) {
   const now = new Date().toISOString();
   const messageIds = items.map((item) => item.message.id);
   const artifactIds = items.map((item) => item.artifact?.id).filter(Boolean);
@@ -635,15 +635,21 @@ function incomingBurstTask(chatId, items) {
       chatId,
       resourceId: items[0].message.from,
       messageId: messageIds.at(-1),
-      messageIds
+      messageIds,
+      messageCount: messageIds.length,
+      burstMode: burst.mode || "single",
+      coalescingDelayMs: Math.max(0, Number(burst.enqueuedAt || Date.now()) - Number(burst.firstAt || burst.enqueuedAt || Date.now())),
+      bypassLatencyMs: burst.mode === "bypass"
+        ? Math.max(0, Number(burst.enqueuedAt || Date.now()) - Number(burst.bypassAt || burst.enqueuedAt || Date.now()))
+        : null
     }
   };
 }
 
-async function enqueueArisaTaskForIncomingBurst(chatId, items) {
+async function enqueueArisaTaskForIncomingBurst(chatId, items, burst = {}) {
   const numericChatId = Number(chatId);
   const messageIds = items.map((item) => item.message.id);
-  const task = incomingBurstTask(numericChatId, items);
+  const task = incomingBurstTask(numericChatId, items, burst);
   for (let attempt = 0; attempt < 3; attempt += 1) {
     const tasks = await readTasks();
     if (messageIds.every((id) => hasIncomingMessageTask(tasks, numericChatId, id))) return;

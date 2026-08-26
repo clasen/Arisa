@@ -55,7 +55,8 @@ function errorText(error) {
   return String(error?.message || error || "unknown error").split("\n")[0].slice(0, 300);
 }
 
-export async function executeDiscoveryOperations(value, handlers) {
+export async function executeDiscoveryOperations(value, handlers, { now = () => Date.now() } = {}) {
+  const startedAt = now();
   const validated = prevalidateDiscoveryOperations(value);
   const results = [];
   for (const item of validated) {
@@ -74,7 +75,10 @@ export async function executeDiscoveryOperations(value, handlers) {
     results,
     total: results.length,
     succeeded: results.filter((item) => item.ok).length,
-    failed: results.filter((item) => !item.ok).length
+    failed: results.filter((item) => !item.ok).length,
+    verificationOperations: validated.filter((item) => ["check-contact", "verify-email", "sources-check"].includes(item.action)).length,
+    mutationOperations: validated.filter((item) => ["add-contact", "sources-record"].includes(item.action)).length,
+    durationMs: Math.max(0, now() - startedAt)
   };
 }
 

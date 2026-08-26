@@ -11,7 +11,7 @@ function harness() {
   const coordinator = createMessageBurstCoordinator({
     readState: async (chatId) => structuredClone(states.get(chatId) || { bursts: {} }),
     writeState: async (chatId, state) => { states.set(chatId, structuredClone(state)); },
-    enqueue: async (chatId, items) => { enqueued.push({ chatId, items }); },
+    enqueue: async (chatId, items, metadata) => { enqueued.push({ chatId, items, metadata }); },
     windowMs: 4_000,
     bypassNames: ["peter"],
     now: () => clock,
@@ -57,6 +57,8 @@ test("coalesces one same-chat burst and preserves chronological messages", async
   await run.fireLatest();
   assert.equal(run.enqueued.length, 1);
   assert.deepEqual(run.enqueued[0].items.map((item) => item.message.id), ["a", "b"]);
+  assert.equal(run.enqueued[0].metadata.mode, "window");
+  assert.equal(run.enqueued[0].metadata.enqueuedAt - run.enqueued[0].metadata.firstAt, 4_000);
 });
 
 test("an explicit Peter invocation flushes the complete pending burst immediately", async () => {
@@ -67,4 +69,6 @@ test("an explicit Peter invocation flushes the complete pending burst immediatel
   assert.deepEqual(result, { bypassed: true, count: 2 });
   assert.equal(run.timers.size, 0);
   assert.deepEqual(run.enqueued[0].items.map((item) => item.message.id), ["a", "b"]);
+  assert.equal(run.enqueued[0].metadata.mode, "bypass");
+  assert.equal(run.enqueued[0].metadata.enqueuedAt - run.enqueued[0].metadata.bypassAt, 0);
 });

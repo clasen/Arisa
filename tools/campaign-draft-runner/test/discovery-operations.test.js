@@ -17,6 +17,9 @@ test("prevalidates every discovery operation without letting one invalid item bl
   assert.deepEqual(calls, ["summary", "save"]);
   assert.equal(result.succeeded, 2);
   assert.equal(result.failed, 1);
+  assert.equal(result.mutationOperations, 2);
+  assert.equal(result.verificationOperations, 0);
+  assert.ok(result.durationMs >= 0);
   assert.deepEqual(result.results[1].validationErrors, ["name is required", "outlet is required"]);
   assert.equal(result.results[2].idempotent, true);
 });
