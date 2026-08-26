@@ -13,7 +13,7 @@ function harness() {
     writeState: async (chatId, state) => { states.set(chatId, structuredClone(state)); },
     enqueue: async (chatId, items, metadata) => { enqueued.push({ chatId, items, metadata }); },
     windowMs: 4_000,
-    bypassNames: ["peter"],
+    bypassNames: ["helper"],
     now: () => clock,
     setTimer(callback, delay) {
       const id = ++timerId;
@@ -41,9 +41,9 @@ function message(id, body) {
 }
 
 test("recognizes explicit configured invocations without substring false positives", () => {
-  assert.deepEqual(burstBypassNames(" Peter, Arisa "), ["peter", "arisa"]);
-  assert.equal(explicitlyInvokesBypassName("peter, mirá esto", ["peter"]), true);
-  assert.equal(explicitlyInvokesBypassName("petersburgo", ["peter"]), false);
+  assert.deepEqual(burstBypassNames(" Helper, Arisa "), ["helper", "arisa"]);
+  assert.equal(explicitlyInvokesBypassName("helper, mirá esto", ["helper"]), true);
+  assert.equal(explicitlyInvokesBypassName("helpers", ["helper"]), false);
 });
 
 test("coalesces one same-chat burst and preserves chronological messages", async () => {
@@ -61,10 +61,10 @@ test("coalesces one same-chat burst and preserves chronological messages", async
   assert.equal(run.enqueued[0].metadata.enqueuedAt - run.enqueued[0].metadata.firstAt, 4_000);
 });
 
-test("an explicit Peter invocation flushes the complete pending burst immediately", async () => {
+test("an explicit configured invocation flushes the complete pending burst immediately", async () => {
   const run = harness();
   await run.coordinator.add(7, message("a", "te paso contexto"));
-  const result = await run.coordinator.add(7, message("b", "Peter, ¿qué opinás?"));
+  const result = await run.coordinator.add(7, message("b", "Helper, ¿qué opinás?"));
 
   assert.deepEqual(result, { bypassed: true, count: 2 });
   assert.equal(run.timers.size, 0);

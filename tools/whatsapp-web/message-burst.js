@@ -3,7 +3,7 @@ function boundedWindow(value, fallback = 4000) {
   return Number.isFinite(parsed) ? Math.max(0, Math.min(15_000, Math.round(parsed))) : fallback;
 }
 
-export function burstBypassNames(value = "peter") {
+export function burstBypassNames(value = "") {
   return String(value || "")
     .split(",")
     .map((item) => item.trim().toLowerCase())
@@ -11,7 +11,7 @@ export function burstBypassNames(value = "peter") {
     .slice(0, 10);
 }
 
-export function explicitlyInvokesBypassName(text, names = ["peter"]) {
+export function explicitlyInvokesBypassName(text, names = []) {
   const normalized = String(text || "").toLowerCase();
   return names.some((name) => {
     const escaped = name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
@@ -41,7 +41,7 @@ export function createMessageBurstCoordinator({
   writeState,
   enqueue,
   windowMs = 4000,
-  bypassNames = ["peter"],
+  bypassNames = [],
   now = () => Date.now(),
   setTimer = setTimeout,
   clearTimer = clearTimeout

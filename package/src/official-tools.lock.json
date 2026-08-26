@@ -545,19 +545,19 @@
       }
     },
     "whatsapp-web": {
-      "version": "1.3.3",
+      "version": "1.3.4",
       "files": {
         "apply-whatsapp-web-compat.js": "8216698bf6d435d516ef8d10e47ea1fa636e81794ec66cde7e52a029f1bd89a0",
         "browser-cache.js": "f71c20f9ab5f04d9d46c5e2551b348d47baba89a10a07173070298098a6d5551",
-        "config.js": "38ad71d1fd4d9c2dd457ee36b595f351cf334756cd8773738f1fe4452a186ba6",
-        "incoming-wake-gate.js": "3c7cf86a1446f1881975dce9bfca3e9ff103f583566d7c3721030e8e7b9277f0",
+        "config.js": "b0d4bed04dc87828ff61e1c9050a67ebf09a39cdc3ca52ce23be4c31476dda08",
+        "incoming-wake-gate.js": "13b773f47e4e92910ac8dcb9ebb31a0cc7f244791105f45cd61c387a7f2f03cc",
         "index.js": "461cecd656ba52245de6b76b009b6d335c2ded24eb7b1f163f7c7b7e50ab02f3",
-        "message-burst.js": "46b1d855ba96be6cb1a08c8b1bb2262528eb69451ba921cf6ab11942e5cc5903",
-        "package.json": "9ef71c6f7a76fdb77db88af9736947a337cc75062fd66c125cdf5455efb669ab",
+        "message-burst.js": "06b2348ea409dffff74c9ae5a6d882f3d279f4adc39206e019f73df424dc4b3b",
+        "package.json": "5e0ddf226fe8658fd78d2e1411f43ff816cc09726a827e0cdb2c151a2a8e8189",
         "test/browser-cache.test.mjs": "636b91c16c9d4a67f38d625293fe371eb3d2e91818d131cacdec15e5bb255a69",
-        "test/incoming-wake-gate.test.mjs": "ebf4852e77d54cc605daa72d68546949a03bc51ba949dcb21614767dea6d3f84",
-        "test/message-burst.test.mjs": "bd27e575f2a05d2e4b38aed6545359016d5c1ce2cbc073f8959561779953ba2c",
-        "tool.manifest.json": "7912989b783340b00c674ae7d36968b2506bf094139f44ca4e76850aec8c6c91"
+        "test/incoming-wake-gate.test.mjs": "f84f4f2e6c8d8ff2b7b63f9a266b15d7234bb017400826eac4f96a675cd7e25d",
+        "test/message-burst.test.mjs": "d994f46054c7b464d47d714e6e364df5ba96206ce0b7069fccbb555fd61ed14f",
+        "tool.manifest.json": "9e40152ece0ba3ae7a1ad2c462291a5336c2d72492b4293f8f574923d2a762d6"
       }
     },
     "whispermix-transcribe": {

@@ -15,15 +15,16 @@ test("normalizes exact resource ids and fail-safe gate modes", () => {
   assert.deepEqual([...wakeGateResourceIds("a@g.us, b@c.us, a@g.us")], ["a@g.us", "b@c.us"]);
   assert.equal(normalizeWakeGateMode("ENFORCE"), "enforce");
   assert.equal(normalizeWakeGateMode("unknown"), "off");
+  assert.deepEqual(classifyIncomingWake([item("named persona hello")]), { wake: false, reason: "passive-chatter" });
 });
 
 test("keeps passive chatter silent while waking explicit or actionable input", () => {
   assert.deepEqual(classifyIncomingWake([
     item("https://example.com/reel/123"),
     item("era enorme ese edificio")
-  ], { bypassNames: ["peter"] }), { wake: false, reason: "passive-chatter" });
+  ], { bypassNames: ["helper"] }), { wake: false, reason: "passive-chatter" });
 
-  assert.deepEqual(classifyIncomingWake([item("Peter, qué opinás")], { bypassNames: ["peter"] }), {
+  assert.deepEqual(classifyIncomingWake([item("Helper, qué opinás")], { bypassNames: ["helper"] }), {
     wake: true,
     reason: "explicit-invocation"
   });

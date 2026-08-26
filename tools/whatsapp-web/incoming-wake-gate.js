@@ -22,7 +22,7 @@ function invokesName(text, names) {
   });
 }
 
-export function classifyIncomingWake(items, { bypassNames = ["peter"] } = {}) {
+export function classifyIncomingWake(items, { bypassNames = [] } = {}) {
   for (const item of items || []) {
     const message = item.message || {};
     const text = String(item.transcript || message.body || "").trim();
