@@ -12,6 +12,7 @@ import { assessSearchQuality, recordSearchQuality } from "./search-quality.js";
 import { getFactSheetStatus, updateApprovedFacts } from "./product-facts.js";
 import { checkExhaustedSources, recordExhaustedSources } from "./source-exhaustion.js";
 import { classifyToolTimeout, toolOutcomeError } from "./operation-timeout.js";
+import { campaignOperationArgs, executeDiscoveryOperations } from "./discovery-operations.js";
 import { recordCampaignTelemetry } from "./telemetry.js";
 
 const toolName = "campaign-draft-runner";
@@ -32,6 +33,7 @@ Usage:
 Actions via args.action:
   run-batch   Reconcile Gmail Sent, skip unchanged empty batches, periodically expand creative discovery, verify contacts, and create Gmail drafts only. args: profile?, limit?, dryRun?, forceReview?, untilDrafted?, retryDelaySeconds?, maxAttempts?, maxRuntimeSeconds?
   reconcile-sent Reconcile manually sent Gmail messages into campaign state. args: profile?
+  discovery-ops Prevalidate and execute up to 50 idempotent discovery reads/checks/saves with an individual result per item. args: profile?, operations=[{id,action,...}]
   assess-search-quality Score the first search tranche and persist a five-cycle measurement window. args: profile?, searches=[{query,text}]
   sources-check Return which coverage/contact URLs remain exhausted within their 30-day window. args: profile?, urls=<JSON array>
   sources-record Record reviewed URLs as exhausted for up to 30 days. args: profile?, sources=[{url,reason}], ttlDays?
@@ -1069,6 +1071,43 @@ async function handleRun(request) {
   const config = await loadToolConfig(toolName, defaults, request.chatId);
   const profile = await loadProfile(request.chatId, args.profile || config.DEFAULT_PROFILE);
   const arisa = createArisaClient({ toolName, chatId: request.chatId });
+
+  if (args.action === "discovery-ops") {
+    const stateDir = getChatToolStateDir(request.chatId, toolName);
+    const campaignTool = profile.campaignTool || defaults.CAMPAIGN_TOOL;
+    const runCampaign = (operation) => runTool(arisa, campaignTool, campaignOperationArgs(operation));
+    const sourceCheck = async (operation) => {
+      const checked = await checkExhaustedSources(stateDir, profile.name, operation.urls || []);
+      return { active: checked.active, available: checked.available, revalidateAfterDays: 30 };
+    };
+    const sourceRecord = async (operation) => recordExhaustedSources(stateDir, profile.name, operation.sources || [], operation.ttlDays);
+    const handlers = {
+      "campaign-status": runCampaign,
+      "list-contacts": runCampaign,
+      "check-contact": runCampaign,
+      "verify-email": runCampaign,
+      "add-contact": runCampaign,
+      "sources-check": sourceCheck,
+      "sources-record": sourceRecord,
+      "discovery-summary": async () => {
+        const [campaign, contacts, sources] = await Promise.all([
+          runTool(arisa, campaignTool, { action: "status" }),
+          runTool(arisa, campaignTool, { action: "list-contacts", status: profile.contactStatus || "new", limit: "1000" }),
+          checkExhaustedSources(stateDir, profile.name, [])
+        ]);
+        return {
+          campaign,
+          candidateContacts: Array.isArray(contacts.contacts) ? contacts.contacts.length : 0,
+          exhaustedSources: Array.isArray(sources.records) ? sources.records.length : 0
+        };
+      }
+    };
+    return {
+      action: "discovery-ops",
+      profile: profile.name,
+      ...(await executeDiscoveryOperations(args.operations, handlers))
+    };
+  }
 
   if (args.action === "assess-search-quality") {
     const searches = typeof args.searches === "string" ? JSON.parse(args.searches) : args.searches;

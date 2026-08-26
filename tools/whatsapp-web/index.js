@@ -11,6 +11,7 @@ import QRCode from "qrcode";
 import pkg from "whatsapp-web.js";
 import defaults from "./config.js";
 import { cacheBudgetBytes, chromiumCacheArgs, chromiumCacheUsage, pruneChromiumCaches } from "./browser-cache.js";
+import { burstBypassNames, createMessageBurstCoordinator } from "./message-burst.js";
 
 const toolDir = path.dirname(fileURLToPath(import.meta.url));
 const arisaPackageDir = process.env.ARISA_PACKAGE_DIR || path.resolve(toolDir, "../../package");
@@ -41,6 +42,7 @@ const legacyRoot = getToolStateDir(toolName);
 const legacySessionDir = path.join(legacyRoot, "session");
 const legacyChatSessionsRoot = path.join(legacyRoot, "chats");
 const artifactStore = new ArtifactStore();
+const burstCoordinators = new Map();
 let config = defaults;
 
 async function cleanupLegacyGlobalDaemon() {
@@ -451,6 +453,32 @@ function watchFileForChat(chatId) {
   return path.join(getChatToolStateDir(chatId, toolName), "watch.json");
 }
 
+function pendingBurstsFileForChat(chatId) {
+  return path.join(getChatToolStateDir(chatId, toolName), "pending-message-bursts.json");
+}
+
+async function readPendingBursts(chatId) {
+  return readJson(pendingBurstsFileForChat(chatId), { bursts: {} });
+}
+
+async function writePendingBursts(chatId, state) {
+  await writeJson(pendingBurstsFileForChat(chatId), state);
+}
+
+function burstCoordinatorForChat(chatId) {
+  const normalizedChatId = normalizeChatId(chatId);
+  if (!burstCoordinators.has(normalizedChatId)) {
+    burstCoordinators.set(normalizedChatId, createMessageBurstCoordinator({
+      readState: readPendingBursts,
+      writeState: writePendingBursts,
+      enqueue: enqueueArisaTaskForIncomingBurst,
+      windowMs: config.INCOMING_BURST_WINDOW_MS,
+      bypassNames: burstBypassNames(config.INCOMING_BURST_BYPASS_NAMES)
+    }));
+  }
+  return burstCoordinators.get(normalizedChatId);
+}
+
 async function readWatchConfig(chatId) {
   return readJson(watchFileForChat(chatId), { enabled: false, chatId: Number(chatId) });
 }
@@ -485,9 +513,8 @@ function isTechnicalWhatsAppNotification(message) {
     && (technicalTypes.has(type) || type.includes("notification") || message.from === "status@broadcast");
 }
 
-function buildIncomingMessagePrompt(message, artifact, transcript = "") {
+function incomingMessageLines(message, artifact, transcript = "") {
   return [
-    "System event: Incoming WhatsApp message.",
     `from: ${message.fromName || message.from}`,
     message.fromPhone ? `fromPhone: ${message.fromPhone}` : null,
     message.chatName ? `chatName: ${message.chatName}` : null,
@@ -503,14 +530,41 @@ function buildIncomingMessagePrompt(message, artifact, transcript = "") {
     transcript ? `transcript: ${transcript}` : null,
     artifact ? `artifactId: ${artifact.id}` : null,
     artifact ? `mimeType: ${artifact.mimeType}` : null,
-    artifact ? `kind: ${artifact.kind}` : null,
+    artifact ? `kind: ${artifact.kind}` : null
+  ].filter(Boolean);
+}
+
+function buildIncomingMessagePrompt(message, artifact, transcript = "") {
+  return [
+    "System event: Incoming WhatsApp message.",
+    ...incomingMessageLines(message, artifact, transcript),
     "Treat this as a new WhatsApp reply that Arisa must reason about.",
     "If you need to reply by WhatsApp, use the whatsapp-web tool."
-  ].filter(Boolean).join("\n");
+  ].join("\n");
+}
+
+function buildIncomingBurstPrompt(items) {
+  if (items.length === 1) return buildIncomingMessagePrompt(items[0].message, items[0].artifact, items[0].transcript);
+  return [
+    "System event: Incoming WhatsApp message burst.",
+    `messageCount: ${items.length}`,
+    ...items.flatMap((item, index) => [
+      `--- message ${index + 1} ---`,
+      ...incomingMessageLines(item.message, item.artifact, item.transcript)
+    ]),
+    "Treat these as one chronological WhatsApp burst. Preserve every message and reason once over the combined context.",
+    "If you need to reply by WhatsApp, use the whatsapp-web tool."
+  ].join("\n");
+}
+
+function taskContainsIncomingMessage(task, numericChatId, messageId) {
+  if (task.source?.toolName !== toolName || task.source?.chatId !== numericChatId) return false;
+  const messageIds = Array.isArray(task.source?.messageIds) ? task.source.messageIds : [task.source?.messageId];
+  return messageIds.includes(messageId);
 }
 
 function hasIncomingMessageTask(tasks, numericChatId, messageId) {
-  return tasks.some((task) => task.source?.toolName === toolName && task.source?.chatId === numericChatId && task.source?.messageId === messageId);
+  return tasks.some((task) => taskContainsIncomingMessage(task, numericChatId, messageId));
 }
 
 function serializedWhatsAppId(value) {
@@ -559,7 +613,13 @@ async function captureReaction(ownerChatId, reaction) {
 }
 
 function incomingMessageTask(chatId, message, artifact = null, transcript = "") {
+  return incomingBurstTask(chatId, [{ message, artifact, transcript }]);
+}
+
+function incomingBurstTask(chatId, items) {
   const now = new Date().toISOString();
+  const messageIds = items.map((item) => item.message.id);
+  const artifactIds = items.map((item) => item.artifact?.id).filter(Boolean);
   return {
     id: crypto.randomUUID(),
     status: "pending",
@@ -567,24 +627,37 @@ function incomingMessageTask(chatId, message, artifact = null, transcript = "") 
     updatedAt: now,
     kind: "agent_task",
     runAt: now,
-    payload: { chatId, prompt: buildIncomingMessagePrompt(message, artifact, transcript), artifactId: artifact?.id || "" },
+    payload: { chatId, prompt: buildIncomingBurstPrompt(items), artifactId: artifactIds.length === 1 ? artifactIds[0] : "" },
     recurrence: null,
-    source: { type: "tool", toolName, chatId, resourceId: message.from, messageId: message.id }
+    source: {
+      type: "tool",
+      toolName,
+      chatId,
+      resourceId: items[0].message.from,
+      messageId: messageIds.at(-1),
+      messageIds
+    }
   };
 }
 
-async function enqueueArisaTaskForIncomingMessage(chatId, message, artifact = null, transcript = "") {
+async function enqueueArisaTaskForIncomingBurst(chatId, items) {
   const numericChatId = Number(chatId);
-  const task = incomingMessageTask(numericChatId, message, artifact, transcript);
+  const messageIds = items.map((item) => item.message.id);
+  const task = incomingBurstTask(numericChatId, items);
   for (let attempt = 0; attempt < 3; attempt += 1) {
     const tasks = await readTasks();
-    if (hasIncomingMessageTask(tasks, numericChatId, message.id)) return;
+    if (messageIds.every((id) => hasIncomingMessageTask(tasks, numericChatId, id))) return;
     tasks.push(task);
     await writeTasks(tasks);
     await sleep(100 + attempt * 150);
-    if (hasIncomingMessageTask(await readTasks(), numericChatId, message.id)) return;
+    const persisted = await readTasks();
+    if (messageIds.every((id) => hasIncomingMessageTask(persisted, numericChatId, id))) return;
   }
-  await writeChatStatus(chatId, { state: "ready", live: true, pid: process.pid, message: `WhatsApp is ready. Warning: failed to persist agent task for message ${message.id}.` });
+  await writeChatStatus(chatId, { state: "ready", live: true, pid: process.pid, message: `WhatsApp is ready. Warning: failed to persist agent task for ${messageIds.length} incoming message(s).` });
+}
+
+async function enqueueArisaTaskForIncomingMessage(chatId, message, artifact = null, transcript = "") {
+  return enqueueArisaTaskForIncomingBurst(chatId, [{ message, artifact, transcript }]);
 }
 
 async function enqueueWhatsAppReadyTask(chatId) {
@@ -876,7 +949,7 @@ async function captureIncomingMessage(ownerChatId, message) {
 
   const artifact = await storeIncomingMediaArtifact(message, ownerChatId, { senderId, fromName: inboxMessage.fromName, chatName: inboxMessage.chatName });
   const transcript = await transcribeIncomingAudio(ownerChatId, inboxMessage, artifact);
-  await enqueueArisaTaskForIncomingMessage(ownerChatId, inboxMessage, artifact, transcript);
+  await burstCoordinatorForChat(ownerChatId).add(ownerChatId, inboxMessage, artifact, transcript);
 }
 
 class SessionManager {
@@ -956,6 +1029,7 @@ class SessionManager {
       record.startupTimer = null;
       record.lastActivity = Date.now();
       await writeChatStatus(normalizedChatId, { state: "ready", live: true, pid: process.pid, message: "WhatsApp is ready." });
+      await burstCoordinatorForChat(normalizedChatId).recover(normalizedChatId);
       if (record.loginNotificationPending) {
         record.loginNotificationPending = false;
         await enqueueWhatsAppReadyTask(normalizedChatId);
