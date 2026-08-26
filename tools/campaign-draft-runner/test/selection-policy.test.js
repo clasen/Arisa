@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { mkdtemp, rm } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
-import { activeQueries, assessSearchQuality, batchSkipSettings, buildApprovedFactsBody, checkExhaustedSources, discoverContacts, getFactSheetStatus, isSelectable, normalizeCanonicalUrls, recordExhaustedSources, runTool, updateApprovedFacts, validateDraftContent } from "../index.js";
+import { activeQueries, assessSearchQuality, auditEligibility, batchSkipSettings, buildApprovedFactsBody, checkExhaustedSources, discoverContacts, draftingLanguage, getFactSheetStatus, isSelectable, normalizeCanonicalUrls, recordExhaustedSources, runTool, updateApprovedFacts, validateDraftContent } from "../index.js";
 import { classifyToolTimeout } from "../operation-timeout.js";
 
 const contact = {
@@ -156,6 +156,48 @@ test("agent eligibility bypasses positive keyword gates", () => {
 
 test("agent eligibility keeps negative exclusions", () => {
   assert.equal(isSelectable({ ...contact, angle: "paid advertising offer" }, profile(true)), false);
+});
+
+test("verified creator business mailboxes and language names remain selectable", () => {
+  const creator = {
+    email: "reviewerbusiness@gmail.com",
+    outlet: "Reviewer",
+    angle: "Narrative game reviews",
+    coverageSourceUrl: "https://youtube.com/watch?v=example",
+    contactSourceUrl: "https://youtube.com/@reviewer",
+    groundedOpening: "Your completed mystery playthrough was specific and useful.",
+    language: "English"
+  };
+  const creatorProfile = profile(true);
+  creatorProfile.selection.requireCoverageSourceProvenance = true;
+  creatorProfile.selection.requireContactSourceProvenance = true;
+  creatorProfile.selection.requireGroundedOpening = true;
+  creatorProfile.selection.allowedLanguages = ["en"];
+  assert.equal(isSelectable(creator, creatorProfile), true);
+});
+
+test("unsupported contact languages can explicitly fall back to approved English copy", () => {
+  const dutchContact = { ...contact, language: "nl" };
+  const fallbackProfile = profile(true);
+  fallbackProfile.selection.fallbackUnsupportedLanguageToDefault = true;
+  fallbackProfile.templates = { en: { subject: "Hello", body: "Body" } };
+  fallbackProfile.factSheet = { draftStatements: { en: [{ factKeys: [], text: "Approved" }] } };
+  assert.equal(isSelectable(dutchContact, fallbackProfile), true);
+  assert.equal(draftingLanguage(dutchContact, fallbackProfile), "en");
+});
+
+test("eligibility audit separates hard rejection from reviewable operational blocks", () => {
+  const reviewable = { ...contact, status: "new", language: "fr" };
+  const report = auditEligibility(
+    [{ ...reviewable, status: "contacted" }, reviewable],
+    [reviewable, { ...reviewable, email: "support@example.fr", outlet: "Other" }],
+    new Set(),
+    profile(true)
+  );
+  assert.equal(report.needsReview, 1);
+  assert.equal(report.ineligible, 1);
+  assert.match(report.contacts[0].reasons.join(" "), /outlet-already-contacted/);
+  assert.match(report.contacts[1].reasons.join(" "), /disallowed-email/);
 });
 
 test("agent eligibility disables automatic discovery", async () => {

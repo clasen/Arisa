@@ -15,10 +15,12 @@ import {
   isCandidateRelationshipResponse,
   messageHash,
   normalizeState,
+  normalizedPostUrl,
   parseCookies,
   publicReplyGuard,
   replyTarget,
   requestTargetsUser,
+  recentDiscoveryQuery,
   usernameFrom,
   withinDailyCap
 } from "../index.js";
@@ -42,6 +44,20 @@ test("legacy sends derive a durable recipient index", () => {
   const state = normalizeState({ sends: [{ username: "Example", sentAt: "2026-01-01T00:00:00Z" }] });
   assert.equal(state.recipientIndex.example.username, "Example");
   assert.match(duplicateGuard(state, "example", "new:key"), /recipient index/);
+});
+
+test("public prospect state survives normalization and post URLs are canonicalized", () => {
+  const prospect = { campaignId: "castle-bravo-public", postUrl: "https://x.com/example/status/123", status: "new" };
+  assert.deepEqual(normalizeState({ prospects: [prospect] }).prospects, [prospect]);
+  assert.equal(normalizedPostUrl("https://twitter.com/example/status/123?ref=test"), "https://x.com/example/status/123");
+  assert.equal(normalizedPostUrl("https://x.com/example"), "");
+});
+
+test("campaign discovery remembers recently used exact queries", () => {
+  const recent = { campaignId: "castle-bravo-public", normalizedQuery: "need a mystery game", searchedAt: new Date().toISOString() };
+  const state = normalizeState({ discoveryQueries: [recent] });
+  assert.equal(recentDiscoveryQuery(state, "castle-bravo-public", " Need  a mystery game "), recent);
+  assert.equal(recentDiscoveryQuery(state, "other", "need a mystery game"), null);
 });
 
 test("an unresolved reservation and uncertain delivery block retries", () => {

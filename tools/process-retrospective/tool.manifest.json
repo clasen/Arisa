@@ -1,7 +1,7 @@
 {
   "name": "process-retrospective",
-  "version": "1.1.0",
-  "description": "Run periodic evidence-based process retrospectives, include telemetry window comparisons when available, rotate analytical focus, remain silent when operations look healthy, and propose improvements without applying them automatically.",
+  "version": "1.2.0",
+  "description": "Run general evidence-based process retrospectives, compare telemetry windows when available, use rotating lenses without narrowing scope, and propose one or more improvements without applying them automatically.",
   "entry": "index.js",
   "input": [
     "text/plain",

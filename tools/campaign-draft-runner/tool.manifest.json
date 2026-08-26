@@ -1,28 +1,95 @@
 {
   "name": "campaign-draft-runner",
-  "version": "0.5.4",
-  "toolDependencies": { "pr-campaign": "^0.1.0", "gmail-workspace": "^0.1.0" },
-  "description": "Run configurable outreach draft batches from chat-scoped profiles. Expands bounded creative discovery after repeated unchanged cycles, avoids recently used queries and exhausted sources, validates approved facts and provenance, records bounded exploration yield by strategy, and creates Gmail drafts only; never sends mail.",
+  "version": "0.7.2",
+  "toolDependencies": {
+    "pr-campaign": "^0.1.0",
+    "gmail-workspace": "^0.1.0"
+  },
+  "description": "Build and score an evidence-backed outreach prospect pool, run a measured three-variant pitch experiment, generate approved-fact reviewer guides, audit eligibility, and create Gmail drafts only; never sends mail.",
   "entry": "index.js",
   "execution": {
     "resourceClass": "orchestrator",
     "weight": 1,
     "deduplicateConcurrent": true
   },
-  "input": ["text/plain", "application/json"],
-  "output": ["application/json", "text/plain"],
+  "input": [
+    "text/plain",
+    "application/json"
+  ],
+  "output": [
+    "application/json",
+    "text/plain"
+  ],
   "category": "communication",
-  "keywords": ["batch", "campaign", "contacts", "discovery", "drafts", "fingerprint", "gmail", "metrics", "no-change", "outreach", "pr", "quality", "facts", "research", "source-exhaustion", "personalization", "provenance", "preflight", "telemetry", "configurable"],
+  "keywords": [
+    "batch",
+    "campaign",
+    "contacts",
+    "candidate-pool",
+    "prospects",
+    "scoring",
+    "segments",
+    "pitch-experiment",
+    "reviewer-guide",
+    "press-kit",
+    "discovery",
+    "drafts",
+    "eligibility",
+    "gmail",
+    "metrics",
+    "outreach",
+    "pr",
+    "quality",
+    "facts",
+    "research",
+    "source-exhaustion",
+    "personalization",
+    "provenance",
+    "preflight",
+    "telemetry",
+    "configurable"
+  ],
   "configSchema": {
-    "DEFAULT_LIMIT": { "type": "number", "required": false, "prompt": "Default number of drafts per batch." },
-    "DEFAULT_PROFILE": { "type": "string", "required": false, "prompt": "Default profile name." },
-    "UNCHANGED_BATCH_SKIP_ENABLED": { "type": "boolean", "required": false, "prompt": "Skip expensive live batches when the campaign fingerprint is unchanged after a clean empty review." },
-    "UNCHANGED_BATCH_FORCE_MS": { "type": "number", "required": false, "prompt": "Maximum time between full campaign reviews even when the fingerprint is unchanged." },
-    "CREATIVE_REVIEW_AFTER_SKIPS": { "type": "number", "required": false, "prompt": "Optional unchanged-cycle count that triggers a bounded creative expansion; zero disables it unless a profile overrides it." },
-    "TELEMETRY_ENABLED": { "type": "boolean", "required": false, "prompt": "Record bounded batch telemetry when telemetry-ledger is available." },
-    "TELEMETRY_TOOL": { "type": "string", "required": false, "prompt": "Optional telemetry tool name. Leave empty to disable telemetry." }
+    "DEFAULT_LIMIT": {
+      "type": "number",
+      "required": false,
+      "prompt": "Default number of drafts per batch."
+    },
+    "DEFAULT_PROFILE": {
+      "type": "string",
+      "required": false,
+      "prompt": "Default profile name."
+    },
+    "UNCHANGED_BATCH_SKIP_ENABLED": {
+      "type": "boolean",
+      "required": false,
+      "prompt": "Skip expensive live batches when the campaign fingerprint is unchanged after a clean empty review."
+    },
+    "UNCHANGED_BATCH_FORCE_MS": {
+      "type": "number",
+      "required": false,
+      "prompt": "Maximum time between full campaign reviews even when the fingerprint is unchanged."
+    },
+    "CREATIVE_REVIEW_AFTER_SKIPS": {
+      "type": "number",
+      "required": false,
+      "prompt": "Optional unchanged-cycle count that triggers a bounded creative expansion; zero disables it unless a profile overrides it."
+    },
+    "TELEMETRY_ENABLED": {
+      "type": "boolean",
+      "required": false,
+      "prompt": "Record bounded batch telemetry when telemetry-ledger is available."
+    },
+    "TELEMETRY_TOOL": {
+      "type": "string",
+      "required": false,
+      "prompt": "Optional telemetry tool name. Leave empty to disable telemetry."
+    }
   },
   "skillHints": [
-    { "name": "stop-slop", "when": "drafting personalized outreach emails" }
+    {
+      "name": "stop-slop",
+      "when": "drafting personalized outreach emails"
+    }
   ]
 }

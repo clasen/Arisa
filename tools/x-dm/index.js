@@ -44,6 +44,10 @@ Actions:
   status   Check the X session and include campaign/send health. args: campaignId?
   check    Validate a target profile and whether its DM button is visible. args: username
   search   Search visible X posts or people without sending. args: query, mode=posts|people, maxResults?
+  save-prospect Persist one public recommendation-request candidate for later review. args: postUrl, username?, campaignId?, query?, segment?, snippet?, fitNote?
+  list-prospects List the accumulated public candidate pool without opening X. args: campaignId?, status?, limit?
+  update-prospect Mark one saved candidate as new, inspected, replied, or dismissed. args: postUrl, campaignId?, status, reason?
+  discovery-history List recent campaign search queries and their result counts without opening X. args: campaignId?, limit?
   verify-delivery Read a bound target conversation and reconcile one unresolved uncertain attempt. args: attemptId, username, message or messageHash
   resolve-uncertain Record human confirmation of one uncertain attempt without opening X. args: attemptId, username, message or messageHash, outcome=delivered|not-sent, confirm=true
   get-bio  Read the logged-in account bio without changing it.
@@ -210,6 +214,8 @@ function normalizeState(value) {
     replies: Array.isArray(source.replies) ? source.replies : [],
     follows: source.follows && typeof source.follows === "object" && !Array.isArray(source.follows) ? source.follows : {},
     attempts: Array.isArray(source.attempts) ? source.attempts : [],
+    prospects: Array.isArray(source.prospects) ? source.prospects : [],
+    discoveryQueries: Array.isArray(source.discoveryQueries) ? source.discoveryQueries : [],
     recipientIndex: { ...derivedRecipients, ...(source.recipientIndex || {}) }
   };
 }
@@ -1307,6 +1313,110 @@ async function statePaths(request) {
   return { stateDir, statePath: path.join(stateDir, "send-log.json") };
 }
 
+function normalizedPostUrl(value) {
+  const raw = String(value || "").trim();
+  const match = raw.match(/^https?:\/\/(?:www\.)?(?:x|twitter)\.com\/([A-Za-z0-9_]{1,15})\/status\/(\d+)/i);
+  return match ? `https://x.com/${match[1]}/status/${match[2]}` : "";
+}
+
+async function saveProspectAction(request, args) {
+  const postUrl = normalizedPostUrl(args.postUrl || request.text);
+  if (!postUrl) return toolError("save-prospect requires an exact public X status URL.");
+  const campaignId = campaignIdFrom(args);
+  const username = cleanHandle(args.username) || cleanHandle(new URL(postUrl).pathname.split("/")[1]);
+  const { stateDir, statePath } = await statePaths(request);
+  const release = await acquireStateLock(stateDir);
+  try {
+    const state = await readState(statePath);
+    const existing = state.prospects.find((item) => item.postUrl === postUrl && item.campaignId === campaignId);
+    if (existing) return toolOk({ text: `Prospect already saved for ${campaignId}: ${postUrl}`, json: { prospect: existing, duplicate: true } });
+    const prospect = {
+      campaignId,
+      postUrl,
+      username,
+      status: "new",
+      query: String(args.query || "").trim().slice(0, 500),
+      segment: String(args.segment || "").trim().slice(0, 120),
+      snippet: String(args.snippet || "").trim().slice(0, 1000),
+      fitNote: String(args.fitNote || "").trim().slice(0, 500),
+      discoveredAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString()
+    };
+    state.prospects = [...state.prospects, prospect].slice(-5000);
+    await writeState(statePath, state);
+    return toolOk({ text: `Saved one public X prospect for ${campaignId}.`, json: { prospect, duplicate: false } });
+  } finally { await release(); }
+}
+
+async function listProspectsAction(request, args) {
+  const { statePath } = await statePaths(request);
+  const state = await readState(statePath);
+  const campaignId = args.campaignId ? campaignIdFrom(args) : "";
+  const status = String(args.status || "").trim().toLowerCase();
+  const limit = Math.max(1, Math.min(intArg(args.limit, 100), 500));
+  const prospects = state.prospects
+    .filter((item) => !campaignId || item.campaignId === campaignId)
+    .filter((item) => !status || item.status === status)
+    .slice(-limit)
+    .reverse();
+  return toolOk({ text: `Found ${prospects.length} saved public X prospect(s).`, json: { campaignId: campaignId || null, status: status || null, prospects } });
+}
+
+async function discoveryHistoryAction(request, args) {
+  const { statePath } = await statePaths(request);
+  const state = await readState(statePath);
+  const campaignId = campaignIdFrom(args);
+  const limit = Math.max(1, Math.min(intArg(args.limit, 50), 500));
+  const queries = state.discoveryQueries.filter((item) => item.campaignId === campaignId).slice(-limit).reverse();
+  return toolOk({ text: `Found ${queries.length} recorded X discovery quer${queries.length === 1 ? "y" : "ies"} for ${campaignId}.`, json: { campaignId, queries } });
+}
+
+function recentDiscoveryQuery(state, campaignId, query, days = 14) {
+  const normalized = String(query || "").trim().toLowerCase().replace(/\s+/g, " ");
+  const cutoff = Date.now() - days * 86_400_000;
+  return state.discoveryQueries.find((item) => item.campaignId === campaignId && item.normalizedQuery === normalized && Date.parse(item.searchedAt) >= cutoff) || null;
+}
+
+async function recordDiscoveryQuery(request, args, search) {
+  const campaignId = campaignIdFrom(args);
+  const { stateDir, statePath } = await statePaths(request);
+  const release = await acquireStateLock(stateDir);
+  try {
+    const state = await readState(statePath);
+    const record = {
+      campaignId,
+      query: search.query,
+      normalizedQuery: String(search.query || "").trim().toLowerCase().replace(/\s+/g, " "),
+      mode: search.mode,
+      results: search.items.length,
+      plausibleCandidates: Math.max(0, intArg(args.plausibleCandidates, 0)),
+      searchedAt: new Date().toISOString()
+    };
+    state.discoveryQueries = [...state.discoveryQueries, record].slice(-5000);
+    await writeState(statePath, state);
+    return record;
+  } finally { await release(); }
+}
+
+async function updateProspectAction(request, args) {
+  const postUrl = normalizedPostUrl(args.postUrl || request.text);
+  const campaignId = campaignIdFrom(args);
+  const status = String(args.status || "").trim().toLowerCase();
+  if (!postUrl || !["new", "inspected", "replied", "dismissed"].includes(status)) return toolError("update-prospect requires postUrl and status=new|inspected|replied|dismissed.");
+  const { stateDir, statePath } = await statePaths(request);
+  const release = await acquireStateLock(stateDir);
+  try {
+    const state = await readState(statePath);
+    const prospect = state.prospects.find((item) => item.postUrl === postUrl && item.campaignId === campaignId);
+    if (!prospect) return toolError("No matching saved public X prospect was found.");
+    prospect.status = status;
+    prospect.reason = String(args.reason || "").trim().slice(0, 500);
+    prospect.updatedAt = new Date().toISOString();
+    await writeState(statePath, state);
+    return toolOk({ text: `Updated the saved X prospect to ${status}.`, json: { prospect } });
+  } finally { await release(); }
+}
+
 async function resolveUncertainAction(request, args) {
   if (!exactBoolean(args.confirm, true)) return toolError("resolve-uncertain requires exact confirm=true after human delivery confirmation.");
   const attemptId = String(args.attemptId || "").trim();
@@ -1860,8 +1970,12 @@ Pass confirm=true to apply exactly this bio.`,
       return toolOk({ text: `X session is logged in${account.handle ? ` as @${account.handle}` : ""}. ${auditState(state, campaignId).sent} DM(s) recorded.`, json: { account, campaign: auditState(state, campaignId) } });
     }
     if (action === "search") {
+      const campaignId = args.campaignId ? campaignIdFrom(args) : "";
+      const repeated = campaignId ? recentDiscoveryQuery(state, campaignId, args.query, intArg(args.queryCooldownDays, 14)) : null;
+      if (repeated && !exactBoolean(args.allowRepeat, true)) return toolError(`This exact query was already used for ${campaignId} on ${repeated.searchedAt}. Choose a different intent or wording.`);
       const search = await searchX(page, args);
-      return toolOk({ text: `Found ${search.items.length} X ${search.mode} result(s) for ${search.query}.`, json: { account, ...search } });
+      const discoveryRecord = campaignId ? await recordDiscoveryQuery(request, args, search) : null;
+      return toolOk({ text: `Found ${search.items.length} X ${search.mode} result(s) for ${search.query}.`, json: { account, ...search, discoveryRecord } });
     }
     if (action === "verify-delivery") {
       const { stateDir } = await statePaths(request);
@@ -2003,6 +2117,10 @@ async function execute(requestFile) {
   const action = String(args.action || "status").toLowerCase();
   if (action === "audit") return auditAction(request, args);
   if (action === "resolve-uncertain") return resolveUncertainAction(request, args);
+  if (action === "save-prospect") return saveProspectAction(request, args);
+  if (action === "list-prospects") return listProspectsAction(request, args);
+  if (action === "update-prospect") return updateProspectAction(request, args);
+  if (action === "discovery-history") return discoveryHistoryAction(request, args);
   if (!["status", "check", "search", "verify-delivery", "get-bio", "get-posts", "get-thread", "update-bio", "create-post", "reply-post", "relationship-status", "follow", "unfollow", "send"].includes(action)) return toolError(`Unknown action: ${action}`);
   if (["relationship-status", "follow", "unfollow", "send"].includes(action)) {
     const username = usernameFrom(args.username || request.text || request.artifact?.text || "", args);
@@ -2077,11 +2195,13 @@ export {
   isCandidateRelationshipResponse,
   messageHash,
   normalizeState,
+  normalizedPostUrl,
   parseCookies,
   profileIdentityFromHeader,
   publicReplyGuard,
   replyTarget,
   requestTargetsUser,
+  recentDiscoveryQuery,
   usernameFrom,
   withinDailyCap
 };

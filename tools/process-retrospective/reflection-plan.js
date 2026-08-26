@@ -54,21 +54,27 @@ export function buildReflectionPrompt({ passNumber, passesPerFocus, reviewWindow
   const proposalLimit = normalizePositiveInteger(maxProposals, 3, { max: 5 });
   const cyclePass = ((pass - 1) % focusWidth) + 1;
 
-  return `Periodic process retrospective, pass ${pass}. Focus: ${focus.label} (${cyclePass}/${focusWidth} before rotating focus).
+  return `Periodic process retrospective, pass ${pass}. Primary lens: ${focus.label} (${cyclePass}/${focusWidth} before rotating focus). The primary lens guides attention but never limits the scope of the review.
 
-Review only the last ${windowHours} hours of relevant chat activity, scheduled-task outcomes, tool results, user corrections, and persisted operational state that is safe and necessary to inspect. Do not expose credentials or private payloads. Do not modify code, configuration, schedules, drafts, messages, or external systems during this turn.
+Review the last ${windowHours} hours of relevant chat activity, scheduled-task outcomes, tool results, user corrections, and persisted operational state that is safe and necessary to inspect. Analyze the overall process at a general, reusable level rather than optimizing for one campaign, tool, or isolated task. Individual incidents are evidence, not the scope of the retrospective. Do not expose credentials or private payloads. Do not modify code, configuration, schedules, drafts, messages, or external systems during this turn.
 
-Before drawing conclusions, reconstruct the whole review window rather than anchoring on the latest exchange. Build a private evidence inventory covering every explicit user correction, rejection, rewrite, or clarification; significant scheduled-task outcomes; meaningful tool successes or failures; and relevant state changes. Inspect activity from the beginning, middle, and end of the window when each exists. Do not show the inventory or private payloads to the user.
+Before drawing conclusions, reconstruct the whole review window rather than anchoring on the latest exchange. Build a private evidence inventory covering every explicit user correction, rejection, rewrite, or clarification; significant scheduled-task outcomes; meaningful tool successes or failures; repeated zero-result or no-change outcomes; and relevant state changes. Inspect activity from the beginning, middle, and end of the window when each exists. Do not show the inventory or private payloads to the user.
 
 Query telemetry-ledger with action report using ${windowHours} hours for both the current and immediately preceding baseline window. Group by only relevant bounded dimensions. Treat insufficient-data as no conclusion, use regressions and improvements as evidence, and describe dimension breakdowns only as correlated hypotheses—not proven causes. If telemetry-ledger is unavailable or has no useful samples, continue with the other evidence and say nothing about missing telemetry.
 
-Questions:
+Always evaluate all of these dimensions:
+- reliability and safety: repeated failures, retries, uncertain outcomes, duplicate risks, and safeguards
+- efficiency and repetition: repeated searches, calls, no-change cycles, cost, and avoidable work
+- output quality and user corrections: rejected or clarified behavior, language, evidence, personalization, and reporting
+- creative alternatives and assumptions: habitual approaches, limiting assumptions, and genuinely different experiments
+
+Give extra attention to the current primary lens:
 - ${focus.questions[0]}
 - ${focus.questions[1]}
 
-Use concrete evidence from distinct activities or time points when available. Do not make every proposal a variation of one incident. Separate temporary incidents from recurring process problems. Check whether an earlier safeguard or proposal already addresses the issue. Do not propose change for its own sake.
+Use concrete evidence from distinct activities or time points when available. Separate temporary incidents from recurring process problems and distinguish technical success from useful outcomes. Check whether an earlier safeguard or proposal already addresses the issue. Abstract each proposal into a reusable process improvement. Do not propose change for its own sake.
 
-If the process looks healthy or the full window does not support ${proposalLimit} useful improvements, remain silent. Otherwise send a concise retrospective with exactly ${proposalLimit} small, testable improvements, ordered by expected impact. Each must include evidence, expected benefit, risk, and a way to measure the result. Ask before any implementation.`;
+If the process looks healthy and there is no useful evidence-backed improvement, remain silent. Otherwise send a concise retrospective with between 1 and ${proposalLimit} small, testable improvements, ordered by expected impact. Send the retrospective even when only one useful improvement is supported. Each improvement must include evidence, expected benefit, risk, and a way to measure the result. Ask before any implementation.`;
 }
 
 export function listFocuses() {

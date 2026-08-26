@@ -1,7 +1,7 @@
 {
   "name": "x-dm",
-  "version": "0.2.1",
-  "description": "Safely manage X/Twitter outreach, follows, the logged-in account bio, and explicitly confirmed posts with account pinning and post-change verification.",
+  "version": "0.4.0",
+  "description": "Safely search X/Twitter with persistent campaign query history, accumulate a chat-scoped pool of public prospects, and manage explicitly confirmed outreach, follows, profile updates, and posts.",
   "entry": "index.js",
   "toolDependencies": {
     "browser-session-bridge": "^0.1.0"
@@ -97,6 +97,10 @@
     "message",
     "outreach",
     "campaign",
+    "prospects",
+    "candidate-pool",
+    "query-history",
+    "discovery",
     "playwright",
     "cookies",
     "social",

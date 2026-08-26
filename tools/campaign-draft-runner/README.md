@@ -5,7 +5,12 @@ Runs recurring, profile-driven outreach research and creates Gmail drafts. It ne
 The tool can:
 
 - reconcile manually sent Gmail messages with `pr-campaign` before each live cycle;
+- maintain an evidence-backed chat-scoped pool of prospects before requiring an email;
+- score prospects on thematic fit, recent activity, small-indie coverage, audience fit, public contact, and response likelihood;
+- assign English drafts across three deterministic pitch variants and record owner-reviewed outcomes;
+- generate a UTF-8 reviewer guide from approved campaign facts, with an explicit missing-media checklist;
 - select unused contacts from `pr-campaign`;
+- audit every candidate with explicit eligible, needs-review, or ineligible decisions, blocking reasons, normalized languages, and matched score signals;
 - discover public editorial contacts through `web-browser`, following same-site contact and staff links when result pages do not expose an address;
 - reject previously used recipients and outlets;
 - skip expensive unchanged empty batches while forcing bounded periodic reviews or bounded creative expansions;
@@ -114,9 +119,7 @@ Minimal profile structure:
 }
 ```
 
-Use `action: "status"` to reconcile Gmail Sent, then inspect campaign and Gmail draft counts. Use `action: "discovery-ops"` to combine up to 50 discovery operations in one tool call. Supported operations cover a compact discovery summary, campaign status, contact listing, duplicate checks, email verification, contact saves, exhausted-source checks, and exhausted-source records. The runner validates every item before execution and returns one result per operation. Invalid items do not block valid ones. Batched contact saves reject `updateExisting`; duplicate emails remain no-ops through `pr-campaign`, and source records overwrite the same canonical URL safely.
-
-The first reconciliation scans the configured sent-mail query. Later runs use the newest Gmail timestamp and persist message IDs in chat-scoped state. This records drafts sent manually as contacted without reopening them or changing terminal statuses such as bounced, opted-out, wrong-fit, and successful publication.
+Use `action: "status"` to reconcile Gmail Sent, then inspect campaign and Gmail draft counts. The first reconciliation scans the configured sent-mail query. Later runs use the newest Gmail timestamp and persist message IDs in chat-scoped state. This records drafts sent manually as contacted without reopening them or changing terminal statuses such as bounced, opted-out, wrong-fit, and successful publication.
 
 When `TELEMETRY_ENABLED` is true and `telemetry-ledger` is installed, each run records business-operation latency, confirmed non-dry-run draft counts, and whether an unchanged batch was skipped. Full reviews also record drafts per review and candidates found under one of four bounded strategies: `existing-pool`, `standard-discovery`, `creative-discovery`, or `unchanged-skip`. The last strategy is excluded from full-review yield so cheap skips cannot improve it artificially. Outcomes are bounded to `drafted`, `candidate-only`, or `zero-result`. Compare at least two complete windows before reallocating the fixed exploration budget; do not reduce run frequency from sparse samples. Telemetry is optional and fail-open: recording failures never change the campaign result. It never records addresses, queries, copy, or source content.
 
@@ -157,3 +160,7 @@ For reviewer-first workflows, store separate `coverageSourceUrl` and `contactSou
 Profiles can enforce these fields with `selection.requireCoverageSourceProvenance`, `selection.requireContactSourceProvenance`, and `selection.requireGroundedOpening`. A `draftValidation` block can independently require both sources, coverage-title metadata, and the grounded opening before Gmail draft creation. The title may be paraphrased in the draft; the grounded opening must still be rendered. `draftValidation.canonicalUrls` normalizes campaign links before the preflight. Failed preflights are reported as skipped contacts and do not create a draft.
 
 Nested read-only calls that time out return `timed_out` with a retry-safe resolution. Mutating calls return `outcome_uncertain` and require a status check instead of an automatic retry.
+
+## Batched discovery operations
+
+Use `action: "discovery-ops"` to combine up to 50 discovery operations in one tool call. The tool supports discovery summaries, campaign status, contact listing, duplicate checks, email verification, contact saves, exhausted-source checks, and exhausted-source records. It validates every item before execution and returns one result per operation. Invalid items do not block valid ones. Batched contact saves reject `updateExisting`; duplicate emails remain no-ops and source records overwrite the same canonical URL safely.

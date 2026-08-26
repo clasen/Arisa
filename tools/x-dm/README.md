@@ -10,6 +10,10 @@ It does not bypass login, CAPTCHAs, recipient restrictions, rate limits, or othe
 - `status`: validate the logged-in X account and include campaign health.
 - `check`: open one profile and report whether the DM button is visible; `verifyComposer=true` confirms that the conversation composer actually opens without typing.
 - `search`: read a bounded set of visible X post or people results without sending.
+- `save-prospect`: persist one exact public recommendation-request post with its discovery query, segment, excerpt, and fit note; duplicate post/campaign pairs are a no-op.
+- `list-prospects`: inspect the accumulated chat-scoped candidate pool without opening X.
+- `update-prospect`: mark a saved candidate as `new`, `inspected`, `replied`, or `dismissed` with a bounded reason.
+- `discovery-history`: inspect recent campaign queries without opening X. Searches with `campaignId` are recorded and exact repeats are blocked for 14 days by default.
 - `verify-delivery`: read back an approved message, or match its stored hash, in a bound target conversation to reconcile an uncertain send without retrying it.
 - `resolve-uncertain`: record explicit human confirmation using the exact message or its stored hash; it never opens X or retries the send.
 - `resolve-uncertain`: record explicit human confirmation of one matching uncertain attempt without reopening or resending the conversation.

@@ -14,6 +14,9 @@ import { checkExhaustedSources, recordExhaustedSources } from "./source-exhausti
 import { classifyToolTimeout, toolOutcomeError } from "./operation-timeout.js";
 import { campaignOperationArgs, executeDiscoveryOperations } from "./discovery-operations.js";
 import { recordCampaignTelemetry } from "./telemetry.js";
+import { listProspects, saveProspect, summarizeProspects, updateProspect } from "./prospect-pool.js";
+import { pitchExperimentSummary, recordPitchAssignment, recordPitchOutcome, selectPitchVariant } from "./pitch-experiment.js";
+import { writeReviewerGuide } from "./reviewer-kit.js";
 
 const toolName = "campaign-draft-runner";
 const toolDir = path.dirname(fileURLToPath(import.meta.url));
@@ -40,6 +43,15 @@ Actions via args.action:
   sources-status Return the compact active exhausted-source ledger. args: profile?
   facts-status Return approved product facts and unresolved questions. args: profile?
   facts-update Store owner-approved product facts. args: profile?, facts=<JSON object>, approvedBy
+  eligibility-audit Explain every candidate's eligibility, review state, score signals, and blocking reasons without mutating campaign state. args: profile?
+  prospects-save Add one evidence-backed candidate to the discovery pool without requiring an email. args: profile?, prospect={sourceUrl,name,outlet,segment,platform,evidence,contactUrl?,publicEmail?,scoreSignals}
+  prospects-list List scored candidates from the pool. args: profile?, status?, segment?, minimumScore?, limit?
+  prospects-update Update score, contact details, evidence, or status discovered|qualified|dismissed|promoted. args: profile?, prospect={sourceUrl,...}
+  prospects-summary Show progress toward the profile's prospect target by status and segment. args: profile?
+  experiment-summary Show assignment and outcome counts for the three pitch variants. args: profile?
+  experiment-outcome Record an owner-reviewed outcome. args: profile?, email, outcome=drafted|approved|sent|response|coverage|no-response|rejected, note?
+  reviewer-guide Generate a reviewer guide from approved facts as a UTF-8 Markdown document. args: profile?
+  assets-status Show verified campaign asset links and media still requiring owner-supplied source video. args: profile?
   status      Reconcile Gmail Sent and return campaign status and Gmail draft count. args: profile?
 
 Profiles live under the chat-scoped state directory:
@@ -91,47 +103,89 @@ function matchesAny(text, patterns = []) {
   return patterns.some((pattern) => new RegExp(pattern, "i").test(text));
 }
 
-function scoreContact(contact, profile) {
+function contactScoreSignals(contact, profile) {
   const text = contactText(contact);
-  let total = 0;
-  for (const [pattern, value] of Object.entries(profile.selection?.scoreKeywords || {})) {
-    if (new RegExp(pattern, "i").test(text)) total += Number(value || 0);
-  }
-  return total;
+  return Object.entries(profile.selection?.scoreKeywords || {}).flatMap(([pattern, value]) => {
+    if (!new RegExp(pattern, "i").test(text)) return [];
+    return [{ pattern, value: Number(value || 0) }];
+  });
 }
 
-function isSelectable(contact, profile) {
+function scoreContact(contact, profile) {
+  return contactScoreSignals(contact, profile).reduce((total, signal) => total + signal.value, 0);
+}
+
+function storedContactEmailIsUsable(value) {
+  const email = normalizedEmail(value);
+  if (!/^[a-z0-9](?:[a-z0-9.!#$%&'*+/=?^_`{|}~-]*[a-z0-9])?@[a-z0-9](?:[a-z0-9-]*[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]*[a-z0-9])?)+$/i.test(email)) return false;
+  if (email.includes("..") || /[＊*•…]/.test(email)) return false;
+  const local = email.split("@")[0] || "";
+  return !/^(?:support|privacy|legal|billing|sales|advertising|careers?|jobs?|noreply|no-reply)(?:[._+-]|$)/i.test(local);
+}
+
+function eligibilityReasons(contact, profile) {
   const text = contactText(contact);
   const include = profile.selection?.includeKeywords || [];
   const exclude = profile.selection?.excludeKeywords || [];
-  const allowedLanguages = profile.selection?.allowedLanguages || [];
+  const allowedLanguages = (profile.selection?.allowedLanguages || []).map((language) => normalizeLanguage(language));
   const requiredKeywordGroups = profile.selection?.requiredKeywordGroups || [];
   const agentDecidesEligibility = profile.selection?.agentDecidesEligibility === true;
-  if (!isPlausibleEmail(contact.email)) return false;
-  if (profile.selection?.requireCoverageSourceProvenance === true && !coverageSourceUrl(contact)) return false;
-  if (profile.selection?.requireContactSourceProvenance === true && !contactSourceUrl(contact)) return false;
-  if (profile.selection?.requireGroundedOpening === true && !clean(contact.groundedOpening)) return false;
+  const reasons = [];
+  if (!storedContactEmailIsUsable(contact.email)) reasons.push("invalid-or-disallowed-email");
+  if (profile.selection?.requireCoverageSourceProvenance === true && !coverageSourceUrl(contact)) reasons.push("missing-coverage-source");
+  if (profile.selection?.requireContactSourceProvenance === true && !contactSourceUrl(contact)) reasons.push("missing-contact-source");
+  if (profile.selection?.requireGroundedOpening === true && !clean(contact.groundedOpening)) reasons.push("missing-grounded-opening");
   const approvedCrossDomainEmails = (profile.selection?.approvedCrossDomainEmails || []).map(normalizedEmail);
   if (
     profile.selection?.requireSourceProvenance !== false
     && !approvedCrossDomainEmails.includes(normalizedEmail(contact.email))
     && !contactEmailFitsSource(contact)
-  ) return false;
-  if (!agentDecidesEligibility && include.length && !matchesAny(text, include)) return false;
-  if (!agentDecidesEligibility && requiredKeywordGroups.some((patterns) => !matchesAny(text, patterns))) return false;
-  if (exclude.length && matchesAny(text, exclude)) return false;
-  if (allowedLanguages.length && !allowedLanguages.includes(detectLanguage(contact, profile))) return false;
-  return true;
+  ) reasons.push("email-source-mismatch");
+  if (!agentDecidesEligibility && include.length && !matchesAny(text, include)) reasons.push("missing-include-keyword");
+  if (!agentDecidesEligibility) {
+    requiredKeywordGroups.forEach((patterns, index) => {
+      if (!matchesAny(text, patterns)) reasons.push(`missing-keyword-group-${index + 1}`);
+    });
+  }
+  const matchedExclusions = exclude.filter((pattern) => new RegExp(pattern, "i").test(text));
+  if (matchedExclusions.length) reasons.push(`excluded:${matchedExclusions.join("|")}`);
+  const language = detectLanguage(contact, profile);
+  if (allowedLanguages.length && !allowedLanguages.includes(language) && profile.selection?.fallbackUnsupportedLanguageToDefault !== true) reasons.push(`language-not-allowed:${language}`);
+  return reasons;
+}
+
+function isSelectable(contact, profile) {
+  return eligibilityReasons(contact, profile).length === 0;
+}
+
+function normalizeLanguage(value) {
+  const language = clean(value).toLowerCase();
+  const aliases = {
+    english: "en", spanish: "es", portuguese: "pt", french: "fr", german: "de",
+    italian: "it", polish: "pl", turkish: "tr", dutch: "nl", korean: "ko",
+    japanese: "ja", chinese: "zh", arabic: "ar", hindi: "hi", indonesian: "id",
+    thai: "th", vietnamese: "vi"
+  };
+  return aliases[language] || language;
 }
 
 function detectLanguage(contact, profile) {
-  const explicit = clean(contact.language || contact.preferredLanguage).toLowerCase();
+  const explicit = normalizeLanguage(contact.language || contact.preferredLanguage);
   if (explicit) return explicit;
   const text = contactText(contact);
   for (const rule of profile.languageDetection || []) {
-    if (new RegExp(rule.match, "i").test(text)) return rule.language;
+    if (new RegExp(rule.match, "i").test(text)) return normalizeLanguage(rule.language);
   }
-  return profile.defaultLanguage || "en";
+  return normalizeLanguage(profile.defaultLanguage || "en");
+}
+
+function draftingLanguage(contact, profile) {
+  const detected = detectLanguage(contact, profile);
+  const defaultLanguage = normalizeLanguage(profile.defaultLanguage || "en");
+  const hasTemplate = Boolean(profile.templates?.[detected]);
+  const hasApprovedStatements = !profile.factSheet || Boolean(profile.factSheet.draftStatements?.[detected]);
+  if (hasTemplate && hasApprovedStatements) return detected;
+  return profile.selection?.fallbackUnsupportedLanguageToDefault === true ? defaultLanguage : detected;
 }
 
 function referenceOutlet(value) {
@@ -250,7 +304,7 @@ function isPlausibleEmail(value) {
 
 function contactEmailFitsSource(contact) {
   const email = normalizedEmail(contact.email);
-  if (!isPlausibleEmail(email)) return false;
+  if (!storedContactEmailIsUsable(email)) return false;
   const domain = email.split("@")[1] || "";
   const host = sourceHost(contactSourceUrl(contact) || coverageSourceUrl(contact));
   if (!domain || !host) return false;
@@ -773,8 +827,8 @@ function validateDraftContent({ contact, language, body, profile }) {
   if (rules.requireGroundedOpening === true && !groundedOpening) failures.push("missing grounded opening");
   if (groundedOpening && !normalizedBody.includes(groundedOpening)) failures.push("grounded opening was not rendered");
   if (rules.requireCoverageTitle === true && !coverageTitle) failures.push("missing coverage title metadata");
-  const explicitLanguage = clean(contact.language || contact.preferredLanguage).toLowerCase();
-  if (explicitLanguage && explicitLanguage !== language) failures.push(`language mismatch: expected ${explicitLanguage}, got ${language}`);
+  const explicitLanguage = normalizeLanguage(contact.language || contact.preferredLanguage);
+  if (explicitLanguage && explicitLanguage !== language && profile.selection?.fallbackUnsupportedLanguageToDefault !== true) failures.push(`language mismatch: expected ${explicitLanguage}, got ${language}`);
   if (failures.length) throw new Error(`Draft preflight failed: ${failures.join("; ")}`);
   return true;
 }
@@ -853,6 +907,44 @@ async function listAllContacts(arisa, profile) {
   const campaignTool = profile.campaignTool || defaults.CAMPAIGN_TOOL;
   const data = await runTool(arisa, campaignTool, { action: "list-contacts", limit: "5000" });
   return data.contacts || [];
+}
+
+function auditEligibility(allContacts, candidateContacts, draftRecipients, profile) {
+  const usedOutlets = new Set(allContacts
+    .filter((contact) => contact.status && contact.status !== (profile.contactStatus || "new"))
+    .map(outletKey).filter(Boolean));
+  const contacts = candidateContacts.map((contact) => {
+    const reasons = eligibilityReasons(contact, profile);
+    if (draftRecipients.has(normalizedEmail(contact.email))) reasons.push("already-in-gmail-drafts");
+    if (contact.emailCheck && contact.emailCheck.deliverable !== true) reasons.push(`email-check:${contact.emailCheck.status || "not-deliverable"}`);
+    if (profile.selection?.skipOutletsAlreadyUsed !== false && usedOutlets.has(outletKey(contact))) reasons.push("outlet-already-contacted");
+    const hardReasons = reasons.filter((reason) => !reason.startsWith("outlet-already-contacted") && !reason.startsWith("email-check:"));
+    const decision = reasons.length === 0 ? "eligible" : hardReasons.length === 0 ? "needs-review" : "ineligible";
+    const signals = contactScoreSignals(contact, profile);
+    return {
+      email: contact.email,
+      outlet: contact.outlet,
+      status: contact.status,
+      decision,
+      reasons,
+      score: signals.reduce((total, signal) => total + signal.value, 0),
+      scoreSignals: signals,
+      language: detectLanguage(contact, profile),
+      draftLanguage: draftingLanguage(contact, profile),
+      provenance: {
+        coverage: Boolean(coverageSourceUrl(contact)),
+        contact: Boolean(contactSourceUrl(contact)),
+        groundedOpening: Boolean(clean(contact.groundedOpening))
+      }
+    };
+  });
+  return {
+    candidates: contacts.length,
+    eligible: contacts.filter((contact) => contact.decision === "eligible").length,
+    needsReview: contacts.filter((contact) => contact.decision === "needs-review").length,
+    ineligible: contacts.filter((contact) => contact.decision === "ineligible").length,
+    contacts
+  };
 }
 
 async function gmailDraftRecipients(arisa, profile) {
@@ -1042,12 +1134,14 @@ function batchSkipSettings(config, profile, args) {
 }
 
 async function createDraft(arisa, profile, contact, approvedFacts = null) {
-  const language = detectLanguage(contact, profile);
+  const language = draftingLanguage(contact, profile);
   const template = profile.templates?.[language] || profile.templates?.[profile.defaultLanguage || "en"];
   if (!template) throw new Error(`No template found for language ${language}`);
   const campaignTool = profile.campaignTool || defaults.CAMPAIGN_TOOL;
   const research = exactCoverageResearch(contact) || await researchContact(arisa, profile, contact);
-  const subject = decodeHtmlEntities(render(template.subject, contact, profile));
+  const pitchVariant = selectPitchVariant(contact, profile);
+  const variantSubject = pitchVariant?.subjects?.[language];
+  const subject = decodeHtmlEntities(render(variantSubject || template.subject, contact, profile));
   const renderedBody = decodeHtmlEntities(render(template.body, contact, profile));
   const opening = clean(contact.groundedOpening) || personalizedOpening(language, research, profile);
   const groundedBody = profile.factSheet
@@ -1062,7 +1156,8 @@ async function createDraft(arisa, profile, contact, approvedFacts = null) {
     language,
     personalized: Boolean(opening),
     referenceUrl: research?.url || null,
-    draftId: data.draft?.id || null
+    draftId: data.draft?.id || null,
+    pitchVariant: pitchVariant?.id || null
   };
 }
 
@@ -1106,6 +1201,30 @@ async function handleRun(request) {
       action: "discovery-ops",
       profile: profile.name,
       ...(await executeDiscoveryOperations(args.operations, handlers))
+    };
+  }
+
+  if (args.action === "eligibility-audit") {
+    const [allContacts, candidateContacts, draftRecipients] = await Promise.all([
+      listAllContacts(arisa, profile),
+      listContacts(arisa, profile),
+      gmailDraftRecipients(arisa, profile)
+    ]);
+    return { action: "eligibility-audit", profile: profile.name, ...auditEligibility(allContacts, candidateContacts, draftRecipients, profile) };
+  }
+
+  if (["prospects-save", "prospects-list", "prospects-update", "prospects-summary"].includes(args.action)) {
+    const stateDir = getChatToolStateDir(request.chatId, toolName);
+    const prospectInput = typeof args.prospect === "string" ? JSON.parse(args.prospect) : (args.prospect || args);
+    const poolSettings = profile.prospectPool || {};
+    if (args.action === "prospects-save") return { action: args.action, profile: profile.name, ...(await saveProspect(stateDir, profile.name, prospectInput)) };
+    if (args.action === "prospects-update") return { action: args.action, profile: profile.name, ...(await updateProspect(stateDir, profile.name, prospectInput)) };
+    const prospects = await listProspects(stateDir, profile.name, args.action === "prospects-list" ? args : { limit: 500 });
+    if (args.action === "prospects-list") return { action: args.action, profile: profile.name, prospects };
+    return {
+      action: args.action,
+      profile: profile.name,
+      ...summarizeProspects(prospects, Number(poolSettings.target || 40), Number(poolSettings.qualificationScore || 65))
     };
   }
 
@@ -1160,6 +1279,52 @@ async function handleRun(request) {
       action: "facts-update",
       ...(await updateApprovedFacts(getChatToolStateDir(request.chatId, toolName), profile, facts, args.approvedBy))
     };
+  }
+
+  if (args.action === "experiment-summary") {
+    return {
+      action: args.action,
+      profile: profile.name,
+      ...(await pitchExperimentSummary(getChatToolStateDir(request.chatId, toolName), profile.name, profile.pitchExperiment?.variants || []))
+    };
+  }
+
+  if (args.action === "experiment-outcome") {
+    return {
+      action: args.action,
+      profile: profile.name,
+      record: await recordPitchOutcome(getChatToolStateDir(request.chatId, toolName), profile.name, args)
+    };
+  }
+
+  if (args.action === "assets-status") {
+    const assets = profile.campaignAssets || {};
+    return {
+      action: args.action,
+      profile: profile.name,
+      assets,
+      available: {
+        presskitZip: Boolean(assets.presskitZip),
+        keyArt: Boolean(assets.keyArt),
+        screenshots: Array.isArray(assets.screenshots) ? assets.screenshots.length : 0,
+        appStore: Boolean(assets.appStore),
+        googlePlay: Boolean(assets.googlePlay),
+        verticalTrailer: Boolean(assets.verticalTrailer),
+        spoilerLightClips: Array.isArray(assets.spoilerLightClips) ? assets.spoilerLightClips.length : 0,
+        gameplayGif: Boolean(assets.gameplayGif)
+      },
+      missingSourceMedia: [
+        ...(!assets.verticalTrailer ? ["vertical-trailer"] : []),
+        ...(!Array.isArray(assets.spoilerLightClips) || assets.spoilerLightClips.length < 3 ? ["three-spoiler-light-clips"] : []),
+        ...(!assets.gameplayGif ? ["gameplay-gif"] : [])
+      ]
+    };
+  }
+
+  if (args.action === "reviewer-guide") {
+    const factStatus = await getFactSheetStatus(getChatToolStateDir(request.chatId, toolName), profile);
+    if (!factStatus.complete) throw new Error("Reviewer guide requires a complete approved fact sheet");
+    return writeReviewerGuide(getChatToolTmpDir(request.chatId, toolName), profile, factStatus.approvedFacts);
   }
 
   if ((args.action || "run-batch") === "status") {
@@ -1277,7 +1442,16 @@ async function handleRun(request) {
             skipped.push({ email: contact.email, reason: "already present in Gmail drafts" });
             continue;
           }
-          drafted.push(await createDraft(arisa, profile, contact, factStatus?.approvedFacts));
+          const draft = await createDraft(arisa, profile, contact, factStatus?.approvedFacts);
+          drafted.push(draft);
+          if (draft.pitchVariant && draft.draftId) {
+            await recordPitchAssignment(stateDir, profile.name, {
+              email: draft.email,
+              outlet: draft.outlet,
+              variant: draft.pitchVariant,
+              draftId: draft.draftId
+            });
+          }
         }
       } catch (error) {
         skipped.push({ email: contact.email, reason: error?.message || String(error) });
@@ -1294,7 +1468,7 @@ async function handleRun(request) {
       poolTarget,
       discovery,
       creativeDiscovery,
-      selected: selected.map((contact) => ({ email: contact.email, outlet: contact.outlet, score: scoreContact(contact, profile), language: detectLanguage(contact, profile) })),
+      selected: selected.map((contact) => ({ email: contact.email, outlet: contact.outlet, score: scoreContact(contact, profile), language: draftingLanguage(contact, profile) })),
       verified: verified.length,
       drafted: drafted.length,
       sent: 0,
@@ -1381,7 +1555,10 @@ async function main() {
       enabled: truthy(telemetryConfig.TELEMETRY_ENABLED),
       telemetryTool: telemetryConfig.TELEMETRY_TOOL
     });
-    console.log(JSON.stringify({ ok: true, output: { text: JSON.stringify(output, null, 2), json: output, mimeType: "application/json" } }));
+    const renderedOutput = output.filePath
+      ? output
+      : { text: JSON.stringify(output, null, 2), json: output, mimeType: "application/json" };
+    console.log(JSON.stringify({ ok: true, output: renderedOutput }));
   } catch (error) {
     if (request?.chatId) {
       const telemetryConfig = await loadToolConfig(toolName, defaults, request.chatId).catch(() => defaults);
@@ -1402,4 +1579,4 @@ async function main() {
 const isDirectRun = process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url);
 if (isDirectRun) main();
 
-export { activeQueries, assessSearchQuality, batchSkipSettings, buildApprovedFactsBody, checkExhaustedSources, discoverContacts, getFactSheetStatus, isSelectable, normalizeCanonicalUrls, recordExhaustedSources, runTool, updateApprovedFacts, validateDraftContent };
+export { activeQueries, assessSearchQuality, auditEligibility, batchSkipSettings, buildApprovedFactsBody, checkExhaustedSources, discoverContacts, draftingLanguage, eligibilityReasons, getFactSheetStatus, isSelectable, normalizeCanonicalUrls, recordExhaustedSources, runTool, selectPitchVariant, updateApprovedFacts, validateDraftContent };

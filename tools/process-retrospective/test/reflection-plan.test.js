@@ -18,13 +18,16 @@ test("prompt is bounded and review-only", () => {
     reviewWindowHours: 24,
     maxProposals: 3
   });
-  assert.match(prompt, /creative alternatives and assumptions/);
+  assert.match(prompt, /Primary lens: creative alternatives and assumptions/);
+  assert.match(prompt, /never limits the scope of the review/);
+  assert.match(prompt, /general, reusable level rather than optimizing for one campaign/);
   assert.match(prompt, /reconstruct the whole review window rather than anchoring on the latest exchange/);
   assert.match(prompt, /beginning, middle, and end of the window/);
+  assert.match(prompt, /repeated zero-result or no-change outcomes/);
   assert.match(prompt, /Query telemetry-ledger with action report using 24 hours/);
   assert.match(prompt, /correlated hypotheses—not proven causes/);
-  assert.match(prompt, /exactly 3 small, testable improvements/);
-  assert.match(prompt, /Do not make every proposal a variation of one incident/);
+  assert.match(prompt, /between 1 and 3 small, testable improvements/);
+  assert.match(prompt, /even when only one useful improvement is supported/);
   assert.match(prompt, /Do not modify code, configuration, schedules, drafts, messages, or external systems/);
   assert.match(prompt, /remain silent/);
 });
