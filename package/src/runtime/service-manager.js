@@ -2,7 +2,7 @@ import { open, readFile, rm, writeFile } from "node:fs/promises";
 import { spawn } from "node:child_process";
 import process from "node:process";
 import { fileURLToPath } from "node:url";
-import { ensureArisaHome, serviceLogFile, servicePidFile } from "./paths.js";
+import { ensureArisaHome, serviceLogFile, servicePidFile } from "../platform/paths.js";
 
 export const serviceEntryFile = fileURLToPath(new URL("../index.js", import.meta.url));
 

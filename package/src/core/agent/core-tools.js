@@ -1,6 +1,6 @@
 import os from "node:os";
 import path from "node:path";
-import { arisaHomeDir } from "../../runtime/paths.js";
+import { arisaHomeDir } from "../../platform/paths.js";
 
 const defaultShellTimeoutMs = 60_000;
 

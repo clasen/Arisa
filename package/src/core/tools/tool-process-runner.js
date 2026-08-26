@@ -1,7 +1,7 @@
 import { existsSync } from "node:fs";
 import path from "node:path";
 import { spawn } from "node:child_process";
-import { arisaIpcSocketFile, arisaPackageDir } from "../../runtime/paths.js";
+import { arisaIpcSocketFile, arisaPackageDir } from "../../platform/paths.js";
 import { daemonConfigDefaults } from "../config/config-defaults.js";
 import { createToolOutputParser } from "./tool-process-output.js";
 

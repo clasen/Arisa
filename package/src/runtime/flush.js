@@ -1,5 +1,5 @@
 import { rm } from "node:fs/promises";
-import { arisaHomeDir } from "./paths.js";
+import { arisaHomeDir } from "../platform/paths.js";
 
 export async function flushArisaHome() {
   await rm(arisaHomeDir, { recursive: true, force: true });

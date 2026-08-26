@@ -1,7 +1,7 @@
 import { mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 import crypto from "node:crypto";
-import { tasksFile } from "../../runtime/paths.js";
+import { tasksFile } from "../../platform/paths.js";
 
 const DEFAULT_RETRY = Object.freeze({
   maxAttempts: 3,

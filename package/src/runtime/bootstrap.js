@@ -10,7 +10,7 @@ import { applyConfigDefaults, telegramConfigDefaults } from "../core/config/conf
 import { prepareConfigForSave } from "../core/config/config-store.js";
 import { buildDeviceCodeTelegramMessage } from "../transport/telegram/device-code-message.js";
 import { buildPagedInlineKeyboard } from "../transport/telegram/paged-inline-keyboard.js";
-import { configFile, ensureArisaHome } from "./paths.js";
+import { configFile, ensureArisaHome } from "../platform/paths.js";
 
 const ARISA_BANNER = [
   " █████╗ ██████╗ ██╗███████╗ █████╗ ",

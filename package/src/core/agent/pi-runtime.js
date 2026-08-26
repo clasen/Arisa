@@ -1,5 +1,5 @@
 import { AuthStorage, ModelRegistry } from "@earendil-works/pi-coding-agent";
-import { piAuthFile } from "../../runtime/paths.js";
+import { piAuthFile } from "../../platform/paths.js";
 
 function compareText(a, b) {
   return a.localeCompare(b, undefined, { sensitivity: "base", numeric: true });

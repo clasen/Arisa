@@ -4,7 +4,7 @@ import path from "node:path";
 import { applyConfigDefaults } from "../core/config/config-defaults.js";
 import { installLockedOfficialTool } from "../core/tools/official-tool-installer.js";
 import { createHeadlessApp } from "./create-headless-app.js";
-import { arisaPackageDir } from "./paths.js";
+import { arisaPackageDir } from "../platform/paths.js";
 import { readPackageVersion, readRecentLogLines, followLogFile } from "./log-viewer.js";
 import { parseSlaveBootstrapUrl } from "./slave-bootstrap-url.js";
 import { withSecureRequestFile } from "./secure-request-file.js";

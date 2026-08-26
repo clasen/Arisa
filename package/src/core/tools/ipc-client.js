@@ -1,6 +1,6 @@
 import crypto from "node:crypto";
 import net from "node:net";
-import { arisaIpcSocketFile } from "../../runtime/paths.js";
+import { arisaIpcSocketFile } from "../../platform/paths.js";
 
 const DEFAULT_TIMEOUT_MS = 10_000;
 

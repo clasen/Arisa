@@ -5,7 +5,7 @@ import process from "node:process";
 import { promisify } from "node:util";
 import { stopManagedDaemon, unregisterManagedDaemon } from "../core/tools/daemon-processes.js";
 import { getServiceStatus, serviceEntryFile } from "./service-manager.js";
-import { arisaHomeDir } from "./paths.js";
+import { arisaHomeDir } from "../platform/paths.js";
 import { renderTextReport, reportRow, wrapReportText } from "./report-format.js";
 
 const execFileAsync = promisify(execFile);

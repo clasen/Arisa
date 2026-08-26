@@ -1,6 +1,6 @@
 import { open, readFile, stat } from "node:fs/promises";
 import { cliLogConfig } from "../core/config/config-defaults.js";
-import { ensureArisaHome, serviceLogFile } from "./paths.js";
+import { ensureArisaHome, serviceLogFile } from "../platform/paths.js";
 
 const readChunkSize = 64 * 1024;
 

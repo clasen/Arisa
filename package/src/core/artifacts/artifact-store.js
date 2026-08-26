@@ -1,7 +1,7 @@
 import { copyFile, mkdir, open, readFile, rename, unlink, writeFile } from "node:fs/promises";
 import path from "node:path";
 import crypto from "node:crypto";
-import { getChatArtifactsDir, getChatArtifactsIndexFile } from "../../runtime/paths.js";
+import { getChatArtifactsDir, getChatArtifactsIndexFile } from "../../platform/paths.js";
 
 const UTF8_BOM = Buffer.from([0xef, 0xbb, 0xbf]);
 const indexOperations = new Map();

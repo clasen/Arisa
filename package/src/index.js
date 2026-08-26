@@ -9,7 +9,7 @@ import { createServiceSupervisor } from "./runtime/service-supervisor.js";
 import { recordUnexpectedWorkerExit } from "./runtime/worker-recovery-report.js";
 import { flushArisaHome } from "./runtime/flush.js";
 import { readPackageVersion, showServiceLogs } from "./runtime/log-viewer.js";
-import { arisaPackageDir } from "./runtime/paths.js";
+import { arisaPackageDir } from "./platform/paths.js";
 import { runSlaveCli } from "./runtime/slave-cli.js";
 import { unregisterSlaveServiceProcess } from "./runtime/slave-service.js";
 

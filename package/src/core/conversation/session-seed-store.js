@@ -3,7 +3,7 @@ import path from "node:path";
 import {
   getChatLegacyConversationHistoryFile,
   getChatSessionSeedFile
-} from "../../runtime/paths.js";
+} from "../../platform/paths.js";
 
 function parseRecords(contents) {
   return String(contents || "")

@@ -1,6 +1,6 @@
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
-import { configFile } from "../../runtime/paths.js";
+import { configFile } from "../../platform/paths.js";
 import { applyConfigDefaults } from "./config-defaults.js";
 
 export function prepareConfigForSave(config) {

@@ -9,7 +9,7 @@ import {
   getDaemonInstanceId,
   normalizeDaemonScope,
   toolStateDir
-} from "../../runtime/paths.js";
+} from "../../platform/paths.js";
 import { loadDaemonPolicy } from "./daemon-policy.js";
 
 export const DAEMON_STATES = Object.freeze([

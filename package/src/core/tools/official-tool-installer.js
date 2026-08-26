@@ -12,7 +12,7 @@ import {
   rm
 } from "node:fs/promises";
 import path from "node:path";
-import { getToolDir } from "../../runtime/paths.js";
+import { getToolDir } from "../../platform/paths.js";
 import { normalizeToolDependencies, resolveToolDependencyPlan, satisfiesToolVersion } from "./tool-dependencies.js";
 
 const bundledLockFile = new URL("../../official-tools.lock.json", import.meta.url);

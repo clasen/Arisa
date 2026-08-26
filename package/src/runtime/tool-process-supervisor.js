@@ -8,7 +8,7 @@ import {
   writeDaemonStatus
 } from "../core/tools/daemon-processes.js";
 import { loadDaemonPolicy } from "../core/tools/daemon-policy.js";
-import { ensureArisaHome } from "./paths.js";
+import { ensureArisaHome } from "../platform/paths.js";
 
 async function fileExists(file) {
   try {

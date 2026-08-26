@@ -1,5 +1,5 @@
 import { AuthStorage } from "@earendil-works/pi-coding-agent";
-import { piAuthFile } from "../../runtime/paths.js";
+import { piAuthFile } from "../../platform/paths.js";
 
 export function createPiOAuthLogin({ provider, onAuth, onDeviceCode, onPrompt, onProgress, onSelect } = {}) {
   const authStorage = AuthStorage.create(piAuthFile);

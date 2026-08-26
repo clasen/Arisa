@@ -1,6 +1,6 @@
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
-import { getToolConfigPath, getChatToolConfigPath } from "../../runtime/paths.js";
+import { getToolConfigPath, getChatToolConfigPath } from "../../platform/paths.js";
 
 export function parseConfigModule(source) {
   const normalized = source.replace(/^export\s+default/, "return");

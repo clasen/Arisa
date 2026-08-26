@@ -3,7 +3,7 @@ import { execFile } from "node:child_process";
 import { mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { promisify } from "node:util";
-import { arisaPackageDir, restartReceiptFile } from "./paths.js";
+import { arisaPackageDir, restartReceiptFile } from "../platform/paths.js";
 
 const execFileAsync = promisify(execFile);
 

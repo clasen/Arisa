@@ -17,8 +17,15 @@ import {
   getToolStateDir,
   stateDir
 } from "../src/runtime/paths.js";
+import * as publicPaths from "../src/runtime/paths.js";
+import * as platformPaths from "../src/platform/paths.js";
 
 const execFileAsync = promisify(execFile);
+
+test("runtime paths remains an exact compatibility facade for platform paths", () => {
+  assert.deepEqual(Object.keys(publicPaths).sort(), Object.keys(platformPaths).sort());
+  for (const name of Object.keys(platformPaths)) assert.equal(publicPaths[name], platformPaths[name]);
+});
 
 test("keeps chat artifact paths scoped below the chat directory", () => {
   const artifactsDir = getChatArtifactsDir("chat-1");

@@ -1,6 +1,6 @@
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { arisaHomeDir, arisaPackageDir, chatsDir, stateDir, toolStateDir, toolsDir } from "../../runtime/paths.js";
+import { arisaHomeDir, arisaPackageDir, chatsDir, stateDir, toolStateDir, toolsDir } from "../../platform/paths.js";
 
 export const arisaInstallDir = fileURLToPath(new URL("../../..", import.meta.url));
 export const arisaAgentsFile = path.join(arisaPackageDir, "AGENTS.md");

@@ -1,6 +1,6 @@
 import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import path from "node:path";
-import { getChatToolUsageFile } from "../../runtime/paths.js";
+import { getChatToolUsageFile } from "../../platform/paths.js";
 
 function emptyUsage() {
   return { version: 1, tools: {} };

@@ -5,7 +5,7 @@ import {
   getChatToolTmpDir,
   getToolStateDir,
   getToolTmpDir
-} from "../../runtime/paths.js";
+} from "../../platform/paths.js";
 import { ToolResourceNoteStore } from "../tools/tool-resource-note-store.js";
 import { installBundledOfficialTool } from "../tools/official-tool-installer.js";
 import { searchOfficialToolCatalog } from "../tools/official-tool-catalog.js";

@@ -2,7 +2,7 @@ import crypto from "node:crypto";
 import { mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { readRecentLogLines } from "./log-viewer.js";
-import { arisaPackageDir, serviceLogFile, stateDir, tasksFile } from "./paths.js";
+import { arisaPackageDir, serviceLogFile, stateDir, tasksFile } from "../platform/paths.js";
 
 export const workerRecoveryReportFile = path.join(stateDir, "worker-recovery-report.json");
 

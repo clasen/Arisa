@@ -8,7 +8,7 @@ import { buildPiToolPolicy } from "./core-tools.js";
 import { createSystemShellTool } from "./system-shell-tool.js";
 import { clampModelThinkingLevel } from "./pi-runtime.js";
 import { clampModelSpeed, createModelSpeedController } from "./model-speed.js";
-import { arisaHomeDir } from "../../runtime/paths.js";
+import { arisaHomeDir } from "../../platform/paths.js";
 import { AgentSessionLifecycle } from "./agent-session-lifecycle.js";
 import { createPiCapabilityTools } from "./pi-capability-tools.js";
 import { ToolResourceNoteStore } from "../tools/tool-resource-note-store.js";

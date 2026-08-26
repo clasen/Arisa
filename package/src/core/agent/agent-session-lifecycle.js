@@ -1,6 +1,6 @@
 import { readFileSync } from "node:fs";
 import { SessionManager } from "@earendil-works/pi-coding-agent";
-import { getChatPiSessionsDir, sessionStartOperationalNotesFile } from "../../runtime/paths.js";
+import { getChatPiSessionsDir, sessionStartOperationalNotesFile } from "../../platform/paths.js";
 import { arisaInstallDir } from "./runtime-context.js";
 
 const operationalNoteMaxChars = 220;

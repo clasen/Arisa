@@ -1,7 +1,7 @@
 import net from "node:net";
 import path from "node:path";
 import { chmod, mkdir, unlink } from "node:fs/promises";
-import { arisaIpcSocketFile } from "../paths.js";
+import { arisaIpcSocketFile } from "../../platform/paths.js";
 
 function writeResponse(socket, response) {
   socket.write(`${JSON.stringify(response)}\n`);

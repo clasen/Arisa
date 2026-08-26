@@ -1,6 +1,6 @@
 import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import path from "node:path";
-import { getChatTelegramWorkspacesFile } from "../../runtime/paths.js";
+import { getChatTelegramWorkspacesFile } from "../../platform/paths.js";
 
 const recentProposalWindowMs = 30 * 24 * 60 * 60 * 1000;
 

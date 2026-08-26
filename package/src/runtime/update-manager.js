@@ -2,7 +2,7 @@ import { spawn } from "node:child_process";
 import { access, cp, mkdir, readFile, rm } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
-import { arisaPackageDir, getToolDir } from "./paths.js";
+import { arisaPackageDir, getToolDir } from "../platform/paths.js";
 import { renderTextReport, reportRow, wrapReportText } from "./report-format.js";
 
 const defaultRepoUrl = "https://github.com/clasen/Arisa.git";
