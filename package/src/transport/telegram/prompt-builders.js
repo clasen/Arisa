@@ -4,12 +4,15 @@ import { clampModelSpeed } from "../../core/agent/model-speed.js";
 
 const slowPromptNoticeMs = 300_000;
 
-function quotedMessageSummary(message) {
+function quotedMessageSummary(incomingMessage) {
+  const message = incomingMessage?.reply_to_message;
   if (!message) return [];
 
   const fromName = message.from?.username
     ? `@${message.from.username}`
     : [message.from?.first_name, message.from?.last_name].filter(Boolean).join(" ") || "unknown";
+  const quotedSelection = incomingMessage.quote?.text;
+  const quotedTopicName = message.forum_topic_created?.name;
 
   const parts = [
     `quotedMessageId: ${message.message_id}`,
@@ -18,6 +21,7 @@ function quotedMessageSummary(message) {
 
   if (message.text) parts.push(`quotedText: ${message.text}`);
   if (message.caption) parts.push(`quotedCaption: ${message.caption}`);
+  if (quotedSelection) parts.push(`quotedSelection: ${quotedSelection}`);
   if (message.voice) parts.push(`quotedKind: voice`);
   if (message.audio) parts.push(`quotedKind: audio`);
   if (message.photo?.length) parts.push(`quotedKind: image`);
@@ -25,8 +29,9 @@ function quotedMessageSummary(message) {
   if (message.video) parts.push(`quotedKind: video`);
   if (message.sticker) parts.push(`quotedKind: sticker`);
   if (message.location) parts.push(`quotedKind: location`, `quotedLocation: ${formatLocationText(message)}`);
+  if (message.forum_topic_created) parts.push(`quotedKind: forum_topic_created`, `quotedTopicName: ${quotedTopicName || "unknown"}`);
 
-  if (!message.text && !message.caption) {
+  if (!message.text && !message.caption && !quotedSelection && !quotedTopicName) {
     parts.push(`Important: this message replies to a Telegram message with no textual body available in the update. Use the quoted kind and metadata as context.`);
   }
 
@@ -126,7 +131,7 @@ export function buildPrompt({ ctx, artifact, transcript, toolResult }) {
   const messageText = getIncomingMessageText(ctx.message);
   if (messageText) parts.push(`text: ${messageText}`);
   parts.push(...forwardedMessageSummary(ctx.message));
-  parts.push(...quotedMessageSummary(ctx.message?.reply_to_message));
+  parts.push(...quotedMessageSummary(ctx.message));
   if (shouldIncludeArtifactReference({ artifact, messageText })) {
     if (artifact?.path) parts.push(`artifactPath: ${artifact.path}`);
     if (artifact?.id) parts.push(`artifactId: ${artifact.id}`);

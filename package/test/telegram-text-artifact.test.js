@@ -110,6 +110,36 @@ test("surfaces Telegram forwarding provenance in the prompt", () => {
   assert.match(prompt, /forwardedAt: 2026-/);
 });
 
+test("surfaces Telegram selected quote text when the replied message has no body", () => {
+  const ctx = createTextContext("update that too");
+  ctx.message.reply_to_message = {
+    message_id: 824,
+    from: { username: "ArisaWaybot" }
+  };
+  ctx.message.quote = { text: "master-slave 0.1.9" };
+
+  const prompt = buildPrompt({ ctx });
+
+  assert.match(prompt, /quotedMessageId: 824/);
+  assert.match(prompt, /quotedSelection: master-slave 0\.1\.9/);
+  assert.doesNotMatch(prompt, /no textual body available/);
+});
+
+test("surfaces quoted Telegram forum topic metadata", () => {
+  const ctx = createTextContext("continue here");
+  ctx.message.reply_to_message = {
+    message_id: 824,
+    from: { username: "ArisaWaybot" },
+    forum_topic_created: { name: "storybot" }
+  };
+
+  const prompt = buildPrompt({ ctx });
+
+  assert.match(prompt, /quotedKind: forum_topic_created/);
+  assert.match(prompt, /quotedTopicName: storybot/);
+  assert.doesNotMatch(prompt, /no textual body available/);
+});
+
 test("formats Telegram reaction changes as lightweight feedback", () => {
   const prompt = buildReactionPrompt({
     reaction: {
