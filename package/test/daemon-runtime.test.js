@@ -43,8 +43,16 @@ const {
 } = await import("../src/core/tools/daemon-processes.js");
 const {
   createDaemonRuntime,
-  isDaemonReady
+  isDaemonReady,
+  submitDaemonControl,
+  DAEMON_EVENT_TYPES,
+  DAEMON_PROTOCOL_VERSION
 } = await import("../src/core/tools/daemon-runtime.js");
+const { submitDaemonControl: directSubmitDaemonControl } = await import("../src/core/tools/daemon-client.js");
+const {
+  DAEMON_EVENT_TYPES: directDaemonEventTypes,
+  DAEMON_PROTOCOL_VERSION: directDaemonProtocolVersion
+} = await import("../src/core/tools/daemon-protocol.js");
 const { createToolProcessSupervisor, formatDaemonOutcome } = await import("../src/runtime/tool-process-supervisor.js");
 const { superviseDaemon } = await import("../src/core/tools/daemon-health.js");
 const { ToolRegistry } = await import("../src/core/tools/tool-registry.js");
@@ -76,6 +84,12 @@ test.after(async () => {
     await stopManagedDaemon({ toolName: "fake-daemon", scope }).catch(() => {});
   }
   await rm(homeDir, { recursive: true, force: true });
+});
+
+test("preserves daemon client and protocol exports through the runtime facade", () => {
+  assert.equal(submitDaemonControl, directSubmitDaemonControl);
+  assert.equal(DAEMON_EVENT_TYPES, directDaemonEventTypes);
+  assert.equal(DAEMON_PROTOCOL_VERSION, directDaemonProtocolVersion);
 });
 
 test("runs health through the queue before accepting jobs", async () => {

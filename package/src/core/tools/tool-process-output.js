@@ -1,4 +1,4 @@
-import { DAEMON_EVENT_TYPES, DAEMON_PROTOCOL_VERSION } from "./daemon-runtime.js";
+import { DAEMON_EVENT_TYPES, DAEMON_PROTOCOL_VERSION } from "./daemon-protocol.js";
 
 export function createToolOutputParser(name, {
   onEvent,
