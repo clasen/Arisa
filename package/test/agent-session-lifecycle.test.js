@@ -46,8 +46,17 @@ test("session lifecycle diagnostics remain available after extraction", async ()
     harness: "pi",
     sessions: 1,
     closingSessions: 0,
+    cache: {
+      maxSessions: 3,
+      maxPersistedBytes: 48 * 1024 * 1024,
+      sessions: 1,
+      persistedBytes: 0
+    },
     contexts: [{
       chatId: "123",
+      activeUsers: 0,
+      persistedBytes: 0,
+      lastAccessedAt: null,
       messages: 2,
       estimatedTokens: 42,
       tokens: 42,
@@ -55,4 +64,60 @@ test("session lifecycle diagnostics remain available after extraction", async ()
       percent: 4.2
     }]
   });
+});
+
+test("evicts the least recently used inactive session without touching active work", async () => {
+  const closed = [];
+  const lifecycle = new AgentSessionLifecycle({
+    logger: null,
+    summarizeContext: () => ({}),
+    cachePolicy: { maxSessions: 2, maxPersistedBytes: 1_000 }
+  });
+  lifecycle.sessions.set("active-old", {
+    activeUsers: 1,
+    lastAccessedAt: 1,
+    persistedBytes: 100,
+    session: { async close() { closed.push("active-old"); } }
+  });
+  lifecycle.sessions.set("inactive-old", {
+    activeUsers: 0,
+    lastAccessedAt: 2,
+    persistedBytes: 100,
+    session: { async close() { closed.push("inactive-old"); } }
+  });
+  lifecycle.sessions.set("current", {
+    activeUsers: 1,
+    lastAccessedAt: 3,
+    persistedBytes: 100,
+    session: { async close() { closed.push("current"); } }
+  });
+
+  const evicted = await lifecycle.enforceCachePolicy({ protectedSessionKeys: ["current"] });
+
+  assert.deepEqual(evicted, [{ sessionKey: "inactive-old", persistedBytes: 100 }]);
+  assert.deepEqual(closed, ["inactive-old"]);
+  assert.deepEqual([...lifecycle.sessions.keys()], ["active-old", "current"]);
+});
+
+test("uses persisted session weight as a second cache bound", async () => {
+  const lifecycle = new AgentSessionLifecycle({
+    logger: null,
+    summarizeContext: () => ({}),
+    cachePolicy: { maxSessions: 10, maxPersistedBytes: 100 }
+  });
+  lifecycle.sessions.set("large-old", {
+    lastAccessedAt: 1,
+    persistedBytes: 80,
+    session: { close() {} }
+  });
+  lifecycle.sessions.set("recent", {
+    lastAccessedAt: 2,
+    persistedBytes: 40,
+    session: { close() {} }
+  });
+
+  await lifecycle.enforceCachePolicy({ protectedSessionKeys: ["recent"] });
+
+  assert.deepEqual([...lifecycle.sessions.keys()], ["recent"]);
+  assert.deepEqual(lifecycle.cacheUsage(), { sessions: 1, persistedBytes: 40 });
 });

@@ -154,7 +154,8 @@ export class AgentManager {
     this.resourceNotes = new ToolResourceNoteStore();
     this.sessionLifecycle = new AgentSessionLifecycle({
       logger,
-      summarizeContext: summarizeRetainedContext
+      summarizeContext: summarizeRetainedContext,
+      cachePolicy: config.pi.sessionCache
     });
     this.sessions = this.sessionLifecycle.sessions;
     this.pendingNewSessions = this.sessionLifecycle.pendingNewSessions;
@@ -188,6 +189,7 @@ export class AgentManager {
 
   setConfig(config) {
     this.sessionLifecycle.resetConfigState();
+    this.sessionLifecycle.setCachePolicy(config.pi.sessionCache);
     this.config = config;
   }
 
@@ -215,6 +217,32 @@ export class AgentManager {
 
   createSessionManager(chatId, workspaceDir = arisaInstallDir, sessionRevision = 0) {
     return this.sessionLifecycle.createSessionManager(chatId, workspaceDir, sessionRevision);
+  }
+
+  async estimatePersistedSessionBytes(session) {
+    const sessionStats = session?.getSessionStats?.();
+    const sessionFile = session?.sessionManager?.getSessionFile?.() || sessionStats?.sessionFile;
+    if (!sessionFile) return 0;
+    try {
+      return (await stat(sessionFile)).size;
+    } catch {
+      return 0;
+    }
+  }
+
+  async acquireSessionContext(sessionKey, context) {
+    const persistedBytes = await this.estimatePersistedSessionBytes(context.session);
+    this.sessionLifecycle.acquireCached(sessionKey, persistedBytes);
+    context.release = () => this.releaseSessionContext(sessionKey, context);
+    await this.sessionLifecycle.enforceCachePolicy({ protectedSessionKeys: [sessionKey] });
+    return context;
+  }
+
+  async releaseSessionContext(sessionKey, context) {
+    if (this.sessions.get(String(sessionKey)) !== context) return;
+    const persistedBytes = await this.estimatePersistedSessionBytes(context.session);
+    this.sessionLifecycle.releaseCached(sessionKey, persistedBytes);
+    await this.sessionLifecycle.enforceCachePolicy();
   }
 
   async validatePiAgent(config = this.config) {
@@ -274,7 +302,7 @@ export class AgentManager {
         existing.telegramTarget.current = telegram;
         existing.accessGuardTarget.current = accessGuard;
         this.logger?.log("agent", `reusing session for chat ${sessionKey}`);
-        return existing;
+        return this.acquireSessionContext(sessionKey, existing);
       }
       this.logger?.log("agent", `model changed for chat ${sessionKey}: ${existing?.modelKey || "unknown"} -> ${effectiveModelKey}; recreating session`);
       this.closeCachedSession(sessionKey);
@@ -366,7 +394,7 @@ export class AgentManager {
     };
     this.sessions.set(sessionKey, ctx);
     if (isNewSession) this.sessionLifecycle.completeNewSession(sessionKey);
-    return ctx;
+    return this.acquireSessionContext(sessionKey, ctx);
   }
 
   async getAvailableModels(chatId) {

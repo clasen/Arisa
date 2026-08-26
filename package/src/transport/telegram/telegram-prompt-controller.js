@@ -93,10 +93,11 @@ export function createTelegramPromptController({
           await agentManager.waitForSessionClose(sessionId);
         }
       }
-      const { session, speedController } = await agentManager.getSessionContext(sessionId, bridge, {
+      const sessionContext = await agentManager.getSessionContext(sessionId, bridge, {
         scopeChatId: route.scopeChatId,
         accessGuard: createWorkspaceAccessGuard(route)
       });
+      const { session, speedController } = sessionContext;
       let text = "";
       const chatState = getChatState(sessionId);
       chatState.activeSession = session;
@@ -126,6 +127,7 @@ export function createTelegramPromptController({
       } finally {
         if (chatState.activeSession === session) chatState.activeSession = null;
         chatState.activeRoute = null;
+        await sessionContext.release?.();
       }
       executionReceipt?.resolve({ status: "executed" });
       if (!text) return;
@@ -266,8 +268,9 @@ export function createTelegramPromptController({
   }
 
   async function summarizeSessionBeforeReset(chatId, route = directChatRoute(chatId)) {
+    let context;
     try {
-      const context = await agentManager.getSessionContext(chatId, createTelegramSessionBridge(route), {
+      context = await agentManager.getSessionContext(chatId, createTelegramSessionBridge(route), {
         scopeChatId: route.scopeChatId,
         accessGuard: createWorkspaceAccessGuard(route)
       });
@@ -279,6 +282,8 @@ export function createTelegramPromptController({
     } catch (error) {
       logger?.log("agent", `session handoff summary failed for chat ${chatId}: ${getErrorMessage(error)}`);
       return { handoff: "", parentSession: "" };
+    } finally {
+      await context?.release?.();
     }
   }
 

@@ -41,13 +41,70 @@ function closeAgentSession(session) {
 }
 
 export class AgentSessionLifecycle {
-  constructor({ logger, summarizeContext }) {
+  constructor({ logger, summarizeContext, cachePolicy = {} }) {
     this.logger = logger;
     this.summarizeContext = summarizeContext;
     this.sessions = new Map();
     this.pendingNewSessions = new Set();
     this.pendingSessionHandoffs = new Map();
     this.sessionClosePromises = new Map();
+    this.setCachePolicy(cachePolicy);
+  }
+
+  setCachePolicy(cachePolicy = {}) {
+    this.cachePolicy = {
+      maxSessions: Math.max(1, Number(cachePolicy.maxSessions) || 3),
+      maxPersistedBytes: Math.max(1, Number(cachePolicy.maxPersistedBytes) || 48 * 1024 * 1024)
+    };
+  }
+
+  acquireCached(sessionKey, persistedBytes = 0) {
+    const context = this.sessions.get(String(sessionKey));
+    if (!context) return;
+    context.activeUsers = (context.activeUsers || 0) + 1;
+    context.lastAccessedAt = Date.now();
+    context.persistedBytes = Math.max(0, Number(persistedBytes) || 0);
+  }
+
+  releaseCached(sessionKey, persistedBytes = 0) {
+    const context = this.sessions.get(String(sessionKey));
+    if (!context) return;
+    context.activeUsers = Math.max(0, (context.activeUsers || 0) - 1);
+    context.lastAccessedAt = Date.now();
+    context.persistedBytes = Math.max(0, Number(persistedBytes) || 0);
+  }
+
+  cacheUsage() {
+    return {
+      sessions: this.sessions.size,
+      persistedBytes: [...this.sessions.values()].reduce((total, context) => total + (context.persistedBytes || 0), 0)
+    };
+  }
+
+  cacheOverLimit() {
+    const usage = this.cacheUsage();
+    return usage.sessions > this.cachePolicy.maxSessions
+      || usage.persistedBytes > this.cachePolicy.maxPersistedBytes;
+  }
+
+  evictionCandidate(protectedKeys = new Set()) {
+    return [...this.sessions.entries()]
+      .filter(([key, context]) => !protectedKeys.has(key) && !(context.activeUsers > 0) && !context.session?.isStreaming)
+      .sort((left, right) => (left[1].lastAccessedAt || 0) - (right[1].lastAccessedAt || 0))[0];
+  }
+
+  async enforceCachePolicy({ protectedSessionKeys = [] } = {}) {
+    const protectedKeys = new Set(protectedSessionKeys.map(String));
+    const evicted = [];
+    while (this.cacheOverLimit()) {
+      const candidate = this.evictionCandidate(protectedKeys);
+      if (!candidate) break;
+      const [sessionKey, context] = candidate;
+      evicted.push({ sessionKey, persistedBytes: context.persistedBytes || 0 });
+      this.logger?.log("agent", `evicting inactive Pi session for chat ${sessionKey} from resident cache`);
+      await this.closeCached(sessionKey);
+    }
+    return evicted;
   }
 
   closeCached(sessionKey) {
@@ -147,7 +204,12 @@ export class AgentSessionLifecycle {
 
   async getDiagnostic() {
     const contexts = await Promise.all([...this.sessions.entries()].map(async ([chatId, context]) => {
-      const base = { chatId };
+      const base = {
+        chatId,
+        activeUsers: context.activeUsers || 0,
+        persistedBytes: context.persistedBytes || 0,
+        lastAccessedAt: context.lastAccessedAt || null
+      };
       try {
         const stats = context.session.getSessionStats();
         const retained = this.summarizeContext(context.session.messages);
@@ -166,6 +228,7 @@ export class AgentSessionLifecycle {
       harness: "pi",
       sessions: this.sessions.size,
       closingSessions: this.sessionClosePromises.size,
+      cache: { ...this.cachePolicy, ...this.cacheUsage() },
       contexts
     };
   }

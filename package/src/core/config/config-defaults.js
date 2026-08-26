@@ -61,6 +61,10 @@ export const taskConfigDefaults = Object.freeze({
 export const piConfigDefaults = Object.freeze({
   thinkingLevel: "medium",
   speed: 1,
+  sessionCache: Object.freeze({
+    maxSessions: 3,
+    maxPersistedBytes: 48 * 1024 * 1024
+  }),
   compaction: Object.freeze({
     enabled: true,
     reserveTokens: 120_000,
@@ -111,6 +115,10 @@ export function applyConfigDefaults(config) {
     pi: {
       ...piConfigDefaults,
       ...configuredPi,
+      sessionCache: {
+        ...piConfigDefaults.sessionCache,
+        ...(configuredPi.sessionCache || {})
+      },
       compaction: {
         ...piConfigDefaults.compaction,
         ...(configuredPi.compaction || {})

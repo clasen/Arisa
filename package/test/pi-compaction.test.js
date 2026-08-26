@@ -14,6 +14,15 @@ test("provides Pi compaction defaults through Arisa config", () => {
   assert.deepEqual(config.pi.compaction, piConfigDefaults.compaction);
 });
 
+test("merges partial resident session cache overrides with defaults", () => {
+  const config = applyConfigDefaults({ pi: { sessionCache: { maxSessions: 2 } } });
+
+  assert.deepEqual(config.pi.sessionCache, {
+    maxSessions: 2,
+    maxPersistedBytes: 48 * 1024 * 1024
+  });
+});
+
 test("merges partial Pi compaction overrides with defaults", () => {
   const config = applyConfigDefaults({
     pi: { compaction: { reserveTokens: 8_192 } }
