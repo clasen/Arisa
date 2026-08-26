@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import crypto from "node:crypto";
-import { cp, mkdir, mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
+import { cp, mkdir, mkdtemp, readFile, readdir, rm, symlink, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -58,6 +58,23 @@ test("verifies the exact file set and digests", async (t) => {
   assert.deepEqual(await verifyOfficialToolTree(source, files), { files: 3 });
   await writeFile(path.join(source, "extra.js"), "unexpected\n");
   await assert.rejects(() => verifyOfficialToolTree(source, files), /unexpected=extra.js/);
+});
+
+test("every catalog tool is represented in the bundled lock", async () => {
+  const lock = JSON.parse(await readFile(new URL("../src/official-tools.lock.json", import.meta.url), "utf8"));
+  const toolsDir = fileURLToPath(new URL("../../tools/", import.meta.url));
+  const entries = await readdir(toolsDir, { withFileTypes: true });
+  const catalogNames = [];
+  for (const entry of entries) {
+    if (!entry.isDirectory()) continue;
+    try {
+      await readFile(path.join(toolsDir, entry.name, "tool.manifest.json"), "utf8");
+      catalogNames.push(entry.name);
+    } catch (error) {
+      if (error.code !== "ENOENT") throw error;
+    }
+  }
+  assert.deepEqual(Object.keys(lock.tools).sort(), catalogNames.sort());
 });
 
 test("every bundled official tool lock matches the catalog source", async () => {
