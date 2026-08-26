@@ -12,11 +12,21 @@ function deferred() {
   return { promise, resolve };
 }
 
+const safeMemoryPressure = async () => ({
+  availableBytes: 512 * 1024 * 1024,
+  workerRssBytes: 100 * 1024 * 1024,
+  swapTotalBytes: 1024,
+  swapUsedPercent: 50
+});
+
 test("normalizes manifest weights and configurable class capacities", () => {
   assert.deepEqual(normalizeToolExecution({ resourceClass: "browser", weight: 2 }), {
     resourceClass: "browser",
     weight: 2,
-    deduplicateConcurrent: false
+    deduplicateConcurrent: false,
+    maxHeapMb: 192,
+    maxMemoryMb: 384,
+    maxOutputBytes: 1_048_576
   });
   assert.equal(normalizeToolExecution({
     resourceClass: "orchestrator",
@@ -33,6 +43,9 @@ test("normalizes manifest weights and configurable class capacities", () => {
   }), {
     defaultCapacity: 3,
     maxQueuedPerClass: 12,
+    minAvailableMemoryMb: 128,
+    maxWorkerRssMb: 384,
+    maxSwapUsedPercent: 95,
     capacities: { browser: 4 }
   });
 });
@@ -42,7 +55,8 @@ test("queues weighted work fairly within one resource class", async () => {
   const governor = new WeightedResourceGovernor({
     policy: { defaultCapacity: 2 },
     now: () => time,
-    memoryUsage: () => ({ rss: 100 * 1024 * 1024 })
+    memoryUsage: () => ({ rss: 100 * 1024 * 1024 }),
+    memoryPressure: safeMemoryPressure
   });
   const execution = { resourceClass: "browser", weight: 1 };
   const first = await governor.acquire(execution, "first");
@@ -73,7 +87,7 @@ test("queues weighted work fairly within one resource class", async () => {
 });
 
 test("undeclared lightweight work bypasses constrained resource queues", async () => {
-  const governor = new WeightedResourceGovernor({ policy: { defaultCapacity: 1 } });
+  const governor = new WeightedResourceGovernor({ policy: { defaultCapacity: 1 }, memoryPressure: safeMemoryPressure });
   const heavy = await governor.acquire({ resourceClass: "browser", weight: 1 }, "heavy");
   const queued = governor.acquire({ resourceClass: "browser", weight: 1 }, "queued");
   const light = await governor.acquire(null, "light");
@@ -84,11 +98,33 @@ test("undeclared lightweight work bypasses constrained resource queues", async (
   (await queued).release();
 });
 
+test("rejects declared heavy tools before spawn when memory pressure is unsafe", async () => {
+  const logs = [];
+  const governor = new WeightedResourceGovernor({
+    policy: { minAvailableMemoryMb: 128, maxWorkerRssMb: 384, maxSwapUsedPercent: 95 },
+    memoryPressure: async () => ({
+      availableBytes: 80 * 1024 * 1024,
+      workerRssBytes: 200 * 1024 * 1024,
+      swapTotalBytes: 1024,
+      swapUsedPercent: 50
+    }),
+    logger: { log: (...parts) => logs.push(parts.join(" ")) }
+  });
+
+  await assert.rejects(
+    () => governor.acquire({ resourceClass: "browser", weight: 1 }, "web-browser"),
+    (error) => error.code === "TOOL_RESOURCE_PRESSURE" && /was not started/.test(error.message)
+  );
+  assert.match(logs.join("\n"), /web-browser rejected for browser/);
+  assert.equal(governor.snapshot().resources.browser.activeWeight, 0);
+});
+
 test("larger weights consume shared capacity and worker RSS peaks are retained", async () => {
   let rss = 120 * 1024 * 1024;
   const governor = new WeightedResourceGovernor({
     policy: { defaultCapacity: 3 },
-    memoryUsage: () => ({ rss })
+    memoryUsage: () => ({ rss }),
+    memoryPressure: safeMemoryPressure
   });
   const large = await governor.acquire({ resourceClass: "browser", weight: 2 }, "large");
   const waiting = governor.acquire({ resourceClass: "browser", weight: 2 }, "waiting");

@@ -8,7 +8,7 @@ const homeDir = await mkdtemp(path.join(os.tmpdir(), "arisa-tool-registry-home-"
 process.env.HOME = homeDir;
 process.env.USERPROFILE = homeDir;
 
-const { ToolRegistry, createToolOutputParser } = await import("../src/core/tools/tool-registry.js");
+const { ToolRegistry, createToolOutputParser, isolatedToolProcessInvocation } = await import("../src/core/tools/tool-registry.js");
 const {
   arisaHomeDir,
   arisaPackageDir,
@@ -98,6 +98,27 @@ setInterval(() => {}, 1_000);
   return dir;
 }
 
+test("wraps declared Linux tool processes in a memory-limited cgroup", () => {
+  assert.deepEqual(isolatedToolProcessInvocation(
+    ["--max-old-space-size=192", "/tool/index.js", "run"],
+    { maxMemoryMb: 384 },
+    { platform: "linux", systemdAvailable: true, oomAdjustAvailable: true }
+  ), {
+    command: "systemd-run",
+    args: [
+      "--scope", "--quiet", "--collect",
+      "-p", "MemoryMax=384M",
+      "-p", "MemorySwapMax=0",
+      "--", "choom", "-n", "500", "--", "node", "--max-old-space-size=192", "/tool/index.js", "run"
+    ],
+    isolated: true
+  });
+  assert.equal(isolatedToolProcessInvocation(["tool.js"], { maxMemoryMb: 384 }, {
+    platform: "darwin",
+    systemdAvailable: false
+  }).isolated, false);
+});
+
 test("loads and lists installed tools from the user tools directory", async () => {
   await resetHome();
   await createFakeTool("fake-tool", {
@@ -172,7 +193,10 @@ test("loads weighted execution metadata from the tool manifest", async () => {
   assert.deepEqual(registry.get("heavy-tool").execution, {
     resourceClass: "browser",
     weight: 2,
-    deduplicateConcurrent: false
+    deduplicateConcurrent: false,
+    maxHeapMb: 192,
+    maxMemoryMb: 384,
+    maxOutputBytes: 1_048_576
   });
 });
 
@@ -232,7 +256,14 @@ test("wraps declared tool runs in the shared execution governor", async () => {
   assert.deepEqual(calls, [
     {
       type: "acquire",
-      execution: { resourceClass: "browser", weight: 1, deduplicateConcurrent: false },
+      execution: {
+        resourceClass: "browser",
+        weight: 1,
+        deduplicateConcurrent: false,
+        maxHeapMb: 192,
+        maxMemoryMb: 384,
+        maxOutputBytes: 1_048_576
+      },
       label: "heavy-tool"
     },
     { type: "release", label: "heavy-tool" }
@@ -252,7 +283,14 @@ await new Promise((resolve) => setTimeout(resolve, 100));
 process.stdout.write(JSON.stringify({ ok: true, output: { text: request.args.value } }));
 `, "utf8");
   const counterFile = path.join(homeDir, "single-flight-count.txt");
-  const registry = new ToolRegistry({ executionPolicy: { capacities: { orchestrator: 1 } } });
+  const registry = new ToolRegistry({
+    executionPolicy: {
+      capacities: { orchestrator: 1 },
+      minAvailableMemoryMb: 32,
+      maxWorkerRssMb: 4096,
+      maxSwapUsedPercent: 100
+    }
+  });
   await registry.load();
   const invocation = {
     name: "single-flight-tool",
@@ -398,6 +436,57 @@ test("parses fragmented NDJSON incrementally and keeps stderr diagnostic-only", 
   assert.doesNotMatch(JSON.stringify(events), /stream diagnostic/);
 });
 
+test("contains an isolated tool heap failure and keeps the registry alive", async () => {
+  await resetHome();
+  const dir = await createFakeTool("heap-bomb-tool", {
+    execution: {
+      resourceClass: "browser",
+      weight: 1,
+      maxHeapMb: 64,
+      maxMemoryMb: 128,
+      maxOutputBytes: 65_536
+    }
+  });
+  await writeFile(path.join(dir, "index.js"), `
+const retained = [];
+while (true) retained.push(new Array(1_000_000).fill("heap-pressure"));
+`, "utf8");
+  await createFakeTool("healthy-after-oom");
+  const registry = new ToolRegistry({
+    runTimeoutMs: 30_000,
+    executionPolicy: { minAvailableMemoryMb: 32, maxWorkerRssMb: 4096, maxSwapUsedPercent: 100 }
+  });
+  await registry.load();
+
+  const failed = await registry.run({ name: "heap-bomb-tool", chatId: "chat-1", request: { args: {} } });
+  assert.equal(failed.ok, false);
+  assert.equal(failed.status, "outcome_uncertain");
+
+  const healthy = await registry.run({ name: "healthy-after-oom", chatId: "chat-1", request: { args: {} } });
+  assert.equal(healthy.ok, true);
+});
+
+test("terminates oversized isolated tool output without taking down the registry", async () => {
+  await resetHome();
+  const dir = await createFakeTool("oversized-tool", {
+    execution: { resourceClass: "browser", weight: 1, maxOutputBytes: 65_536 }
+  });
+  await writeFile(path.join(dir, "index.js"), `process.stdout.write("x".repeat(70_000));`, "utf8");
+  await createFakeTool("healthy-tool");
+  const registry = new ToolRegistry({
+    executionPolicy: { minAvailableMemoryMb: 32, maxWorkerRssMb: 4096, maxSwapUsedPercent: 100 }
+  });
+  await registry.load();
+
+  const oversized = await registry.run({ name: "oversized-tool", chatId: "chat-1", request: { args: {} } });
+  assert.equal(oversized.ok, false);
+  assert.equal(oversized.status, "outcome_uncertain");
+  assert.match(oversized.error, /exceeds 65536 bytes/);
+
+  const healthy = await registry.run({ name: "healthy-tool", chatId: "chat-1", request: { args: {} } });
+  assert.equal(healthy.ok, true);
+});
+
 test("rejects invalid NDJSON sequences and a second terminal event", async () => {
   const invalidSequence = createToolOutputParser("sequence-tool");
   await invalidSequence.push(`${JSON.stringify({ version: 1, jobId: "job", type: "accepted", sequence: 1, payload: {} })}\n`);
@@ -411,6 +500,14 @@ test("rejects invalid NDJSON sequences and a second terminal event", async () =>
   await assert.rejects(
     () => duplicateTerminal.push(`${JSON.stringify({ version: 1, jobId: "job", type: "failed", sequence: 2, payload: { error: "late" } })}\n`),
     /more than one terminal event/
+  );
+});
+
+test("bounds accumulated legacy output before parsing", async () => {
+  const parser = createToolOutputParser("legacy-tool", { maxOutputBytes: 10 });
+  await assert.rejects(
+    () => parser.push("12345678901"),
+    (error) => error.code === "TOOL_OUTPUT_LIMIT"
   );
 });
 

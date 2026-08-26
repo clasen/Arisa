@@ -19,7 +19,10 @@ export const daemonConfigDefaults = Object.freeze({
 export const toolExecutionConfigDefaults = Object.freeze({
   defaultCapacity: 2,
   maxQueuedPerClass: 100,
-  capacities: Object.freeze({ orchestrator: 1 })
+  minAvailableMemoryMb: 128,
+  maxWorkerRssMb: 384,
+  maxSwapUsedPercent: 95,
+  capacities: Object.freeze({ browser: 1, orchestrator: 1 })
 });
 
 export const telegramConfigDefaults = Object.freeze({

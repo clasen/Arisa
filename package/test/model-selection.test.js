@@ -302,7 +302,10 @@ test("centralizes Telegram and Pi defaults in config", () => {
   assert.equal(config.telegram.busyMessageMode, "steer");
   assert.equal(config.toolExecution.defaultCapacity, toolExecutionConfigDefaults.defaultCapacity);
   assert.equal(config.toolExecution.maxQueuedPerClass, 100);
-  assert.deepEqual(config.toolExecution.capacities, { orchestrator: 1 });
+  assert.equal(config.toolExecution.minAvailableMemoryMb, 128);
+  assert.equal(config.toolExecution.maxWorkerRssMb, 384);
+  assert.equal(config.toolExecution.maxSwapUsedPercent, 95);
+  assert.deepEqual(config.toolExecution.capacities, { browser: 1, orchestrator: 1 });
   assert.equal(config.pi.thinkingLevel, piConfigDefaults.thinkingLevel);
   assert.equal(config.pi.speed, piConfigDefaults.speed);
 });
