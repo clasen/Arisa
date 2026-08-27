@@ -46,6 +46,7 @@ test("normalizes manifest weights and configurable class capacities", () => {
   });
   assert.throws(() => normalizeToolExecution({ resourceClass: "Browser!", weight: 1 }), /Invalid tool execution resource class/);
   assert.throws(() => normalizeToolExecution({ resourceClass: "browser", weight: 0 }), /positive integer/);
+  assert.equal(normalizeToolExecutionPolicy({ minAvailableMemoryMb: 0 }).minAvailableMemoryMb, 0);
   assert.deepEqual(normalizeToolExecutionPolicy({
     defaultCapacity: 3,
     maxQueuedPerClass: 12,

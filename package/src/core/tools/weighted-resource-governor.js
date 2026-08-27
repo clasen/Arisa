@@ -66,7 +66,7 @@ export function normalizeToolExecutionPolicy(policy = {}) {
   return {
     defaultCapacity: positiveInteger(policy?.defaultCapacity, defaultCapacity),
     maxQueuedPerClass: positiveInteger(policy?.maxQueuedPerClass, defaultMaxQueuedPerClass),
-    minAvailableMemoryMb: boundedInteger(policy?.minAvailableMemoryMb, defaultMinAvailableMemoryMb, 32, 65_536),
+    minAvailableMemoryMb: boundedInteger(policy?.minAvailableMemoryMb, defaultMinAvailableMemoryMb, 0, 65_536),
     maxWorkerRssMb: boundedInteger(policy?.maxWorkerRssMb, defaultMaxWorkerRssMb, 64, 65_536),
     maxSwapUsedPercent: boundedInteger(policy?.maxSwapUsedPercent, defaultMaxSwapUsedPercent, 1, 100),
     initialToolMemoryMb: boundedInteger(policy?.initialToolMemoryMb, defaultInitialToolMemoryMb, 128, 16_384),
