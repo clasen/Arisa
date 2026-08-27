@@ -38,10 +38,11 @@ function resourceClassName(value) {
 }
 
 export function normalizeToolExecution(execution) {
-  if (execution != null && (!execution || typeof execution !== "object" || Array.isArray(execution))) {
+  if (execution == null) return null;
+  if (!execution || typeof execution !== "object" || Array.isArray(execution)) {
     throw new Error("Tool execution policy must be an object");
   }
-  const configured = execution || {};
+  const configured = execution;
   const resourceClass = resourceClassName(configured.resourceClass || "default");
   const weight = configured.weight == null ? 1 : positiveInteger(configured.weight, 0);
   if (!weight) throw new Error("Tool execution weight must be a positive integer");
@@ -79,6 +80,10 @@ export function normalizeToolExecutionPolicy(policy = {}) {
     toolSwapMaxMb: boundedInteger(policy?.toolSwapMaxMb, defaultToolSwapMaxMb, 0, 4096),
     capacities
   };
+}
+
+function noopLease() {
+  return { waitedMs: 0, release() {} };
 }
 
 export class WeightedResourceGovernor {
@@ -252,6 +257,7 @@ export class WeightedResourceGovernor {
 
   async acquire(rawExecution, label = "tool") {
     const execution = normalizeToolExecution(rawExecution);
+    if (!execution) return noopLease();
     const resourceClass = execution.resourceClass;
     const capacity = this.capacityFor(resourceClass);
     const weight = Math.min(execution.weight, capacity);

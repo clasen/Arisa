@@ -43,6 +43,7 @@ function concurrentExecutionKey(name, chatId, request) {
 }
 
 function executionForLease(execution, lease) {
+  if (!execution) return null;
   return {
     ...execution,
     maxHeapMb: lease.heapLimitMb || execution.maxHeapMb,
@@ -268,16 +269,18 @@ export class ToolRegistry {
     const lease = await this.executionGovernor.acquire(tool.execution, `${name}:help`);
     try {
       const execution = executionForLease(tool.execution, lease);
-      const invocation = isolatedToolProcessInvocation(
-        [`--max-old-space-size=${execution.maxHeapMb}`, tool.entry, "--help"],
-        execution
-      );
+      const nodeArgs = [
+        ...(execution?.maxHeapMb ? [`--max-old-space-size=${execution.maxHeapMb}`] : []),
+        tool.entry,
+        "--help"
+      ];
+      const invocation = isolatedToolProcessInvocation(nodeArgs, execution);
       const result = await runToolHelpProcess(invocation.command, invocation.args, {
         cwd: tool.dir,
         env: toolProcessEnv(),
         timeoutMs: this.helpTimeoutMs,
         killGraceMs: this.killGraceMs,
-        maxOutputBytes: execution.maxOutputBytes || daemonConfigDefaults.ipcFrameBytes,
+        maxOutputBytes: execution?.maxOutputBytes || daemonConfigDefaults.ipcFrameBytes,
         label: `Tool help for ${name}`
       });
       const help = result.stdout || result.stderr;
@@ -416,7 +419,13 @@ export class ToolRegistry {
       } else {
         await writeFile(requestFile, `${JSON.stringify(enrichedRequest, null, 2)}\n`, "utf8");
         const execution = executionForLease(tool.execution, lease);
-        const nodeArgs = [`--max-old-space-size=${execution.maxHeapMb}`, tool.entry, "run", "--request-file", requestFile];
+        const nodeArgs = [
+          ...(execution?.maxHeapMb ? [`--max-old-space-size=${execution.maxHeapMb}`] : []),
+          tool.entry,
+          "run",
+          "--request-file",
+          requestFile
+        ];
         const processInvocation = isolatedToolProcessInvocation(nodeArgs, execution);
         if (processInvocation.isolated) {
           this.logger?.log("tools", `${name} isolated at ${execution.maxMemoryMb} MiB total memory (${execution.maxHeapMb} MiB heap)`);

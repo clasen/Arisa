@@ -36,14 +36,7 @@ test("normalizes manifest weights and configurable class capacities", () => {
     weight: 1,
     deduplicateConcurrent: true
   }).deduplicateConcurrent, true);
-  assert.deepEqual(normalizeToolExecution(undefined), {
-    resourceClass: "default",
-    weight: 1,
-    deduplicateConcurrent: false,
-    maxHeapMb: 4096,
-    maxMemoryMb: 16_384,
-    maxOutputBytes: 1_048_576
-  });
+  assert.equal(normalizeToolExecution(undefined), null);
   assert.throws(() => normalizeToolExecution({ resourceClass: "Browser!", weight: 1 }), /Invalid tool execution resource class/);
   assert.throws(() => normalizeToolExecution({ resourceClass: "browser", weight: 0 }), /positive integer/);
   assert.equal(normalizeToolExecutionPolicy({ minAvailableMemoryMb: 0 }).minAvailableMemoryMb, 0);
@@ -106,14 +99,15 @@ test("queues weighted work fairly within one resource class", async () => {
   assert.equal(governor.snapshot().resources.browser.activeWeight, 0);
 });
 
-test("undeclared work receives an isolated default resource policy", async () => {
+test("undeclared work bypasses the optional resource governor", async () => {
   const governor = new WeightedResourceGovernor({ policy: { defaultCapacity: 1 }, memoryPressure: safeMemoryPressure });
   const heavy = await governor.acquire({ resourceClass: "browser", weight: 1 }, "heavy");
   const queued = governor.acquire({ resourceClass: "browser", weight: 1 }, "queued");
+  await settle();
   const light = await governor.acquire(null, "light");
-  assert.ok(light.waitedMs >= 0);
-  assert.equal(light.memoryLimitMb, 384);
-  assert.equal(light.heapLimitMb, 249);
+  assert.equal(light.waitedMs, 0);
+  assert.equal(light.memoryLimitMb, undefined);
+  assert.equal(light.heapLimitMb, undefined);
   assert.equal(governor.snapshot().resources.browser.queued, 1);
   light.release();
   heavy.release();

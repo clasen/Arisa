@@ -186,14 +186,7 @@ test("lists optional semantic metadata with stable defaults", async () => {
 
   assert.equal(registry.list()[0].category, null);
   assert.deepEqual(registry.list()[0].keywords, []);
-  assert.deepEqual(registry.get("fake-tool").execution, {
-    resourceClass: "default",
-    weight: 1,
-    deduplicateConcurrent: false,
-    maxHeapMb: 4096,
-    maxMemoryMb: 16_384,
-    maxOutputBytes: 1_048_576
-  });
+  assert.equal(registry.get("fake-tool").execution, null);
 });
 
 test("loads weighted execution metadata from the tool manifest", async () => {
