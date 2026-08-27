@@ -39,7 +39,6 @@ test("normalizes manifest weights and configurable class capacities", () => {
   assert.equal(normalizeToolExecution(undefined), null);
   assert.throws(() => normalizeToolExecution({ resourceClass: "Browser!", weight: 1 }), /Invalid tool execution resource class/);
   assert.throws(() => normalizeToolExecution({ resourceClass: "browser", weight: 0 }), /positive integer/);
-  assert.equal(normalizeToolExecutionPolicy({ minAvailableMemoryMb: 0 }).minAvailableMemoryMb, 0);
   assert.deepEqual(normalizeToolExecutionPolicy({
     defaultCapacity: 3,
     maxQueuedPerClass: 12,
@@ -47,7 +46,6 @@ test("normalizes manifest weights and configurable class capacities", () => {
   }), {
     defaultCapacity: 3,
     maxQueuedPerClass: 12,
-    minAvailableMemoryMb: 128,
     maxWorkerRssMb: 384,
     maxSwapUsedPercent: 95,
     initialToolMemoryMb: 384,
@@ -117,10 +115,10 @@ test("undeclared work bypasses the optional resource governor", async () => {
 test("rejects declared heavy tools before spawn when memory pressure is unsafe", async () => {
   const logs = [];
   const governor = new WeightedResourceGovernor({
-    policy: { minAvailableMemoryMb: 128, maxWorkerRssMb: 384, maxSwapUsedPercent: 95 },
+    policy: { maxWorkerRssMb: 384, maxSwapUsedPercent: 95 },
     memoryPressure: async () => ({
       availableBytes: 80 * 1024 * 1024,
-      workerRssBytes: 200 * 1024 * 1024,
+      workerRssBytes: 400 * 1024 * 1024,
       swapTotalBytes: 1024,
       swapUsedPercent: 50
     }),

@@ -45,11 +45,7 @@ export async function readMemoryPressure({
 
 export function memoryPressureReason(snapshot, policy) {
   const mebibyte = 1024 * 1024;
-  const availableMb = snapshot.availableBytes / mebibyte;
   const workerRssMb = snapshot.workerRssBytes / mebibyte;
-  if (availableMb < policy.minAvailableMemoryMb) {
-    return `available memory ${Math.floor(availableMb)} MiB is below the ${policy.minAvailableMemoryMb} MiB reserve`;
-  }
   if (workerRssMb > policy.maxWorkerRssMb) {
     return `worker RSS ${Math.ceil(workerRssMb)} MiB exceeds the ${policy.maxWorkerRssMb} MiB limit`;
   }

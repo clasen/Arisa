@@ -19,7 +19,6 @@ export const daemonConfigDefaults = Object.freeze({
 export const toolExecutionConfigDefaults = Object.freeze({
   defaultCapacity: 2,
   maxQueuedPerClass: 100,
-  minAvailableMemoryMb: 128,
   maxWorkerRssMb: 384,
   maxSwapUsedPercent: 95,
   initialToolMemoryMb: 384,

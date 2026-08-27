@@ -22,21 +22,13 @@ test("reads Linux available memory, swap pressure, and worker RSS", async () => 
 });
 
 test("classifies each configured memory pressure boundary", () => {
-  const policy = { minAvailableMemoryMb: 128, maxWorkerRssMb: 384, maxSwapUsedPercent: 95 };
+  const policy = { maxWorkerRssMb: 384, maxSwapUsedPercent: 95 };
   assert.match(memoryPressureReason({
-    availableBytes: 100 * 1024 * 1024,
-    workerRssBytes: 100 * 1024 * 1024,
-    swapTotalBytes: 0,
-    swapUsedPercent: 0
-  }, policy), /available memory/);
-  assert.match(memoryPressureReason({
-    availableBytes: 200 * 1024 * 1024,
     workerRssBytes: 400 * 1024 * 1024,
     swapTotalBytes: 0,
     swapUsedPercent: 0
   }, policy), /worker RSS/);
   assert.match(memoryPressureReason({
-    availableBytes: 200 * 1024 * 1024,
     workerRssBytes: 100 * 1024 * 1024,
     swapTotalBytes: 100,
     swapUsedPercent: 96

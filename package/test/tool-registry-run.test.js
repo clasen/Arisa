@@ -294,7 +294,6 @@ process.stdout.write(JSON.stringify({ ok: true, output: { text: request.args.val
   const registry = new ToolRegistry({
     executionPolicy: {
       capacities: { orchestrator: 1 },
-      minAvailableMemoryMb: 32,
       maxWorkerRssMb: 4096,
       maxSwapUsedPercent: 100
     }
@@ -462,7 +461,7 @@ while (true) retained.push(new Array(1_000_000).fill("heap-pressure"));
   await createFakeTool("healthy-after-oom");
   const registry = new ToolRegistry({
     runTimeoutMs: 30_000,
-    executionPolicy: { minAvailableMemoryMb: 32, maxWorkerRssMb: 4096, maxSwapUsedPercent: 100 }
+    executionPolicy: { maxWorkerRssMb: 4096, maxSwapUsedPercent: 100 }
   });
   await registry.load();
 
@@ -482,7 +481,7 @@ test("terminates oversized isolated tool output without taking down the registry
   await writeFile(path.join(dir, "index.js"), `process.stdout.write("x".repeat(70_000));`, "utf8");
   await createFakeTool("healthy-tool");
   const registry = new ToolRegistry({
-    executionPolicy: { minAvailableMemoryMb: 32, maxWorkerRssMb: 4096, maxSwapUsedPercent: 100 }
+    executionPolicy: { maxWorkerRssMb: 4096, maxSwapUsedPercent: 100 }
   });
   await registry.load();
 

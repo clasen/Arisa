@@ -2,7 +2,6 @@ import { memoryPressureReason, readMemoryPressure } from "./memory-pressure.js";
 
 const defaultCapacity = 2;
 const defaultMaxQueuedPerClass = 100;
-const defaultMinAvailableMemoryMb = 128;
 const defaultMaxWorkerRssMb = 384;
 const defaultMaxSwapUsedPercent = 95;
 const defaultInitialToolMemoryMb = 384;
@@ -67,7 +66,6 @@ export function normalizeToolExecutionPolicy(policy = {}) {
   return {
     defaultCapacity: positiveInteger(policy?.defaultCapacity, defaultCapacity),
     maxQueuedPerClass: positiveInteger(policy?.maxQueuedPerClass, defaultMaxQueuedPerClass),
-    minAvailableMemoryMb: boundedInteger(policy?.minAvailableMemoryMb, defaultMinAvailableMemoryMb, 0, 65_536),
     maxWorkerRssMb: boundedInteger(policy?.maxWorkerRssMb, defaultMaxWorkerRssMb, 64, 65_536),
     maxSwapUsedPercent: boundedInteger(policy?.maxSwapUsedPercent, defaultMaxSwapUsedPercent, 1, 100),
     initialToolMemoryMb: boundedInteger(policy?.initialToolMemoryMb, defaultInitialToolMemoryMb, 128, 16_384),
