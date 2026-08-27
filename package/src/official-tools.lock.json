@@ -570,17 +570,14 @@
       }
     },
     "x-campaign-runner": {
-      "version": "0.1.0",
+      "version": "0.1.1",
       "files": {
         "README.md": "7cb7264446b9bef41332da9634cd6c94130f55c740142d084cddec776cf703c8",
         "config.js": "5eb3c5667d01705d48504a4bf711347262b8a440605cb6b75ec519dd56cb1309",
         "index.js": "19ca6dd9aa62b15e62481c6c7ce65023af6a25a21ffc622527acae12ff0171ed",
-        "package.json": "7a2dd72ce45cb1f3946b2459362ed39b82478d6df622a78690a0cc483fa03043",
+        "package.json": "1eecda56828887b3a59ed512362632dd6db16db229857dd66e40a129b2b83b8d",
         "test/x-campaign-runner.test.mjs": "cf62245bccc7d7b5804117ca02753130e7eec4f56fcc671af82757f922117389",
-        "tool.manifest.json": "ebde15ad3666ed985377ae8ff67264567f3d5db408b5ec0823617f386ef46140"
-      },
-      "toolDependencies": {
-        "x-dm": "^0.2.0"
+        "tool.manifest.json": "0f5dcd2ba69c2f57f85cad7873d6bd0a8492886d3eec34f71feb8e308bdb7751"
       }
     },
     "x-dm": {
