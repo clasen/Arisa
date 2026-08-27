@@ -1,12 +1,12 @@
 {
   "name": "creator-scout",
-  "version": "1.0.1",
+  "version": "1.1.0",
   "description": "Search CreatorScout for YouTube and Twitch creators covering comparable games, with optional public business-email discovery and exact comparable-title filtering before email lookup.",
   "entry": "index.js",
   "input": ["text/plain", "application/json"],
   "output": ["application/json", "text/plain"],
   "category": "marketing",
-  "keywords": ["creators", "youtube", "twitch", "influencers", "email", "outreach", "games", "contacts", "exact-match", "provenance"],
+  "keywords": ["creators", "youtube", "twitch", "influencers", "email", "outreach", "games", "contacts", "exact-match", "provenance", "billing", "checkout", "stripe"],
   "configSchema": {
     "EMAIL": {
       "type": "string",

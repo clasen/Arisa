@@ -32,6 +32,7 @@ Usage:
 Actions via args.action:
   authenticate  Request and consume a CreatorScout magic link through Gmail.
   status        Report whether the persistent profile is signed in.
+  checkout-quote Prepare and verify a CreatorScout Pro Stripe checkout without submitting payment.
   search        Search by comparable game or genre. args: query, language?, recency?, revealEmails?, maxEmailLookups?, limit?, requireExactReference?, referenceTitles?.
 
 When requireExactReference=true, referenceTitles must list the exact comparable title and any localized aliases. Unrelated result rows are removed before email lookup. Search output still requires provenance and campaign deduplication review.
@@ -155,6 +156,41 @@ async function revealEmail(page, row) {
   return { email: emailFrom(text), lookup: emailFrom(text) ? "found" : "not-found", detail: text.slice(0, 1200) };
 }
 
+async function checkoutQuote(request, config) {
+  const context = await openContext(request.chatId, config);
+  try {
+    const page = context.pages()[0] || await context.newPage();
+    if (!(await signedIn(page))) throw new Error("CreatorScout authentication is required. Run action=authenticate.");
+    await page.goto("https://www.creatorscout.dev/pricing", { waitUntil: "networkidle", timeout: 60000 });
+    const launch = page.getByRole("button", { name: /Upgrade|Keep Pro/ }).first();
+    if (!(await launch.count())) throw new Error("CreatorScout Pro upgrade control was not found");
+    await launch.click();
+    const upgrade = page.getByRole("button", { name: "Upgrade to Pro", exact: true });
+    if (!(await upgrade.count())) throw new Error("CreatorScout Pro checkout confirmation was not found");
+    await upgrade.click();
+    await page.waitForURL(/https:\/\/checkout\.stripe\.com\//, { timeout: 30000 });
+    await page.waitForLoadState("domcontentloaded");
+    const body = await page.locator("body").innerText();
+    if (!body.includes("Subscribe to CreatorScout Pro") || !body.includes("€5.00") || !/per\s*\n?\s*month/i.test(body)) {
+      throw new Error("CreatorScout Stripe quote did not match Pro at EUR 5.00 per month");
+    }
+    return {
+      checkoutUrl: page.url(),
+      checkoutHost: "checkout.stripe.com",
+      merchant: "CreatorScout",
+      processorMerchant: "Gooder Games",
+      product: "CreatorScout Pro",
+      amount: "5.00",
+      currency: "EUR",
+      recurring: "month",
+      submitButton: "Subscribe",
+      successUrlPrefix: "https://www.creatorscout.dev/"
+    };
+  } finally {
+    await context.close();
+  }
+}
+
 async function search(request, config) {
   const query = String(request.args?.query || request.text || "").trim();
   if (!query) throw new Error("args.query is required");
@@ -206,6 +242,7 @@ async function handle(request) {
   const config = await loadToolConfig(toolName, defaults, request.chatId);
   const action = String(request.args?.action || "status");
   if (action === "authenticate") return authenticate(request, config);
+  if (action === "checkout-quote") return checkoutQuote(request, config);
   if (action === "search") return search(request, config);
   if (action === "status") {
     const context = await openContext(request.chatId, config);

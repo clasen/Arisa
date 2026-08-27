@@ -98,16 +98,16 @@
       }
     },
     "creator-scout": {
-      "version": "1.0.1",
+      "version": "1.1.0",
       "files": {
         "README.md": "4f50850317c0875ad7ddea767c7dda112669112bec107a98e67a31a42787b82c",
         "config.js": "bab728665650b986c0eaef8e1be1c259ec42b1f83df4217c9780f5468d3c7666",
-        "index.js": "d1266d622b6abaf77ce1fe93823d4f2faedb8a5991371997c364082a198dc728",
+        "index.js": "3aa67c84853414459548382a87914698476a8c4956bad77b612d8c8bbc4cccde",
         "package-lock.json": "ed479120b59c2d9b083991dea60eb7750ba36bc7b2c7defb01cfb598889b8d90",
-        "package.json": "ad463eeddea6a958ef291d58f216c0b42c5ff3b398b62ed9512b857ea5e4b672",
+        "package.json": "6f905fbfb26042b00e72d1d93c47110e6380c90f2645c131e3cc86c32cadad10",
         "reference-match.js": "762d822ad31f89c06cb5a40f84ba3f864436db486375ed30e48bde94de282c7c",
         "test/reference-match.test.js": "701ce83396126b1e42bd3a54e331ff011a1fc27646a0f3aa99ce1c3e576aff6d",
-        "tool.manifest.json": "0617b0488035fd7f8a83a8e5a698558b3d0e956e7ea1e043e2e80bb224d4974f"
+        "tool.manifest.json": "d922c8aef03cd31c67e3dab94dd61301179ff20b4566726d67e44f184b899d6e"
       }
     },
     "file-document": {
