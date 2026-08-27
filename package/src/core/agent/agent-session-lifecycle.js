@@ -93,6 +93,20 @@ export class AgentSessionLifecycle {
       .sort((left, right) => (left[1].lastAccessedAt || 0) - (right[1].lastAccessedAt || 0))[0];
   }
 
+  async evictInactive({ protectedSessionKeys = [] } = {}) {
+    const protectedKeys = new Set(protectedSessionKeys.map(String));
+    const evicted = [];
+    let candidate = this.evictionCandidate(protectedKeys);
+    while (candidate) {
+      const [sessionKey, context] = candidate;
+      evicted.push({ sessionKey, persistedBytes: context.persistedBytes || 0 });
+      this.logger?.log("agent", `evicting inactive Pi session for chat ${sessionKey} from resident cache`);
+      await this.closeCached(sessionKey);
+      candidate = this.evictionCandidate(protectedKeys);
+    }
+    return evicted;
+  }
+
   async enforceCachePolicy({ protectedSessionKeys = [] } = {}) {
     const protectedKeys = new Set(protectedSessionKeys.map(String));
     const evicted = [];

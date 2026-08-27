@@ -65,6 +65,13 @@ export const piConfigDefaults = Object.freeze({
     maxSessions: 3,
     maxPersistedBytes: 48 * 1024 * 1024
   }),
+  heapCircuitBreaker: Object.freeze({
+    enabled: true,
+    softPercent: 70,
+    criticalPercent: 82,
+    waitMs: 15_000,
+    pollMs: 500
+  }),
   compaction: Object.freeze({
     enabled: true,
     reserveTokens: 120_000,
@@ -118,6 +125,10 @@ export function applyConfigDefaults(config) {
       sessionCache: {
         ...piConfigDefaults.sessionCache,
         ...(configuredPi.sessionCache || {})
+      },
+      heapCircuitBreaker: {
+        ...piConfigDefaults.heapCircuitBreaker,
+        ...(configuredPi.heapCircuitBreaker || {})
       },
       compaction: {
         ...piConfigDefaults.compaction,

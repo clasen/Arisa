@@ -99,6 +99,33 @@ test("evicts the least recently used inactive session without touching active wo
   assert.deepEqual([...lifecycle.sessions.keys()], ["active-old", "current"]);
 });
 
+test("pressure eviction closes every inactive session while preserving active work", async () => {
+  const closed = [];
+  const lifecycle = new AgentSessionLifecycle({
+    logger: null,
+    summarizeContext: () => ({})
+  });
+  lifecycle.sessions.set("active", {
+    activeUsers: 1,
+    lastAccessedAt: 1,
+    session: { async close() { closed.push("active"); } }
+  });
+  lifecycle.sessions.set("idle-old", {
+    lastAccessedAt: 2,
+    session: { async close() { closed.push("idle-old"); } }
+  });
+  lifecycle.sessions.set("idle-new", {
+    lastAccessedAt: 3,
+    session: { async close() { closed.push("idle-new"); } }
+  });
+
+  const evicted = await lifecycle.evictInactive();
+
+  assert.deepEqual(evicted.map((item) => item.sessionKey), ["idle-old", "idle-new"]);
+  assert.deepEqual(closed, ["idle-old", "idle-new"]);
+  assert.deepEqual([...lifecycle.sessions.keys()], ["active"]);
+});
+
 test("uses persisted session weight as a second cache bound", async () => {
   const lifecycle = new AgentSessionLifecycle({
     logger: null,

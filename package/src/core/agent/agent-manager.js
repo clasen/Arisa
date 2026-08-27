@@ -13,6 +13,7 @@ import { AgentSessionLifecycle } from "./agent-session-lifecycle.js";
 import { createPiCapabilityTools } from "./pi-capability-tools.js";
 import { ToolResourceNoteStore } from "../tools/tool-resource-note-store.js";
 import { materializeToolOutput } from "../tools/tool-output-materializer.js";
+import { WorkerHeapCircuitBreaker } from "./worker-heap-circuit-breaker.js";
 
 const piValidationTimeoutMs = 60_000;
 const arisaToolNames = [
@@ -157,6 +158,11 @@ export class AgentManager {
       summarizeContext: summarizeRetainedContext,
       cachePolicy: config.pi.sessionCache
     });
+    this.heapCircuitBreaker = new WorkerHeapCircuitBreaker({
+      lifecycle: this.sessionLifecycle,
+      logger,
+      config: config.pi.heapCircuitBreaker
+    });
     this.sessions = this.sessionLifecycle.sessions;
     this.pendingNewSessions = this.sessionLifecycle.pendingNewSessions;
     this.pendingSessionHandoffs = this.sessionLifecycle.pendingSessionHandoffs;
@@ -190,6 +196,7 @@ export class AgentManager {
   setConfig(config) {
     this.sessionLifecycle.resetConfigState();
     this.sessionLifecycle.setCachePolicy(config.pi.sessionCache);
+    this.heapCircuitBreaker.setConfig(config.pi.heapCircuitBreaker);
     this.config = config;
   }
 
@@ -211,8 +218,12 @@ export class AgentManager {
     }
   }
 
-  getRuntimeDiagnostic() {
-    return this.sessionLifecycle.getDiagnostic();
+  async getRuntimeDiagnostic() {
+    const diagnostic = await this.sessionLifecycle.getDiagnostic();
+    return {
+      ...diagnostic,
+      heapCircuitBreaker: this.heapCircuitBreaker.getDiagnostic()
+    };
   }
 
   createSessionManager(chatId, workspaceDir = arisaInstallDir, sessionRevision = 0) {
@@ -282,6 +293,7 @@ export class AgentManager {
   }
 
   async getSessionContext(chatId, telegram, { scopeChatId = chatId, accessGuard = async () => {} } = {}) {
+    await this.heapCircuitBreaker.admit();
     const sessionKey = String(chatId);
     const modelSelection = resolveChatModelSelection(this.config, sessionKey);
     const effectiveModelId = modelSelection.model;
