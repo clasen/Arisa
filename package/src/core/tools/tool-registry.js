@@ -42,6 +42,16 @@ function concurrentExecutionKey(name, chatId, request) {
   return createHash("sha256").update(serialized).digest("hex");
 }
 
+function executionForLease(execution, lease) {
+  return {
+    ...execution,
+    maxHeapMb: lease.heapLimitMb || execution.maxHeapMb,
+    maxMemoryMb: lease.memoryLimitMb || execution.maxMemoryMb,
+    memoryHighPercent: lease.memoryHighPercent,
+    swapMaxMb: lease.swapMaxMb
+  };
+}
+
 function requirementNames(requirements) {
   if (Array.isArray(requirements)) {
     return requirements.map((item) => typeof item === "string" ? item : item?.name).filter(Boolean);
@@ -255,31 +265,42 @@ export class ToolRegistry {
   async help(name) {
     const tool = this.get(name);
     if (!tool) throw new Error(`Tool not found: ${name}`);
-    const helpHeapMb = tool.execution?.maxHeapMb || 192;
-    const result = await runToolHelpProcess("node", [`--max-old-space-size=${helpHeapMb}`, tool.entry, "--help"], {
-      cwd: tool.dir,
-      env: toolProcessEnv(),
-      timeoutMs: this.helpTimeoutMs,
-      killGraceMs: this.killGraceMs,
-      maxOutputBytes: tool.execution?.maxOutputBytes || daemonConfigDefaults.ipcFrameBytes,
-      label: `Tool help for ${name}`
-    });
-    const help = result.stdout || result.stderr;
-    const skills = await this.resolveSkills(name);
-    const sections = [
-      help.trimEnd(),
-      formatSemanticMetadata(tool),
-      formatToolDependencies(tool, this.tools)
-    ];
-    if (skills.length) {
-      const skillHelp = skills.map((item) => [
-        `- ${item.name}${item.when ? ` (${item.when})` : ""}`,
-        item.description ? `  ${item.description}` : null,
-        item.found ? `  path: ${item.path}` : "  warning: skill not found"
-      ].filter(Boolean).join("\n")).join("\n");
-      sections.push(`Assigned skills:\n${skillHelp}`);
+    const lease = await this.executionGovernor.acquire(tool.execution, `${name}:help`);
+    try {
+      const execution = executionForLease(tool.execution, lease);
+      const invocation = isolatedToolProcessInvocation(
+        [`--max-old-space-size=${execution.maxHeapMb}`, tool.entry, "--help"],
+        execution
+      );
+      const result = await runToolHelpProcess(invocation.command, invocation.args, {
+        cwd: tool.dir,
+        env: toolProcessEnv(),
+        timeoutMs: this.helpTimeoutMs,
+        killGraceMs: this.killGraceMs,
+        maxOutputBytes: execution.maxOutputBytes || daemonConfigDefaults.ipcFrameBytes,
+        label: `Tool help for ${name}`
+      });
+      const help = result.stdout || result.stderr;
+      const skills = await this.resolveSkills(name);
+      const sections = [
+        help.trimEnd(),
+        formatSemanticMetadata(tool),
+        formatToolDependencies(tool, this.tools)
+      ];
+      if (skills.length) {
+        const skillHelp = skills.map((item) => [
+          `- ${item.name}${item.when ? ` (${item.when})` : ""}`,
+          item.description ? `  ${item.description}` : null,
+          item.found ? `  path: ${item.path}` : "  warning: skill not found"
+        ].filter(Boolean).join("\n")).join("\n");
+        sections.push(`Assigned skills:\n${skillHelp}`);
+      }
+      lease.release({ success: result.code === 0 });
+      return `${sections.filter(Boolean).join("\n\n")}\n`;
+    } catch (error) {
+      lease.release({ memoryLimited: error?.code === "TOOL_PROCESS_MEMORY_LIMIT" });
+      throw error;
     }
-    return `${sections.filter(Boolean).join("\n\n")}\n`;
   }
 
   async resolveSkills(name) {
@@ -372,6 +393,7 @@ export class ToolRegistry {
     const tmpDir = chatId != null ? getChatToolTmpDir(chatId, name) : getToolTmpDir(name);
     const requestFile = path.join(tmpDir, `.request-${Date.now()}-${randomUUID()}.json`);
     let lease = null;
+    let leaseOutcome = {};
     let result;
     try {
       lease = await this.executionGovernor.acquire(tool.execution, name);
@@ -393,12 +415,11 @@ export class ToolRegistry {
         result = await runtime.submit(enrichedRequest, { onEvent });
       } else {
         await writeFile(requestFile, `${JSON.stringify(enrichedRequest, null, 2)}\n`, "utf8");
-        const nodeArgs = tool.execution?.maxHeapMb
-          ? [`--max-old-space-size=${tool.execution.maxHeapMb}`, tool.entry, "run", "--request-file", requestFile]
-          : [tool.entry, "run", "--request-file", requestFile];
-        const processInvocation = isolatedToolProcessInvocation(nodeArgs, tool.execution);
+        const execution = executionForLease(tool.execution, lease);
+        const nodeArgs = [`--max-old-space-size=${execution.maxHeapMb}`, tool.entry, "run", "--request-file", requestFile];
+        const processInvocation = isolatedToolProcessInvocation(nodeArgs, execution);
         if (processInvocation.isolated) {
-          this.logger?.log("tools", `${name} isolated at ${tool.execution.maxMemoryMb} MiB total memory`);
+          this.logger?.log("tools", `${name} isolated at ${execution.maxMemoryMb} MiB total memory (${execution.maxHeapMb} MiB heap)`);
         }
         const processResult = await runToolProcess(processInvocation.command, processInvocation.args, {
           cwd: tool.dir,
@@ -428,6 +449,7 @@ export class ToolRegistry {
           : JSON.parse(processResult.parsed.output);
       }
       const normalized = normalizeToolResult(name, result);
+      leaseOutcome = { success: normalized.ok !== false };
       if (normalized.ok === false) {
         this.logger?.log("tools", `${name} -> ${normalized.status || "error"}: ${normalized.error || "unknown error"}`);
       } else {
@@ -435,6 +457,7 @@ export class ToolRegistry {
       }
       return normalized;
     } catch (error) {
+      leaseOutcome = { memoryLimited: error?.code === "TOOL_PROCESS_MEMORY_LIMIT" };
       if (error?.code === "TOOL_RESOURCE_PRESSURE") {
         return normalizeToolResult(name, {
           ok: false,
@@ -464,7 +487,7 @@ export class ToolRegistry {
         error: error?.message || `Invalid tool response for ${name}`
       });
     } finally {
-      lease?.release();
+      lease?.release(leaseOutcome);
       await unlink(requestFile).catch(() => {});
       await rmdir(tmpDir).catch(() => {});
       if (chatId != null) {

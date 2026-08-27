@@ -12,6 +12,7 @@ import { readPackageVersion, showServiceLogs } from "./runtime/log-viewer.js";
 import { arisaPackageDir } from "./platform/paths.js";
 import { runSlaveCli } from "./runtime/slave-cli.js";
 import { unregisterSlaveServiceProcess } from "./runtime/slave-service.js";
+import { protectCoreFromOom } from "./runtime/oom-protection.js";
 
 process.env.ARISA_PACKAGE_DIR = arisaPackageDir;
 
@@ -26,6 +27,9 @@ const slaveCommand = command === "slave";
 const slaveServiceRunner = slaveCommand && serviceRunner;
 const runtimeOverrides = toNestedOverrides(cli.nestedFlags);
 const logger = createLogger({ verbose });
+if (command === "run" || serviceRunner || serviceWorker || slaveServiceRunner) {
+  await protectCoreFromOom({ logger });
+}
 let activeApp = null;
 let shuttingDown = false;
 

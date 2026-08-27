@@ -14,18 +14,21 @@ function deferred() {
 
 const safeMemoryPressure = async () => ({
   availableBytes: 512 * 1024 * 1024,
+  totalBytes: 4 * 1024 * 1024 * 1024,
   workerRssBytes: 100 * 1024 * 1024,
   swapTotalBytes: 1024,
   swapUsedPercent: 50
 });
+
+const settle = () => new Promise((resolve) => setImmediate(resolve));
 
 test("normalizes manifest weights and configurable class capacities", () => {
   assert.deepEqual(normalizeToolExecution({ resourceClass: "browser", weight: 2 }), {
     resourceClass: "browser",
     weight: 2,
     deduplicateConcurrent: false,
-    maxHeapMb: 192,
-    maxMemoryMb: 384,
+    maxHeapMb: 4096,
+    maxMemoryMb: 16_384,
     maxOutputBytes: 1_048_576
   });
   assert.equal(normalizeToolExecution({
@@ -33,7 +36,14 @@ test("normalizes manifest weights and configurable class capacities", () => {
     weight: 1,
     deduplicateConcurrent: true
   }).deduplicateConcurrent, true);
-  assert.equal(normalizeToolExecution(undefined), null);
+  assert.deepEqual(normalizeToolExecution(undefined), {
+    resourceClass: "default",
+    weight: 1,
+    deduplicateConcurrent: false,
+    maxHeapMb: 4096,
+    maxMemoryMb: 16_384,
+    maxOutputBytes: 1_048_576
+  });
   assert.throws(() => normalizeToolExecution({ resourceClass: "Browser!", weight: 1 }), /Invalid tool execution resource class/);
   assert.throws(() => normalizeToolExecution({ resourceClass: "browser", weight: 0 }), /positive integer/);
   assert.deepEqual(normalizeToolExecutionPolicy({
@@ -46,6 +56,14 @@ test("normalizes manifest weights and configurable class capacities", () => {
     minAvailableMemoryMb: 128,
     maxWorkerRssMb: 384,
     maxSwapUsedPercent: 95,
+    initialToolMemoryMb: 384,
+    minimumToolMemoryMb: 128,
+    maximumToolMemoryMb: 4096,
+    systemReserveMb: 128,
+    coreReserveMb: 384,
+    toolHeapPercent: 65,
+    toolMemoryHighPercent: 85,
+    toolSwapMaxMb: 128,
     capacities: { browser: 4 }
   });
 });
@@ -63,6 +81,7 @@ test("queues weighted work fairly within one resource class", async () => {
   const second = await governor.acquire(execution, "second");
   const thirdLease = governor.acquire(execution, "third");
   const fourthLease = governor.acquire(execution, "fourth");
+  await settle();
 
   assert.deepEqual(governor.snapshot().resources.browser, {
     capacity: 2,
@@ -86,12 +105,14 @@ test("queues weighted work fairly within one resource class", async () => {
   assert.equal(governor.snapshot().resources.browser.activeWeight, 0);
 });
 
-test("undeclared lightweight work bypasses constrained resource queues", async () => {
+test("undeclared work receives an isolated default resource policy", async () => {
   const governor = new WeightedResourceGovernor({ policy: { defaultCapacity: 1 }, memoryPressure: safeMemoryPressure });
   const heavy = await governor.acquire({ resourceClass: "browser", weight: 1 }, "heavy");
   const queued = governor.acquire({ resourceClass: "browser", weight: 1 }, "queued");
   const light = await governor.acquire(null, "light");
-  assert.equal(light.waitedMs, 0);
+  assert.ok(light.waitedMs >= 0);
+  assert.equal(light.memoryLimitMb, 384);
+  assert.equal(light.heapLimitMb, 249);
   assert.equal(governor.snapshot().resources.browser.queued, 1);
   light.release();
   heavy.release();
@@ -128,10 +149,52 @@ test("larger weights consume shared capacity and worker RSS peaks are retained",
   });
   const large = await governor.acquire({ resourceClass: "browser", weight: 2 }, "large");
   const waiting = governor.acquire({ resourceClass: "browser", weight: 2 }, "waiting");
+  await settle();
   assert.equal(governor.snapshot().resources.browser.queued, 1);
   rss = 180 * 1024 * 1024;
   large.release();
   const next = await waiting;
   assert.equal(governor.snapshot().peakRssBytes, rss);
   next.release();
+});
+
+test("shares one host memory budget across independent resource classes", async () => {
+  const pressure = async () => ({
+    availableBytes: 512 * 1024 * 1024,
+    totalBytes: 1024 * 1024 * 1024,
+    workerRssBytes: 100 * 1024 * 1024,
+    swapTotalBytes: 0,
+    swapUsedPercent: 0
+  });
+  const governor = new WeightedResourceGovernor({
+    policy: { systemReserveMb: 128, coreReserveMb: 384, initialToolMemoryMb: 384 },
+    memoryPressure: pressure
+  });
+  const browser = await governor.acquire({ resourceClass: "browser" }, "browser");
+  const queued = governor.acquire({ resourceClass: "orchestrator" }, "orchestrator");
+  await settle();
+
+  assert.equal(governor.snapshot().memory.budgetMb, 512);
+  assert.equal(governor.snapshot().memory.activeMb, 384);
+  assert.equal(governor.snapshot().resources.orchestrator.queued, 1);
+
+  browser.release({ success: true });
+  const orchestrator = await queued;
+  assert.equal(orchestrator.memoryLimitMb, 384);
+  orchestrator.release({ success: true });
+});
+
+test("raises a tool memory recommendation after an isolated limit failure", async () => {
+  const governor = new WeightedResourceGovernor({
+    policy: { initialToolMemoryMb: 256 },
+    memoryPressure: safeMemoryPressure
+  });
+  const first = await governor.acquire({}, "growing-tool");
+  assert.equal(first.memoryLimitMb, 256);
+  first.release({ memoryLimited: true });
+
+  const second = await governor.acquire({}, "growing-tool");
+  assert.equal(second.memoryLimitMb, 384);
+  assert.equal(governor.snapshot().memory.profiles["growing-tool"].memoryLimitFailures, 1);
+  second.release({ success: true });
 });

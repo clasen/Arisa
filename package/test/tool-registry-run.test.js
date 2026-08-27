@@ -113,9 +113,10 @@ test("wraps declared Linux tool processes in a memory-limited cgroup", () => {
   ), {
     command: "systemd-run",
     args: [
-      "--scope", "--quiet", "--collect",
+      "--scope", "--quiet", "--collect", "--slice=arisa-tools.slice",
+      "-p", "MemoryHigh=326M",
       "-p", "MemoryMax=384M",
-      "-p", "MemorySwapMax=0",
+      "-p", "MemorySwapMax=128M",
       "--", "choom", "-n", "500", "--", "node", "--max-old-space-size=192", "/tool/index.js", "run"
     ],
     isolated: true
@@ -185,7 +186,14 @@ test("lists optional semantic metadata with stable defaults", async () => {
 
   assert.equal(registry.list()[0].category, null);
   assert.deepEqual(registry.list()[0].keywords, []);
-  assert.equal(registry.get("fake-tool").execution, null);
+  assert.deepEqual(registry.get("fake-tool").execution, {
+    resourceClass: "default",
+    weight: 1,
+    deduplicateConcurrent: false,
+    maxHeapMb: 4096,
+    maxMemoryMb: 16_384,
+    maxOutputBytes: 1_048_576
+  });
 });
 
 test("loads weighted execution metadata from the tool manifest", async () => {
@@ -201,8 +209,8 @@ test("loads weighted execution metadata from the tool manifest", async () => {
     resourceClass: "browser",
     weight: 2,
     deduplicateConcurrent: false,
-    maxHeapMb: 192,
-    maxMemoryMb: 384,
+    maxHeapMb: 4096,
+    maxMemoryMb: 16_384,
     maxOutputBytes: 1_048_576
   });
 });
@@ -267,8 +275,8 @@ test("wraps declared tool runs in the shared execution governor", async () => {
         resourceClass: "browser",
         weight: 1,
         deduplicateConcurrent: false,
-        maxHeapMb: 192,
-        maxMemoryMb: 384,
+        maxHeapMb: 4096,
+        maxMemoryMb: 16_384,
         maxOutputBytes: 1_048_576
       },
       label: "heavy-tool"

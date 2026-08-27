@@ -1,6 +1,6 @@
 import { spawn } from "node:child_process";
 import crypto from "node:crypto";
-import { closeSync, openSync } from "node:fs";
+import { closeSync, existsSync, openSync } from "node:fs";
 import { chmod, mkdir, readFile, readdir, rename, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 import {
@@ -21,6 +21,21 @@ export const DAEMON_STATES = Object.freeze([
   "stopped",
   "failed"
 ]);
+
+export function daemonProcessInvocation(entryPath, {
+  platform = process.platform,
+  nodePath = process.execPath,
+  oomAdjustAvailable = existsSync("/usr/bin/choom")
+} = {}) {
+  if (platform !== "linux" || !oomAdjustAvailable) {
+    return { command: nodePath, args: [entryPath, "daemon"], oomProtected: false };
+  }
+  return {
+    command: "/usr/bin/choom",
+    args: ["-n", "500", "--", nodePath, entryPath, "daemon"],
+    oomProtected: true
+  };
+}
 
 function daemonIdentity(toolNameOrOptions, scope) {
   if (typeof toolNameOrOptions === "string") {
@@ -367,7 +382,8 @@ export async function startManagedDaemon({
     const out = openSync(paths.logFile, "a");
     let child;
     try {
-      child = spawn(process.execPath, [entryPath, "daemon"], {
+      const invocation = daemonProcessInvocation(entryPath);
+      child = spawn(invocation.command, invocation.args, {
         detached: false,
         stdio: ["ignore", out, out],
         env: {

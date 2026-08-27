@@ -22,6 +22,14 @@ export const toolExecutionConfigDefaults = Object.freeze({
   minAvailableMemoryMb: 128,
   maxWorkerRssMb: 384,
   maxSwapUsedPercent: 95,
+  initialToolMemoryMb: 384,
+  minimumToolMemoryMb: 128,
+  maximumToolMemoryMb: 4096,
+  systemReserveMb: 128,
+  coreReserveMb: 384,
+  toolHeapPercent: 65,
+  toolMemoryHighPercent: 85,
+  toolSwapMaxMb: 128,
   capacities: Object.freeze({ browser: 1, orchestrator: 1 })
 });
 

@@ -17,14 +17,21 @@ export function isolatedToolProcessInvocation(nodeArgs, execution, {
   if (!execution?.maxMemoryMb || platform !== "linux" || !systemdAvailable) {
     return { command: "node", args: nodeArgs, isolated: false };
   }
+  const memoryHighPercent = Number.isSafeInteger(execution.memoryHighPercent)
+    ? execution.memoryHighPercent
+    : 85;
+  const memoryHighMb = Math.max(1, Math.floor(execution.maxMemoryMb * memoryHighPercent / 100));
+  const swapMaxMb = Number.isSafeInteger(execution.swapMaxMb) ? execution.swapMaxMb : 128;
   return {
     command: "systemd-run",
     args: [
       "--scope",
       "--quiet",
       "--collect",
+      "--slice=arisa-tools.slice",
+      "-p", `MemoryHigh=${memoryHighMb}M`,
       "-p", `MemoryMax=${execution.maxMemoryMb}M`,
-      "-p", "MemorySwapMax=0",
+      "-p", `MemorySwapMax=${swapMaxMb}M`,
       "--",
       ...(oomAdjustAvailable ? ["choom", "-n", "500", "--"] : []),
       "node",

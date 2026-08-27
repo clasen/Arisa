@@ -305,6 +305,14 @@ test("centralizes Telegram and Pi defaults in config", () => {
   assert.equal(config.toolExecution.minAvailableMemoryMb, 128);
   assert.equal(config.toolExecution.maxWorkerRssMb, 384);
   assert.equal(config.toolExecution.maxSwapUsedPercent, 95);
+  assert.equal(config.toolExecution.initialToolMemoryMb, 384);
+  assert.equal(config.toolExecution.minimumToolMemoryMb, 128);
+  assert.equal(config.toolExecution.maximumToolMemoryMb, 4096);
+  assert.equal(config.toolExecution.systemReserveMb, 128);
+  assert.equal(config.toolExecution.coreReserveMb, 384);
+  assert.equal(config.toolExecution.toolHeapPercent, 65);
+  assert.equal(config.toolExecution.toolMemoryHighPercent, 85);
+  assert.equal(config.toolExecution.toolSwapMaxMb, 128);
   assert.deepEqual(config.toolExecution.capacities, { browser: 1, orchestrator: 1 });
   assert.equal(config.pi.thinkingLevel, piConfigDefaults.thinkingLevel);
   assert.equal(config.pi.speed, piConfigDefaults.speed);
