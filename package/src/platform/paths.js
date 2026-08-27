@@ -9,6 +9,7 @@ export const arisaHomeDir = process.env.ARISA_HOME
   ? path.resolve(process.env.ARISA_HOME)
   : path.join(os.homedir(), ".arisa");
 export const stateDir = path.join(arisaHomeDir, "state");
+export const tuiSessionsDir = path.join(stateDir, "pi-tui-sessions");
 export const configFile = path.join(stateDir, "config.json");
 export const piAuthFile = path.join(stateDir, "pi-auth.json");
 export const servicePidFile = path.join(stateDir, "arisa.pid");

@@ -91,7 +91,7 @@ export function createArisaClient({
       enqueueEvent: (params) => call("agent.enqueueEvent", params)
     },
     tools: {
-      list: () => call("tools.list"),
+      list: (params = {}) => call("tools.list", params),
       help: (params) => call("tools.help", params),
       skills: (params) => call("tools.skills", params),
       setConfig: (params) => call("tools.setConfig", params),
