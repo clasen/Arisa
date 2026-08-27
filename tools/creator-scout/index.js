@@ -33,6 +33,7 @@ Actions via args.action:
   authenticate  Request and consume a CreatorScout magic link through Gmail.
   status        Report whether the persistent profile is signed in.
   checkout-quote Prepare and verify a CreatorScout Pro Stripe checkout without submitting payment.
+  subscription-status Inspect the authenticated account for billing status without opening or submitting checkout.
   search        Search by comparable game or genre. args: query, language?, recency?, revealEmails?, maxEmailLookups?, limit?, requireExactReference?, referenceTitles?.
 
 When requireExactReference=true, referenceTitles must list the exact comparable title and any localized aliases. Unrelated result rows are removed before email lookup. Search output still requires provenance and campaign deduplication review.
@@ -191,6 +192,26 @@ async function checkoutQuote(request, config) {
   }
 }
 
+async function subscriptionStatus(request, config) {
+  const context = await openContext(request.chatId, config);
+  try {
+    const page = context.pages()[0] || await context.newPage();
+    if (!(await signedIn(page))) throw new Error("CreatorScout authentication is required. Run action=authenticate.");
+    await page.goto("https://www.creatorscout.dev/pricing", { waitUntil: "networkidle", timeout: 60000 });
+    const text = await page.locator("body").innerText();
+    const managesBilling = /Manage billing|Billing portal|Manage subscription/i.test(text);
+    const trial = /trial/i.test(text);
+    return {
+      authenticated: true,
+      subscriptionConfirmed: managesBilling,
+      trialMentioned: trial,
+      evidence: managesBilling ? "CreatorScout exposes subscription management for this account." : "CreatorScout does not expose subscription management for this account."
+    };
+  } finally {
+    await context.close();
+  }
+}
+
 async function search(request, config) {
   const query = String(request.args?.query || request.text || "").trim();
   if (!query) throw new Error("args.query is required");
@@ -243,6 +264,7 @@ async function handle(request) {
   const action = String(request.args?.action || "status");
   if (action === "authenticate") return authenticate(request, config);
   if (action === "checkout-quote") return checkoutQuote(request, config);
+  if (action === "subscription-status") return subscriptionStatus(request, config);
   if (action === "search") return search(request, config);
   if (action === "status") {
     const context = await openContext(request.chatId, config);
