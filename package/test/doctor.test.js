@@ -151,6 +151,28 @@ test("stops only a registered duplicate Arisa service with verified identity", a
   assert.match(report.repairs.join("\n"), /Stopped duplicate Arisa service process 321/);
 });
 
+test("does not stop the supervisor that owns the current worker", async () => {
+  const supervisorPid = 321;
+  const stopped = [];
+  const report = await runDoctor({
+    agentManager: { getRuntimeDiagnostic: async () => runtime() },
+    toolProcessSupervisor: { repair: async () => [] },
+    daemonPolicy,
+    doctorPolicy,
+    listProcesses: async () => [{
+      pid: supervisorPid,
+      command: `${process.execPath} ${serviceEntryFile} --service-runner`
+    }],
+    serviceStatus: async () => ({ running: true, pid: supervisorPid }),
+    stopProcess: async (pid) => { stopped.push(pid); },
+    inspectResources: async () => system,
+    supervisorPid
+  });
+
+  assert.deepEqual(stopped, []);
+  assert.deepEqual(report.repairs, []);
+});
+
 test("requires complete positive doctor context policy", async () => {
   await assert.rejects(
     runDoctor({

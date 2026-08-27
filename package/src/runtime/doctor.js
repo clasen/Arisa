@@ -314,7 +314,8 @@ export async function runDoctor({
   unregisterDaemon = unregisterManagedDaemon,
   inspectResources = inspectSystemResources,
   inspectInfrastructure = null,
-  inspectToolDependencies = null
+  inspectToolDependencies = null,
+  supervisorPid = Number.parseInt(process.env.ARISA_SUPERVISOR_PID || "", 10)
 }) {
   assertDoctorPolicy(doctorPolicy);
   const runtime = await agentManager.getRuntimeDiagnostic();
@@ -362,7 +363,9 @@ export async function runDoctor({
 
   const processByPid = new Map(processes.map((record) => [record.pid, record]));
   const currentService = await serviceStatus();
-  if (currentService.running && currentService.pid !== process.pid) {
+  const belongsToCurrentService = currentService.pid === process.pid
+    || (Number.isSafeInteger(supervisorPid) && currentService.pid === supervisorPid);
+  if (currentService.running && !belongsToCurrentService) {
     const registered = processByPid.get(currentService.pid);
     if (registered && isArisaServiceProcess(registered)) {
       try {
