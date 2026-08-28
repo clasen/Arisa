@@ -1,7 +1,7 @@
 {
   "version": 1,
   "repository": "https://github.com/clasen/Arisa.git",
-  "commit": "be02751b18a0cabea5a1df4dede1f912880c9977",
+  "commit": "7b5322b53c5a1eadc66b611f96e6666d9385f282",
   "tools": {
     "audio-extractor": {
       "version": null,
@@ -161,7 +161,7 @@
       "version": "0.11.0",
       "files": {
         "BENCHMARK.md": "9c732c65f6d8bceb4e73c1a03d298d5140d919f50269f982bd0ec6c1b21fa8b6",
-        "COMPATIBILITY-MIGRATION.md": "db2bf3f67181454613b5b20f96e9fbde42e1a8690e753aa42dcb85f06264cebb",
+        "COMPATIBILITY-MIGRATION.md": "531e8105f2046b648bc4a7583887e8fb92aa2767d02feb4fe7248d866a5cc78f",
         "LIMITS.md": "6c0ec9624c76de8ddf09b82a4da1dba1b89a48a1f0e71a083ffbcf7a3d5401fb",
         "README.md": "6ddd8585305127a2d1ff1ae324b85ab674bebba8f70cd939c2c8f92a9f9dfb09",
         "action-policy.js": "8c071776ddcfaa5059e9bb9a97b6396370a0bef22670697e63b2156ba10496e1",
