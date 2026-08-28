@@ -1,0 +1,262 @@
+{
+  "generatedAt": "2026-08-28T18:23:31.756Z",
+  "engine": "lightpanda",
+  "chromiumLaunched": false,
+  "policy": {
+    "fixtures": [
+      {
+        "id": "react-todomvc",
+        "category": "react",
+        "url": "https://todomvc.com/examples/react/dist/",
+        "requiredText": [
+          "todos",
+          "TodoMVC"
+        ]
+      },
+      {
+        "id": "vue-todomvc",
+        "category": "vue",
+        "url": "https://todomvc.com/examples/vue/dist/",
+        "requiredText": [
+          "todos",
+          "TodoMVC"
+        ]
+      },
+      {
+        "id": "angular-todomvc",
+        "category": "angular",
+        "url": "https://todomvc.com/examples/angular/dist/browser/",
+        "requiredText": [
+          "Angular",
+          "Todos"
+        ]
+      },
+      {
+        "id": "public-form",
+        "category": "forms",
+        "url": "https://httpbin.org/forms/post",
+        "requiredText": [
+          "Customer name",
+          "Telephone"
+        ]
+      },
+      {
+        "id": "css-modal",
+        "category": "modals",
+        "url": "https://www.w3schools.com/howto/howto_css_modals.asp",
+        "requiredText": [
+          "Open Modal"
+        ]
+      },
+      {
+        "id": "html-table",
+        "category": "tables",
+        "url": "https://www.w3schools.com/html/html_tables.asp",
+        "requiredText": [
+          "Company",
+          "Alfreds Futterkiste"
+        ]
+      },
+      {
+        "id": "long-news-page",
+        "category": "scrolling",
+        "url": "https://news.ycombinator.com/news?p=2",
+        "requiredText": [
+          "Hacker News"
+        ]
+      },
+      {
+        "id": "public-redirect",
+        "category": "redirects",
+        "url": "https://httpbin.org/redirect-to?url=https%3A%2F%2Fexample.com%2F",
+        "finalUrl": "https://example.com/",
+        "requiredText": [
+          "Example Domain"
+        ]
+      },
+      {
+        "id": "html-iframe",
+        "category": "iframes",
+        "url": "https://www.w3schools.com/html/html_iframe.asp",
+        "requiredText": [
+          "HTML Iframes",
+          "iframe"
+        ]
+      }
+    ],
+    "limits": {
+      "compatibilityTimeoutMs": 30000,
+      "navigationCount": 100,
+      "navigationLifetimeMs": 120000,
+      "navigationRssLimitMiB": 128,
+      "leakGrowthLimitMiB": 48,
+      "concurrentSessions": 2,
+      "concurrentAggregateRssLimitMiB": 128,
+      "concurrentSwapGrowthLimitMiB": 64,
+      "unsupportedTimeoutMs": 25000,
+      "forcedTimeoutMs": 1,
+      "outputBytes": 65536
+    }
+  },
+  "compatibility": {
+    "results": [
+      {
+        "id": "react-todomvc",
+        "category": "react",
+        "success": true,
+        "elapsedMs": 729,
+        "finalUrl": "https://todomvc.com/examples/react/dist/",
+        "missingText": [],
+        "finalUrlMatches": true
+      },
+      {
+        "id": "vue-todomvc",
+        "category": "vue",
+        "success": true,
+        "elapsedMs": 200,
+        "finalUrl": "https://todomvc.com/examples/vue/dist/#/",
+        "missingText": [],
+        "finalUrlMatches": true
+      },
+      {
+        "id": "angular-todomvc",
+        "category": "angular",
+        "success": true,
+        "elapsedMs": 288,
+        "finalUrl": "https://todomvc.com/examples/angular/dist/browser/#/all",
+        "missingText": [],
+        "finalUrlMatches": true
+      },
+      {
+        "id": "public-form",
+        "category": "forms",
+        "success": true,
+        "elapsedMs": 422,
+        "finalUrl": "https://httpbin.org/forms/post",
+        "missingText": [],
+        "finalUrlMatches": true
+      },
+      {
+        "id": "css-modal",
+        "category": "modals",
+        "success": true,
+        "elapsedMs": 1339,
+        "finalUrl": "https://www.w3schools.com/howto/howto_css_modals.asp",
+        "missingText": [],
+        "finalUrlMatches": true
+      },
+      {
+        "id": "html-table",
+        "category": "tables",
+        "success": true,
+        "elapsedMs": 994,
+        "finalUrl": "https://www.w3schools.com/html/html_tables.asp",
+        "missingText": [],
+        "finalUrlMatches": true
+      },
+      {
+        "id": "long-news-page",
+        "category": "scrolling",
+        "success": true,
+        "elapsedMs": 364,
+        "finalUrl": "https://news.ycombinator.com/news?p=2",
+        "missingText": [],
+        "finalUrlMatches": true
+      },
+      {
+        "id": "public-redirect",
+        "category": "redirects",
+        "success": true,
+        "elapsedMs": 98,
+        "finalUrl": "https://example.com/",
+        "missingText": [],
+        "finalUrlMatches": true
+      },
+      {
+        "id": "html-iframe",
+        "category": "iframes",
+        "success": true,
+        "elapsedMs": 1002,
+        "finalUrl": "https://www.w3schools.com/html/html_iframe.asp",
+        "missingText": [],
+        "finalUrlMatches": true
+      }
+    ],
+    "passed": true
+  },
+  "navigation": {
+    "status": "completed",
+    "completed": 100,
+    "requested": 100,
+    "elapsedMs": 6240,
+    "firstMedianRssMiB": 23.9,
+    "lastMedianRssMiB": 24,
+    "growthMiB": 0.1,
+    "peakRssMiB": 24,
+    "limit": null
+  },
+  "concurrency": {
+    "sessions": 2,
+    "results": [
+      {
+        "id": "react-todomvc",
+        "success": true,
+        "missingText": [],
+        "finalUrlMatches": true
+      },
+      {
+        "id": "vue-todomvc",
+        "success": true,
+        "missingText": [],
+        "finalUrlMatches": true
+      }
+    ],
+    "peakAggregateRssMiB": 62.3,
+    "minimumAvailableMiB": 121.5,
+    "swapGrowthMiB": 11.5,
+    "pressureBreach": false,
+    "before": {
+      "available": 130.8,
+      "swapFree": 555.2,
+      "swapTotal": 2560
+    },
+    "after": {
+      "available": 133.3,
+      "swapFree": 543.7,
+      "swapTotal": 2560
+    },
+    "passed": true
+  },
+  "unsupportedApi": {
+    "status": "unsupported",
+    "fixture": "Speedometer 3.1",
+    "diagnostic": "One or more subtests produced no duration."
+  },
+  "timeoutRecovery": {
+    "timeout": {
+      "explicit": true,
+      "diagnostic": {
+        "code": "LIGHTPANDA_TIMEOUT",
+        "message": "Lightpanda interaction timed out."
+      }
+    },
+    "recovery": {
+      "success": true
+    },
+    "passed": true
+  },
+  "cleanup": {
+    "baselinePids": [],
+    "finalPids": [],
+    "unexpectedResidual": []
+  },
+  "checks": {
+    "semanticAssertions": true,
+    "navigationBound": true,
+    "concurrentPressure": true,
+    "explicitUnsupportedAndTimeout": true,
+    "cleanup": true,
+    "chromiumExcluded": true
+  },
+  "passed": true
+}

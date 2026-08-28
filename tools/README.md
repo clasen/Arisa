@@ -118,6 +118,18 @@ Apply ordered, deterministic image operations in one artifact pipe: crop, resize
 - **Setup:** `ffmpeg` available on the host
 - **Install footprint:** **Low**, no npm dependencies
 
+### [`lightpanda-browser`](./lightpanda-browser/)
+
+Open, inspect, capture, and adaptively interact with public JavaScript-rendered pages through bounded ephemeral or temporary chat-scoped Lightpanda sessions, including deterministic safe recipes and resource-limit diagnostics.
+
+- **Category:** `web`
+- **Tags:** `adaptive` · `automation` · `browser` · `browse` · `capture` · `daemon` · `headless` · `interaction` · `javascript` · `lightpanda` · `lightweight` · `mcp` · `navigation` · `page` · `public-web` · `recipe` · `render` · `replay` · `screenshot` · `semantic` · `session` · `web`
+- **Accepts:** `text/plain`, `application/json`
+- **Produces:** `text/plain`, `application/json`, `image/png`
+- **Setup:** run `npm run install-browser` with `ARISA_PACKAGE_DIR` set, or configure an absolute `LIGHTPANDA_BINARY`
+- **Runtime:** chat-scoped auto-start daemon; browser sessions remain temporary and bounded
+- **Install footprint:** **Medium**, verified external Lightpanda binary download and a chat-scoped daemon, with no npm dependencies
+
 ### [`markdown-pdf`](./markdown-pdf/)
 
 Convert Markdown to PDF with support for headings, emphasis, links, code, blockquotes, lists, tables, images, rules, and footnotes.

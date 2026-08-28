@@ -1,0 +1,101 @@
+{
+  "name": "lightpanda-browser",
+  "version": "0.9.0",
+  "description": "Open, inspect, and adaptively interact with public JavaScript-rendered pages through bounded ephemeral or temporary chat-scoped Lightpanda sessions.",
+  "entry": "index.js",
+  "daemon": {
+    "scope": "chat",
+    "autoStart": true,
+    "health": "internal"
+  },
+  "input": [
+    "text/plain",
+    "application/json"
+  ],
+  "output": [
+    "text/plain",
+    "application/json",
+    "image/png"
+  ],
+  "configSchema": {
+    "LIGHTPANDA_BINARY": {
+      "type": "string",
+      "required": false,
+      "prompt": "Optional absolute path to a Lightpanda binary. Defaults to the verified binary in the tool state directory."
+    },
+    "TIMEOUT_MS": {
+      "type": "number",
+      "required": false,
+      "prompt": "Maximum browser execution time in milliseconds."
+    },
+    "MAX_OUTPUT_BYTES": {
+      "type": "number",
+      "required": false,
+      "prompt": "Maximum UTF-8 output size returned by one operation."
+    },
+    "CAPTURE_MAX_BYTES": {
+      "type": "number",
+      "required": false,
+      "prompt": "Maximum PNG bytes returned by one Lightpanda text-layout capture."
+    },
+    "CAPTURE_MAX_WIDTH": {
+      "type": "number",
+      "required": false,
+      "prompt": "Maximum text-layout capture width in pixels, capped at 1280."
+    },
+    "CAPTURE_MAX_HEIGHT": {
+      "type": "number",
+      "required": false,
+      "prompt": "Maximum text-layout capture height in pixels, capped at 4096."
+    },
+    "OBEY_ROBOTS": {
+      "type": "boolean",
+      "required": false,
+      "prompt": "Require Lightpanda to obey robots.txt."
+    },
+    "SESSION_TTL_MS": {
+      "type": "number",
+      "required": false,
+      "prompt": "Idle lifetime of one temporary browser session in milliseconds."
+    },
+    "MAX_SESSIONS": {
+      "type": "number",
+      "required": false,
+      "prompt": "Maximum simultaneous temporary Lightpanda sessions for one chat."
+    },
+    "IDLE_TIMEOUT_MS": {
+      "type": "number",
+      "required": false,
+      "prompt": "How long the chat-scoped daemon remains warm without jobs."
+    }
+  },
+  "execution": {
+    "resourceClass": "browser",
+    "weight": 1
+  },
+  "category": "web",
+  "keywords": [
+    "adaptive",
+    "automation",
+    "browser",
+    "browse",
+    "capture",
+    "daemon",
+    "headless",
+    "interaction",
+    "javascript",
+    "lightpanda",
+    "lightweight",
+    "mcp",
+    "navigation",
+    "page",
+    "public-web",
+    "recipe",
+    "render",
+    "replay",
+    "screenshot",
+    "semantic",
+    "session",
+    "web"
+  ]
+}

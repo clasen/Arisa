@@ -1,0 +1,12 @@
+{
+  "name": "arisa-tool-lightpanda-browser",
+  "version": "0.9.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "node --test",
+    "install-browser": "node scripts/install-lightpanda.js",
+    "benchmark": "node scripts/benchmark.js",
+    "limit-suite": "node scripts/limit-suite.js"
+  }
+}
