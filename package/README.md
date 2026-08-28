@@ -108,7 +108,7 @@ Per chat (`~/.arisa/chats/<chatId>/`):
 - chat-scoped daemon infrastructure lives in `state/tools/<tool>/daemon/`; persistent tool data stays beside it
 - ephemeral scratch lives under `tmp/`
 
-Managed daemons become ready only after their tool-defined health operation succeeds through the normal command queue. Arisa records heartbeats, successful jobs, errors, and standard lifecycle states, then retries recovery or recreates an unhealthy process with its persisted scope and startup context.
+Managed daemons become ready only after their tool-defined health operation succeeds through the normal command queue. Arisa records heartbeats, successful jobs, errors, and standard lifecycle states, then retries recovery or recreates an unhealthy process with its persisted scope and startup context. The supervisor automatically removes registrations and daemon runtime directories that no longer match an installed daemon tool. A live process is terminated only when its command line matches the registered entry and daemon invocation; unverifiable PIDs are left untouched and reported for attention.
 
 Daemon tools may opt into the `arisa-daemon-v1` local protocol for immediate
 multiplexed jobs and incremental NDJSON events over a capability-protected local
@@ -151,12 +151,16 @@ Automatic context compaction uses Pi's native implementation and can be tuned in
       "enabled": true,
       "reserveTokens": 120000,
       "keepRecentTokens": 20000
+    },
+    "sessionRotation": {
+      "enabled": true,
+      "maxPersistedBytes": 67108864
     }
   }
 }
 ```
 
-Pi compacts when the context exceeds the model's context window minus `reserveTokens`. The default keeps a large reserve so compaction occurs before Arisa Doctor's context warning on the default model. Set a smaller reserve when using models with substantially smaller context windows. Arisa does not add Telegram commands or compaction notifications.
+Pi compacts when the context exceeds the model's context window minus `reserveTokens`. The default keeps a large reserve so compaction occurs before Arisa Doctor's context warning on the default model. After a successful compaction, a persisted session larger than `sessionRotation.maxPersistedBytes` rotates to a fresh JSONL using the latest summary as its handoff. The historical JSONL remains intact on disk and its resident object is released only after active work finishes. Set a smaller reserve when using models with substantially smaller context windows. Arisa does not add Telegram commands or compaction notifications.
 
 ## Install globally
 

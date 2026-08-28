@@ -23,6 +23,15 @@ test("merges partial resident session cache overrides with defaults", () => {
   });
 });
 
+test("merges partial session rotation overrides with defaults", () => {
+  const config = applyConfigDefaults({ pi: { sessionRotation: { enabled: false } } });
+
+  assert.deepEqual(config.pi.sessionRotation, {
+    enabled: false,
+    maxPersistedBytes: 64 * 1024 * 1024
+  });
+});
+
 test("merges partial Pi compaction overrides with defaults", () => {
   const config = applyConfigDefaults({
     pi: { compaction: { reserveTokens: 8_192 } }
