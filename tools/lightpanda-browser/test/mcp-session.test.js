@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { normalizeInteractionSteps } from "../mcp-session.js";
+import { buildMcpCommand, normalizeInteractionSteps } from "../mcp-session.js";
 
 const publicLookup = async () => [{ address: "93.184.216.34" }];
 
@@ -28,6 +28,19 @@ test("mutation operations are opt-in and require replayable selectors", async ()
 test("blocks unsupported capabilities and private navigation", async () => {
   await assert.rejects(normalizeInteractionSteps([{ tool: "evaluate", arguments: { script: "document.cookie" } }]), /unsupported tool/);
   await assert.rejects(normalizeInteractionSteps([{ tool: "goto", arguments: { url: "http://127.0.0.1" } }]), /Private or non-public/);
+});
+
+test("authenticated MCP command loads private cookies and required resources", () => {
+  const command = buildMcpCommand({ OBEY_ROBOTS: true, AUTHENTICATED_OBEY_ROBOTS: false }, 10_000, {
+    authenticated: true,
+    cookiePath: "/private/cookies.json",
+    cookieJarPath: "/private/jar.json"
+  });
+  assert.equal(command.includes("--obey-robots"), false);
+  assert.deepEqual(command.slice(-8), [
+    "--cookie", "/private/cookies.json", "--cookie-jar", "/private/jar.json",
+    "--load-resources", "iframe", "--load-resources", "stylesheet"
+  ]);
 });
 
 test("validates extraction schema and sequence bounds", async () => {

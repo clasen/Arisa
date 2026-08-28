@@ -1,9 +1,10 @@
 # lightpanda-browser
 
-A standalone Arisa tool for bounded public-web search, JavaScript rendering, and interaction with [Lightpanda](https://lightpanda.io/).
+A standalone Arisa tool for bounded public-web search, JavaScript rendering, and scoped interaction with [Lightpanda](https://lightpanda.io/).
 
-- use `lightpanda-browser` for anonymous public search and browsing;
-- use an explicitly selected Chromium tool for authenticated or unsupported workflows.
+- use anonymous mode for public search and browsing;
+- use authenticated mode only with a browser session explicitly shared through `browser-session-bridge`;
+- use an explicitly selected Chromium tool only when the exact workflow remains incompatible.
 
 The tool never silently changes engines.
 
@@ -23,9 +24,11 @@ Version 0.10 adds public web search without launching a browser process. It hedg
 
 Version 0.10.1 removes the legacy external-browser benchmark adapter. The bounded benchmark now measures Lightpanda alone, with Chromium available only through explicit opt-in.
 
+Version 0.11 adds authenticated sessions without accepting cookie values in tool arguments or output. `session-open-authenticated` reads one explicitly shared, same-site session from chat-scoped `browser-session-bridge` state, loads cookies through a private runtime file, refreshes cookies back to the bridge on clean close, and removes scratch files. Only one live session per resource is allowed. Every explicit and final URL must remain in scope. Web storage remains in memory for that live session because the current Lightpanda MCP build advertises but rejects its SQLite storage flags. Credential and payment controls remain blocked.
+
 ## Adaptive sessions
 
-1. Call `session-open` and retain the returned opaque `sessionId`.
+1. Call `session-open` for anonymous browsing, or `session-open-authenticated` with a bridge `resourceId`, and retain the returned opaque `sessionId`.
 2. Call `session-call` with that id, one allowlisted MCP `tool`, and `toolArgs` as a JSON object string.
 3. Inspect the result and make the next call using the same id.
 4. Optionally call `session-capture` for a bounded text-layout PNG artifact.
@@ -41,7 +44,7 @@ Use `recipe-save` with a name, read/interact level, and validated steps. `recipe
 
 Pass `mode=interact` and `steps` as a JSON array string. At most 20 allowlisted operations run in one isolated browser context. Results include total and per-step latency plus observed peak browser-process RSS on Linux. Read operations include `goto`, `tree`, `links`, `markdown`, `html`, `extract`, form inspection, and bounded waits. Mutation operations (`fill`, `click`, `press`, `selectOption`, `setChecked`, `hover`, and `scroll`) require `allowMutations=true`.
 
-Selectors are required for element mutations so sequences remain reproducible. Arbitrary page-side evaluation, cookies, environment access, persistent profiles, and native agent/model execution are deliberately not exposed. The separate `session-capture` action exposes only bounded text-layout PNGs. Every explicit URL is validated before launch, Lightpanda blocks private networks during navigation and subresource loading, and the final URL is validated again.
+Selectors are required for element mutations so sequences remain reproducible. Arbitrary page-side evaluation, direct cookie access, environment access, and native agent/model execution are deliberately not exposed. Authenticated profiles consume cookies internally from the bridge and never return their values. The separate `session-capture` action exposes only bounded text-layout PNGs. Every explicit URL is validated before launch, Lightpanda blocks private networks during navigation and subresource loading, and the final URL is validated again.
 
 Example args:
 
@@ -65,16 +68,17 @@ Safety boundaries:
 - only absolute public HTTP(S) URLs without embedded credentials;
 - DNS answers containing loopback, private, link-local, reserved, documentation, or multicast addresses are rejected before launch;
 - Lightpanda's `--block-private-networks` applies the private-network policy again after DNS resolution to redirects and subresources;
-- robots.txt is obeyed by default;
+- robots.txt is obeyed by default for anonymous browsing; explicit user-session browsing is same-site scoped and does not obey robots by default;
 - every process has navigation, HTTP, watchdog, and outer-process deadlines and runs under Arisa's declared `browser` resource class;
 - Lightpanda V8 is capped at 64 MiB, HTTP responses at 4 MiB, and network concurrency is bounded;
 - captured browser output is bounded between 1 KiB and 1 MiB, with a 128 KiB default;
 - compatibility failures are explicit; there is no silent Chromium fallback;
-- no cookies, authenticated profiles, or private browser-session artifacts are accepted;
+- cookie values are accepted only from chat-scoped `browser-session-bridge` state, never from request arguments or artifacts, and never appear in output;
 - interaction sequences are capped at 20 operations and persistent actions use read/interact/commit levels;
 - commit-capable controls require a matching explicit intent, while purchase/payment and credential controls remain blocked;
 - native MCP runs with telemetry disabled and a minimal environment;
-- temporary persistent sessions exist only in daemon memory, never persist credentials or cookies, and close on expiry, cancellation, crash, recovery, or daemon exit;
+- anonymous sessions and authenticated web storage exist only in daemon memory; authenticated cookie refresh is returned atomically to the bridge on close;
+- authenticated scratch is mode 0700/0600 and removed on close; a newer bridge import is never overwritten by an older Lightpanda session;
 - daemon infrastructure uses Arisa's chat-scoped shared daemon runtime and internal health contract.
 
 ## Install the browser
@@ -96,8 +100,9 @@ Run tests with `npm test`. Run the bounded compatibility and resource probe with
 
 ## Engine switching
 
-- Use `lightpanda-browser` for anonymous public search, JavaScript, rendered HTML, and rendered link extraction.
-- Select Chromium explicitly for authenticated sessions, unsupported APIs, visual fidelity, downloads, CAPTCHA, or payment authentication.
+- Use anonymous Lightpanda for public search, JavaScript, rendered HTML, and rendered link extraction.
+- Use authenticated Lightpanda only after an explicit bridge share and validate the exact target independently.
+- Select Chromium explicitly for unsupported APIs, visual fidelity, downloads, CAPTCHA, or payment authentication.
 - Never interpret a Lightpanda failure as authorization to launch Chromium automatically.
 
 ## Bounded benchmark

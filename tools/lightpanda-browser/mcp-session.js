@@ -1,4 +1,5 @@
 import { spawn } from "node:child_process";
+import path from "node:path";
 import { readFile } from "node:fs/promises";
 import { createInterface } from "node:readline";
 import { authorizeAction, authorizeStaticAction, assertKnownActionTool, normalizeActionLevel } from "./action-policy.js";
@@ -113,8 +114,13 @@ export class McpProcess {
     this.lines = createInterface({ input: this.child.stdout });
     this.lines.on("line", (line) => this.onLine(line));
     this.child.stderr.on("data", (chunk) => this.captureStderr(chunk));
+    this.child.stdin.on("error", (error) => this.fail(error));
     this.child.once("error", (error) => this.fail(error));
-    this.child.once("close", (code, signal) => this.fail(new Error(`Lightpanda MCP exited (${signal || code}). ${this.stderr.join("").trim()}`)));
+    this.closed = new Promise((resolve) => { this.resolveClosed = resolve; });
+    this.child.once("close", (code, signal) => {
+      this.resolveClosed?.();
+      if (!this.closing) this.fail(new Error(`Lightpanda MCP exited (${signal || code}). ${this.stderr.join("").trim()}`));
+    });
     this.timer = timeoutMs > 0 ? setTimeout(() => {
       this.child.kill("SIGKILL");
       this.fail(Object.assign(new Error("Lightpanda interaction timed out."), { code: "LIGHTPANDA_TIMEOUT", retryable: true }));
@@ -183,7 +189,7 @@ export class McpProcess {
     await this.request("initialize", {
       protocolVersion: "2025-06-18",
       capabilities: {},
-      clientInfo: { name: "arisa-lightpanda-browser", version: "0.10.1" }
+      clientInfo: { name: "arisa-lightpanda-browser", version: "0.11.0" }
     });
     this.notify("notifications/initialized");
   }
@@ -198,23 +204,47 @@ export class McpProcess {
     return resultText(await this.callResult(tool, args));
   }
 
-  close() {
+  async close() {
+    if (this.closePromise) return this.closePromise;
+    this.closing = true;
     clearTimeout(this.timer);
     clearInterval(this.sampler);
-    this.lines.close();
-    this.child.stdin.end();
-    this.child.kill("SIGTERM");
+    this.closePromise = (async () => {
+      this.lines.close();
+      this.child.stdin.end();
+      this.child.kill("SIGTERM");
+      const force = setTimeout(() => this.child.kill("SIGKILL"), 2_000);
+      force.unref?.();
+      await this.closed;
+      clearTimeout(force);
+    })();
+    return this.closePromise;
   }
 }
 
-export function buildMcpCommand(config, timeoutMs) {
+function requiredRuntimePath(value, label) {
+  const normalized = String(value || "");
+  if (!path.isAbsolute(normalized) || normalized.includes("\u0000")) throw new Error(`${label} must be an absolute runtime path.`);
+  return normalized;
+}
+
+export function buildMcpCommand(config, timeoutMs, runtime = {}) {
   const command = [
     "mcp", "--block-private-networks", "--http-connect-timeout", String(Math.min(10_000, timeoutMs)),
     "--http-timeout", String(Math.min(15_000, timeoutMs)), "--http-max-response-size", String(4 * 1024 * 1024),
     "--http-max-concurrent", "8", "--http-max-host-open", "4", "--v8-max-heap-mb", "64",
     "--watchdog-ms", String(Math.min(15_000, timeoutMs)), "--ws-max-concurrent", "2", "--log-level", "error"
   ];
-  if (config.OBEY_ROBOTS !== false) command.push("--obey-robots");
+  const obeyRobots = runtime.authenticated ? config.AUTHENTICATED_OBEY_ROBOTS === true : config.OBEY_ROBOTS !== false;
+  if (obeyRobots) command.push("--obey-robots");
+  if (runtime.authenticated) {
+    command.push(
+      "--cookie", requiredRuntimePath(runtime.cookiePath, "cookiePath"),
+      "--cookie-jar", requiredRuntimePath(runtime.cookieJarPath, "cookieJarPath"),
+      "--load-resources", "iframe",
+      "--load-resources", "stylesheet"
+    );
+  }
   return command;
 }
 
@@ -267,6 +297,6 @@ export async function performInteraction({ steps: rawSteps, allowMutations, conf
       }
     };
   } finally {
-    client.close();
+    await client.close();
   }
 }

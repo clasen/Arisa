@@ -1,7 +1,7 @@
 {
   "name": "lightpanda-browser",
-  "version": "0.10.1",
-  "description": "Search the public web, open rendered pages, capture semantic layouts, and adaptively interact through bounded ephemeral or temporary chat-scoped Lightpanda sessions.",
+  "version": "0.11.0",
+  "description": "Search and render the public web or use explicitly shared, same-site browser sessions through bounded chat-scoped Lightpanda profiles.",
   "entry": "index.js",
   "daemon": {
     "scope": "chat",
@@ -61,7 +61,12 @@
     "OBEY_ROBOTS": {
       "type": "boolean",
       "required": false,
-      "prompt": "Require Lightpanda to obey robots.txt."
+      "prompt": "Require anonymous Lightpanda browsing to obey robots.txt."
+    },
+    "AUTHENTICATED_OBEY_ROBOTS": {
+      "type": "boolean",
+      "required": false,
+      "prompt": "Apply robots.txt to explicit user-session browsing. Defaults to false; authentication, scope, and target validation still apply."
     },
     "SESSION_TTL_MS": {
       "type": "number",
@@ -92,6 +97,8 @@
     "capture",
     "daemon",
     "headless",
+    "authenticated",
+    "cookies",
     "interaction",
     "javascript",
     "lightpanda",
@@ -108,6 +115,7 @@
     "search",
     "semantic",
     "session",
+    "storage",
     "web"
   ]
 }

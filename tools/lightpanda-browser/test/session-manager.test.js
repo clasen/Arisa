@@ -88,6 +88,41 @@ test("unsafe final navigation closes the persistent session", async () => {
   await service.close();
 });
 
+test("authenticated sessions are identified, unique per resource, and same-site scoped", async () => {
+  const clients = [];
+  const profiles = [];
+  const service = createPersistentSessionService({
+    binary: "/unused",
+    config: { SESSION_TTL_MS: 30_000, MAX_SESSIONS: 2, SESSION_SWEEP_MS: 10_000 },
+    createClient: async (options) => {
+      profiles.push(options.authenticatedProfile);
+      return clients[clients.push(fakeClient()) - 1];
+    },
+    profileStore: {
+      async open(resourceId) {
+        return {
+          resourceId,
+          publicMetadata: { authenticated: true, resourceId },
+          async finish() {}
+        };
+      }
+    },
+    lookup: async () => [{ address: "93.184.216.34" }]
+  });
+  const session = await service.processJob({ action: "session-open-authenticated", resourceId: "example.com" });
+  assert.equal(session.authenticated, true);
+  assert.equal(session.resourceId, "example.com");
+  assert.equal(profiles[0].resourceId, "example.com");
+  await assert.rejects(service.processJob({ action: "session-open-authenticated", resourceId: "example.com" }), /already active/);
+  await assert.rejects(
+    service.processJob({ action: "session-call", sessionId: session.id, tool: "goto", arguments: { url: "https://example.net/" } }),
+    /left the shared session scope/
+  );
+  assert.equal(clients[0].closed, true);
+  assert.equal(service.manager.list().length, 0);
+  await service.close();
+});
+
 test("session capture returns a bounded PNG file result", async () => {
   const root = await mkdtemp(path.join(os.tmpdir(), "lp-session-capture-"));
   const buffer = Buffer.alloc(24);

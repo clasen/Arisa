@@ -3,6 +3,7 @@ import { readFile } from "node:fs/promises";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import defaults from "./config.js";
 import { readBinaryVersion, resolveBinary, runProcess } from "./binary.js";
+import { createAuthenticatedProfileStore } from "./authenticated-profile.js";
 import { performBrowse } from "./browser-operation.js";
 import { performInteraction } from "./mcp-session.js";
 import { createPersistentSessionService } from "./daemon-service.js";
@@ -12,7 +13,7 @@ import { searchWeb } from "./web-search.js";
 const toolName = "lightpanda-browser";
 
 function help() {
-  console.log(`lightpanda-browser\n\nUsage:\n  node index.js --help\n  node index.js run --request-file <json>\n  node index.js daemon  # managed internally by Arisa\n\nModes:\n  status         Verify the installed Lightpanda binary.\n  search         Search the public web through bounded hedged HTTP providers.\n  open           Open a public JavaScript-rendered page as bounded Markdown.\n  render         Return the bounded rendered DOM as HTML.\n  extract-links  Extract bounded HTTP(S) links from the rendered DOM.\n  interact       Run a bounded, stateful MCP sequence in one ephemeral browser.\n  session-open   Open a temporary chat-scoped browser session.\n  session-call   Call one allowlisted MCP tool in an existing session.\n  session-capture Return a bounded text-layout PNG from an existing session.\n  session-list   List this chat's temporary sessions.\n  session-close  Close one temporary session explicitly.\n  recipe-save    Save a validated read/interact sequence in chat-scoped state.\n  recipe-list    List this chat's deterministic recipes.\n  recipe-run     Revalidate and replay one recipe without a model.\n  recipe-delete  Delete one recipe.\n\nSearch input: request.args.query, request.text, or request.artifact.text.\nBrowse input URL: request.args.url, request.text, or request.artifact.text.\nInteract input: request.args.steps as a JSON array string. Mutation operations also require allowMutations=true.\nSession call args: sessionId, tool, toolArgs (JSON object string), actionLevel=read|interact|commit, commitIntent=submit-form|post-content|delete when required.\nCapture args: sessionId, selector?, fullPage?. Recipe args: name?, recipeId?, steps?, actionLevel=read|interact.\nOptional args: timeoutMs, maxOutputBytes, waitMs, waitSelector, selector, maxLinks, stripUi.\n\nThis tool handles anonymous public search and JavaScript rendering. It never falls back to Chromium silently.\n`);
+  console.log(`lightpanda-browser\n\nUsage:\n  node index.js --help\n  node index.js run --request-file <json>\n  node index.js daemon  # managed internally by Arisa\n\nModes:\n  status         Verify the installed Lightpanda binary.\n  search         Search the public web through bounded hedged HTTP providers.\n  open           Open a public JavaScript-rendered page as bounded Markdown.\n  render         Return the bounded rendered DOM as HTML.\n  extract-links  Extract bounded HTTP(S) links from the rendered DOM.\n  interact       Run a bounded, stateful MCP sequence in one ephemeral browser.\n  session-open   Open a temporary anonymous chat-scoped browser session.\n  session-open-authenticated Open a scoped session from browser-session-bridge cookies. args: resourceId.\n  session-call   Call one allowlisted MCP tool in an existing session.\n  session-capture Return a bounded text-layout PNG from an existing session.\n  session-list   List this chat's temporary sessions.\n  session-close  Close one temporary session explicitly and refresh authenticated cookies.\n  recipe-save    Save a validated read/interact sequence in chat-scoped state.\n  recipe-list    List this chat's deterministic recipes.\n  recipe-run     Revalidate and replay one recipe without a model.\n  recipe-delete  Delete one recipe.\n\nSearch input: request.args.query, request.text, or request.artifact.text.\nBrowse input URL: request.args.url, request.text, or request.artifact.text.\nInteract input: request.args.steps as a JSON array string. Mutation operations also require allowMutations=true.\nSession call args: sessionId, tool, toolArgs (JSON object string), actionLevel=read|interact|commit, commitIntent=submit-form|post-content|delete when required.\nCapture args: sessionId, selector?, fullPage?. Recipe args: name?, recipeId?, steps?, actionLevel=read|interact.\nOptional args: timeoutMs, maxOutputBytes, waitMs, waitSelector, selector, maxLinks, stripUi.\n\nAnonymous mode handles public search/rendering. Authenticated mode consumes only an explicitly shared, same-site browser-session-bridge session and never returns cookie values. It never falls back to Chromium silently.\n`);
 }
 
 function coreImport(relativePath) {
@@ -106,9 +107,12 @@ async function run(request) {
       const daemon = chatDaemonRuntime(createDaemonRuntime, request.chatId);
       const timeoutMs = boundedInteger(config.JOB_TIMEOUT_MS, defaults.JOB_TIMEOUT_MS, 5_000, 60_000);
       const readyTimeoutMs = boundedInteger(config.READY_TIMEOUT_MS, defaults.READY_TIMEOUT_MS, 5_000, 60_000);
-      if (mode === "session-open") {
-        const output = await daemon.submit({ action: mode }, { timeoutMs, readyTimeoutMs });
-        return toolOk({ text: `Opened temporary Lightpanda session ${output.id}.`, json: output });
+      if (mode === "session-open" || mode === "session-open-authenticated") {
+        const resourceId = String(request.args?.resourceId || "").trim().toLowerCase();
+        if (mode === "session-open-authenticated" && !resourceId) return toolError("session-open-authenticated requires resourceId.");
+        const output = await daemon.submit({ action: mode, ...(resourceId ? { resourceId } : {}) }, { timeoutMs, readyTimeoutMs });
+        const label = output.authenticated ? `authenticated Lightpanda session for ${output.resourceId}` : "temporary Lightpanda session";
+        return toolOk({ text: `Opened ${label} ${output.id}.`, json: output });
       }
       if (mode === "session-list") {
         const output = await daemon.submit({ action: mode }, { timeoutMs, readyTimeoutMs });
@@ -209,7 +213,7 @@ async function run(request) {
 }
 
 async function runDaemon() {
-  const [{ loadToolConfig }, { createDaemonRuntime }, { readDaemonLaunchContext }, { getChatToolTmpDir, getToolStateDir }] = await Promise.all([
+  const [{ loadToolConfig }, { createDaemonRuntime }, { readDaemonLaunchContext }, { getChatToolStateDir, getChatToolTmpDir, getToolStateDir }] = await Promise.all([
     coreImport("core/tools/tool-config.js"),
     coreImport("core/tools/daemon-runtime.js"),
     coreImport("core/tools/daemon-processes.js"),
@@ -222,7 +226,11 @@ async function runDaemon() {
   let config = await loadToolConfig(toolName, defaults, chatId);
   let binary = await resolveBinary(config.LIGHTPANDA_BINARY, getToolStateDir(toolName));
   const tmpDir = getChatToolTmpDir(chatId, toolName);
-  let service = createPersistentSessionService({ binary, config, tmpDir });
+  const profileStore = createAuthenticatedProfileStore({
+    bridgeStateDir: getChatToolStateDir(chatId, "browser-session-bridge"),
+    tmpDir
+  });
+  let service = createPersistentSessionService({ binary, config, tmpDir, profileStore });
   await daemon.workLoop({
     idleTimeoutMs: boundedInteger(config.IDLE_TIMEOUT_MS, defaults.IDLE_TIMEOUT_MS, 60_000, 60 * 60_000),
     processJob: (job, context) => service.processJob(job, context),
@@ -231,7 +239,7 @@ async function runDaemon() {
       await service.close("recovery");
       config = await loadToolConfig(toolName, defaults, chatId);
       binary = await resolveBinary(config.LIGHTPANDA_BINARY, getToolStateDir(toolName));
-      service = createPersistentSessionService({ binary, config, tmpDir });
+      service = createPersistentSessionService({ binary, config, tmpDir, profileStore });
       return true;
     },
     beforeExit: () => service.close("daemon-exit")

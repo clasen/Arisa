@@ -22,13 +22,17 @@ export class BrowserSessionManager {
     this.sweeper.unref?.();
   }
 
-  async open() {
+  async open(options = {}) {
     await this.reapExpired();
     if (this.sessions.size >= this.maxSessions) throw new Error(`Lightpanda session limit reached (${this.maxSessions}). Close or wait for an existing session to expire.`);
+    const metadata = options.publicMetadata && typeof options.publicMetadata === "object" ? structuredClone(options.publicMetadata) : {};
+    if (metadata.resourceId && [...this.sessions.values()].some((session) => session.metadata?.resourceId === metadata.resourceId)) {
+      throw new Error(`An authenticated Lightpanda session is already active for ${metadata.resourceId}.`);
+    }
     const id = sessionId();
-    const client = await this.createClient();
+    const client = await this.createClient(options);
     const timestamp = this.now();
-    this.sessions.set(id, { id, client, createdAt: timestamp, lastUsedAt: timestamp, busy: false });
+    this.sessions.set(id, { id, client, metadata, createdAt: timestamp, lastUsedAt: timestamp, busy: false });
     return this.describe(this.sessions.get(id));
   }
 
@@ -38,7 +42,8 @@ export class BrowserSessionManager {
       createdAt: new Date(session.createdAt).toISOString(),
       lastUsedAt: new Date(session.lastUsedAt).toISOString(),
       expiresAt: new Date(session.lastUsedAt + this.ttlMs).toISOString(),
-      busy: session.busy
+      busy: session.busy,
+      ...session.metadata
     };
   }
 
@@ -48,6 +53,10 @@ export class BrowserSessionManager {
 
   has(id) {
     return this.sessions.has(String(id || ""));
+  }
+
+  metadata(id) {
+    return structuredClone(this.get(id).metadata || {});
   }
 
   get(id) {
