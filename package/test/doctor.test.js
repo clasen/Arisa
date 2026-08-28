@@ -121,6 +121,25 @@ test("lists each checked daemon with its scope and state", async () => {
   assert.ok(formatted.split("\n").every((line) => [...line].length <= 35));
 });
 
+test("reports automatic obsolete daemon cleanup and unverifiable leftovers", async () => {
+  const { report } = await run({
+    repairs: [
+      {
+        record: { toolName: "removed", instanceId: "global", scope: { type: "global" } },
+        outcome: "obsolete-removed",
+        reason: "tool is no longer installed"
+      },
+      {
+        record: { toolName: "unknown-pid", instanceId: "global", scope: { type: "global" } },
+        outcome: "obsolete-unverified"
+      }
+    ]
+  });
+
+  assert.match(report.repairs.join("\n"), /Removed obsolete daemon removed/);
+  assert.match(report.attention.join("\n"), /unknown-pid.*could not be verified/);
+});
+
 test("reports missing tool dependencies as attention items", async () => {
   const report = await runDoctor({
     agentManager: { getRuntimeDiagnostic: async () => runtime() },

@@ -244,7 +244,7 @@ test("supervisor ignores invalid chat directories and recovers valid daemons", a
   }
 });
 
-test("does not restart registrations whose scope no longer matches the tool manifest", async () => {
+test("removes stopped registrations whose scope no longer matches the tool manifest", async () => {
   const runtime = runtimeFor({ type: "global" }, { autoStart: true });
   const registry = new ToolRegistry();
   registry.tools.set("fake-daemon", {
@@ -267,11 +267,9 @@ test("does not restart registrations whose scope no longer matches the tool mani
   const results = await supervisor.repair();
   const result = results.find((item) => item.record.toolName === "fake-daemon" && item.record.instanceId === "global");
 
-  assert.equal(result.outcome, "stale-registration");
+  assert.equal(result.outcome, "obsolete-removed");
   assert.match(result.reason, /global scope does not match manifest chat scope/);
   assert.equal(isProcessAlive(await runtime.getPid()), false);
-
-  await unregisterManagedDaemon({ toolName: "fake-daemon", scope: { type: "global" } });
   assert.deepEqual(await readJson(runtime.paths.metaFile, null), null);
 });
 

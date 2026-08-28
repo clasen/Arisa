@@ -280,6 +280,13 @@ export async function unregisterManagedDaemon(toolNameOrOptions, { scope } = {})
   return { toolName: paths.toolName, scope: paths.scope, instanceId: paths.instanceId };
 }
 
+export async function purgeManagedDaemon(toolNameOrOptions, { scope } = {}) {
+  const paths = daemonPaths(toolNameOrOptions, scope);
+  await unregisterManagedDaemon(toolNameOrOptions, { scope });
+  await rm(paths.root, { recursive: true, force: true });
+  return { toolName: paths.toolName, scope: paths.scope, instanceId: paths.instanceId };
+}
+
 export async function stopManagedDaemon(toolNameOrOptions, {
   scope,
   signal = "SIGTERM",

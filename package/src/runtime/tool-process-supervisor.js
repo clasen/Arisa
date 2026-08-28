@@ -9,6 +9,7 @@ import {
 } from "../core/tools/daemon-processes.js";
 import { loadDaemonPolicy } from "../core/tools/daemon-policy.js";
 import { ensureArisaHome } from "../platform/paths.js";
+import { reapObsoleteDaemon } from "./obsolete-daemon-reaper.js";
 
 async function fileExists(file) {
   try {
@@ -58,7 +59,12 @@ function validateRegistration(record, toolRegistry) {
   };
 }
 
-export function createToolProcessSupervisor({ logger, policy, toolRegistry } = {}) {
+export function createToolProcessSupervisor({
+  logger,
+  policy,
+  toolRegistry,
+  obsoleteDaemonReaper = reapObsoleteDaemon
+} = {}) {
   let running = false;
   let timer = null;
   let reconciliation = null;
@@ -75,13 +81,34 @@ export function createToolProcessSupervisor({ logger, policy, toolRegistry } = {
     for (const registeredRecord of await listRegisteredDaemons()) {
       const validation = validateRegistration(registeredRecord, toolRegistry);
       if (!validation.valid) {
-        logger?.log("tools", `skipping stale daemon registration ${registeredRecord.toolName} (${registeredRecord.instanceId || "global"}): ${validation.reason}`);
-        results.push({
-          record: registeredRecord,
-          outcome: "stale-registration",
-          reason: validation.reason,
-          diagnostic: await readDaemonDiagnostic(registeredRecord)
-        });
+        const diagnostic = await readDaemonDiagnostic(registeredRecord);
+        try {
+          const result = await obsoleteDaemonReaper({
+            record: registeredRecord,
+            diagnostic,
+            reason: validation.reason,
+            timeoutMs: daemonPolicy.healthTimeoutMs,
+            stopTimeoutMs: daemonPolicy.stopTimeoutMs
+          });
+          results.push(result);
+          const key = `${registeredRecord.toolName}:${registeredRecord.instanceId || "global"}`;
+          const message = result.outcome === "obsolete-removed"
+            ? `removed obsolete daemon ${registeredRecord.toolName} (${registeredRecord.instanceId || "global"}): ${validation.reason}`
+            : `left obsolete daemon ${registeredRecord.toolName} (${registeredRecord.instanceId || "global"}) untouched because process identity could not be verified`;
+          if (reportedDiagnostics.get(key) !== message) {
+            reportedDiagnostics.set(key, message);
+            logger?.log("tools", message);
+          }
+        } catch (error) {
+          logger?.error?.("tools", `obsolete daemon cleanup failed for ${registeredRecord.toolName}: ${error?.message || error}`);
+          results.push({
+            record: registeredRecord,
+            outcome: "obsolete-cleanup-error",
+            reason: validation.reason,
+            diagnostic,
+            error: error?.message || String(error)
+          });
+        }
         continue;
       }
       const record = validation.record;

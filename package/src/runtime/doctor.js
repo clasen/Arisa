@@ -1,86 +1,21 @@
-import { execFile } from "node:child_process";
 import { statfs } from "node:fs/promises";
 import os from "node:os";
 import process from "node:process";
-import { promisify } from "node:util";
 import { stopManagedDaemon, unregisterManagedDaemon } from "../core/tools/daemon-processes.js";
 import { getServiceStatus, serviceEntryFile } from "./service-manager.js";
 import { arisaHomeDir } from "../platform/paths.js";
 import { renderTextReport, reportRow, wrapReportText } from "./report-format.js";
+import {
+  isArisaServiceProcess as matchesArisaServiceProcess,
+  isDaemonProcess,
+  listSystemProcesses,
+  terminateProcess
+} from "./process-inspection.js";
 
-const execFileAsync = promisify(execFile);
-
-function parsePosixProcesses(output) {
-  return String(output || "")
-    .split("\n")
-    .map((line) => /^\s*(\d+)\s+(.+)$/.exec(line))
-    .filter(Boolean)
-    .map((match) => ({ pid: Number(match[1]), command: match[2] }));
-}
-
-function parseWindowsProcesses(output) {
-  const parsed = JSON.parse(output || "[]");
-  const records = Array.isArray(parsed) ? parsed : [parsed];
-  return records
-    .filter((record) => record?.ProcessId && record?.CommandLine)
-    .map((record) => ({ pid: Number(record.ProcessId), command: String(record.CommandLine) }));
-}
-
-export async function listSystemProcesses({ timeoutMs, platform = process.platform } = {}) {
-  if (!Number.isFinite(timeoutMs) || timeoutMs <= 0) {
-    throw new Error("Doctor process inspection requires a positive timeoutMs");
-  }
-  if (platform === "win32") {
-    const { stdout } = await execFileAsync("powershell.exe", [
-      "-NoProfile",
-      "-Command",
-      "Get-CimInstance Win32_Process | Select-Object ProcessId,CommandLine | ConvertTo-Json -Compress"
-    ], { timeout: timeoutMs, windowsHide: true });
-    return parseWindowsProcesses(stdout);
-  }
-  const { stdout } = await execFileAsync("ps", ["-ww", "-axo", "pid=,command="], { timeout: timeoutMs });
-  return parsePosixProcesses(stdout);
-}
+export { listSystemProcesses, terminateProcess } from "./process-inspection.js";
 
 function isArisaServiceProcess(record) {
-  return record.command.includes(serviceEntryFile)
-    && /(?:^|\s)--service-runner(?:\s|$)/.test(record.command);
-}
-
-function isDaemonProcess(record, daemon) {
-  return record.command.includes(daemon.entryPath)
-    && /(?:^|\s)daemon(?:\s|$)/.test(record.command);
-}
-
-function sleep(ms) {
-  return new Promise((resolve) => setTimeout(resolve, ms));
-}
-
-function isAlive(pid) {
-  try {
-    process.kill(pid, 0);
-    return true;
-  } catch {
-    return false;
-  }
-}
-
-export async function terminateProcess(pid, { forceAfterMs } = {}) {
-  if (!Number.isSafeInteger(pid) || pid <= 0 || pid === process.pid) {
-    throw new Error(`Refusing to terminate invalid doctor target: ${pid}`);
-  }
-  if (!Number.isFinite(forceAfterMs) || forceAfterMs <= 0) {
-    throw new Error("Doctor process cleanup requires a positive forceAfterMs");
-  }
-  if (!isAlive(pid)) return false;
-  process.kill(pid, "SIGTERM");
-  const startedAt = Date.now();
-  while (Date.now() - startedAt < forceAfterMs) {
-    if (!isAlive(pid)) return true;
-    await sleep(Math.min(100, forceAfterMs));
-  }
-  if (isAlive(pid)) process.kill(pid, "SIGKILL");
-  return true;
+  return matchesArisaServiceProcess(record, serviceEntryFile);
 }
 
 function daemonLabel(record) {
@@ -386,6 +321,18 @@ export async function runDoctor({
   }
   for (const result of report.daemons) {
     const label = daemonLabel(result.record);
+    if (result.outcome === "obsolete-removed") {
+      report.repairs.push(`Removed obsolete daemon ${label}: ${result.reason}.`);
+      continue;
+    }
+    if (result.outcome === "obsolete-unverified") {
+      report.attention.push(`${label} is obsolete, but its live process identity could not be verified.`);
+      continue;
+    }
+    if (result.outcome === "obsolete-cleanup-error") {
+      report.attention.push(`${label} obsolete daemon cleanup failed: ${result.error || "unknown error"}.`);
+      continue;
+    }
     if (result.outcome === "stale-registration") {
       const pid = result.diagnostic?.pid;
       const registered = pid ? processByPid.get(pid) : null;
