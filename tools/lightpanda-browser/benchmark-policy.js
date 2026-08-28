@@ -4,7 +4,7 @@ export const benchmarkFixtures = Object.freeze([
   Object.freeze({ id: "news", url: "https://news.ycombinator.com/", requiredText: Object.freeze(["Hacker News"]) })
 ]);
 
-export const benchmarkEngines = Object.freeze(["web-browser", "lightpanda", "chromium"]);
+export const benchmarkEngines = Object.freeze(["lightpanda", "chromium"]);
 export const benchmarkLimits = Object.freeze({ pages: 3, runsPerPage: 1, timeoutMs: 30_000, captureBytes: 1024 * 1024 });
 
 export function contentMatchesFixture(fixture, content) {

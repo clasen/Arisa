@@ -7,7 +7,7 @@ test("benchmark is fixed, bounded, reproducible, and anonymous", () => {
   assert.equal(benchmarkFixtures.length, 3);
   assert.equal(benchmarkLimits.runsPerPage, 1);
   assert.equal(benchmarkLimits.timeoutMs, 30_000);
-  assert.deepEqual(benchmarkEngines, ["web-browser", "lightpanda", "chromium"]);
+  assert.deepEqual(benchmarkEngines, ["lightpanda", "chromium"]);
   for (const fixture of benchmarkFixtures) {
     const url = new URL(fixture.url);
     assert.equal(url.protocol, "https:");

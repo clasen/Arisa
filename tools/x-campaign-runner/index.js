@@ -308,9 +308,20 @@ function mergeSeedCandidates(state, profile, excluded) {
   return added;
 }
 
+export function searchResultsFromToolOutput(output) {
+  if (Array.isArray(output?.results)) {
+    return output.results.map((item) => ({
+      title: clean(item?.title),
+      url: clean(item?.url),
+      snippet: clean(item?.snippet)
+    })).filter((item) => item.url);
+  }
+  return parseSearchResults(output?.text || "");
+}
+
 async function discoverCandidates(arisa, profile, state, excluded, needed, creative = false) {
   const discovery = profile.discovery || {};
-  const webTool = discovery.webTool || "web-browser";
+  const webTool = discovery.webTool || "lightpanda-browser";
   const xSearchTool = discovery.xSearchTool || profile.dmTool || "x-dm";
   const queries = nextQueries(profile, state, creative);
   const catalog = queryCatalog(profile, creative);
@@ -369,7 +380,7 @@ async function discoverCandidates(arisa, profile, state, excluded, needed, creat
     try {
       const output = await runTool(arisa, webTool, { mode: "search", maxResults: String(discovery.maxResults || 10) }, intArg(discovery.timeoutMs, 90000), query);
       searches += 1;
-      webResults = parseSearchResults(output.text);
+      webResults = searchResultsFromToolOutput(output);
     } catch (error) { errors.push({ query, source: "web-search", error: clean(error.message || error).slice(0, 300) }); }
     if (!webResults.length && discovery.duckDuckGoFallback !== false) {
       try {

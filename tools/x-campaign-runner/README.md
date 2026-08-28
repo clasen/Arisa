@@ -4,7 +4,7 @@ Runs evidence-backed, profile-driven organic outreach on X while keeping `x-dm` 
 
 ## Workflow
 
-1. `discover` rotates standard queries, then creative queries when necessary. It uses authenticated X post and people search first, strips web-only `site:x.com` operators from native queries, and falls back to the registered `web-browser` only when X yields no accepted candidate. Every prospect retains its public source, query, snippet, score, and discovery time.
+1. `discover` rotates standard queries, then creative queries when necessary. It uses authenticated X post and people search first, strips web-only `site:x.com` operators from native queries, and falls back to bounded structured `lightpanda-browser` search only when X yields no accepted candidate. Every prospect retains its public source, query, snippet, score, and discovery time.
 2. `prepare-next` excludes all prior X DM recipients, ranks candidates, verifies that the profile exposes a real DM composer, renders deterministic copy from evidence, and persists one expiring approval. It never sends.
 3. The user reviews the exact candidate and message.
 4. `send-approved` requires the persisted `approvalId`, exact `messageHash`, unchanged profile digest, `confirm=true`, and `dryRun=false`. When `follow.enabled` is true, it first asks `x-dm` to verify or create the target follow and persists that result before attempting the DM. A failed or uncertain follow blocks the DM.

@@ -1,47 +1,45 @@
 {
-  "generatedAt": "2026-08-28T15:35:28.140Z",
-  "legacySuccessRule": true,
-  "warning": "Historical non-empty-output result; rerun version 0.4 for semantic success rates.",
+  "generatedAt": "2026-08-28T23:17:59.777Z",
   "policy": {
     "fixtures": [
       {
         "id": "static",
-        "url": "https://example.com/"
+        "url": "https://example.com/",
+        "requiredText": [
+          "Example Domain"
+        ]
       },
       {
         "id": "javascript",
-        "url": "https://demo-browser.lightpanda.io/amiibo/"
+        "url": "https://demo-browser.lightpanda.io/amiibo/",
+        "requiredText": [
+          "Sandy",
+          "Animal Crossing",
+          "Isabelle"
+        ]
       },
       {
         "id": "news",
-        "url": "https://news.ycombinator.com/"
+        "url": "https://news.ycombinator.com/",
+        "requiredText": [
+          "Hacker News"
+        ]
       }
     ],
     "runsPerPage": 1,
     "timeoutMs": 30000,
     "authenticatedSessions": false
   },
-  "chromiumAvailable": true,
+  "chromiumRequested": false,
+  "chromiumAvailable": false,
   "results": [
-    {
-      "engine": "web-browser",
-      "fixture": "static",
-      "url": "https://example.com/",
-      "success": true,
-      "elapsedMs": 3040,
-      "peakRssMiB": 60.7,
-      "contentBytes": 409,
-      "exitCode": 0,
-      "timedOut": false,
-      "detail": ""
-    },
     {
       "engine": "lightpanda",
       "fixture": "static",
       "url": "https://example.com/",
       "success": true,
-      "elapsedMs": 1596.1,
-      "peakRssMiB": 19.8,
+      "elapsedMs": 1573.3,
+      "peakRssMiB": 19.9,
       "contentBytes": 169,
       "exitCode": 0,
       "timedOut": false,
@@ -52,33 +50,17 @@
       "fixture": "static",
       "url": "https://example.com/",
       "success": false,
-      "elapsedMs": 30799,
-      "peakRssMiB": 733.7,
-      "contentBytes": 0,
-      "exitCode": null,
-      "timedOut": true,
-      "detail": "[299526:299526:0828/123350.258866:ERROR:base/memory/shared_memory_switch.cc:289] Failed global descriptor lookup: 7\n[299489:299504:0828/123356.001753:ERROR:google_apis/gcm/engine/registration_request.cc:291] Registration response error mess"
-    },
-    {
-      "engine": "web-browser",
-      "fixture": "javascript",
-      "url": "https://demo-browser.lightpanda.io/amiibo/",
-      "success": true,
-      "elapsedMs": 3916.7,
-      "peakRssMiB": 60.9,
-      "contentBytes": 1187,
-      "exitCode": 0,
-      "timedOut": false,
-      "detail": ""
+      "skipped": true,
+      "detail": "Chromium excluded by default; set INCLUDE_CHROMIUM=true explicitly"
     },
     {
       "engine": "lightpanda",
       "fixture": "javascript",
       "url": "https://demo-browser.lightpanda.io/amiibo/",
       "success": true,
-      "elapsedMs": 722,
-      "peakRssMiB": 21.3,
-      "contentBytes": 144,
+      "elapsedMs": 1647.5,
+      "peakRssMiB": 22.5,
+      "contentBytes": 1029,
       "exitCode": 0,
       "timedOut": false,
       "detail": ""
@@ -88,33 +70,17 @@
       "fixture": "javascript",
       "url": "https://demo-browser.lightpanda.io/amiibo/",
       "success": false,
-      "elapsedMs": 30327.8,
-      "peakRssMiB": 733.8,
-      "contentBytes": 0,
-      "exitCode": null,
-      "timedOut": true,
-      "detail": "[299648:299648:0828/123424.184849:ERROR:base/memory/shared_memory_switch.cc:289] Failed global descriptor lookup: 7\n[299609:299625:0828/123427.632677:ERROR:google_apis/gcm/engine/registration_request.cc:291] Registration response error mess"
-    },
-    {
-      "engine": "web-browser",
-      "fixture": "news",
-      "url": "https://news.ycombinator.com/",
-      "success": true,
-      "elapsedMs": 2974.8,
-      "peakRssMiB": 60.2,
-      "contentBytes": 12078,
-      "exitCode": 0,
-      "timedOut": false,
-      "detail": ""
+      "skipped": true,
+      "detail": "Chromium excluded by default; set INCLUDE_CHROMIUM=true explicitly"
     },
     {
       "engine": "lightpanda",
       "fixture": "news",
       "url": "https://news.ycombinator.com/",
       "success": true,
-      "elapsedMs": 1492.9,
-      "peakRssMiB": 23.1,
-      "contentBytes": 19002,
+      "elapsedMs": 3736.3,
+      "peakRssMiB": 23.4,
+      "contentBytes": 19056,
       "exitCode": 0,
       "timedOut": false,
       "detail": ""
@@ -124,38 +90,26 @@
       "fixture": "news",
       "url": "https://news.ycombinator.com/",
       "success": false,
-      "elapsedMs": 30335.6,
-      "peakRssMiB": 740.6,
-      "contentBytes": 0,
-      "exitCode": null,
-      "timedOut": true,
-      "detail": "[299773:299773:0828/123459.003044:ERROR:base/memory/shared_memory_switch.cc:289] Failed global descriptor lookup: 7\n[299737:299750:0828/123503.159282:ERROR:google_apis/gcm/engine/registration_request.cc:291] Registration response error mess"
+      "skipped": true,
+      "detail": "Chromium excluded by default; set INCLUDE_CHROMIUM=true explicitly"
     }
   ],
   "summary": [
     {
-      "engine": "web-browser",
-      "attempted": 3,
-      "succeeded": 3,
-      "successRate": 1,
-      "medianElapsedMs": 3040,
-      "medianPeakRssMiB": 60.7
-    },
-    {
       "engine": "lightpanda",
       "attempted": 3,
       "succeeded": 3,
       "successRate": 1,
-      "medianElapsedMs": 1492.9,
-      "medianPeakRssMiB": 21.3
+      "medianElapsedMs": 1647.5,
+      "medianPeakRssMiB": 22.5
     },
     {
       "engine": "chromium",
-      "attempted": 3,
+      "attempted": 0,
       "succeeded": 0,
-      "successRate": 0,
-      "medianElapsedMs": 30335.6,
-      "medianPeakRssMiB": 733.8
+      "successRate": null,
+      "medianElapsedMs": null,
+      "medianPeakRssMiB": null
     }
   ]
 }

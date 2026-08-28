@@ -1,6 +1,6 @@
 ﻿import test from "node:test";
 import assert from "node:assert/strict";
-import { availableCandidates, candidateScore, greetingNameFor, handleFromXUrl, hasGroundedCoverageEvidence, isUncertainDeliveryError, parseSearchResults, pendingApproval, renderMessage, sha256, targetBoundGreeting } from "../index.js";
+import { availableCandidates, candidateScore, greetingNameFor, handleFromXUrl, hasGroundedCoverageEvidence, isUncertainDeliveryError, parseSearchResults, pendingApproval, renderMessage, searchResultsFromToolOutput, sha256, targetBoundGreeting } from "../index.js";
 
 test("extracts only real X profile handles", () => {
   assert.equal(handleFromXUrl("https://x.com/Good_Handle/status/123"), "Good_Handle");
@@ -9,13 +9,25 @@ test("extracts only real X profile handles", () => {
   assert.equal(handleFromXUrl("https://example.com/user"), "");
 });
 
-test("parses web-browser search results with provenance", () => {
+test("parses legacy text search results with provenance", () => {
   const results = parseSearchResults(`Search: test
 
 1. Creator (@Creator) / X
 URL: https://x.com/Creator
 Snippet: Reviews narrative games`);
   assert.deepEqual(results, [{ title: "Creator (@Creator) / X", url: "https://x.com/Creator", snippet: "Reviews narrative games" }]);
+});
+
+test("consumes structured Lightpanda search results without reparsing text", () => {
+  assert.deepEqual(searchResultsFromToolOutput({ results: [{
+    title: "Creator (@Creator) / X",
+    url: "https://x.com/Creator/status/1",
+    snippet: "Reviews interactive fiction"
+  }] }), [{
+    title: "Creator (@Creator) / X",
+    url: "https://x.com/Creator/status/1",
+    snippet: "Reviews interactive fiction"
+  }]);
 });
 
 test("scoring rewards close comparables and penalizes paid promotion", () => {

@@ -1,7 +1,10 @@
 {
   "name": "x-campaign-runner",
-  "version": "0.1.1",
-  "toolDependencies": { "x-dm": "^0.4.0" },
+  "version": "0.2.0",
+  "toolDependencies": {
+    "x-dm": "^0.4.0",
+    "lightpanda-browser": "^0.10.1"
+  },
   "description": "Run profile-driven organic X outreach: discover relevant public candidates with source evidence, exclude prior recipients, score and validate DM availability, personalize one message, and propose or send at most one DM per run through x-dm.",
   "entry": "index.js",
   "input": [
@@ -29,7 +32,8 @@
     "outreach",
     "personalization",
     "dedupe",
-    "research"
+    "research",
+    "lightpanda"
   ],
   "skillHints": [
     {

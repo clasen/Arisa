@@ -143,22 +143,6 @@ async function runLightpanda(fixture, binary) {
   }
 }
 
-async function runWebBrowser(fixture, webBrowserEntry, requestFile) {
-  await writeFile(requestFile, JSON.stringify({ text: fixture.url, args: { mode: "open", url: fixture.url } }), "utf8");
-  const measured = await runMeasured(process.execPath, [webBrowserEntry, "run", "--request-file", requestFile], {
-    ...benchmarkLimits,
-    env: { ...process.env, ARISA_PACKAGE_DIR: process.env.ARISA_PACKAGE_DIR }
-  });
-  try {
-    const payload = JSON.parse(measured.stdout);
-    const content = payload.output?.text || "";
-    const semanticMatch = contentMatchesFixture(fixture, content);
-    return outcome("web-browser", fixture, measured, payload.ok === true && semanticMatch, Buffer.byteLength(content), payload.error || (!semanticMatch ? "semantic assertion failed" : measured.stderr));
-  } catch {
-    return outcome("web-browser", fixture, measured, false, 0, measured.stderr || "invalid JSON response");
-  }
-}
-
 async function runChromium(fixture, chromium, profileDir) {
   if (!chromium) return { engine: "chromium", fixture: fixture.id, url: fixture.url, success: false, skipped: true, detail: "Chromium executable unavailable" };
   const measured = await runMeasured(chromium, [
@@ -187,23 +171,21 @@ function summarize(results) {
 
 function markdown(report) {
   const rows = report.summary.map((row) => `| ${row.engine} | ${row.succeeded}/${row.attempted} | ${row.medianElapsedMs ?? "n/a"} | ${row.medianPeakRssMiB ?? "n/a"} |`);
-  return `# Lightpanda browser benchmark\n\nGenerated: ${report.generatedAt}\n\nThis is a bounded directional benchmark: three anonymous public HTTPS pages, one run per engine and page. Success requires fixture-specific semantic content, not merely HTTP 200 or non-empty output. Network variance means the latency values are not a durable performance claim. Peak RSS is the sampled process-tree resident set, not heap. Medians include failed and timed-out attempts so resource cost is not hidden.\n\n| Engine | Success | Median observed latency (ms) | Median observed peak RSS (MiB) |\n|---|---:|---:|---:|\n${rows.join("\n")}\n\n## Switching guidance\n\n1. Use \`web-browser\` first for search and static/readable pages; it has no rendering engine.\n2. Use \`lightpanda-browser\` for anonymous public pages that require JavaScript or rendered-DOM extraction.\n3. Select Chromium explicitly for authenticated sessions, unsupported browser APIs, visual fidelity, downloads, CAPTCHA, or payment authentication.\n4. A Lightpanda compatibility failure never triggers Chromium automatically.\n5. Keep browser outputs bounded because the active Pi session, not browser subprocess RSS, caused the observed worker OOM.\n\nRaw bounded results are stored in \`benchmark-latest.json\`.\n`;
+  return `# Lightpanda browser benchmark\n\nGenerated: ${report.generatedAt}\n\nThis is a bounded directional benchmark: three anonymous public HTTPS pages, one run per engine and page. Success requires fixture-specific semantic content, not merely HTTP 200 or non-empty output. Network variance means the latency values are not a durable performance claim. Peak RSS is the sampled process-tree resident set, not heap. Medians include failed and timed-out attempts so resource cost is not hidden.\n\n| Engine | Success | Median observed latency (ms) | Median observed peak RSS (MiB) |\n|---|---:|---:|---:|\n${rows.join("\n")}\n\n## Switching guidance\n\n1. Use \`lightpanda-browser\` for anonymous public pages, including JavaScript and rendered-DOM extraction.\n2. Select Chromium explicitly for authenticated sessions, unsupported browser APIs, visual fidelity, downloads, CAPTCHA, or payment authentication.\n3. A Lightpanda compatibility failure never triggers Chromium automatically.\n4. Keep browser outputs bounded because active Pi tool results can raise worker heap usage.\n\nRaw bounded results are stored in \`benchmark-latest.json\`.\n`;
 }
 
 async function main() {
   validateBenchmarkPolicy();
-  const { getToolStateDir, getToolTmpDir, getToolDir } = await coreImport("runtime/paths.js");
+  const { getToolStateDir, getToolTmpDir } = await coreImport("runtime/paths.js");
   const stateDir = getToolStateDir(toolName);
   const temporaryDir = path.join(getToolTmpDir(toolName), `benchmark-${process.pid}-${Date.now()}`);
   const binary = defaultBinaryPath(stateDir);
   const includeChromium = String(process.env.INCLUDE_CHROMIUM || "").toLowerCase() === "true";
   const chromium = includeChromium ? await findChromium() : "";
-  const webBrowserEntry = path.join(getToolDir("web-browser"), "index.js");
   const results = [];
   await mkdir(temporaryDir, { recursive: true });
   try {
     for (const fixture of benchmarkFixtures) {
-      results.push(await runWebBrowser(fixture, webBrowserEntry, path.join(temporaryDir, `${fixture.id}-web.json`)));
       results.push(await runLightpanda(fixture, binary));
       results.push(includeChromium
         ? await runChromium(fixture, chromium, path.join(temporaryDir, `${fixture.id}-chrome`))

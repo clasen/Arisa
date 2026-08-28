@@ -1,9 +1,8 @@
 # lightpanda-browser
 
-A standalone Arisa tool for bounded JavaScript-rendered browsing with [Lightpanda](https://lightpanda.io/). It complements rather than replaces `web-browser`:
+A standalone Arisa tool for bounded public-web search, JavaScript rendering, and interaction with [Lightpanda](https://lightpanda.io/).
 
-- use `web-browser` for search and ordinary static/readable pages;
-- use `lightpanda-browser` when a public page requires JavaScript rendering;
+- use `lightpanda-browser` for anonymous public search and browsing;
 - use an explicitly selected Chromium tool for authenticated or unsupported workflows.
 
 The tool never silently changes engines.
@@ -21,6 +20,8 @@ Version 0.8 adds bounded text-layout PNG captures and deterministic recipes. Cap
 Version 0.9 adds a bounded Lightpanda-only limit suite. It uses fixture-specific semantic assertions across React, Vue, Angular, forms, modals, tables, scrolling, redirects, and iframes; probes 100 sequential navigations, two concurrent sessions, timeout recovery, Speedometer incompatibility, RSS trend, swap pressure, and process cleanup. Compatibility failures remain explicit and never trigger fallback. Chromium is excluded from the suite and from the ordinary benchmark unless `INCLUDE_CHROMIUM=true` is deliberately set.
 
 Version 0.10 adds public web search without launching a browser process. It hedges fixed direct Bing and DuckDuckGo HTTP providers, accepts the first semantically parseable bounded result, and uses fixed Jina proxies only if both direct providers fail within the same total deadline. Queries, result counts, response bytes, URLs, and time are bounded. Search metadata identifies the provider and the `bounded-http` transport honestly; Chromium is never involved.
+
+Version 0.10.1 removes the legacy external-browser benchmark adapter. The bounded benchmark now measures Lightpanda alone, with Chromium available only through explicit opt-in.
 
 ## Adaptive sessions
 
@@ -91,12 +92,11 @@ node index.js --help
 node index.js run --request-file request.json
 ```
 
-Run tests with `npm test`. Run the bounded compatibility and resource probe with `ARISA_PACKAGE_DIR=/path/to/arisa/package npm run limit-suite`.
+Run tests with `npm test`. Run the bounded compatibility and resource probe with `ARISA_PACKAGE_DIR=/path/to/arisa/package npm run limit-suite`. See `COMPATIBILITY-MIGRATION.md` for the evidence-based Chromium replacement matrix.
 
 ## Engine switching
 
-- Start with `web-browser` for search and ordinary readable pages because it uses HTTP/Jina rather than a rendering engine.
-- Switch to `lightpanda-browser` for anonymous public pages that require JavaScript, rendered HTML, or rendered link extraction.
+- Use `lightpanda-browser` for anonymous public search, JavaScript, rendered HTML, and rendered link extraction.
 - Select Chromium explicitly for authenticated sessions, unsupported APIs, visual fidelity, downloads, CAPTCHA, or payment authentication.
 - Never interpret a Lightpanda failure as authorization to launch Chromium automatically.
 

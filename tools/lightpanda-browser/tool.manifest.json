@@ -1,6 +1,6 @@
 {
   "name": "lightpanda-browser",
-  "version": "0.10.0",
+  "version": "0.10.1",
   "description": "Search the public web, open rendered pages, capture semantic layouts, and adaptively interact through bounded ephemeral or temporary chat-scoped Lightpanda sessions.",
   "entry": "index.js",
   "daemon": {
