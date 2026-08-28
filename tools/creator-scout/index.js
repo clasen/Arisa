@@ -60,10 +60,26 @@ async function openContext(chatId, config) {
   });
 }
 
-async function signedIn(page) {
-  await page.goto("https://www.creatorscout.dev/saved", { waitUntil: "domcontentloaded", timeout: 60000 });
-  await page.waitForTimeout(1200);
-  return (await page.locator("body").innerText()).includes("Sign out");
+async function signedIn(page, timeoutMs = 60000) {
+  await page.goto("https://www.creatorscout.dev/saved", { waitUntil: "domcontentloaded", timeout: timeoutMs });
+  const signOut = page.getByText("Sign out", { exact: true });
+  await signOut.waitFor({ state: "visible", timeout: Math.min(timeoutMs, 15000) }).catch(() => {});
+  return await signOut.isVisible().catch(() => false);
+}
+
+function operationTimeout(request, config) {
+  return boundedInteger(request.args?.operationTimeoutMs, config.OPERATION_TIMEOUT_MS || 120000, 30000, 180000);
+}
+
+async function waitForSearchResults(page, timeoutMs) {
+  await page.waitForFunction(
+    () => {
+      const text = document.body.innerText;
+      return /\bRESULTS\b/.test(text) && /creators (?:who cover games like|matching)/i.test(text);
+    },
+    null,
+    { timeout: timeoutMs }
+  );
 }
 
 function magicLink(text) {
@@ -118,6 +134,11 @@ function emailFrom(text) {
   return String(text || "").match(/[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/i)?.[0]?.toLowerCase() || null;
 }
 
+function activityFrom(text) {
+  const matches = [...String(text || "").matchAll(/\b(today|yesterday|\d+\s+(?:days?|weeks?|months?|years?)\s+ago)\b/gi)];
+  return matches.at(-1)?.[0] || null;
+}
+
 async function resultRows(page) {
   const links = page.locator('a[aria-label="Open channel"]');
   const rows = [];
@@ -143,6 +164,7 @@ async function parseRow(row) {
     subscribers: valueAfter(text, "SUBS"),
     averageViews: valueAfter(text, "AVG VIEWS"),
     match: valueAfter(text, "MATCH"),
+    lastActive: activityFrom(text),
     email: emailFrom(text),
     rawText: text
   };
@@ -218,18 +240,19 @@ async function subscriptionStatus(request, config) {
 async function search(request, config) {
   const query = String(request.args?.query || request.text || "").trim();
   if (!query) throw new Error("args.query is required");
+  const timeoutMs = operationTimeout(request, config);
   const context = await openContext(request.chatId, config);
   try {
     const page = context.pages()[0] || await context.newPage();
-    if (!(await signedIn(page))) throw new Error("CreatorScout authentication is required. Run action=authenticate.");
-    await page.goto("https://www.creatorscout.dev/", { waitUntil: "domcontentloaded", timeout: 60000 });
+    if (!(await signedIn(page, timeoutMs))) throw new Error("CreatorScout authentication is required. Run action=authenticate.");
+    await page.goto("https://www.creatorscout.dev/", { waitUntil: "domcontentloaded", timeout: timeoutMs });
     await page.locator('input[placeholder*="Paste your Steam link"]').fill(query);
     const language = String(request.args?.language || "").toLowerCase();
     if (language) await page.locator("select").selectOption(language).catch(() => {});
     const recency = String(request.args?.recency || "90d");
     await page.getByRole("button", { name: recency, exact: true }).click().catch(() => {});
     await page.getByRole("button", { name: "Search", exact: true }).click();
-    await page.waitForFunction(() => document.body.innerText.includes("creators matching"), null, { timeout: 60000 });
+    await waitForSearchResults(page, timeoutMs);
     await page.waitForTimeout(1200);
 
     const rows = await resultRows(page);

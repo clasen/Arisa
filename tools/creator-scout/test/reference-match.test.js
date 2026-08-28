@@ -20,3 +20,7 @@ test("supports explicit localized aliases", () => {
 test("parses arrays without guessing titles from the search query", () => {
   assert.deepEqual(referenceTitles({ referenceTitles: ["Duskwood", "더스크우드"] }), ["Duskwood", "더스크우드"]);
 });
+
+test("parses JSON-encoded title arrays from CLI args", () => {
+  assert.deepEqual(referenceTitles({ referenceTitles: '["SIMULACRA", "SIMULACRA 2"]' }), ["SIMULACRA", "SIMULACRA 2"]);
+});

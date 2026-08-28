@@ -1,7 +1,14 @@
 export function referenceTitles(args = {}) {
   const value = args.referenceTitles ?? args.referenceTitle ?? args.comparableTitles;
   if (Array.isArray(value)) return value.map((item) => String(item || "").trim()).filter(Boolean);
-  return String(value || "").split(/\n|\|\|/).map((item) => item.trim()).filter(Boolean);
+  const text = String(value || "").trim();
+  if (text.startsWith("[")) {
+    try {
+      const parsed = JSON.parse(text);
+      if (Array.isArray(parsed)) return parsed.map((item) => String(item || "").trim()).filter(Boolean);
+    } catch {}
+  }
+  return text.split(/\n|\|\|/).map((item) => item.trim()).filter(Boolean);
 }
 
 export function normalizedTitle(value) {
