@@ -2,6 +2,7 @@ import { readFileSync } from "node:fs";
 import { SessionManager } from "@earendil-works/pi-coding-agent";
 import { getChatPiSessionsDir, sessionStartOperationalNotesFile } from "../../platform/paths.js";
 import { arisaInstallDir } from "./runtime-context.js";
+import { migrateRecentSessionBeforeLoad } from "./session-preload-migration.js";
 
 const operationalNoteMaxChars = 220;
 
@@ -26,7 +27,7 @@ export function loadSessionStartOperationalNotes() {
   }
 }
 
-function formatSessionStartOperationalNotes(notes) {
+export function formatSessionStartOperationalNotes(notes) {
   if (!notes.length) return "";
   return [
     "Durable operating notes for this Arisa session:",
@@ -41,7 +42,7 @@ function closeAgentSession(session) {
 }
 
 export class AgentSessionLifecycle {
-  constructor({ logger, summarizeContext, cachePolicy = {} }) {
+  constructor({ logger, summarizeContext, cachePolicy = {}, sessionRotationPolicy = {} }) {
     this.logger = logger;
     this.summarizeContext = summarizeContext;
     this.sessions = new Map();
@@ -49,6 +50,7 @@ export class AgentSessionLifecycle {
     this.pendingSessionHandoffs = new Map();
     this.sessionClosePromises = new Map();
     this.setCachePolicy(cachePolicy);
+    this.setSessionRotationPolicy(sessionRotationPolicy);
   }
 
   setCachePolicy(cachePolicy = {}) {
@@ -56,6 +58,10 @@ export class AgentSessionLifecycle {
       maxSessions: Math.max(1, Number(cachePolicy.maxSessions) || 3),
       maxPersistedBytes: Math.max(1, Number(cachePolicy.maxPersistedBytes) || 48 * 1024 * 1024)
     };
+  }
+
+  setSessionRotationPolicy(policy = {}) {
+    this.sessionRotationPolicy = { ...policy };
   }
 
   acquireCached(sessionKey, persistedBytes = 0) {
@@ -182,6 +188,7 @@ export class AgentSessionLifecycle {
   createSessionManager(chatId, workspaceDir = arisaInstallDir, sessionRevision = 0) {
     const sessionKey = String(chatId);
     const sessionDir = getChatPiSessionsDir(sessionKey, sessionRevision);
+    const operationalNotes = formatSessionStartOperationalNotes(loadSessionStartOperationalNotes());
     if (this.pendingNewSessions.has(sessionKey)) {
       this.logger?.log("agent", `starting new persisted session for chat ${sessionKey}`);
       const handoff = this.pendingSessionHandoffs.get(sessionKey);
@@ -190,7 +197,6 @@ export class AgentSessionLifecycle {
         sessionDir,
         handoff?.parentSession ? { parentSession: handoff.parentSession } : undefined
       );
-      const operationalNotes = formatSessionStartOperationalNotes(loadSessionStartOperationalNotes());
       if (operationalNotes) {
         sessionManager.appendCustomMessageEntry(
           "arisa-operational-notes",
@@ -208,6 +214,18 @@ export class AgentSessionLifecycle {
         );
       }
       return { sessionManager, isNewSession: true };
+    }
+    const migration = migrateRecentSessionBeforeLoad({
+      sessionDir,
+      cwd: workspaceDir,
+      policy: this.sessionRotationPolicy,
+      operationalNotes
+    });
+    if (migration) {
+      this.logger?.log(
+        "agent",
+        `migrated oversized Pi session for chat ${sessionKey} before loading (${Math.ceil(migration.sourceBytes / 1024 / 1024)} MiB -> ${Math.ceil(migration.targetBytes / 1024 / 1024)} MiB)`
+      );
     }
     this.logger?.log("agent", `recovering persisted session for chat ${sessionKey}`);
     return {

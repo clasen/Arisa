@@ -28,7 +28,8 @@ test("merges partial session rotation overrides with defaults", () => {
 
   assert.deepEqual(config.pi.sessionRotation, {
     enabled: false,
-    maxPersistedBytes: 64 * 1024 * 1024
+    compactAtPersistedBytes: 24 * 1024 * 1024,
+    maxPersistedBytes: 32 * 1024 * 1024
   });
 });
 

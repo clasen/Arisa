@@ -74,7 +74,8 @@ export const piConfigDefaults = Object.freeze({
   }),
   sessionRotation: Object.freeze({
     enabled: true,
-    maxPersistedBytes: 64 * 1024 * 1024
+    compactAtPersistedBytes: 24 * 1024 * 1024,
+    maxPersistedBytes: 32 * 1024 * 1024
   }),
   heapCircuitBreaker: Object.freeze({
     enabled: true,

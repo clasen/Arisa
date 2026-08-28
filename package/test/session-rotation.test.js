@@ -18,21 +18,60 @@ function compactionEvent(summary = "checkpoint") {
 test("normalizes the automatic session rotation policy", () => {
   assert.deepEqual(normalizeSessionRotationPolicy(), {
     enabled: true,
-    maxPersistedBytes: 64 * mebibyte
+    compactAtPersistedBytes: 24 * mebibyte,
+    maxPersistedBytes: 32 * mebibyte
   });
-  assert.deepEqual(normalizeSessionRotationPolicy({ enabled: false, maxPersistedBytes: 12 }), {
+  assert.deepEqual(normalizeSessionRotationPolicy({
     enabled: false,
+    compactAtPersistedBytes: 8,
+    maxPersistedBytes: 12
+  }), {
+    enabled: false,
+    compactAtPersistedBytes: 8,
     maxPersistedBytes: 12
   });
 });
 
 test("requests rotation only after a successful oversized compaction", () => {
-  assert.equal(compactionRotationRequest(compactionEvent(), 64 * mebibyte), null);
-  assert.equal(compactionRotationRequest({ ...compactionEvent(), aborted: true }, 65 * mebibyte), null);
-  assert.equal(compactionRotationRequest(compactionEvent(), 65 * mebibyte, { enabled: false }), null);
-  const request = compactionRotationRequest(compactionEvent("latest summary"), 65 * mebibyte);
-  assert.equal(request.persistedBytes, 65 * mebibyte);
+  assert.equal(compactionRotationRequest(compactionEvent(), 24 * mebibyte), null);
+  assert.equal(compactionRotationRequest({ ...compactionEvent(), aborted: true }, 25 * mebibyte), null);
+  assert.equal(compactionRotationRequest(compactionEvent(), 25 * mebibyte, { enabled: false }), null);
+  const request = compactionRotationRequest(compactionEvent("latest summary"), 25 * mebibyte);
+  assert.equal(request.persistedBytes, 25 * mebibyte);
   assert.match(request.handoff, /latest summary/);
+});
+
+test("compacts at the preventive persisted-size threshold and then rotates", async () => {
+  const config = applyConfigDefaults({ telegram: {}, pi: { provider: "test", model: "test" } });
+  const manager = new AgentManager({
+    config,
+    artifactStore: {},
+    toolRegistry: {},
+    taskStore: {},
+    logger: null
+  });
+  let compactions = 0;
+  const context = {
+    activeUsers: 1,
+    session: {
+      sessionFile: "/sessions/preventive.jsonl",
+      async compact() {
+        compactions += 1;
+        manager.scheduleCompactionRotationCheck("chat", context, compactionEvent("preventive summary"));
+      },
+      async close() {}
+    },
+    rotationCheckPromise: Promise.resolve(),
+    rotationRequest: null
+  };
+  manager.sessions.set("chat", context);
+  manager.estimatePersistedSessionBytes = async () => 25 * mebibyte;
+
+  await manager.releaseSessionContext("chat", context);
+
+  assert.equal(compactions, 1);
+  assert.equal(manager.sessions.has("chat"), false);
+  assert.equal(manager.pendingNewSessions.has("chat"), true);
 });
 
 test("rotates after active work releases and preserves the parent session path", async () => {

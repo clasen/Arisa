@@ -14,7 +14,7 @@ import { createPiCapabilityTools } from "./pi-capability-tools.js";
 import { ToolResourceNoteStore } from "../tools/tool-resource-note-store.js";
 import { materializeToolOutput } from "../tools/tool-output-materializer.js";
 import { WorkerHeapCircuitBreaker } from "./worker-heap-circuit-breaker.js";
-import { compactionRotationRequest } from "./session-rotation.js";
+import { compactionRotationRequest, normalizeSessionRotationPolicy } from "./session-rotation.js";
 
 const piValidationTimeoutMs = 60_000;
 const arisaToolNames = [
@@ -157,7 +157,8 @@ export class AgentManager {
     this.sessionLifecycle = new AgentSessionLifecycle({
       logger,
       summarizeContext: summarizeRetainedContext,
-      cachePolicy: config.pi.sessionCache
+      cachePolicy: config.pi.sessionCache,
+      sessionRotationPolicy: config.pi.sessionRotation
     });
     this.heapCircuitBreaker = new WorkerHeapCircuitBreaker({
       lifecycle: this.sessionLifecycle,
@@ -197,6 +198,7 @@ export class AgentManager {
   setConfig(config) {
     this.sessionLifecycle.resetConfigState();
     this.sessionLifecycle.setCachePolicy(config.pi.sessionCache);
+    this.sessionLifecycle.setSessionRotationPolicy(config.pi.sessionRotation);
     this.heapCircuitBreaker.setConfig(config.pi.heapCircuitBreaker);
     this.config = config;
   }
@@ -250,10 +252,28 @@ export class AgentManager {
     return context;
   }
 
+  async compactPersistedSessionIfNeeded(sessionKey, context, persistedBytes) {
+    const policy = normalizeSessionRotationPolicy(this.config.pi.sessionRotation);
+    if (!policy.enabled
+      || persistedBytes <= policy.compactAtPersistedBytes
+      || context.rotationRequest
+      || typeof context.session?.compact !== "function") return;
+    try {
+      this.logger?.log("agent", `compacting ${Math.ceil(persistedBytes / 1024 / 1024)} MiB Pi session for chat ${sessionKey} before rotation`);
+      await context.session.compact();
+      await context.rotationCheckPromise;
+    } catch (error) {
+      this.logger?.error?.("agent", `persisted-size compaction failed for chat ${sessionKey}: ${error instanceof Error ? error.message : String(error)}`);
+    }
+  }
+
   async releaseSessionContext(sessionKey, context) {
     if (this.sessions.get(String(sessionKey)) !== context) return;
     await context.rotationCheckPromise;
     const persistedBytes = await this.estimatePersistedSessionBytes(context.session);
+    if ((context.activeUsers || 0) <= 1) {
+      await this.compactPersistedSessionIfNeeded(sessionKey, context, persistedBytes);
+    }
     this.sessionLifecycle.releaseCached(sessionKey, persistedBytes);
     if ((context.activeUsers || 0) === 0 && context.rotationRequest) {
       const request = context.rotationRequest;
