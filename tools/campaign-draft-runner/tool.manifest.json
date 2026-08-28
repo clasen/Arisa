@@ -1,9 +1,10 @@
 {
   "name": "campaign-draft-runner",
-  "version": "0.7.2",
+  "version": "0.8.0",
   "toolDependencies": {
     "pr-campaign": "^0.1.0",
-    "gmail-workspace": "^0.1.0"
+    "gmail-workspace": "^0.1.0",
+    "lightpanda-browser": "^0.10.0"
   },
   "description": "Build and score an evidence-backed outreach prospect pool, run a measured three-variant pitch experiment, generate approved-fact reviewer guides, audit eligibility, and create Gmail drafts only; never sends mail.",
   "entry": "index.js",
@@ -42,6 +43,7 @@
     "quality",
     "facts",
     "research",
+    "lightpanda",
     "source-exhaustion",
     "personalization",
     "provenance",

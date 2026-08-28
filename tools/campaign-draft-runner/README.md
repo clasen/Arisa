@@ -7,11 +7,11 @@ The tool can:
 - reconcile manually sent Gmail messages with `pr-campaign` before each live cycle;
 - maintain an evidence-backed chat-scoped pool of prospects before requiring an email;
 - score prospects on thematic fit, recent activity, small-indie coverage, audience fit, public contact, and response likelihood;
-- assign English drafts across three deterministic pitch variants and record owner-reviewed outcomes;
+- assign English drafts across three deterministic pitch variants that change subject, approved-fact emphasis, and closing, then record owner-reviewed outcomes;
 - generate a UTF-8 reviewer guide from approved campaign facts, with an explicit missing-media checklist;
 - select unused contacts from `pr-campaign`;
 - audit every candidate with explicit eligible, needs-review, or ineligible decisions, blocking reasons, normalized languages, and matched score signals;
-- discover public editorial contacts through `web-browser`, following same-site contact and staff links when result pages do not expose an address;
+- discover public editorial contacts through `lightpanda-browser`, following same-site contact and staff links when result pages do not expose an address;
 - reject previously used recipients and outlets;
 - skip expensive unchanged empty batches while forcing bounded periodic reviews or bounded creative expansions;
 - prefer creative queries not used within a configurable cooldown window;
@@ -28,7 +28,7 @@ Install and configure these Arisa tools:
 
 - `pr-campaign`
 - `gmail-workspace`
-- `web-browser` when discovery or personalization is enabled
+- `lightpanda-browser` when discovery or personalization is enabled
 
 ## Profile location
 
@@ -68,7 +68,7 @@ Minimal profile structure:
   },
   "discovery": {
     "enabled": true,
-    "webTool": "web-browser",
+    "webTool": "lightpanda-browser",
     "minEligiblePool": 1,
     "archiveEmptyQueries": true,
     "queryBudgetPerRun": 1,
@@ -90,7 +90,7 @@ Minimal profile structure:
   },
   "personalization": {
     "enabled": true,
-    "webTool": "web-browser",
+    "webTool": "lightpanda-browser",
     "querySuffix": "review OR feature",
     "openingTemplates": {
       "en": "I read your piece “{{title}}”: {{url}}"

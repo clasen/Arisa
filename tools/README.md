@@ -34,11 +34,11 @@ Receive explicitly shared, domain-scoped Chrome or Brave sessions through a temp
 Run profile-driven outreach batches that expand bounded creative discovery after repeated unchanged cycles, avoid recently used queries and exhausted sources, verify domains, research coverage, and create Gmail drafts. It never sends mail.
 
 - **Category:** `communication`
-- **Tags:** `campaign` · `contacts` · `creative-discovery` · `discovery` · `drafts` · `gmail` · `polling` · `outreach` · `pr` · `research` · `personalization` · `configurable`
+- **Tags:** `campaign` · `contacts` · `creative-discovery` · `discovery` · `drafts` · `gmail` · `lightpanda` · `polling` · `outreach` · `pr` · `research` · `personalization` · `configurable`
 - **Accepts:** `text/plain`, `application/json`
 - **Produces:** `application/json`, `text/plain`
-- **Setup:** optional `web-browser`; Gmail authorization is configured in `gmail-workspace`
-- **Tool dependencies:** `pr-campaign@^0.1.0`, `gmail-workspace@^0.1.0`
+- **Setup:** Lightpanda is used for public-web discovery and personalization; Gmail authorization is configured in `gmail-workspace`
+- **Tool dependencies:** `pr-campaign@^0.1.0`, `gmail-workspace@^0.1.0`, `lightpanda-browser@^0.10.0`
 - **Install footprint:** **Medium**, two tool dependencies and Gmail setup
 
 ### [`change-plan-runner`](./change-plan-runner/)

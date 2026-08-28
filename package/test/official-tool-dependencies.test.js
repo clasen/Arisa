@@ -10,7 +10,8 @@ test("official orchestrators declare their hard tool dependencies", async () => 
   assert.deepEqual((await manifest("magnific-mcp")).toolDependencies, { "mcp-client": "^0.2.0" });
   assert.deepEqual((await manifest("campaign-draft-runner")).toolDependencies, {
     "pr-campaign": "^0.1.0",
-    "gmail-workspace": "^0.1.0"
+    "gmail-workspace": "^0.1.0",
+    "lightpanda-browser": "^0.10.0"
   });
   assert.deepEqual((await manifest("x-campaign-runner")).toolDependencies, { "x-dm": "^0.4.0" });
   assert.deepEqual((await manifest("x-dm")).toolDependencies, { "browser-session-bridge": "^0.1.0" });

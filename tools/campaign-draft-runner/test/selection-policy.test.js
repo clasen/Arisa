@@ -280,6 +280,32 @@ test("fact-backed drafts discard legacy claims and require every declared approv
   }), /unapproved facts availability/);
 });
 
+test("pitch variants change fact emphasis and closing without adding unapproved claims", () => {
+  const factsProfile = {
+    defaultLanguage: "en",
+    factSheet: {
+      draftStatements: {
+        en: [
+          { factKeys: ["site"], text: "Official site." },
+          { factKeys: ["length"], text: "Three hours long." }
+        ]
+      }
+    }
+  };
+  const body = buildApprovedFactsBody({
+    renderedBody: "Hi Example,\n\nOld claim.\n\nDefault closing.\n\nArisa",
+    opening: "Grounded opening.",
+    profile: factsProfile,
+    language: "en",
+    approvedFacts: { site: "approved", length: "approved" },
+    pitchVariant: {
+      factOrder: ["length", "site"],
+      closings: { en: "Creator-specific closing." }
+    }
+  });
+  assert.equal(body, "Hi Example,\n\nGrounded opening.\n\nThree hours long.\n\nOfficial site.\n\nCreator-specific closing.\n\nArisa");
+});
+
 test("canonical campaign URLs gain one trailing slash", () => {
   const body = "https://castlebravo.org and https://castlebravo.org/path";
   assert.equal(

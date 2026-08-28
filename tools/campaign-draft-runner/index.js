@@ -19,6 +19,7 @@ import { pitchExperimentSummary, recordPitchAssignment, recordPitchOutcome, sele
 import { writeReviewerGuide } from "./reviewer-kit.js";
 
 const toolName = "campaign-draft-runner";
+const DEFAULT_WEB_TOOL = "lightpanda-browser";
 const toolDir = path.dirname(fileURLToPath(import.meta.url));
 const arisaPackageDir = process.env.ARISA_PACKAGE_DIR || process.env.ARISA_INSTALL_DIR || path.resolve(toolDir, "../../package");
 const importCore = (relativePath) => import(pathToFileURL(path.join(arisaPackageDir, "src", relativePath)).href);
@@ -40,7 +41,7 @@ Actions via args.action:
   assess-search-quality Score the first search tranche and persist a five-cycle measurement window. args: profile?, searches=[{query,text}]
   sources-check Return which coverage/contact URLs remain exhausted within their 30-day window. args: profile?, urls=<JSON array>
   sources-record Record reviewed URLs as exhausted for up to 30 days. args: profile?, sources=[{url,reason}], ttlDays?
-  sources-status Return the compact active exhausted-source ledger. args: profile?
+  sources-status Return a bounded summary of the active exhausted-source ledger. args: profile?, limit?
   facts-status Return approved product facts and unresolved questions. args: profile?
   facts-update Store owner-approved product facts. args: profile?, facts=<JSON object>, approvedBy
   eligibility-audit Explain every candidate's eligibility, review state, score signals, and blocking reasons without mutating campaign state. args: profile?
@@ -539,7 +540,7 @@ async function discoverContacts(arisa, chatId, profile, allContacts, draftRecipi
   }
 
   const campaignTool = profile.campaignTool || defaults.CAMPAIGN_TOOL;
-  const webTool = settings.webTool || profile.personalization?.webTool || "web-browser";
+  const webTool = settings.webTool || profile.personalization?.webTool || DEFAULT_WEB_TOOL;
   const knownEmails = new Set([...allContacts.map((contact) => normalizedEmail(contact.email)), ...draftRecipients]);
   const knownOutlets = new Set(allContacts.map(outletKey).filter(Boolean));
   const usedOutlets = new Set(allContacts.filter((contact) => contact.status && contact.status !== (profile.contactStatus || "new")).map(outletKey).filter(Boolean));
@@ -749,7 +750,7 @@ function isUsableResearchResult(result, contact) {
 async function researchContact(arisa, profile, contact) {
   const settings = profile.personalization;
   if (!settings?.enabled) return null;
-  const webTool = settings.webTool || "web-browser";
+  const webTool = settings.webTool || DEFAULT_WEB_TOOL;
   const args = { mode: "search", maxResults: String(settings.maxResults || 5) };
   try {
     const output = await runTool(arisa, webTool, args, Number(settings.timeoutMs || 120_000), personalizationQuery(contact, settings));
@@ -1061,12 +1062,12 @@ async function verifyContact(arisa, profile, contact) {
   return data.check;
 }
 
-function approvedFactStatements(profile, language, approvedFacts) {
+function approvedFactStatements(profile, language, approvedFacts, pitchVariant = null) {
   const statements = profile.factSheet?.draftStatements?.[language];
   if (!Array.isArray(statements) || statements.length === 0) {
     throw new Error(`Draft preflight failed: missing approved fact statements for ${language}`);
   }
-  return statements.map((statement, index) => {
+  const validated = statements.map((statement, index) => {
     const factKeys = Array.isArray(statement.factKeys) ? statement.factKeys.map(clean).filter(Boolean) : [];
     const text = clean(statement.text);
     if (!factKeys.length || !text) {
@@ -1076,20 +1077,30 @@ function approvedFactStatements(profile, language, approvedFacts) {
     if (missing.length) {
       throw new Error(`Draft preflight failed: unapproved facts ${missing.join(", ")}`);
     }
-    return text;
+    return { factKeys, text, index };
   });
+  const order = Array.isArray(pitchVariant?.factOrder) ? pitchVariant.factOrder.map(clean).filter(Boolean) : [];
+  if (order.length) {
+    const rank = (statement) => {
+      const positions = statement.factKeys.map((key) => order.indexOf(key)).filter((position) => position >= 0);
+      return positions.length ? Math.min(...positions) : order.length + statement.index;
+    };
+    validated.sort((left, right) => rank(left) - rank(right) || left.index - right.index);
+  }
+  return validated.map((statement) => statement.text);
 }
 
-function buildApprovedFactsBody({ renderedBody, opening, profile, language, approvedFacts }) {
+function buildApprovedFactsBody({ renderedBody, opening, profile, language, approvedFacts, pitchVariant = null }) {
   const paragraphs = String(renderedBody || "").split(/\n\s*\n/).map(clean).filter(Boolean);
   if (paragraphs.length < 3) throw new Error(`Draft preflight failed: incomplete template for ${language}`);
   const greeting = paragraphs[0];
-  const closing = paragraphs.at(-2);
+  const variantClosing = clean(pitchVariant?.closings?.[language] || pitchVariant?.closings?.[profile.defaultLanguage || "en"]);
+  const closing = variantClosing || paragraphs.at(-2);
   const signature = paragraphs.at(-1);
   return [
     greeting,
     clean(opening),
-    ...approvedFactStatements(profile, language, approvedFacts),
+    ...approvedFactStatements(profile, language, approvedFacts, pitchVariant),
     closing,
     signature
   ].filter(Boolean).join("\n\n");
@@ -1145,7 +1156,7 @@ async function createDraft(arisa, profile, contact, approvedFacts = null) {
   const renderedBody = decodeHtmlEntities(render(template.body, contact, profile));
   const opening = clean(contact.groundedOpening) || personalizedOpening(language, research, profile);
   const groundedBody = profile.factSheet
-    ? buildApprovedFactsBody({ renderedBody, opening, profile, language, approvedFacts })
+    ? buildApprovedFactsBody({ renderedBody, opening, profile, language, approvedFacts, pitchVariant })
     : replaceOpeningParagraph(renderedBody, opening);
   const body = normalizeCanonicalUrls(decodeHtmlEntities(groundedBody), profile.draftValidation?.canonicalUrls);
   validateDraftContent({ contact, language, body, profile });
@@ -1245,10 +1256,24 @@ async function handleRun(request) {
       : (typeof args.urls === "string" ? JSON.parse(args.urls) : args.urls);
     if (!Array.isArray(urls)) throw new Error("urls must be a JSON array");
     const result = await checkExhaustedSources(getChatToolStateDir(request.chatId, toolName), profile.name, urls);
+    if (args.action === "sources-status") {
+      const limit = Math.max(1, Math.min(100, Number(args.limit || 25)));
+      const byReason = {};
+      for (const record of result.records) byReason[record.reason] = (byReason[record.reason] || 0) + 1;
+      return {
+        action: args.action,
+        profile: profile.name,
+        totalActive: result.records.length,
+        byReason,
+        active: result.records.slice(0, limit),
+        truncated: result.records.length > limit,
+        revalidateAfterDays: 30
+      };
+    }
     return {
       action: args.action,
       profile: profile.name,
-      active: args.action === "sources-status" ? result.records : result.active,
+      active: result.active,
       available: result.available,
       revalidateAfterDays: 30
     };
@@ -1579,4 +1604,4 @@ async function main() {
 const isDirectRun = process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url);
 if (isDirectRun) main();
 
-export { activeQueries, assessSearchQuality, auditEligibility, batchSkipSettings, buildApprovedFactsBody, checkExhaustedSources, discoverContacts, draftingLanguage, eligibilityReasons, getFactSheetStatus, isSelectable, normalizeCanonicalUrls, recordExhaustedSources, runTool, selectPitchVariant, updateApprovedFacts, validateDraftContent };
+export { DEFAULT_WEB_TOOL, activeQueries, assessSearchQuality, auditEligibility, batchSkipSettings, buildApprovedFactsBody, checkExhaustedSources, discoverContacts, draftingLanguage, eligibilityReasons, getFactSheetStatus, isSelectable, normalizeCanonicalUrls, recordExhaustedSources, runTool, selectPitchVariant, updateApprovedFacts, validateDraftContent };
