@@ -72,6 +72,10 @@ export const piConfigDefaults = Object.freeze({
     maxSessions: 3,
     maxPersistedBytes: 48 * 1024 * 1024
   }),
+  sessionRotation: Object.freeze({
+    enabled: true,
+    maxPersistedBytes: 64 * 1024 * 1024
+  }),
   heapCircuitBreaker: Object.freeze({
     enabled: true,
     softPercent: 70,
@@ -132,6 +136,10 @@ export function applyConfigDefaults(config) {
       sessionCache: {
         ...piConfigDefaults.sessionCache,
         ...(configuredPi.sessionCache || {})
+      },
+      sessionRotation: {
+        ...piConfigDefaults.sessionRotation,
+        ...(configuredPi.sessionRotation || {})
       },
       heapCircuitBreaker: {
         ...piConfigDefaults.heapCircuitBreaker,

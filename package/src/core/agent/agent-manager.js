@@ -14,6 +14,7 @@ import { createPiCapabilityTools } from "./pi-capability-tools.js";
 import { ToolResourceNoteStore } from "../tools/tool-resource-note-store.js";
 import { materializeToolOutput } from "../tools/tool-output-materializer.js";
 import { WorkerHeapCircuitBreaker } from "./worker-heap-circuit-breaker.js";
+import { compactionRotationRequest } from "./session-rotation.js";
 
 const piValidationTimeoutMs = 60_000;
 const arisaToolNames = [
@@ -251,9 +252,38 @@ export class AgentManager {
 
   async releaseSessionContext(sessionKey, context) {
     if (this.sessions.get(String(sessionKey)) !== context) return;
+    await context.rotationCheckPromise;
     const persistedBytes = await this.estimatePersistedSessionBytes(context.session);
     this.sessionLifecycle.releaseCached(sessionKey, persistedBytes);
+    if ((context.activeUsers || 0) === 0 && context.rotationRequest) {
+      const request = context.rotationRequest;
+      const parentSession = context.session.sessionFile || "";
+      this.logger?.log("agent", `rotating ${Math.ceil(request.persistedBytes / 1024 / 1024)} MiB Pi session for chat ${sessionKey} after compaction`);
+      this.sessionLifecycle.resetSession(sessionKey, {
+        handoff: request.handoff,
+        parentSession,
+        source: "compaction-rotation"
+      });
+      await this.sessionLifecycle.waitForClose(sessionKey);
+      return;
+    }
     await this.sessionLifecycle.enforceCachePolicy();
+  }
+
+  scheduleCompactionRotationCheck(sessionKey, context, event) {
+    if (event?.type !== "compaction_end") return;
+    const previous = context.rotationCheckPromise || Promise.resolve();
+    context.rotationCheckPromise = previous
+      .catch(() => {})
+      .then(async () => {
+        if (this.sessions.get(String(sessionKey)) !== context) return;
+        const persistedBytes = await this.estimatePersistedSessionBytes(context.session);
+        const request = compactionRotationRequest(event, persistedBytes, this.config.pi.sessionRotation);
+        if (request) context.rotationRequest = request;
+      })
+      .catch((error) => {
+        this.logger?.error?.("agent", `session rotation check failed for chat ${sessionKey}: ${error instanceof Error ? error.message : String(error)}`);
+      });
   }
 
   async validatePiAgent(config = this.config) {
@@ -402,8 +432,11 @@ export class AgentManager {
       modelKey: effectiveModelKey,
       speedController,
       telegramTarget,
-      accessGuardTarget
+      accessGuardTarget,
+      rotationCheckPromise: Promise.resolve(),
+      rotationRequest: null
     };
+    session.subscribe((event) => this.scheduleCompactionRotationCheck(sessionKey, ctx, event));
     this.sessions.set(sessionKey, ctx);
     if (isNewSession) this.sessionLifecycle.completeNewSession(sessionKey);
     return this.acquireSessionContext(sessionKey, ctx);

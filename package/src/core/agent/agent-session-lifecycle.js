@@ -161,14 +161,19 @@ export class AgentSessionLifecycle {
     this.pendingSessionHandoffs.clear();
   }
 
-  resetSession(chatId, { handoff = "", parentSession = "" } = {}) {
+  resetSession(chatId, { handoff = "", parentSession = "", source = "" } = {}) {
     const sessionKey = String(chatId);
     this.closeCached(sessionKey);
     this.pendingNewSessions.add(sessionKey);
     const text = String(handoff || "").trim();
     const parent = String(parentSession || "").trim();
+    const handoffSource = String(source || "").trim();
     if (text || parent) {
-      this.pendingSessionHandoffs.set(sessionKey, { text, parentSession: parent });
+      this.pendingSessionHandoffs.set(sessionKey, {
+        text,
+        parentSession: parent,
+        ...(handoffSource ? { source: handoffSource } : {})
+      });
     } else {
       this.pendingSessionHandoffs.delete(sessionKey);
     }
@@ -199,7 +204,7 @@ export class AgentSessionLifecycle {
           "arisa-session-handoff",
           handoff.text,
           false,
-          { source: "telegram-new" }
+          { source: handoff.source || "telegram-new" }
         );
       }
       return { sessionManager, isNewSession: true };
