@@ -1,7 +1,7 @@
 {
   "version": 1,
   "repository": "https://github.com/clasen/Arisa.git",
-  "commit": "ac6027017d304f6a4156719ec5a7bbc77e62f746",
+  "commit": "7589c989b28edfa2bb318b07d009f37ecc3ecc99",
   "tools": {
     "audio-extractor": {
       "version": null,
@@ -158,43 +158,44 @@
       }
     },
     "lightpanda-browser": {
-      "version": "0.10.0",
+      "version": "0.10.1",
       "files": {
+        "BENCHMARK.md": "9c732c65f6d8bceb4e73c1a03d298d5140d919f50269f982bd0ec6c1b21fa8b6",
+        "COMPATIBILITY-MIGRATION.md": "ec797874545a3034da10fe19d5591b46f50921e27caee1de63458a8cd47ca5e2",
+        "LIMITS.md": "6c0ec9624c76de8ddf09b82a4da1dba1b89a48a1f0e71a083ffbcf7a3d5401fb",
+        "README.md": "59872163f7289b35040f57fd9f3364bb45663c2414f0776fb79d4f061b045e54",
         "action-policy.js": "8c071776ddcfaa5059e9bb9a97b6396370a0bef22670697e63b2156ba10496e1",
-        "benchmark-latest.json": "093ed593e388f7c71241c49bd3f224b7161323867927f23fe25fe15b22f8deca",
-        "benchmark-policy.js": "e08fa525a31d9fefbeff80bc4740a24357da092ef06602cf4a9474d84c014ea0",
-        "BENCHMARK.md": "96b0adf4413f1eb74069d29a6e7c6a37b440ce7a2b32ea609533fd91061f48e3",
+        "benchmark-latest.json": "c5524e6d42479578579fd7db0e50857ff0831ca219e611b821ad1e0a4fade303",
+        "benchmark-policy.js": "2c3763d7f327293c9d54ca24da9e65b94dc304af44908c1e196a4af45ed49a89",
         "binary.js": "accd3f1f536ae7ceee4dbfcee2de9ac56fc1ae343656238d62003233417257f1",
         "browser-operation.js": "51384d146d45fda8c672d3d6672fa223b715ad40c3c5b5878719e9df38151592",
         "capture.js": "bfdf77ee25b334b65fcceb88ee2bf0879b0f7e07230b49cffdbb5ee19ae71b7f",
         "config.js": "a6a46c33484c9aa7842ac60c83543bd278f0f197bad72adec222c1e44c502d2c",
         "daemon-service.js": "b28cabe31d2513f483d4b2ff589adf7cd780bdb3ad41618293ef1515ec3dc700",
-        "index.js": "fad23f7cff23e8080c9ba06bdcdaad32d6c30ea02011063fc5d9bcaa22158da2",
+        "index.js": "9475c95b6ed4e16fc2ab1155153f4658008399a97764a1eaf7ac72b82bb0ef86",
         "limit-suite-latest.json": "3d30f958d2d6c1e9dfcaf53e40a401ae288bf264a97ba6c3b64a25a08031feb0",
         "limit-suite-policy.js": "61440ee2e7f557ab2f3c74f8ef4ec2ec85fd2fb7fc53a4121e1f0d066670ea17",
-        "LIMITS.md": "6c0ec9624c76de8ddf09b82a4da1dba1b89a48a1f0e71a083ffbcf7a3d5401fb",
-        "mcp-session.js": "1e7565be8047a0ef886464f2731acdfc775755d76507b79e44227ec392035290",
+        "mcp-session.js": "2b2704dc0d3c7c235e8a5e14e1482f2a199db082ea33419c5cb0cbc58a051ff8",
         "output-bounds.js": "08ab730d0d8722c5e0e761911a509653dd23d8eb4d8c2abf2d9c5e8432870bdd",
-        "package.json": "a8f487b6ade2a22b68881bea42b95713e2d569a6a00d2042b46e2dcbcb422aef",
+        "package.json": "2dcc90045677421d21cec29f32c8c3e5c32d0d39ddddc57bf20edab7fa2cfe66",
         "process-metrics.js": "e39d2980abb581ca0b917d0d33a1d71922ce49b679a7e96cf16a6a66b81d879a",
-        "README.md": "edf8be6ce4dd0189fe07e461bb588d2fdba47bbabf77efc7d01f671c0be145c8",
         "recipe-store.js": "358ac391ae86e0bfb82fc5b55bd08cfe3fd4fa56ac12a5ad4ad5abfa43c9a6c6",
-        "scripts/benchmark.js": "da3a3a7d0f77bff56bc305605185cae565770a39d474d0d83b8496da04667419",
+        "scripts/benchmark.js": "f1bb939984460d84118317f9b4f811e0df80f590b0a441cd62a56eb97bb69b37",
         "scripts/install-lightpanda.js": "ba4a2f9e5ffae80b9375578731d68eff25997333cb9e3e443b155f7834948205",
         "scripts/limit-suite.js": "d314aa43cd3319135c9abe42dcd9e8bf744e17ae5f2c2b84bcd03c1ff51aeedb",
         "session-manager.js": "47f9e017aeed76bb7f42504d67234f8d76d915f45ec3ff4d351aeb74aa180dee",
         "test/action-policy.test.js": "3fb1e5c8a4af4757e75fc1d2099b080101b68f7edf0e341e910694e62fc2bed8",
-        "test/benchmark-policy.test.js": "f3b473dd7717072610cb31042f749ae66a5efd2f178b55553d5f544415edf106",
+        "test/benchmark-policy.test.js": "02dbd3e7619aaa28f63df1de7ec3af5f206d8cf3d0f74afa8f14b69a0b084716",
         "test/browser-operation.test.js": "283f074ef7ec499f70ba5db3450b792aacebdc2ef72b14727e7b3992cd6f173f",
         "test/capture.test.js": "b4551640d008b73575919e33e5565f7eed2c766a154f8fbe6703ef826f4b9f76",
-        "test/daemon-contract.test.js": "0ffa8bcea5f7b8f17447cc31b970cf6b915e1ed8a62e650cf17bffdcf0017b79",
+        "test/daemon-contract.test.js": "e9300cfa41c331e6a60c97666ed8e5c09447ed60289c4f3c0ba60579c35252c3",
         "test/limit-suite-policy.test.js": "3bc29952084d0febf617f22ffefeeec15ede245e778e7f00fa86fd4c8140cbd6",
         "test/mcp-session.test.js": "a87bf79396b87a1a9e97ec17702ff2e1baa9c5a734afb2ed74936675de1510b6",
         "test/recipe-store.test.js": "f249b33aa42bebc4f6e61150400f6bca7647feea13b0770e72016485e8d13b46",
         "test/safety.test.js": "2842a7c2b05c1d3d340050deee969a1a8b7d2999262f2c636e5a5bae6a751899",
         "test/session-manager.test.js": "af1816fb5e170f43e84c7a5996ca9c4bb249bc05a698882f53f50e68ec08e55f",
         "test/web-search.test.js": "b6b42f82bb3cae516cf8ad40b55f467ab637d72cf4b04da3eb9e77391386397f",
-        "tool.manifest.json": "1277ea8bb280829c6d8d39547ea29feae7a9d005326f0a30de972f2aeae7895c",
+        "tool.manifest.json": "e6c91bb97e52038ea3d3b8a648cd83541e194b01bb95f047a63dc4a4b13d532b",
         "url-security.js": "e1f370b3d9b9a74c7ae435d073a8a069a1bc8adbf4e0caa65c817099a48a1c22",
         "web-search.js": "18c1b9980b1724668e0aec9d354dcac236e0aa43fa58cbe652b1bcd3770d8d0e"
       }
@@ -616,14 +617,18 @@
       }
     },
     "x-campaign-runner": {
-      "version": "0.1.1",
+      "version": "0.2.0",
       "files": {
-        "README.md": "7cb7264446b9bef41332da9634cd6c94130f55c740142d084cddec776cf703c8",
+        "README.md": "081de53492143a499c8a74b7353e7ce4ea89ffb4632f13e93579094014ff9c7f",
         "config.js": "5eb3c5667d01705d48504a4bf711347262b8a440605cb6b75ec519dd56cb1309",
-        "index.js": "19ca6dd9aa62b15e62481c6c7ce65023af6a25a21ffc622527acae12ff0171ed",
-        "package.json": "1eecda56828887b3a59ed512362632dd6db16db229857dd66e40a129b2b83b8d",
-        "test/x-campaign-runner.test.mjs": "cf62245bccc7d7b5804117ca02753130e7eec4f56fcc671af82757f922117389",
-        "tool.manifest.json": "0f5dcd2ba69c2f57f85cad7873d6bd0a8492886d3eec34f71feb8e308bdb7751"
+        "index.js": "d2cdc3c51fe130406f90db2cafd63783ff3d3ab7e4e09e699de4bed2a1e583c7",
+        "package.json": "aa64b45edd1196f95afece7038d4b384fc6c08120eb1569fb6e08e5f17574ca9",
+        "test/x-campaign-runner.test.mjs": "e810f56acd107b56986967a860b8cdc159eca85b3dfb5a9d086898041175ec5f",
+        "tool.manifest.json": "00b8563ee7b195f9bb86c497ed7f5a939239d290bd8d722cab3ae5b12302276a"
+      },
+      "toolDependencies": {
+        "x-dm": "^0.4.0",
+        "lightpanda-browser": "^0.10.1"
       }
     },
     "x-dm": {
