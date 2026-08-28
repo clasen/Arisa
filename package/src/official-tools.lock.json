@@ -1,7 +1,7 @@
 {
   "version": 1,
   "repository": "https://github.com/clasen/Arisa.git",
-  "commit": "db6111d98851c204293e50a0b1ed30523580b55e",
+  "commit": "f4913cfba39ddb93b3e62fb1d4f56e67813b6b98",
   "tools": {
     "audio-extractor": {
       "version": null,
@@ -40,13 +40,13 @@
       }
     },
     "campaign-draft-runner": {
-      "version": "0.7.2",
+      "version": "0.8.0",
       "files": {
-        "README.md": "dc294ee65686b141e0a85f069232cc2a0503ba0e2d7452cbf54bcea10b60512c",
+        "README.md": "9d8c9d87edc66375b5f059bd5abb06a8b8ee743e979d77ffc4f5312f3ec7b57f",
         "batch-skip.js": "ad428464b739e7355e00ac7cf399247ce611fcef0470d97a73893701e5b07627",
         "config.js": "9b9c2d9686cebf17c3ba2630088c7028281883608f61054e733283aeb8d383cb",
         "discovery-operations.js": "a5e9f046358938a07ffba039085c5c48f829c6a2e05362d0d0230a37a3c47f60",
-        "index.js": "8c4febce077f57ed33d6ed3136e1c084b1d32c7e05a010462c594c25ae5536ee",
+        "index.js": "d7fd503c86069c73f590ce0fed2ab9fc05dc72ad969bbb5278134d685e8680f1",
         "operation-timeout.js": "9b1ced30ec9ed710bb9118b91f6f3feded5111a08e1e21abf163e4cfb91d7ad2",
         "package.json": "a25b7ed1dd2c30cd68c3c10feb8ee1752cac8cd55cd4344690ffad649e231ec1",
         "pitch-experiment.js": "3da9350dc862cab36a630f628d3b3c06974375facd999b8bdbeed8ebf15e63a3",
@@ -60,13 +60,15 @@
         "test/discovery-operations.test.js": "bc3e7c877911278bf87ef2a5844990721570a4957b78478e2e916be869bc2159",
         "test/pitch-experiment.test.js": "5c43901a9986b666f1094a7dc298adf2072dcb167ea023bb24fb5c9f13c152b0",
         "test/prospect-pool.test.js": "d0a81f21899b0055c210747008db2ed12afe11b3a57d3e80d1aae797732982d3",
-        "test/selection-policy.test.js": "9621fa4fb4cac782734fbcf519990e107ad1d7d794dd9924dd1c6319a55e9ec4",
+        "test/selection-policy.test.js": "33967a965b47c50febb3533ab8cc7080b378f8e4dbed363f6c0304eb90da4277",
         "test/telemetry.test.js": "8e52a43fa9eb08fa0f3be124b72b7cd39258666cb88311b1df6978037372c257",
-        "tool.manifest.json": "a81752d7314810a8005fc864d3d0b938c0c954a20efcc982ca39a2818e3c6200"
+        "test/web-tool-default.test.js": "bafd71c48fc922d449b40b2603900c08a45ba3701ffa9a48e3e533219f1bd1a5",
+        "tool.manifest.json": "01d9bc9c602c6c6487a09c5faaeb621297d6db2054743b6a80f0527eaff93a5a"
       },
       "toolDependencies": {
         "pr-campaign": "^0.1.0",
-        "gmail-workspace": "^0.1.0"
+        "gmail-workspace": "^0.1.0",
+        "lightpanda-browser": "^0.10.0"
       }
     },
     "change-plan-runner": {
