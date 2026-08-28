@@ -72,16 +72,16 @@ function arisaClient(chatId) {
 async function notifyDeviceActivated(event) {
   await arisaClient(event.chatId).agent.enqueueEvent({
     resourceId: event.deviceId,
-    acknowledgement: `Browser profile ${event.label} is connected.`,
-    prompt: `Browser profile ${event.label} (${event.deviceId}) finished secure bridge authorization. The transport already acknowledged it. Continue any pending setup work now; do not repeat the acknowledgement.`
+    acknowledgement: `Browser profile ${event.label} is connected. No site session has been shared yet.`,
+    prompt: `Browser profile ${event.label} (${event.deviceId}) finished secure bridge authorization. This proves only that the profile is connected; it does not prove that a site session was shared or that any requested target works. The transport already acknowledged it. Continue pending setup only at the next required state.`
   });
 }
 
 async function notifySessionImported(event) {
   await arisaClient(event.chatId).agent.enqueueEvent({
     resourceId: event.resourceId,
-    acknowledgement: `Authorization received for ${event.resourceId}. Continuing now.`,
-    prompt: `The user explicitly shared an authenticated browser session for ${event.resourceId} through ${event.label || "Arisa Session Bridge"}. The bridge received ${event.cookieCount} domain-scoped cookies at ${event.receivedAt}. The transport already acknowledged it. If a pending task was waiting for this authorization, continue it now without asking the user to confirm; otherwise stay silent.`
+    acknowledgement: `Session received for ${event.resourceId}. The requested target is not validated yet.`,
+    prompt: `The user explicitly shared an authenticated browser session for ${event.resourceId} through ${event.label || "Arisa Session Bridge"}. The bridge received ${event.cookieCount} domain-scoped cookies at ${event.receivedAt}. This proves a session share only; it does not prove freshness, target access, or expected coverage. The transport already acknowledged it. If a pending task was waiting, run its target validation now; otherwise stay silent.`
   });
 }
 
@@ -144,7 +144,9 @@ async function listSessions(chatId) {
         sourceUrl: record.sourceUrl,
         capturedAt: record.capturedAt,
         receivedAt: record.receivedAt,
-        cookieCount: Array.isArray(record.cookies) ? record.cookies.length : 0
+        cookieCount: Array.isArray(record.cookies) ? record.cookies.length : 0,
+        connectionStatus: "session_shared",
+        targetValidation: { status: "not_validated", reason: "A consumer must prove the requested target." }
       });
     } catch {}
   }

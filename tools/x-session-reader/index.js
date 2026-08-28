@@ -4,6 +4,7 @@ import { pathToFileURL } from "node:url";
 import { chromium } from "playwright";
 import defaults from "./config.js";
 import { cacheBudgetBytes, chromiumCacheArgs } from "./browser-cache.js";
+import { buildTargetValidation } from "./target-validation.js";
 
 const toolName = "x-session-reader";
 const bridgeToolName = "browser-session-bridge";
@@ -178,8 +179,10 @@ async function collectVisiblePosts(page, options) {
   const posts = [];
   const seen = new Set();
   let idle = 0;
+  let attempts = 0;
   let lastHeight = 0;
   for (let attempt = 0; attempt < maxScrolls && posts.length < maxResults && idle < idleLimit; attempt += 1) {
+    attempts = attempt + 1;
     const visible = await extractPosts(page, maxResults, includeReplies);
     let added = 0;
     for (const post of visible) {
@@ -199,7 +202,7 @@ async function collectVisiblePosts(page, options) {
     await page.evaluate(() => window.scrollBy(0, Math.floor(window.innerHeight * 1.2))).catch(() => {});
     await new Promise((resolve) => setTimeout(resolve, scrollDelayMs));
   }
-  return posts;
+  return { posts, attempts, idle };
 }
 
 function csvEscape(value) {
@@ -270,28 +273,35 @@ function formatPosts(title, posts, emptyMessage) {
   ].join("\n\n");
 }
 
-async function loadBridgeCookies(chatId) {
-  if (chatId == null || chatId === "") return "";
+async function loadBridgeSession(chatId) {
+  if (chatId == null || chatId === "") return null;
   const stateDir = getChatToolStateDir(chatId, bridgeToolName);
   const sessionPath = path.join(stateDir, "sessions", "x.com.json");
   try {
     const session = JSON.parse((await readFile(sessionPath, "utf8")).replace(/^\uFEFF/, ""));
-    return Array.isArray(session.cookies) && session.cookies.length ? JSON.stringify(session.cookies) : "";
+    return Array.isArray(session.cookies) && session.cookies.length ? session : null;
   } catch (error) {
-    if (error?.code === "ENOENT") return "";
+    if (error?.code === "ENOENT") return null;
     throw new Error(`Could not read ${bridgeToolName} x.com session: ${error.message || error}`);
   }
 }
 
 async function loadConfig(request) {
   const config = await loadToolConfig(toolName, defaults, request.chatId ?? null);
-  const bridgeCookies = await loadBridgeCookies(request.chatId ?? null);
-  return bridgeCookies ? { ...config, X_COOKIES: bridgeCookies } : config;
+  const bridgeSession = await loadBridgeSession(request.chatId ?? null);
+  return {
+    config: bridgeSession ? { ...config, X_COOKIES: JSON.stringify(bridgeSession.cookies) } : config,
+    sessionAuthorization: bridgeSession ? {
+      source: "browser-session-bridge",
+      capturedAt: bridgeSession.capturedAt,
+      receivedAt: bridgeSession.receivedAt
+    } : { source: "tool-config" }
+  };
 }
 
 async function run(requestFile) {
   const request = JSON.parse(await readFile(requestFile, "utf8"));
-  const config = await loadConfig(request);
+  const { config, sessionAuthorization } = await loadConfig(request);
 
   if (!config.X_COOKIES) {
     console.log(JSON.stringify(toolNeedsConfig({
@@ -361,7 +371,7 @@ async function run(requestFile) {
       return;
     }
     let latestExport = null;
-    const posts = await collectVisiblePosts(page, {
+    const collection = await collectVisiblePosts(page, {
       maxResults,
       includeReplies,
       maxScrolls,
@@ -372,6 +382,26 @@ async function run(requestFile) {
       } : null
     });
 
+    const { posts, attempts, idle } = collection;
+    const emptyStateVisible = await page.locator('[data-testid="emptyState"]').count().then((count) => count > 0).catch(() => false);
+    const validation = buildTargetValidation({
+      action,
+      username,
+      posts,
+      requested: maxResults,
+      attempts,
+      idle,
+      idleLimit,
+      emptyStateVisible,
+      sessionSource: sessionAuthorization.source,
+      capturedAt: sessionAuthorization.capturedAt,
+      receivedAt: sessionAuthorization.receivedAt
+    });
+    if (validation.target.status !== "validated") {
+      console.log(JSON.stringify(toolError("X authorization was available, but the requested target could not be validated. No success is claimed; refresh the current x.com session or inspect X verification.")));
+      return;
+    }
+
     if (wantsExport) {
       latestExport = await writeExportFile({ request, action, username, posts, format });
       console.log(JSON.stringify(toolOk({
@@ -380,15 +410,15 @@ async function run(requestFile) {
         fileName: latestExport.fileName,
         kind: "document",
         mimeType: latestExport.mimeType,
-        metadata: { action, count: posts.length, maxResults, maxScrolls, idleLimit },
+        metadata: { action, count: posts.length, maxResults, maxScrolls, idleLimit, validation },
         delivery: { method: "document" }
       })));
     } else if (boolArg(args.raw, false)) {
-      console.log(JSON.stringify(toolOk({ text: JSON.stringify({ action, username: action === "bookmarks" ? null : username, posts }, null, 2), mimeType: "application/json" })));
+      console.log(JSON.stringify(toolOk({ text: JSON.stringify({ action, username: action === "bookmarks" ? null : username, validation, posts }, null, 2), metadata: { validation }, mimeType: "application/json" })));
     } else if (action === "bookmarks") {
-      console.log(JSON.stringify(toolOk({ text: formatPosts("Latest visible X/Twitter bookmarks:", posts, "No bookmarks were visible. The session may be logged out, blocked by X verification, or there may be no visible bookmarks.") })));
+      console.log(JSON.stringify(toolOk({ text: formatPosts("Latest visible X/Twitter bookmarks:", posts, "No bookmarks are present in the validated target."), metadata: { validation } })));
     } else {
-      console.log(JSON.stringify(toolOk({ text: formatPosts(`@${username} latest visible post${posts.length === 1 ? "" : "s"}:`, posts, `No posts were visible for @${username}. The session may be logged out, blocked by X verification, or the account may have no visible posts.`) })));
+      console.log(JSON.stringify(toolOk({ text: formatPosts(`@${username} latest visible post${posts.length === 1 ? "" : "s"}:`, posts, `No posts are present in the validated target for @${username}.`), metadata: { validation } })));
     }
   } catch (error) {
     console.log(JSON.stringify(toolError(error.message || String(error))));

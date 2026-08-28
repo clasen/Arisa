@@ -18,7 +18,7 @@ function nativeTools(policy) {
   }];
 }
 
-export function createPiCapabilityTools({ capabilityService, telegram, chatId, policy, logger }) {
+export function createPiCapabilityTools({ capabilityService, telegram, chatId, policy, logger, toolFanout }) {
   if (!capabilityService?.execute) throw new Error("Pi capability tools require CapabilityService");
 
   const baseContext = {
@@ -38,6 +38,7 @@ export function createPiCapabilityTools({ capabilityService, telegram, chatId, p
     }
   };
 
+  const runWithFanout = (work) => toolFanout?.run ? toolFanout.run(work) : work();
   const execute = (actorToolName, method, params = {}, context = {}) => capabilityService.execute({
     method,
     actorToolName,
@@ -113,7 +114,9 @@ export function createPiCapabilityTools({ capabilityService, telegram, chatId, p
         args: Type.Optional(Type.Record(Type.String(), Type.String())),
         deliver: Type.Optional(Type.Boolean())
       }),
-      execute: async (_id, params) => jsonResult(await execute("run_tool", "tools.run", params))
+      execute: async (_id, params) => jsonResult(await runWithFanout(
+        () => execute("run_tool", "tools.run", params)
+      ))
     }),
     defineTool({
       name: "list_scheduled_tasks",

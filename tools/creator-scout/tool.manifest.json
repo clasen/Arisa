@@ -1,7 +1,7 @@
 {
   "name": "creator-scout",
-  "version": "1.1.1",
-  "description": "Search CreatorScout for YouTube and Twitch creators covering comparable games, with optional public business-email discovery and exact comparable-title filtering before email lookup.",
+  "version": "1.2.0",
+  "description": "Search CreatorScout for exact comparable-game creators and inspect billing while explicitly separating authentication, validated targets, prepared checkout, and confirmed subscription states.",
   "entry": "index.js",
   "input": ["text/plain", "application/json"],
   "output": ["application/json", "text/plain"],

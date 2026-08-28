@@ -156,12 +156,20 @@ Automatic context compaction uses Pi's native implementation and can be tuned in
       "enabled": true,
       "compactAtPersistedBytes": 25165824,
       "maxPersistedBytes": 33554432
+    },
+    "toolFanout": {
+      "enabled": true,
+      "maxConcurrent": 2,
+      "pressureConcurrent": 1,
+      "serializePercent": 60
     }
   }
 }
 ```
 
-Pi compacts when the context exceeds the model's context window minus `reserveTokens`. Arisa also requests compaction when persisted history exceeds `compactAtPersistedBytes`, then rotates to a fresh JSONL using the latest summary and retained active context. Before Pi loads a recent session above `maxPersistedBytes`, Arisa discovers the last valid active-branch compaction by streaming, atomically creates a compact child with `parentSession`, and leaves the historical JSONL intact. An unsafe oversized session is rejected rather than loaded into an OOM-prone worker. Set a smaller token reserve when using models with substantially smaller context windows. Arisa adds no Telegram commands or compaction notifications.
+Pi compacts when the context exceeds the model's context window minus `reserveTokens`. Arisa also requests compaction when persisted history exceeds `compactAtPersistedBytes`, then rotates to a fresh JSONL using the latest summary and retained active context. Before Pi loads a recent session above `maxPersistedBytes`, Arisa discovers the last valid active-branch compaction by streaming, atomically creates a compact child with `parentSession`, and leaves the historical JSONL intact. An unsafe oversized session is rejected rather than loaded into an OOM-prone worker. Same-turn `run_tool` fan-out is capped at two, becomes sequential when heap usage reaches `serializePercent`, and uses the heap circuit breaker before every admission. Set a smaller token reserve when using models with substantially smaller context windows. Arisa adds no Telegram commands or compaction notifications.
+
+Browser and checkout tools report lifecycle states separately: profile connection is not a session share, a session share is not target validation, wallet enrollment is not checkout submission, and only explicit target or merchant evidence can confirm the final objective.
 
 ## Install globally
 

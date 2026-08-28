@@ -84,6 +84,12 @@ export const piConfigDefaults = Object.freeze({
     waitMs: 15_000,
     pollMs: 500
   }),
+  toolFanout: Object.freeze({
+    enabled: true,
+    maxConcurrent: 2,
+    pressureConcurrent: 1,
+    serializePercent: 60
+  }),
   compaction: Object.freeze({
     enabled: true,
     reserveTokens: 120_000,
@@ -145,6 +151,10 @@ export function applyConfigDefaults(config) {
       heapCircuitBreaker: {
         ...piConfigDefaults.heapCircuitBreaker,
         ...(configuredPi.heapCircuitBreaker || {})
+      },
+      toolFanout: {
+        ...piConfigDefaults.toolFanout,
+        ...(configuredPi.toolFanout || {})
       },
       compaction: {
         ...piConfigDefaults.compaction,

@@ -5,6 +5,7 @@ import { mkdir, readFile } from "node:fs/promises";
 import { chromium } from "playwright";
 import defaults from "./config.js";
 import { exactReferenceMatch, referenceTitles } from "./reference-match.js";
+import { authenticatedState, preparedCheckoutState, subscriptionState } from "./outcome-contract.js";
 
 const toolName = "creator-scout";
 
@@ -185,7 +186,8 @@ async function checkoutQuote(request, config) {
       currency: "EUR",
       recurring: "month",
       submitButton: "Subscribe",
-      successUrlPrefix: "https://www.creatorscout.dev/"
+      successUrlPrefix: "https://www.creatorscout.dev/",
+      lifecycle: preparedCheckoutState()
     };
   } finally {
     await context.close();
@@ -205,7 +207,8 @@ async function subscriptionStatus(request, config) {
       authenticated: true,
       subscriptionConfirmed: managesBilling,
       trialMentioned: trial,
-      evidence: managesBilling ? "CreatorScout exposes subscription management for this account." : "CreatorScout does not expose subscription management for this account."
+      evidence: managesBilling ? "CreatorScout exposes subscription management for this account." : "CreatorScout does not expose subscription management for this account.",
+      lifecycle: subscriptionState(managesBilling)
     };
   } finally {
     await context.close();
@@ -270,7 +273,8 @@ async function handle(request) {
     const context = await openContext(request.chatId, config);
     try {
       const page = context.pages()[0] || await context.newPage();
-      return { authenticated: await signedIn(page) };
+      const authenticated = await signedIn(page);
+      return { authenticated, lifecycle: authenticatedState(authenticated) };
     } finally {
       await context.close();
     }

@@ -1,6 +1,6 @@
 {
   "name": "x-session-reader",
-  "version": "1.1.0",
+  "version": "1.2.0",
   "description": "Read posts and bookmarks visible to a user-provided or browser-session-bridge X/Twitter web session, without bypassing login or anti-bot checks.",
   "entry": "index.js",
   "toolDependencies": {

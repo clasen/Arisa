@@ -14,6 +14,7 @@ import { createPiCapabilityTools } from "./pi-capability-tools.js";
 import { ToolResourceNoteStore } from "../tools/tool-resource-note-store.js";
 import { materializeToolOutput } from "../tools/tool-output-materializer.js";
 import { WorkerHeapCircuitBreaker } from "./worker-heap-circuit-breaker.js";
+import { WorkerToolFanoutController } from "./worker-tool-fanout.js";
 import { compactionRotationRequest, normalizeSessionRotationPolicy } from "./session-rotation.js";
 
 const piValidationTimeoutMs = 60_000;
@@ -165,6 +166,11 @@ export class AgentManager {
       logger,
       config: config.pi.heapCircuitBreaker
     });
+    this.toolFanout = new WorkerToolFanoutController({
+      heapCircuitBreaker: this.heapCircuitBreaker,
+      logger,
+      config: config.pi.toolFanout
+    });
     this.sessions = this.sessionLifecycle.sessions;
     this.pendingNewSessions = this.sessionLifecycle.pendingNewSessions;
     this.pendingSessionHandoffs = this.sessionLifecycle.pendingSessionHandoffs;
@@ -200,6 +206,7 @@ export class AgentManager {
     this.sessionLifecycle.setCachePolicy(config.pi.sessionCache);
     this.sessionLifecycle.setSessionRotationPolicy(config.pi.sessionRotation);
     this.heapCircuitBreaker.setConfig(config.pi.heapCircuitBreaker);
+    this.toolFanout.setConfig(config.pi.toolFanout);
     this.config = config;
   }
 
@@ -225,7 +232,8 @@ export class AgentManager {
     const diagnostic = await this.sessionLifecycle.getDiagnostic();
     return {
       ...diagnostic,
-      heapCircuitBreaker: this.heapCircuitBreaker.getDiagnostic()
+      heapCircuitBreaker: this.heapCircuitBreaker.getDiagnostic(),
+      toolFanout: this.toolFanout.getDiagnostic()
     };
   }
 
@@ -506,7 +514,8 @@ export class AgentManager {
       telegram,
       chatId,
       policy,
-      logger: this.logger
+      logger: this.logger,
+      toolFanout: this.toolFanout
     });
   }
 
