@@ -7,11 +7,12 @@ import { performBrowse } from "./browser-operation.js";
 import { performInteraction } from "./mcp-session.js";
 import { createPersistentSessionService } from "./daemon-service.js";
 import { RecipeStore, validateRecipe } from "./recipe-store.js";
+import { searchWeb } from "./web-search.js";
 
 const toolName = "lightpanda-browser";
 
 function help() {
-  console.log(`lightpanda-browser\n\nUsage:\n  node index.js --help\n  node index.js run --request-file <json>\n  node index.js daemon  # managed internally by Arisa\n\nModes:\n  status         Verify the installed Lightpanda binary.\n  open           Open a public JavaScript-rendered page as bounded Markdown.\n  render         Return the bounded rendered DOM as HTML.\n  extract-links  Extract bounded HTTP(S) links from the rendered DOM.\n  interact       Run a bounded, stateful MCP sequence in one ephemeral browser.\n  session-open   Open a temporary chat-scoped browser session.\n  session-call   Call one allowlisted MCP tool in an existing session.\n  session-capture Return a bounded text-layout PNG from an existing session.\n  session-list   List this chat's temporary sessions.\n  session-close  Close one temporary session explicitly.\n  recipe-save    Save a validated read/interact sequence in chat-scoped state.\n  recipe-list    List this chat's deterministic recipes.\n  recipe-run     Revalidate and replay one recipe without a model.\n  recipe-delete  Delete one recipe.\n\nBrowse input URL: request.args.url, request.text, or request.artifact.text.\nInteract input: request.args.steps as a JSON array string. Mutation operations also require allowMutations=true.\nSession call args: sessionId, tool, toolArgs (JSON object string), actionLevel=read|interact|commit, commitIntent=submit-form|post-content|delete when required.\nCapture args: sessionId, selector?, fullPage?. Recipe args: name?, recipeId?, steps?, actionLevel=read|interact.\nOptional args: timeoutMs, maxOutputBytes, waitMs, waitSelector, selector, maxLinks, stripUi.\n\nThis tool is a switchable JavaScript-rendering companion to web-browser. It never falls back to Chromium silently.\n`);
+  console.log(`lightpanda-browser\n\nUsage:\n  node index.js --help\n  node index.js run --request-file <json>\n  node index.js daemon  # managed internally by Arisa\n\nModes:\n  status         Verify the installed Lightpanda binary.\n  search         Search the public web through bounded hedged HTTP providers.\n  open           Open a public JavaScript-rendered page as bounded Markdown.\n  render         Return the bounded rendered DOM as HTML.\n  extract-links  Extract bounded HTTP(S) links from the rendered DOM.\n  interact       Run a bounded, stateful MCP sequence in one ephemeral browser.\n  session-open   Open a temporary chat-scoped browser session.\n  session-call   Call one allowlisted MCP tool in an existing session.\n  session-capture Return a bounded text-layout PNG from an existing session.\n  session-list   List this chat's temporary sessions.\n  session-close  Close one temporary session explicitly.\n  recipe-save    Save a validated read/interact sequence in chat-scoped state.\n  recipe-list    List this chat's deterministic recipes.\n  recipe-run     Revalidate and replay one recipe without a model.\n  recipe-delete  Delete one recipe.\n\nSearch input: request.args.query, request.text, or request.artifact.text.\nBrowse input URL: request.args.url, request.text, or request.artifact.text.\nInteract input: request.args.steps as a JSON array string. Mutation operations also require allowMutations=true.\nSession call args: sessionId, tool, toolArgs (JSON object string), actionLevel=read|interact|commit, commitIntent=submit-form|post-content|delete when required.\nCapture args: sessionId, selector?, fullPage?. Recipe args: name?, recipeId?, steps?, actionLevel=read|interact.\nOptional args: timeoutMs, maxOutputBytes, waitMs, waitSelector, selector, maxLinks, stripUi.\n\nThis tool is a switchable JavaScript-rendering companion to web-browser. It never falls back to Chromium silently.\n`);
 }
 
 function coreImport(relativePath) {
@@ -154,6 +155,26 @@ async function run(request) {
         return toolOk({ text: output.text, json: output });
       }
       return toolError(`Unknown session action: ${mode}.`);
+    }
+    if (mode === "search") {
+      const query = request.args?.query || request.text || request.artifact?.text;
+      if (!query) return toolError("search requires args.query, text, or artifact text.");
+      const output = await searchWeb(query, {
+        maxResults: request.args?.maxResults,
+        timeoutMs: request.args?.timeoutMs ?? config.SEARCH_TIMEOUT_MS,
+        maxResponseBytes: request.args?.maxResponseBytes ?? config.SEARCH_MAX_RESPONSE_BYTES
+      });
+      return toolOk({
+        text: output.text,
+        json: {
+          engine: "lightpanda-search",
+          transport: "bounded-http",
+          provider: output.provider,
+          query: output.query,
+          results: output.results,
+          elapsedMs: output.elapsedMs
+        }
+      });
     }
     const binary = await resolveBinary(config.LIGHTPANDA_BINARY, getToolStateDir(toolName));
     if (mode === "status") {

@@ -20,6 +20,8 @@ Version 0.8 adds bounded text-layout PNG captures and deterministic recipes. Cap
 
 Version 0.9 adds a bounded Lightpanda-only limit suite. It uses fixture-specific semantic assertions across React, Vue, Angular, forms, modals, tables, scrolling, redirects, and iframes; probes 100 sequential navigations, two concurrent sessions, timeout recovery, Speedometer incompatibility, RSS trend, swap pressure, and process cleanup. Compatibility failures remain explicit and never trigger fallback. Chromium is excluded from the suite and from the ordinary benchmark unless `INCLUDE_CHROMIUM=true` is deliberately set.
 
+Version 0.10 adds public web search without launching a browser process. It hedges fixed direct Bing and DuckDuckGo HTTP providers, accepts the first semantically parseable bounded result, and uses fixed Jina proxies only if both direct providers fail within the same total deadline. Queries, result counts, response bytes, URLs, and time are bounded. Search metadata identifies the provider and the `bounded-http` transport honestly; Chromium is never involved.
+
 ## Adaptive sessions
 
 1. Call `session-open` and retain the returned opaque `sessionId`.
@@ -54,10 +56,11 @@ For cleaner Markdown on pages dominated by embedded SVG/image data, pass `stripU
 
 ## Contract
 
-Modes are `open` (rendered Markdown), `render` (rendered DOM HTML), `extract-links` (deduplicated HTTP(S) links from the rendered DOM), `interact` (bounded stateful MCP sequence), and `status`.
+Modes are `search` (bounded public results without a browser process), `open` (rendered Markdown), `render` (rendered DOM HTML), `extract-links` (deduplicated HTTP(S) links from the rendered DOM), `interact` (bounded stateful MCP sequence), and `status`.
 
 Safety boundaries:
 
+- search uses only fixed Bing, DuckDuckGo, and Jina endpoints, with a 500-byte query cap, 10-result cap, total deadline, and bounded provider responses;
 - only absolute public HTTP(S) URLs without embedded credentials;
 - DNS answers containing loopback, private, link-local, reserved, documentation, or multicast addresses are rejected before launch;
 - Lightpanda's `--block-private-networks` applies the private-network policy again after DNS resolution to redirects and subresources;

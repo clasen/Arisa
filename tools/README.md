@@ -120,10 +120,10 @@ Apply ordered, deterministic image operations in one artifact pipe: crop, resize
 
 ### [`lightpanda-browser`](./lightpanda-browser/)
 
-Open, inspect, capture, and adaptively interact with public JavaScript-rendered pages through bounded ephemeral or temporary chat-scoped Lightpanda sessions, including deterministic safe recipes and resource-limit diagnostics.
+Search the public web through bounded hedged providers, then open, inspect, capture, and adaptively interact with JavaScript-rendered pages through ephemeral or temporary chat-scoped Lightpanda sessions, including deterministic safe recipes and resource-limit diagnostics.
 
 - **Category:** `web`
-- **Tags:** `adaptive` · `automation` · `browser` · `browse` · `capture` · `daemon` · `headless` · `interaction` · `javascript` · `lightpanda` · `lightweight` · `mcp` · `navigation` · `page` · `public-web` · `recipe` · `render` · `replay` · `screenshot` · `semantic` · `session` · `web`
+- **Tags:** `adaptive` · `automation` · `browser` · `browse` · `capture` · `daemon` · `headless` · `interaction` · `javascript` · `lightpanda` · `lightweight` · `mcp` · `navigation` · `page` · `public-web` · `recipe` · `render` · `replay` · `research` · `screenshot` · `search` · `semantic` · `session` · `web`
 - **Accepts:** `text/plain`, `application/json`
 - **Produces:** `text/plain`, `application/json`, `image/png`
 - **Setup:** run `npm run install-browser` with `ARISA_PACKAGE_DIR` set, or configure an absolute `LIGHTPANDA_BINARY`

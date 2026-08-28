@@ -1,7 +1,7 @@
 {
   "name": "lightpanda-browser",
-  "version": "0.9.0",
-  "description": "Open, inspect, and adaptively interact with public JavaScript-rendered pages through bounded ephemeral or temporary chat-scoped Lightpanda sessions.",
+  "version": "0.10.0",
+  "description": "Search the public web, open rendered pages, capture semantic layouts, and adaptively interact through bounded ephemeral or temporary chat-scoped Lightpanda sessions.",
   "entry": "index.js",
   "daemon": {
     "scope": "chat",
@@ -32,6 +32,16 @@
       "type": "number",
       "required": false,
       "prompt": "Maximum UTF-8 output size returned by one operation."
+    },
+    "SEARCH_TIMEOUT_MS": {
+      "type": "number",
+      "required": false,
+      "prompt": "Total deadline for one bounded public web search."
+    },
+    "SEARCH_MAX_RESPONSE_BYTES": {
+      "type": "number",
+      "required": false,
+      "prompt": "Maximum response bytes accepted from one fixed search provider."
     },
     "CAPTURE_MAX_BYTES": {
       "type": "number",
@@ -92,8 +102,10 @@
     "public-web",
     "recipe",
     "render",
+    "research",
     "replay",
     "screenshot",
+    "search",
     "semantic",
     "session",
     "web"
