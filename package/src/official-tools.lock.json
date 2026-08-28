@@ -1,7 +1,7 @@
 {
   "version": 1,
   "repository": "https://github.com/clasen/Arisa.git",
-  "commit": "0857a7ca64a0e840a716fde641caeb0df6788caf",
+  "commit": "db6111d98851c204293e50a0b1ed30523580b55e",
   "tools": {
     "audio-extractor": {
       "version": null,
@@ -154,7 +154,7 @@
       }
     },
     "lightpanda-browser": {
-      "version": "0.9.0",
+      "version": "0.10.0",
       "files": {
         "action-policy.js": "8c071776ddcfaa5059e9bb9a97b6396370a0bef22670697e63b2156ba10496e1",
         "benchmark-latest.json": "093ed593e388f7c71241c49bd3f224b7161323867927f23fe25fe15b22f8deca",
@@ -163,17 +163,17 @@
         "binary.js": "accd3f1f536ae7ceee4dbfcee2de9ac56fc1ae343656238d62003233417257f1",
         "browser-operation.js": "51384d146d45fda8c672d3d6672fa223b715ad40c3c5b5878719e9df38151592",
         "capture.js": "bfdf77ee25b334b65fcceb88ee2bf0879b0f7e07230b49cffdbb5ee19ae71b7f",
-        "config.js": "cd7750fc0836caf7be22839b07accc62637cfa290ab148afa468653a96a86201",
+        "config.js": "a6a46c33484c9aa7842ac60c83543bd278f0f197bad72adec222c1e44c502d2c",
         "daemon-service.js": "b28cabe31d2513f483d4b2ff589adf7cd780bdb3ad41618293ef1515ec3dc700",
-        "index.js": "a9ddf605e2abcc441b20cedb2ba2315356ca0abaea20788b2ae54c8299cbdb0f",
+        "index.js": "fad23f7cff23e8080c9ba06bdcdaad32d6c30ea02011063fc5d9bcaa22158da2",
         "limit-suite-latest.json": "3d30f958d2d6c1e9dfcaf53e40a401ae288bf264a97ba6c3b64a25a08031feb0",
         "limit-suite-policy.js": "61440ee2e7f557ab2f3c74f8ef4ec2ec85fd2fb7fc53a4121e1f0d066670ea17",
         "LIMITS.md": "6c0ec9624c76de8ddf09b82a4da1dba1b89a48a1f0e71a083ffbcf7a3d5401fb",
-        "mcp-session.js": "ebab85316c1863cf834011e743bf3594106cfaa495eb69be253e559bf3f41fc8",
+        "mcp-session.js": "1e7565be8047a0ef886464f2731acdfc775755d76507b79e44227ec392035290",
         "output-bounds.js": "08ab730d0d8722c5e0e761911a509653dd23d8eb4d8c2abf2d9c5e8432870bdd",
-        "package.json": "59f4bfcfc78c15d4bbfc632f64ee0ecef66c24110b1cc2c149121d2256c6157b",
+        "package.json": "a8f487b6ade2a22b68881bea42b95713e2d569a6a00d2042b46e2dcbcb422aef",
         "process-metrics.js": "e39d2980abb581ca0b917d0d33a1d71922ce49b679a7e96cf16a6a66b81d879a",
-        "README.md": "3b427b6996c70401d979b6b6549ac402e45fe9edd2f921c5cab13c59d9ffe836",
+        "README.md": "edf8be6ce4dd0189fe07e461bb588d2fdba47bbabf77efc7d01f671c0be145c8",
         "recipe-store.js": "358ac391ae86e0bfb82fc5b55bd08cfe3fd4fa56ac12a5ad4ad5abfa43c9a6c6",
         "scripts/benchmark.js": "da3a3a7d0f77bff56bc305605185cae565770a39d474d0d83b8496da04667419",
         "scripts/install-lightpanda.js": "ba4a2f9e5ffae80b9375578731d68eff25997333cb9e3e443b155f7834948205",
@@ -183,14 +183,16 @@
         "test/benchmark-policy.test.js": "f3b473dd7717072610cb31042f749ae66a5efd2f178b55553d5f544415edf106",
         "test/browser-operation.test.js": "283f074ef7ec499f70ba5db3450b792aacebdc2ef72b14727e7b3992cd6f173f",
         "test/capture.test.js": "b4551640d008b73575919e33e5565f7eed2c766a154f8fbe6703ef826f4b9f76",
-        "test/daemon-contract.test.js": "4cf41d0aac817de4dffa54e189c88da2652b1afe59aecf4b289a0dcdad22bf3f",
+        "test/daemon-contract.test.js": "0ffa8bcea5f7b8f17447cc31b970cf6b915e1ed8a62e650cf17bffdcf0017b79",
         "test/limit-suite-policy.test.js": "3bc29952084d0febf617f22ffefeeec15ede245e778e7f00fa86fd4c8140cbd6",
         "test/mcp-session.test.js": "a87bf79396b87a1a9e97ec17702ff2e1baa9c5a734afb2ed74936675de1510b6",
         "test/recipe-store.test.js": "f249b33aa42bebc4f6e61150400f6bca7647feea13b0770e72016485e8d13b46",
         "test/safety.test.js": "2842a7c2b05c1d3d340050deee969a1a8b7d2999262f2c636e5a5bae6a751899",
         "test/session-manager.test.js": "af1816fb5e170f43e84c7a5996ca9c4bb249bc05a698882f53f50e68ec08e55f",
-        "tool.manifest.json": "69dabbf69aaf27b67880a351745432f0efa424d55707a5e07907f6416fbe8976",
-        "url-security.js": "e1f370b3d9b9a74c7ae435d073a8a069a1bc8adbf4e0caa65c817099a48a1c22"
+        "test/web-search.test.js": "b6b42f82bb3cae516cf8ad40b55f467ab637d72cf4b04da3eb9e77391386397f",
+        "tool.manifest.json": "1277ea8bb280829c6d8d39547ea29feae7a9d005326f0a30de972f2aeae7895c",
+        "url-security.js": "e1f370b3d9b9a74c7ae435d073a8a069a1bc8adbf4e0caa65c817099a48a1c22",
+        "web-search.js": "18c1b9980b1724668e0aec9d354dcac236e0aa43fa58cbe652b1bcd3770d8d0e"
       }
     },
     "magnific-mcp": {
