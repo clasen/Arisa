@@ -1,7 +1,7 @@
 {
   "version": 1,
   "repository": "https://github.com/clasen/Arisa.git",
-  "commit": "84e9acea3e9667a70573e4b8ac0b88be3d8f0496",
+  "commit": "ac6027017d304f6a4156719ec5a7bbc77e62f746",
   "tools": {
     "audio-extractor": {
       "version": null,
@@ -104,13 +104,13 @@
       "files": {
         "README.md": "4f50850317c0875ad7ddea767c7dda112669112bec107a98e67a31a42787b82c",
         "config.js": "bab728665650b986c0eaef8e1be1c259ec42b1f83df4217c9780f5468d3c7666",
-        "index.js": "29711fe2547ef27092063bf4ad4537aaba1e35db8d4b401c5a135db404f86060",
+        "index.js": "29d6c30c8a0cdebdc45147334a5adf916ab4aa5c2c77c7b984eaf9feef2a1f1a",
         "outcome-contract.js": "5685bd8fbe4fcb608ee43a0148201206283013c1a60855c974a928c1d312480a",
         "package-lock.json": "ed479120b59c2d9b083991dea60eb7750ba36bc7b2c7defb01cfb598889b8d90",
         "package.json": "13f36535286a4ef628d6f99d64d59213a34f6934bd3596320c959d7dcc25a4e8",
-        "reference-match.js": "762d822ad31f89c06cb5a40f84ba3f864436db486375ed30e48bde94de282c7c",
+        "reference-match.js": "5ceb71bfe57763258d89c60936bb7e5b3166b6aa7127f9d2f8da49f01298f46b",
         "test/outcome-contract.test.js": "dda85d1f56880b30d7fad3e8a27aacbb0808d91fc0addac6e0c38f9f0c4849bf",
-        "test/reference-match.test.js": "701ce83396126b1e42bd3a54e331ff011a1fc27646a0f3aa99ce1c3e576aff6d",
+        "test/reference-match.test.js": "38572ee3756f4ff0b0c61942dda0a19c9d06697826051cf0924dd3c47fc99b67",
         "tool.manifest.json": "279778b22c45bec5b469a7089c188fbe519bfcab5bea2fe719729c43368b38ce"
       }
     },
