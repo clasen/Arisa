@@ -1,7 +1,7 @@
 {
   "version": 1,
   "repository": "https://github.com/clasen/Arisa.git",
-  "commit": "f1d6329d28baccb8dba93a14717e0f99dc1853a5",
+  "commit": "c5916bba300dea3fd05c0359f626e5a45d874975",
   "tools": {
     "audio-extractor": {
       "version": null,
@@ -13,9 +13,9 @@
       }
     },
     "browser-session-bridge": {
-      "version": "0.1.1",
+      "version": "0.1.2",
       "files": {
-        "README.md": "fc2848472b48627838b757bf1a7be9564f31e483e8b673bd4ae95a11016f3309",
+        "README.md": "4ba459c8d1149b3deb943996afacc68aab7474704f6479dfdf4e68c07b0f0b61",
         "bridge-server.js": "87f5a392bc99fd97899836c0731b4694402b04d5dfbe88e66bb4f496bfef351d",
         "chrome-web-store.js": "a6bd9553f1490d5ccda3fe3044c30ee6fe243f422e69a5000bc844884e6d1e95",
         "config.js": "45c8e9e9a159b9125d6ea3458c616926c2ba2b5327fdfd750aa05316d3ce5af8",
@@ -27,16 +27,21 @@
         "extension/popup.css": "138811e3e96e9c7741f064f8cf017be75973cd0942efa9668e96a584b7b52c1c",
         "extension/popup.html": "9d7798efd04c57c534840a7966dd3818f9264022c52390f0fd1d462236a01d60",
         "extension/popup.js": "60ea83f17e5d87f072d27c6540b903361f70e03925c3727983cca6beba9696d3",
-        "index.js": "9120a1ccf4763c8f89fde7b761d8a3439d0bcf7fa45baaf0affc98a16d4e21b8",
-        "package-lock.json": "e1081b8b48c2eaaeca73c63e64902519b33e8822ce351a45afe8509224776c12",
-        "package.json": "172301c497085e4e6283d886c9758c72d44f898c7069ec1cdfae193554d786e4",
+        "index.js": "ff6885c47b80d8e95da1afec25cba0fafec95a57caf79cdd898b836741cc7afd",
+        "lightpanda-session.js": "ba74db85cb46484aee92e6db4401ff83fc3763e8a9e79bd3f7474fac058ae717",
+        "package-lock.json": "688c1b506ad55172e14d5a7319875ec4d1ddf862915290a56ceb98fa2ca78c69",
+        "package.json": "999f7faa3617b35136e70f98f92b735f9950e1b68a6e875b2fee475887a4c6d9",
         "session-browser.js": "d5544db5c6712327e76b8436cfabe02e34d8e043ff2d251c2c5ff3f00f1a9dd7",
         "session-store.js": "56b33e1a342ba148cb4443e03435e5c728db60903ecd0ae87c05fbff3ca881ab",
         "test/device-enrollment.test.js": "3dd36d37044eaf1043bd8b2e9f10ead9dc87479152a07237ab87d50146782f4c",
+        "test/lightpanda-session.test.js": "1fa6c1693a5008c173ec6c5c97effe001b68c535c7a3d4530500c0c4b691c532",
         "test/session-refresh.test.js": "8f5facb81444f0d09928d48f22e82112d47bde21927afcd7fd830ce6832b9f79",
-        "tool.manifest.json": "fe58e50233680315800e65108cb95ab378d7a03908b59dab52f506f9c7511d1d",
+        "tool.manifest.json": "60bef349189be32bc675fd87928f0494434710baca0810e40d7dd3600f986a0d",
         "web-store/listing.md": "914e7c38bc67e19f3afbea86288c0cbc49afcb8941f4734fd3f786c5533861e7",
         "web-store/privacy-policy.md": "c96e84f1a112e5949a3e7bd952fcf5ec794eaa5c4bee14a1dbe0c8e0f5888fb7"
+      },
+      "toolDependencies": {
+        "lightpanda-browser": "^0.11.1"
       }
     },
     "campaign-draft-runner": {
