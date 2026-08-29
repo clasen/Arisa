@@ -8,6 +8,7 @@ import { createDevice, createPairing, createReviewerAccess, listDevices, probeBr
 import { createChromeWebStoreAssets, fillChromeWebStoreDistribution, fillChromeWebStoreListing, fillChromeWebStorePrivacy, fillChromeWebStorePublisherContact, fillChromeWebStoreTestInstructions, inspectChromeWebStoreDraft, replaceChromeWebStorePackage, uploadChromeWebStoreDraft, withdrawChromeWebStoreReview } from "./chrome-web-store.js";
 import { openWithLightpanda } from "./lightpanda-session.js";
 import { openWithSession } from "./session-browser.js";
+import { redactStoredCookieValues } from "./session-redaction.js";
 
 const toolName = "browser-session-bridge";
 const toolDir = path.dirname(fileURLToPath(import.meta.url));
@@ -193,10 +194,12 @@ async function handleRequest(request) {
       url: request.args?.url,
       maxChars: positiveInteger(request.args?.maxChars, 30000, 1000, 100000)
     };
+    const stateDir = getChatToolStateDir(chatId, toolName);
     const opened = engine === "lightpanda"
       ? await openWithLightpanda({ arisa: arisaClient(chatId), ...input })
-      : { engine: "chromium", ...await openWithSession({ stateDir: getChatToolStateDir(chatId, toolName), ...input }) };
-    return toolOk({ text: `Engine: ${opened.engine}\nPage: ${opened.url}\nTitle: ${opened.title}\n\n${opened.text}`, json: opened, mimeType: "application/json" });
+      : { engine: "chromium", ...await openWithSession({ stateDir, ...input }) };
+    const safeOpened = await redactStoredCookieValues({ stateDir, resourceId: input.resourceId, page: opened });
+    return toolOk({ text: `Engine: ${safeOpened.engine}\nPage: ${safeOpened.url}\nTitle: ${safeOpened.title}\n\n${safeOpened.text}`, json: safeOpened, mimeType: "application/json" });
   }
   if (action === "chrome-web-store-publisher-contact") {
     const publisher = await fillChromeWebStorePublisherContact({
