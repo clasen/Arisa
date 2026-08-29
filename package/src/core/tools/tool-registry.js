@@ -43,18 +43,22 @@ function concurrentExecutionKey(name, chatId, request) {
 }
 
 export function readyDaemonAdmission(tool, diagnostic) {
-  const reusable = tool?.daemon?.protocol === "arisa-daemon-v1"
+  const reusable = Boolean(tool?.daemon)
     && diagnostic?.alive === true
     && diagnostic?.state === "ready"
     && diagnostic?.restart?.requested !== true;
   return reusable ? { ignoreWorkerRss: true } : {};
 }
 
-function daemonScope(tool, chatId) {
-  if (tool?.daemon?.protocol !== "arisa-daemon-v1") return null;
+function declaredDaemonScope(tool, chatId) {
+  if (!tool?.daemon) return null;
   return tool.daemon.scope === "chat"
     ? { type: "chat", chatId }
     : { type: "global" };
+}
+
+function nativeDaemonScope(tool, chatId) {
+  return tool?.daemon?.protocol === "arisa-daemon-v1" ? declaredDaemonScope(tool, chatId) : null;
 }
 
 function executionForLease(execution, lease) {
@@ -414,12 +418,12 @@ export class ToolRegistry {
     let leaseOutcome = {};
     let result;
     try {
-      const scope = daemonScope(tool, chatId);
+      const admissionScope = declaredDaemonScope(tool, chatId);
       let admission = {};
-      if (scope) {
+      if (admissionScope) {
         const diagnostic = await readDaemonDiagnostic({
           toolName: name,
-          scope,
+          scope: admissionScope,
           autoStart: Boolean(tool.daemon.autoStart)
         }).catch(() => null);
         admission = readyDaemonAdmission(tool, diagnostic);
@@ -430,12 +434,13 @@ export class ToolRegistry {
       await mkdir(tmpDir, { recursive: true });
       const skills = await this.resolveSkills(name);
       const enrichedRequest = { ...request, chatId, skills };
-      if (scope) {
+      const runtimeScope = nativeDaemonScope(tool, chatId);
+      if (runtimeScope) {
         const runtime = createDaemonRuntime({
           toolName: name,
           entryPath: tool.entry,
-          scope,
-          startupContext: scope.type === "chat" ? { chatId: String(chatId) } : {},
+          scope: runtimeScope,
+          startupContext: runtimeScope.type === "chat" ? { chatId: String(chatId) } : {},
           autoStart: Boolean(tool.daemon.autoStart)
         });
         result = await runtime.submit(enrichedRequest, { onEvent });

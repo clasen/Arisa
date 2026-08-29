@@ -242,8 +242,8 @@ test("reports dependency status in help and blocks a tool with a missing depende
   );
 });
 
-test("only a live ready daemon bypasses worker RSS spawn admission", () => {
-  const tool = { daemon: { protocol: "arisa-daemon-v1" } };
+test("only a live ready declared daemon bypasses worker RSS spawn admission", () => {
+  const tool = { daemon: { scope: "chat", health: "internal" } };
   assert.deepEqual(readyDaemonAdmission(tool, { alive: true, state: "ready", restart: { requested: false } }), { ignoreWorkerRss: true });
   assert.deepEqual(readyDaemonAdmission(tool, { alive: false, state: "ready", restart: { requested: false } }), {});
   assert.deepEqual(readyDaemonAdmission(tool, { alive: true, state: "degraded", restart: { requested: false } }), {});
