@@ -1,6 +1,6 @@
 # Browser Session Bridge
 
-A Chrome/Brave Manifest V3 extension and Arisa tool for intentionally sharing the active site's applicable cookies from a dedicated browser profile.
+A Chrome/Brave Manifest V3 extension and Arisa tool for intentionally sharing the active site's cookies and web storage from a dedicated browser profile.
 
 ## Recommended profile
 
@@ -34,7 +34,7 @@ The setup link expires, is consumed after one activation, and keeps its temporar
 
 Arisa immediately confirms receipt before continuing any pending browser work.
 
-The extension uses `activeTab` for the selected site rather than permanent access to every site. When the user sends a session, it requests host access for that active site only while reading its applicable cookies, then removes access. Persistent host permission is retained only for the configured bridge endpoint. Session payloads use AES-256-GCM, remain chat-scoped, and never expose cookie values in tool output.
+The extension uses `activeTab` for the selected site rather than permanent access to every site. When the user sends a session, it requests host access for that active site only while reading applicable cookies plus that page's local/session storage, then removes access. Persistent host permission is retained only for the configured bridge endpoint. Session payloads use AES-256-GCM, remain chat-scoped, and never expose stored session values in tool output.
 
 After an authenticated browser action, the bridge stores refreshed cookie values only when they still apply to the originally shared site. It never expands the session to sibling hosts or unrelated domains. This can extend a session but cannot override provider-controlled expiry or reauthentication.
 

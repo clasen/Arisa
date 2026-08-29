@@ -2,7 +2,7 @@
 
 Last updated: August 16, 2026
 
-Arisa Session Bridge has one purpose: to let a user intentionally share the active site's applicable browser cookies with an Arisa instance they control.
+Arisa Session Bridge has one purpose: to let a user intentionally share the active site's browser session with an Arisa instance they control.
 
 ## Data processed
 
@@ -10,10 +10,11 @@ When the user chooses **Send current session**, the extension processes:
 
 - the active site's hostname and origin
 - cookies applicable to that active URL
+- localStorage and sessionStorage belonging to that active page
 - the capture time
 - a revocable bridge-device identifier
 
-The extension does not collect browsing history, keystrokes, form contents, or cookies for inactive sites. It requests host access for the active site only during this explicit action and removes that access after reading the applicable cookies.
+The extension does not collect browsing history, keystrokes, or sessions for inactive sites. It requests host access for the active site only during this explicit action and removes that access after reading its cookies and web storage.
 
 ## Transfer and storage
 

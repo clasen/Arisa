@@ -42,9 +42,30 @@ export function decryptEnvelope(secret, envelope) {
   return JSON.parse(Buffer.concat([decipher.update(ciphertext), decipher.final()]).toString("utf8"));
 }
 
+function normalizedWebStorage(value) {
+  const source = value && typeof value === "object" && !Array.isArray(value) ? value : {};
+  const output = {};
+  let bytes = 0;
+  for (const area of ["local", "session"]) {
+    const entries = source[area] && typeof source[area] === "object" && !Array.isArray(source[area]) ? Object.entries(source[area]) : [];
+    if (entries.length > 500) throw new Error("Too many web storage entries");
+    output[area] = {};
+    for (const [rawKey, rawValue] of entries) {
+      const key = cleanText(rawKey, 512);
+      const stored = String(rawValue ?? "");
+      bytes += Buffer.byteLength(key) + Buffer.byteLength(stored);
+      if (stored.length > 256 * 1024 || bytes > 1024 * 1024) throw new Error("Web storage payload is too large");
+      output[area][key] = stored;
+    }
+  }
+  return output;
+}
+
 export function validateSessionPayload(payload, maxCookies = 500) {
-  if (payload?.version !== 1 || !Array.isArray(payload.cookies)) throw new Error("Unsupported session payload");
-  if (payload.cookies.length < 1 || payload.cookies.length > maxCookies) throw new Error("Invalid cookie count");
+  if (![1, 2].includes(payload?.version) || !Array.isArray(payload.cookies)) throw new Error("Unsupported session payload");
+  if (payload.cookies.length > maxCookies) throw new Error("Invalid cookie count");
+  const webStorage = normalizedWebStorage(payload.webStorage);
+  if (!payload.cookies.length && !Object.keys(webStorage.local).length && !Object.keys(webStorage.session).length) throw new Error("The shared site has no session state");
   const source = new URL(payload.sourceUrl);
   if (!["http:", "https:"].includes(source.protocol)) throw new Error("Invalid source URL");
   const hostname = source.hostname.toLowerCase();
@@ -70,12 +91,13 @@ export function validateSessionPayload(payload, maxCookies = 500) {
   });
 
   return {
-    version: 1,
+    version: 2,
     resourceId: hostname,
     sourceUrl: source.origin,
     capturedAt: new Date(payload.capturedAt || Date.now()).toISOString(),
     receivedAt: new Date().toISOString(),
-    cookies
+    cookies,
+    webStorage
   };
 }
 

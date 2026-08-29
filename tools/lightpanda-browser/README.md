@@ -28,6 +28,8 @@ Version 0.11 adds authenticated sessions without accepting cookie values in tool
 
 Version 0.11.1 makes those sessions practical to reuse: opening the same authenticated resource returns its existing live session, selector misses and other recoverable MCP operation errors no longer destroy it, and cookie refresh still persists authentication when the process eventually closes. Unsafe final navigation, process failure, cancellation, and explicit close retain their cleanup behavior.
 
+Version 0.11.2 restores bridge-provided localStorage/sessionStorage before the first target reload and snapshots it again on close. This supports storage-only sessions without waiting for Lightpanda's currently broken SQLite flags.
+
 ## Adaptive sessions
 
 1. Call `session-open` for anonymous browsing, or `session-open-authenticated` with a bridge `resourceId`, and retain the returned opaque `sessionId`.

@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { refreshedSession } from "../session-store.js";
+import { refreshedSession, validateSessionPayload } from "../session-store.js";
 
 const session = {
   version: 1,
@@ -27,6 +27,20 @@ test("keeps refreshed cookies inside the original resource scope", () => {
   ]);
   assert.equal(refreshed.cookies[0].expirationDate, 2_000_000_000);
   assert.equal(refreshed.cookies[1].session, true);
+});
+
+test("accepts a storage-only session and bounds its values", () => {
+  const normalized = validateSessionPayload({
+    version: 2,
+    resourceId: "creatorscout.dev",
+    sourceUrl: "https://creatorscout.dev/saved",
+    capturedAt: "2026-08-29T00:00:00.000Z",
+    cookies: [],
+    webStorage: { local: { session: "token" }, session: {} }
+  });
+  assert.equal(normalized.version, 2);
+  assert.deepEqual(normalized.cookies, []);
+  assert.deepEqual(normalized.webStorage.local, { session: "token" });
 });
 
 test("does not erase a session when no refreshed cookie remains in scope", () => {

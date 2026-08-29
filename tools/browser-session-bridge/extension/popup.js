@@ -188,24 +188,46 @@ async function postEncrypted(path, payload) {
   return result;
 }
 
+async function readWebStorage(tabId) {
+  const [{ result } = {}] = await chrome.scripting.executeScript({
+    target: { tabId },
+    func: () => ({
+      local: Object.fromEntries(Array.from({ length: localStorage.length }, (_, index) => {
+        const key = localStorage.key(index);
+        return [key, localStorage.getItem(key)];
+      })),
+      session: Object.fromEntries(Array.from({ length: sessionStorage.length }, (_, index) => {
+        const key = sessionStorage.key(index);
+        return [key, sessionStorage.getItem(key)];
+      }))
+    })
+  });
+  return result || { local: {}, session: {} };
+}
+
 async function sendCurrentSession() {
   setStatus("");
   sendButton.disabled = true;
   try {
     await ensureEndpointPermission(device.endpoint);
-    const { url } = await activeWebTab();
-    const cookies = await withTemporarySitePermission(url, async () => (await chrome.cookies.getAll({ url: url.href }))
-      .filter((cookie) => !cookie.expirationDate || cookie.expirationDate * 1000 > Date.now())
-      .map(serializableCookie));
-    if (!cookies.length) throw new Error("No cookies are available for this site");
+    const { tab, url } = await activeWebTab();
+    const { cookies, webStorage } = await withTemporarySitePermission(url, async () => ({
+      cookies: (await chrome.cookies.getAll({ url: url.href }))
+        .filter((cookie) => !cookie.expirationDate || cookie.expirationDate * 1000 > Date.now())
+        .map(serializableCookie),
+      webStorage: await readWebStorage(tab.id)
+    }));
+    const storageCount = Object.keys(webStorage.local).length + Object.keys(webStorage.session).length;
+    if (!cookies.length && !storageCount) throw new Error("No cookies or web storage are available for this site");
     const result = await postEncrypted("/v1/import-device", {
-      version: 1,
+      version: 2,
       resourceId: url.hostname,
       sourceUrl: url.origin,
       capturedAt: new Date().toISOString(),
-      cookies
+      cookies,
+      webStorage
     });
-    setStatus(`Sent ${result.cookieCount} cookies for ${result.resourceId}.`, "success");
+    setStatus(`Sent ${result.cookieCount} cookies and ${result.storageCount} storage entries for ${result.resourceId}.`, "success");
   } catch (error) {
     setStatus(error.message || String(error), "error");
   } finally {

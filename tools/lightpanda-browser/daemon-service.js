@@ -15,6 +15,16 @@ function boundedInteger(value, fallback, minimum, maximum) {
   return Math.min(maximum, Math.max(minimum, Math.floor(number)));
 }
 
+function hasWebStorage(webStorage) {
+  return Object.keys(webStorage?.local || {}).length > 0 || Object.keys(webStorage?.session || {}).length > 0;
+}
+
+function storageInjectionScript(origin, webStorage) {
+  return `return (() => {\n  if (location.origin !== ${JSON.stringify(origin)}) throw new Error("Storage origin mismatch");\n  const data = ${JSON.stringify(webStorage)};\n  for (const [key, value] of Object.entries(data.local || {})) localStorage.setItem(key, value);\n  for (const [key, value] of Object.entries(data.session || {})) sessionStorage.setItem(key, value);\n  return true;\n})()`;
+}
+
+const storageSnapshotScript = `return {\n  origin: location.origin,\n  local: Object.fromEntries(Array.from({ length: localStorage.length }, (_, index) => { const key = localStorage.key(index); return [key, localStorage.getItem(key)]; })),\n  session: Object.fromEntries(Array.from({ length: sessionStorage.length }, (_, index) => { const key = sessionStorage.key(index); return [key, sessionStorage.getItem(key)]; }))\n}`;
+
 async function createStartedClient(binary, config, options = {}) {
   const operationTimeoutMs = boundedInteger(config.TIMEOUT_MS, 30_000, 5_000, 60_000);
   const profile = options.authenticatedProfile || null;
@@ -26,23 +36,44 @@ async function createStartedClient(binary, config, options = {}) {
     timeoutMs: 0,
     maxCaptureBytes: 32 * 1024
   });
-  const closeClient = client.close.bind(client);
-  if (profile) {
-    client.close = async () => {
-      try {
-        await closeClient();
-        await profile.finish({ refresh: true });
-      } catch (error) {
-        await profile.finish({ refresh: false }).catch(() => {});
-        throw error;
-      }
-    };
-  }
+  const baseCall = client.call.bind(client);
+  const baseClose = client.close.bind(client);
   try {
     await client.start();
+    if (profile) {
+      let storageInjected = !hasWebStorage(profile.webStorage);
+      client.call = async (tool, args = {}) => {
+        if (tool === "goto" && !storageInjected) {
+          const target = new URL(String(args.url || ""));
+          await baseCall("goto", args);
+          await baseCall("evaluate", { script: storageInjectionScript(target.origin, profile.webStorage) });
+          storageInjected = true;
+          return baseCall("goto", args);
+        }
+        return baseCall(tool, args);
+      };
+      client.close = async () => {
+        let webStorage = null;
+        try {
+          if (!client.failed) {
+            const snapshot = JSON.parse(await baseCall("evaluate", { script: storageSnapshotScript }));
+            assertResourceUrl(snapshot.origin, profile.resourceId);
+            webStorage = { local: snapshot.local, session: snapshot.session };
+          }
+        } catch {}
+        try {
+          await baseClose();
+          await profile.finish({ refresh: true, webStorage });
+        } catch (error) {
+          await profile.finish({ refresh: false }).catch(() => {});
+          throw error;
+        }
+      };
+    }
     return client;
   } catch (error) {
-    await client.close().catch(() => {});
+    await baseClose().catch(() => {});
+    await profile?.finish({ refresh: false }).catch(() => {});
     throw error;
   }
 }

@@ -51,7 +51,14 @@ export async function openWithSession({ stateDir, resourceId: rawResourceId, url
   const browser = await chromium.launch({ headless: true });
   try {
     const context = await browser.newContext();
-    await context.addCookies(session.cookies.map(toPlaywrightCookie));
+    if (session.cookies.length) await context.addCookies(session.cookies.map(toPlaywrightCookie));
+    if (session.webStorage) {
+      await context.addInitScript(({ origin, webStorage }) => {
+        if (location.origin !== origin) return;
+        for (const [key, value] of Object.entries(webStorage.local || {})) localStorage.setItem(key, value);
+        for (const [key, value] of Object.entries(webStorage.session || {})) sessionStorage.setItem(key, value);
+      }, { origin: new URL(session.sourceUrl).origin, webStorage: session.webStorage });
+    }
     refreshSessionOnBrowserClose({ browser, context, stateDir, session });
     const page = await context.newPage();
     await page.goto(url.href, { waitUntil: "domcontentloaded", timeout: 60000 });

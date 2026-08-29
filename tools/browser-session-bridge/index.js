@@ -83,7 +83,7 @@ async function notifySessionImported(event) {
   await arisaClient(event.chatId).agent.enqueueEvent({
     resourceId: event.resourceId,
     acknowledgement: `Session received for ${event.resourceId}. The requested target is not validated yet.`,
-    prompt: `The user explicitly shared an authenticated browser session for ${event.resourceId} through ${event.label || "Arisa Session Bridge"}. The bridge received ${event.cookieCount} domain-scoped cookies at ${event.receivedAt}. This proves a session share only; it does not prove freshness, target access, or expected coverage. The transport already acknowledged it. If a pending task was waiting, run its target validation now; otherwise stay silent.`
+    prompt: `The user explicitly shared an authenticated browser session for ${event.resourceId} through ${event.label || "Arisa Session Bridge"}. The bridge received ${event.cookieCount} domain-scoped cookies and ${event.storageCount || 0} web-storage entries at ${event.receivedAt}. This proves a session share only; it does not prove freshness, target access, or expected coverage. The transport already acknowledged it. If a pending task was waiting, run its target validation now; otherwise stay silent.`
   });
 }
 
@@ -147,6 +147,7 @@ async function listSessions(chatId) {
         capturedAt: record.capturedAt,
         receivedAt: record.receivedAt,
         cookieCount: Array.isArray(record.cookies) ? record.cookies.length : 0,
+        storageCount: Object.keys(record.webStorage?.local || {}).length + Object.keys(record.webStorage?.session || {}).length,
         connectionStatus: "session_shared",
         targetValidation: { status: "not_validated", reason: "A consumer must prove the requested target." }
       });
@@ -221,9 +222,9 @@ async function handleRequest(request) {
       stateDir: getChatToolStateDir(chatId, toolName),
       privacyUrl: request.args?.privacyUrl,
       fields: {
-        singlePurpose: "Let a user explicitly share the active site's applicable browser session cookies with an Arisa instance they control.",
+        singlePurpose: "Let a user explicitly share the active site's browser session with an Arisa instance they control.",
         activeTab: "Identifies the site selected by the user when they open the extension popup and choose to send that site's session.",
-        cookies: "Reads only cookies applicable to the active site after the user explicitly chooses Send current session. Those cookies are encrypted before transfer to the paired Arisa bridge.",
+        cookies: "Reads cookies plus local/session storage for the active site only after the user explicitly chooses Send current session. The session is encrypted before transfer to the paired Arisa bridge.",
         storage: "Stores the paired bridge endpoint and revocable device credential locally in the dedicated browser profile so the user does not need to reconnect for every session share.",
         dataTypes: ["Authentication information", "Web history"],
         privacyPolicyUrl: request.args?.privacyPolicyUrl

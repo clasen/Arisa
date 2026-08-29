@@ -41,6 +41,24 @@ test("authenticated profile materializes private runtime cookies and refreshes t
   }
 });
 
+test("authenticated profile accepts storage-only bridge sessions", async () => {
+  const setup = await fixture();
+  try {
+    const sessionPath = path.join(setup.bridgeStateDir, "sessions", "example.com.json");
+    const record = JSON.parse(await readFile(sessionPath, "utf8"));
+    record.version = 2;
+    record.cookies = [];
+    record.webStorage = { local: { auth: "stored" }, session: {} };
+    await writeFile(sessionPath, JSON.stringify(record));
+    const profile = await setup.store.open("example.com");
+    assert.deepEqual(profile.webStorage.local, { auth: "stored" });
+    assert.deepEqual(JSON.parse(await readFile(profile.cookiePath, "utf8")), []);
+    await profile.finish({ refresh: false });
+  } finally {
+    await rm(setup.root, { recursive: true, force: true });
+  }
+});
+
 test("authenticated profile refuses cross-site cookies and navigation", async () => {
   const setup = await fixture();
   try {

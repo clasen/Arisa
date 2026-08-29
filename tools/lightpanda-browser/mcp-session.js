@@ -192,7 +192,7 @@ export class McpProcess {
     await this.request("initialize", {
       protocolVersion: "2025-06-18",
       capabilities: {},
-      clientInfo: { name: "arisa-lightpanda-browser", version: "0.11.1" }
+      clientInfo: { name: "arisa-lightpanda-browser", version: "0.11.2" }
     });
     this.notify("notifications/initialized");
   }

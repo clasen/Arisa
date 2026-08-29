@@ -96,6 +96,7 @@ test("activates a short-lived device enrollment exactly once", async (t) => {
     resourceId: "example.com",
     sourceUrl: "https://example.com",
     cookieCount: 1,
+    storageCount: 0,
     receivedAt: sessionEvents[0].receivedAt
   });
 

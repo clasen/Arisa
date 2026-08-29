@@ -23,7 +23,7 @@ function cookieKey(cookie) {
 }
 
 function validateCookies(cookies, hostname) {
-  if (!Array.isArray(cookies) || !cookies.length || cookies.length > 2_000) throw new Error("Stored browser session has an invalid cookie count.");
+  if (!Array.isArray(cookies) || cookies.length > 2_000) throw new Error("Stored browser session has an invalid cookie count.");
   return cookies.map((cookie) => {
     if (!cookie || typeof cookie !== "object" || Array.isArray(cookie)) throw new Error("Stored browser session contains an invalid cookie.");
     const domain = normalizedDomain(cookie.domain || hostname);
@@ -44,6 +44,17 @@ function validateCookies(cookies, hostname) {
       ...(Number.isFinite(cookie.expirationDate) ? { expirationDate: Number(cookie.expirationDate) } : {})
     };
   });
+}
+
+function normalizedWebStorage(value) {
+  const source = value && typeof value === "object" && !Array.isArray(value) ? value : {};
+  const output = { local: {}, session: {} };
+  for (const area of ["local", "session"]) {
+    for (const [key, stored] of Object.entries(source[area] || {}).slice(0, 500)) {
+      if (key.length <= 512 && String(stored ?? "").length <= 256 * 1024) output[area][key] = String(stored ?? "");
+    }
+  }
+  return output;
 }
 
 function toLightpandaCookie(cookie) {
@@ -95,6 +106,8 @@ export function createAuthenticatedProfileStore({ bridgeStateDir, tmpDir }) {
     const session = JSON.parse(await readFile(sessionPath, "utf8"));
     if (String(session.resourceId || "").toLowerCase() !== hostname) throw new Error("Stored browser session identity does not match resourceId.");
     const cookies = validateCookies(session.cookies, hostname);
+    const webStorage = normalizedWebStorage(session.webStorage);
+    if (!cookies.length && !Object.keys(webStorage.local).length && !Object.keys(webStorage.session).length) throw new Error("Stored browser session has no authentication state.");
     const runDir = path.join(tmpDir, "authenticated-profiles", `${hostname}-${crypto.randomUUID()}`);
     await mkdir(runDir, { recursive: true, mode: 0o700 });
     await chmod(runDir, 0o700);
@@ -105,19 +118,25 @@ export function createAuthenticatedProfileStore({ bridgeStateDir, tmpDir }) {
     const sourceVersion = `${session.receivedAt || ""}\n${session.refreshedAt || ""}\n${session.capturedAt || ""}`;
     let finished = false;
 
-    async function finish({ refresh }) {
+    async function finish({ refresh, webStorage: refreshedWebStorage = null }) {
       if (finished) return;
       finished = true;
       try {
         if (refresh) {
-          const jar = JSON.parse(await readFile(cookieJarPath, "utf8"));
+          const jar = await readFile(cookieJarPath, "utf8").then(JSON.parse).catch((error) => error?.code === "ENOENT" ? [] : Promise.reject(error));
           const refreshedCookies = validateCookies(jar.map(fromLightpandaCookie), hostname);
           const latest = JSON.parse(await readFile(sessionPath, "utf8"));
           const latestVersion = `${latest.receivedAt || ""}\n${latest.refreshedAt || ""}\n${latest.capturedAt || ""}`;
           if (latestVersion === sourceVersion) {
             const merged = new Map(validateCookies(latest.cookies, hostname).map((cookie) => [cookieKey(cookie), cookie]));
             for (const cookie of refreshedCookies) merged.set(cookieKey(cookie), cookie);
-            await atomicWriteJson(sessionPath, { ...latest, cookies: [...merged.values()], refreshedAt: new Date().toISOString() });
+            await atomicWriteJson(sessionPath, {
+              ...latest,
+              version: 2,
+              cookies: [...merged.values()],
+              webStorage: refreshedWebStorage ? normalizedWebStorage(refreshedWebStorage) : webStorage,
+              refreshedAt: new Date().toISOString()
+            });
           }
         }
       } catch (error) {
@@ -131,6 +150,7 @@ export function createAuthenticatedProfileStore({ bridgeStateDir, tmpDir }) {
       resourceId: hostname,
       cookiePath,
       cookieJarPath,
+      webStorage,
       finish,
       publicMetadata: { authenticated: true, resourceId: hostname }
     };
