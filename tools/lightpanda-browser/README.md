@@ -26,6 +26,8 @@ Version 0.10.1 removes the legacy external-browser benchmark adapter. The bounde
 
 Version 0.11 adds authenticated sessions without accepting cookie values in tool arguments or output. `session-open-authenticated` reads one explicitly shared, same-site session from chat-scoped `browser-session-bridge` state, loads cookies through a private runtime file, refreshes cookies back to the bridge on clean close, and removes scratch files. Only one live session per resource is allowed. Every explicit and final URL must remain in scope. Web storage remains in memory for that live session because the current Lightpanda MCP build advertises but rejects its SQLite storage flags. Credential and payment controls remain blocked.
 
+Version 0.11.1 makes those sessions practical to reuse: opening the same authenticated resource returns its existing live session, selector misses and other recoverable MCP operation errors no longer destroy it, and cookie refresh still persists authentication when the process eventually closes. Unsafe final navigation, process failure, cancellation, and explicit close retain their cleanup behavior.
+
 ## Adaptive sessions
 
 1. Call `session-open` for anonymous browsing, or `session-open-authenticated` with a bridge `resourceId`, and retain the returned opaque `sessionId`.

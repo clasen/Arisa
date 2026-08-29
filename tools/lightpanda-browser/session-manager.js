@@ -51,6 +51,14 @@ export class BrowserSessionManager {
     return [...this.sessions.values()].map((session) => this.describe(session));
   }
 
+  reuseByResource(resourceId) {
+    const normalized = String(resourceId || "");
+    const session = [...this.sessions.values()].find((candidate) => candidate.metadata?.resourceId === normalized);
+    if (!session) return null;
+    session.lastUsedAt = this.now();
+    return { ...this.describe(session), reused: true };
+  }
+
   has(id) {
     return this.sessions.has(String(id || ""));
   }
@@ -91,7 +99,12 @@ export class BrowserSessionManager {
       }
       return output;
     } catch (error) {
-      await this.close(id, error?.code === "DAEMON_JOB_CANCELLED" ? "cancelled" : "crashed");
+      if (error?.recoverable === true && this.sessions.has(id)) {
+        session.lastUsedAt = this.now();
+        session.busy = false;
+      } else {
+        await this.close(id, error?.code === "DAEMON_JOB_CANCELLED" ? "cancelled" : "crashed");
+      }
       throw error;
     } finally {
       signal?.removeEventListener("abort", abortListener);

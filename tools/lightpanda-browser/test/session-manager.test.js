@@ -113,13 +113,41 @@ test("authenticated sessions are identified, unique per resource, and same-site 
   assert.equal(session.authenticated, true);
   assert.equal(session.resourceId, "example.com");
   assert.equal(profiles[0].resourceId, "example.com");
-  await assert.rejects(service.processJob({ action: "session-open-authenticated", resourceId: "example.com" }), /already active/);
+  const reused = await service.processJob({ action: "session-open-authenticated", resourceId: "example.com" });
+  assert.equal(reused.id, session.id);
+  assert.equal(reused.reused, true);
   await assert.rejects(
     service.processJob({ action: "session-call", sessionId: session.id, tool: "goto", arguments: { url: "https://example.net/" } }),
     /left the shared session scope/
   );
-  assert.equal(clients[0].closed, true);
-  assert.equal(service.manager.list().length, 0);
+  assert.equal(clients[0].closed, false);
+  assert.equal(service.manager.list().length, 1);
+  await service.close();
+});
+
+test("recoverable MCP misses keep the adaptive session alive", async () => {
+  const client = fakeClient({
+    call: async (operation) => {
+      if (operation === "waitForSelector") throw Object.assign(new Error("NodeNotFound"), { recoverable: true });
+      if (operation === "getUrl") return "https://example.com/";
+      return "tree";
+    }
+  });
+  const service = createPersistentSessionService({
+    binary: "/unused",
+    config: { SESSION_TTL_MS: 30_000, MAX_SESSIONS: 1, SESSION_SWEEP_MS: 10_000 },
+    createClient: async () => client,
+    lookup: async () => [{ address: "93.184.216.34" }]
+  });
+  const session = await service.processJob({ action: "session-open" });
+  await assert.rejects(
+    service.processJob({ action: "session-call", sessionId: session.id, tool: "waitForSelector", arguments: { selector: ".missing" } }),
+    /NodeNotFound/
+  );
+  assert.equal(client.closed, false);
+  assert.equal(service.manager.list().length, 1);
+  const result = await service.processJob({ action: "session-call", sessionId: session.id, tool: "tree", arguments: {} });
+  assert.equal(result.text, "tree");
   await service.close();
 });
 

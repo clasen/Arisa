@@ -155,7 +155,10 @@ export class McpProcess {
     const pending = this.pending.get(message.id);
     if (!pending) return;
     this.pending.delete(message.id);
-    if (message.error) pending.reject(new Error(`Lightpanda MCP error: ${message.error.message || JSON.stringify(message.error)}`));
+    if (message.error) pending.reject(Object.assign(
+      new Error(`Lightpanda MCP error: ${message.error.message || JSON.stringify(message.error)}`),
+      { code: "LIGHTPANDA_MCP_OPERATION_FAILED", recoverable: true }
+    ));
     else pending.resolve(message.result);
   }
 
@@ -189,14 +192,17 @@ export class McpProcess {
     await this.request("initialize", {
       protocolVersion: "2025-06-18",
       capabilities: {},
-      clientInfo: { name: "arisa-lightpanda-browser", version: "0.11.0" }
+      clientInfo: { name: "arisa-lightpanda-browser", version: "0.11.1" }
     });
     this.notify("notifications/initialized");
   }
 
   async callResult(tool, args) {
     const result = await this.request("tools/call", { name: tool, arguments: args });
-    if (result?.isError) throw new Error(`Lightpanda ${tool} failed: ${resultText(result) || "unknown error"}`);
+    if (result?.isError) throw Object.assign(
+      new Error(`Lightpanda ${tool} failed: ${resultText(result) || "unknown error"}`),
+      { code: "LIGHTPANDA_MCP_OPERATION_FAILED", recoverable: true }
+    );
     return result;
   }
 

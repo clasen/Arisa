@@ -72,6 +72,8 @@ export function createPersistentSessionService({ binary, config, createClient = 
     if (action === "session-open") return manager.open();
     if (action === "session-open-authenticated") {
       if (!profileStore) throw new Error("Authenticated Lightpanda profiles are unavailable.");
+      const reused = manager.reuseByResource(payload.resourceId);
+      if (reused) return reused;
       const authenticatedProfile = await profileStore.open(payload.resourceId);
       try {
         return await manager.open({ authenticatedProfile, publicMetadata: authenticatedProfile.publicMetadata });
@@ -120,11 +122,13 @@ export function createPersistentSessionService({ binary, config, createClient = 
       });
       const metadata = manager.metadata(payload.sessionId);
       const startedAt = Date.now();
+      let operationCompleted = false;
       try {
         if (metadata.authenticated && step.arguments.url !== undefined) assertResourceUrl(step.arguments.url, metadata.resourceId);
         const client = { call: (operation, args) => manager.execute(payload.sessionId, operation, args, { signal }) };
         const permission = await authorizeAction({ client, ...step, args: step.arguments });
         const rawText = await manager.execute(payload.sessionId, step.tool, step.arguments, { signal });
+        operationCompleted = true;
         const maxOutputBytes = normalizeMaxOutputBytes(payload.maxOutputBytes ?? config.MAX_OUTPUT_BYTES);
         const bounded = boundUtf8(rawText, maxOutputBytes);
         const finalUrl = await finalPublicUrl(payload.sessionId, signal);
@@ -140,7 +144,7 @@ export function createPersistentSessionService({ binary, config, createClient = 
           bytes: bounded.bytes
         };
       } catch (error) {
-        if (manager.has(payload.sessionId)) await manager.close(payload.sessionId, "unsafe-or-failed-navigation");
+        if (operationCompleted && manager.has(payload.sessionId)) await manager.close(payload.sessionId, "unsafe-final-navigation");
         throw error;
       }
     }

@@ -50,7 +50,7 @@ export async function cleanupStaleCaptures(tmpDir, { olderThanMs = 10 * 60_000, 
     if (!/^lightpanda-capture-[0-9a-f-]+\.png$/i.test(name)) continue;
     const filePath = path.join(directory, name);
     const info = await stat(filePath).catch(() => null);
-    if (info && now - info.mtimeMs >= olderThanMs) {
+    if (info && (olderThanMs <= 0 || now - info.mtimeMs >= olderThanMs)) {
       await unlink(filePath).catch(() => {});
       removed += 1;
     }

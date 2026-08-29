@@ -112,7 +112,7 @@ async function run(request) {
         if (mode === "session-open-authenticated" && !resourceId) return toolError("session-open-authenticated requires resourceId.");
         const output = await daemon.submit({ action: mode, ...(resourceId ? { resourceId } : {}) }, { timeoutMs, readyTimeoutMs });
         const label = output.authenticated ? `authenticated Lightpanda session for ${output.resourceId}` : "temporary Lightpanda session";
-        return toolOk({ text: `Opened ${label} ${output.id}.`, json: output });
+        return toolOk({ text: `${output.reused ? "Reused" : "Opened"} ${label} ${output.id}.`, json: output });
       }
       if (mode === "session-list") {
         const output = await daemon.submit({ action: mode }, { timeoutMs, readyTimeoutMs });
