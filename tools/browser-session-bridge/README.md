@@ -38,6 +38,8 @@ The extension uses `activeTab` for the selected site rather than permanent acces
 
 After an authenticated browser action, the bridge stores refreshed cookie values only when they still apply to the originally shared site. It never expands the session to sibling hosts or unrelated domains. This can extend a session but cannot override provider-controlled expiry or reauthentication.
 
+The `open` action now uses `lightpanda` by default. It opens or reuses the site's authenticated Lightpanda session, navigates to the requested same-site URL, and returns bounded title and body text while leaving the session reusable. Pass `engine=chromium` explicitly for an incompatible target. A Lightpanda failure is returned as-is and never triggers an automatic Chromium fallback.
+
 Sharing grants Arisa the same access as the selected browser session. Log out, use **Forget**, or ask Arisa to delete the stored session and revoke the browser profile. The bridge does not bypass login, CAPTCHA, verification, approval, or anti-bot controls.
 
 ## Chrome Web Store reviewer access

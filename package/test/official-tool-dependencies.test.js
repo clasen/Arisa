@@ -13,6 +13,7 @@ test("official orchestrators declare their hard tool dependencies", async () => 
     "gmail-workspace": "^0.1.0",
     "lightpanda-browser": "^0.10.0"
   });
+  assert.deepEqual((await manifest("browser-session-bridge")).toolDependencies, { "lightpanda-browser": "^0.11.1" });
   assert.deepEqual((await manifest("x-campaign-runner")).toolDependencies, {
     "x-dm": "^0.4.0",
     "lightpanda-browser": "^0.11.0"

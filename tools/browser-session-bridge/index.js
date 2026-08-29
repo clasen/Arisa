@@ -6,6 +6,7 @@ import path from "node:path";
 import defaults from "./config.js";
 import { createDevice, createPairing, createReviewerAccess, listDevices, probeBridge, revokeDevice, revokeReviewerAccess, startBridgeServer } from "./bridge-server.js";
 import { createChromeWebStoreAssets, fillChromeWebStoreDistribution, fillChromeWebStoreListing, fillChromeWebStorePrivacy, fillChromeWebStorePublisherContact, fillChromeWebStoreTestInstructions, inspectChromeWebStoreDraft, replaceChromeWebStorePackage, uploadChromeWebStoreDraft, withdrawChromeWebStoreReview } from "./chrome-web-store.js";
+import { openWithLightpanda } from "./lightpanda-session.js";
 import { openWithSession } from "./session-browser.js";
 
 const toolName = "browser-session-bridge";
@@ -49,7 +50,7 @@ Actions via args.action:
   reviewer-revoke Revoke the Chrome Web Store reviewer setup URL.
   pair           Create a legacy encrypted one-time pairing code.
   list           List stored browser sessions without exposing cookie values.
-  open                     Open one same-site URL with a stored session. args: resourceId, url, maxChars?.
+  open                     Open one same-site URL with a stored session. args: resourceId, url, maxChars?, engine=lightpanda|chromium (default lightpanda).
   chrome-web-store-inspect      Inspect non-secret controls in one existing draft. args: draftUrl.
   chrome-web-store-fill-listing Complete and save the listing fields without submitting. args: draftUrl, description, category, language, homepageUrl, supportUrl.
   chrome-web-store-fill-privacy Complete and save accurate privacy disclosures without submitting. args: privacyUrl, privacyPolicyUrl.
@@ -185,13 +186,17 @@ async function handleRequest(request) {
   }
   if (action === "list") return toolOk({ text: "Stored browser sessions", json: { sessions: await listSessions(chatId) }, mimeType: "application/json" });
   if (action === "open") {
-    const opened = await openWithSession({
-      stateDir: getChatToolStateDir(chatId, toolName),
+    const engine = String(request.args?.engine || "lightpanda").trim().toLowerCase();
+    if (!new Set(["lightpanda", "chromium"]).has(engine)) throw new Error("engine must be lightpanda or chromium");
+    const input = {
       resourceId: request.args?.resourceId,
       url: request.args?.url,
       maxChars: positiveInteger(request.args?.maxChars, 30000, 1000, 100000)
-    });
-    return toolOk({ text: `Page: ${opened.url}\nTitle: ${opened.title}\n\n${opened.text}`, json: opened, mimeType: "application/json" });
+    };
+    const opened = engine === "lightpanda"
+      ? await openWithLightpanda({ arisa: arisaClient(chatId), ...input })
+      : { engine: "chromium", ...await openWithSession({ stateDir: getChatToolStateDir(chatId, toolName), ...input }) };
+    return toolOk({ text: `Engine: ${opened.engine}\nPage: ${opened.url}\nTitle: ${opened.title}\n\n${opened.text}`, json: opened, mimeType: "application/json" });
   }
   if (action === "chrome-web-store-publisher-contact") {
     const publisher = await fillChromeWebStorePublisherContact({
