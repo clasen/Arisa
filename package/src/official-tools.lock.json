@@ -1,7 +1,7 @@
 {
   "version": 1,
   "repository": "https://github.com/clasen/Arisa.git",
-  "commit": "c5916bba300dea3fd05c0359f626e5a45d874975",
+  "commit": "a1a016269b4617562d91e08354f99d2067041518",
   "tools": {
     "audio-extractor": {
       "version": null,
@@ -27,14 +27,16 @@
         "extension/popup.css": "138811e3e96e9c7741f064f8cf017be75973cd0942efa9668e96a584b7b52c1c",
         "extension/popup.html": "9d7798efd04c57c534840a7966dd3818f9264022c52390f0fd1d462236a01d60",
         "extension/popup.js": "60ea83f17e5d87f072d27c6540b903361f70e03925c3727983cca6beba9696d3",
-        "index.js": "ff6885c47b80d8e95da1afec25cba0fafec95a57caf79cdd898b836741cc7afd",
+        "index.js": "fc8d5492cb90b7dd4a89e013b8a946accf2d111e32207c012680bd0d27af4827",
         "lightpanda-session.js": "ba74db85cb46484aee92e6db4401ff83fc3763e8a9e79bd3f7474fac058ae717",
         "package-lock.json": "688c1b506ad55172e14d5a7319875ec4d1ddf862915290a56ceb98fa2ca78c69",
         "package.json": "999f7faa3617b35136e70f98f92b735f9950e1b68a6e875b2fee475887a4c6d9",
         "session-browser.js": "d5544db5c6712327e76b8436cfabe02e34d8e043ff2d251c2c5ff3f00f1a9dd7",
+        "session-redaction.js": "7e5cf2c12cc5efd9ed9f57e404b2f35c8ab4cc552431aa6128a9aa16c2f95d39",
         "session-store.js": "56b33e1a342ba148cb4443e03435e5c728db60903ecd0ae87c05fbff3ca881ab",
         "test/device-enrollment.test.js": "3dd36d37044eaf1043bd8b2e9f10ead9dc87479152a07237ab87d50146782f4c",
         "test/lightpanda-session.test.js": "1fa6c1693a5008c173ec6c5c97effe001b68c535c7a3d4530500c0c4b691c532",
+        "test/session-redaction.test.js": "e45b5cbd19eea7996d57141b5185c3a6e4c79989e4cb7253272fc66cd2cbd719",
         "test/session-refresh.test.js": "8f5facb81444f0d09928d48f22e82112d47bde21927afcd7fd830ce6832b9f79",
         "tool.manifest.json": "60bef349189be32bc675fd87928f0494434710baca0810e40d7dd3600f986a0d",
         "web-store/listing.md": "914e7c38bc67e19f3afbea86288c0cbc49afcb8941f4734fd3f786c5533861e7",
