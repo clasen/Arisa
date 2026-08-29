@@ -133,6 +133,34 @@ test("rejects declared heavy tools before spawn when memory pressure is unsafe",
   assert.equal(governor.snapshot().resources.browser.activeWeight, 0);
 });
 
+test("ready daemon jobs bypass only worker RSS spawn admission", async () => {
+  const governor = new WeightedResourceGovernor({
+    policy: { maxWorkerRssMb: 384, maxSwapUsedPercent: 95 },
+    memoryPressure: async () => ({
+      availableBytes: 512 * 1024 * 1024,
+      totalBytes: 4 * 1024 * 1024 * 1024,
+      workerRssBytes: 450 * 1024 * 1024,
+      swapTotalBytes: 100,
+      swapUsedPercent: 50
+    })
+  });
+  const lease = await governor.acquire({ resourceClass: "browser", weight: 1 }, "ready-daemon", { ignoreWorkerRss: true });
+  assert.equal(lease.memoryLimitMb, 384);
+  lease.release({ success: true });
+
+  governor.memoryPressure = async () => ({
+    availableBytes: 512 * 1024 * 1024,
+    totalBytes: 4 * 1024 * 1024 * 1024,
+    workerRssBytes: 450 * 1024 * 1024,
+    swapTotalBytes: 100,
+    swapUsedPercent: 96
+  });
+  await assert.rejects(
+    () => governor.acquire({ resourceClass: "browser", weight: 1 }, "ready-daemon", { ignoreWorkerRss: true }),
+    /swap use/
+  );
+});
+
 test("larger weights consume shared capacity and worker RSS peaks are retained", async () => {
   let rss = 120 * 1024 * 1024;
   const governor = new WeightedResourceGovernor({

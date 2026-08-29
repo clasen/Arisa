@@ -42,6 +42,21 @@ function concurrentExecutionKey(name, chatId, request) {
   return createHash("sha256").update(serialized).digest("hex");
 }
 
+export function readyDaemonAdmission(tool, diagnostic) {
+  const reusable = tool?.daemon?.protocol === "arisa-daemon-v1"
+    && diagnostic?.alive === true
+    && diagnostic?.state === "ready"
+    && diagnostic?.restart?.requested !== true;
+  return reusable ? { ignoreWorkerRss: true } : {};
+}
+
+function daemonScope(tool, chatId) {
+  if (tool?.daemon?.protocol !== "arisa-daemon-v1") return null;
+  return tool.daemon.scope === "chat"
+    ? { type: "chat", chatId }
+    : { type: "global" };
+}
+
 function executionForLease(execution, lease) {
   if (!execution) return null;
   return {
@@ -399,15 +414,23 @@ export class ToolRegistry {
     let leaseOutcome = {};
     let result;
     try {
-      lease = await this.executionGovernor.acquire(tool.execution, name);
+      const scope = daemonScope(tool, chatId);
+      let admission = {};
+      if (scope) {
+        const diagnostic = await readDaemonDiagnostic({
+          toolName: name,
+          scope,
+          autoStart: Boolean(tool.daemon.autoStart)
+        }).catch(() => null);
+        admission = readyDaemonAdmission(tool, diagnostic);
+        if (admission.ignoreWorkerRss) this.logger?.log("tools", `reusing ready ${name} daemon without worker RSS spawn admission`);
+      }
+      lease = await this.executionGovernor.acquire(tool.execution, name, admission);
       this.logger?.log("tools", `running ${name}`);
       await mkdir(tmpDir, { recursive: true });
       const skills = await this.resolveSkills(name);
       const enrichedRequest = { ...request, chatId, skills };
-      if (tool.daemon?.protocol === "arisa-daemon-v1") {
-        const scope = tool.daemon.scope === "chat"
-          ? { type: "chat", chatId }
-          : { type: "global" };
+      if (scope) {
         const runtime = createDaemonRuntime({
           toolName: name,
           entryPath: tool.entry,

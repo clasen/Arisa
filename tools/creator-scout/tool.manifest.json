@@ -1,12 +1,16 @@
 {
   "name": "creator-scout",
-  "version": "1.2.0",
-  "description": "Search CreatorScout for exact comparable-game creators and inspect billing while explicitly separating authentication, validated targets, prepared checkout, and confirmed subscription states.",
+  "version": "1.3.0",
+  "description": "Search CreatorScout through a persistent Lightpanda session for exact comparable-game creators, while keeping checkout inspection explicitly on Chromium.",
   "entry": "index.js",
   "input": ["text/plain", "application/json"],
   "output": ["application/json", "text/plain"],
   "category": "marketing",
   "keywords": ["creators", "youtube", "twitch", "influencers", "email", "outreach", "games", "contacts", "exact-match", "provenance", "billing", "checkout", "stripe"],
+  "toolDependencies": {
+    "lightpanda-browser": "^0.11.3",
+    "browser-session-bridge": "^0.1.3"
+  },
   "configSchema": {
     "EMAIL": {
       "type": "string",

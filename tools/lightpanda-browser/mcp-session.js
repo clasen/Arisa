@@ -56,8 +56,17 @@ function normalizeArguments(tool, value) {
     }
   }
   if (selectorTools.has(tool)) {
-    normalizeSelector(args.selector);
-    delete args.backendNodeId;
+    const hasSelector = typeof args.selector === "string" && Boolean(args.selector.trim());
+    const backendNodeId = Number(args.backendNodeId);
+    const hasBackendNodeId = Number.isSafeInteger(backendNodeId) && backendNodeId > 0;
+    if (!hasSelector && !hasBackendNodeId) throw new Error(`${tool} requires selector or backendNodeId.`);
+    if (hasSelector) {
+      normalizeSelector(args.selector);
+      delete args.backendNodeId;
+    } else {
+      args.backendNodeId = backendNodeId;
+      delete args.selector;
+    }
   }
   return args;
 }
@@ -192,7 +201,7 @@ export class McpProcess {
     await this.request("initialize", {
       protocolVersion: "2025-06-18",
       capabilities: {},
-      clientInfo: { name: "arisa-lightpanda-browser", version: "0.11.2" }
+      clientInfo: { name: "arisa-lightpanda-browser", version: "0.11.3" }
     });
     this.notify("notifications/initialized");
   }

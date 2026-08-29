@@ -43,10 +43,10 @@ export async function readMemoryPressure({
   };
 }
 
-export function memoryPressureReason(snapshot, policy) {
+export function memoryPressureReason(snapshot, policy, { ignoreWorkerRss = false } = {}) {
   const mebibyte = 1024 * 1024;
   const workerRssMb = snapshot.workerRssBytes / mebibyte;
-  if (workerRssMb > policy.maxWorkerRssMb) {
+  if (!ignoreWorkerRss && workerRssMb > policy.maxWorkerRssMb) {
     return `worker RSS ${Math.ceil(workerRssMb)} MiB exceeds the ${policy.maxWorkerRssMb} MiB limit`;
   }
   if (snapshot.swapTotalBytes > 0 && snapshot.swapUsedPercent > policy.maxSwapUsedPercent) {

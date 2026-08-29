@@ -205,11 +205,11 @@ export class WeightedResourceGovernor {
     request.resolve(this.createLease(request, waitedMs));
   }
 
-  async pressureSnapshot(label, resourceClass) {
+  async pressureSnapshot(label, resourceClass, { ignoreWorkerRss = false } = {}) {
     const pressure = await this.memoryPressure();
     this.lastPressure = pressure;
     this.lastMemoryBudgetMb = this.memoryBudgetMb(pressure);
-    const reason = memoryPressureReason(pressure, this.policy);
+    const reason = memoryPressureReason(pressure, this.policy, { ignoreWorkerRss });
     if (!reason) return pressure;
     const error = new Error(`Tool ${label} was not started because ${reason}`);
     error.code = "TOOL_RESOURCE_PRESSURE";
@@ -234,7 +234,7 @@ export class WeightedResourceGovernor {
           const next = state.queue[0];
           if (!next) continue;
           try {
-            const pressure = await this.pressureSnapshot(next.label, resourceClass);
+            const pressure = await this.pressureSnapshot(next.label, resourceClass, next.admission);
             const budgetMb = this.memoryBudgetMb(pressure);
             next.memoryMb = this.requestedMemoryMb(next.execution, next.label, budgetMb);
             if (next.memoryMb < this.policy.minimumToolMemoryMb || !this.canGrant(next)) continue;
@@ -253,14 +253,14 @@ export class WeightedResourceGovernor {
     }
   }
 
-  async acquire(rawExecution, label = "tool") {
+  async acquire(rawExecution, label = "tool", admission = {}) {
     const execution = normalizeToolExecution(rawExecution);
     if (!execution) return noopLease();
     const resourceClass = execution.resourceClass;
     const capacity = this.capacityFor(resourceClass);
     const weight = Math.min(execution.weight, capacity);
     const state = this.stateFor(resourceClass);
-    const pressure = await this.pressureSnapshot(label, resourceClass);
+    const pressure = await this.pressureSnapshot(label, resourceClass, admission);
     const budgetMb = this.memoryBudgetMb(pressure);
     const memoryMb = this.requestedMemoryMb(execution, label, budgetMb);
     if (budgetMb < this.policy.minimumToolMemoryMb || memoryMb < this.policy.minimumToolMemoryMb) {
@@ -274,7 +274,8 @@ export class WeightedResourceGovernor {
       weight,
       memoryMb,
       label,
-      queuedAt: this.now()
+      queuedAt: this.now(),
+      admission: { ignoreWorkerRss: admission?.ignoreWorkerRss === true }
     };
     if (!state.queue.length && this.canGrant(request)) {
       return new Promise((resolve) => this.grant({ ...request, resolve }));

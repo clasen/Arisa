@@ -28,9 +28,14 @@ test("classifies each configured memory pressure boundary", () => {
     swapTotalBytes: 0,
     swapUsedPercent: 0
   }, policy), /worker RSS/);
+  assert.equal(memoryPressureReason({
+    workerRssBytes: 400 * 1024 * 1024,
+    swapTotalBytes: 0,
+    swapUsedPercent: 0
+  }, policy, { ignoreWorkerRss: true }), "");
   assert.match(memoryPressureReason({
-    workerRssBytes: 100 * 1024 * 1024,
+    workerRssBytes: 400 * 1024 * 1024,
     swapTotalBytes: 100,
     swapUsedPercent: 96
-  }, policy), /swap use/);
+  }, policy, { ignoreWorkerRss: true }), /swap use/);
 });

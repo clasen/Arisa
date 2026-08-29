@@ -73,9 +73,10 @@ function attribute(html, name) {
   return String(match?.[1] ?? match?.[2] ?? match?.[3] ?? "").toLowerCase();
 }
 
-async function inspectTarget(client, selector) {
+async function inspectTarget(client, args) {
+  const target = args.selector ? { selector: args.selector } : { backendNodeId: args.backendNodeId };
   return String(await client.call("html", {
-    selector,
+    ...target,
     maxBytes: 4096,
     strip: { js: true, css: true, ui: true, invisible: true }
   }));
@@ -102,7 +103,7 @@ export async function authorizeAction({ client, tool, args = {}, actionLevel, co
     return { actionLevel, requiredLevel: required, commitIntent: null };
   }
 
-  const html = await inspectTarget(client, args.selector);
+  const html = await inspectTarget(client, args);
   assertNotSensitive(html, tool);
   if (tool !== "click") return { actionLevel, requiredLevel: "interact", commitIntent: null };
 

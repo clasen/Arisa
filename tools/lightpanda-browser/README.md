@@ -30,6 +30,8 @@ Version 0.11.1 makes those sessions practical to reuse: opening the same authent
 
 Version 0.11.2 restores bridge-provided localStorage/sessionStorage before the first target reload and snapshots it again on close. This supports storage-only sessions without waiting for Lightpanda's currently broken SQLite flags.
 
+Version 0.11.3 allows fresh `backendNodeId` targets returned by `interactiveElements` for policy-gated mutations. This lets deterministic adapters select controls by accessible name without weakening commit intent or sensitive-control checks.
+
 ## Adaptive sessions
 
 1. Call `session-open` for anonymous browsing, or `session-open-authenticated` with a bridge `resourceId`, and retain the returned opaque `sessionId`.

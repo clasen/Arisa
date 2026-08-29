@@ -2,9 +2,10 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { authorizeAction, normalizeActionLevel } from "../action-policy.js";
 
-function clientWith(html) {
-  return { call: async (tool) => {
+function clientWith(html, inspect = null) {
+  return { call: async (tool, args) => {
     assert.equal(tool, "html");
+    inspect?.(args);
     return html;
   } };
 }
@@ -22,6 +23,13 @@ test("ordinary controls require interact level", async () => {
   assert.equal(decision.requiredLevel, "interact");
   const link = await authorizeAction({ client: clientWith('<a href="/next">Next</a>'), tool: "click", args: { selector: "a" }, actionLevel: "interact" });
   assert.equal(link.requiredLevel, "interact");
+  const backendLink = await authorizeAction({
+    client: clientWith('<a href="/next">Next</a>', (args) => assert.equal(args.backendNodeId, 42)),
+    tool: "click",
+    args: { backendNodeId: 42 },
+    actionLevel: "interact"
+  });
+  assert.equal(backendLink.requiredLevel, "interact");
 });
 
 test("submission-capable actions require commit level and matching intent", async () => {

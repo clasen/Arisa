@@ -6,6 +6,15 @@ import { chromium } from "playwright";
 import defaults from "./config.js";
 import { exactReferenceMatch, referenceTitles } from "./reference-match.js";
 import { authenticatedState, preparedCheckoutState, subscriptionState } from "./outcome-contract.js";
+import { parsePandaResults } from "./panda-results.js";
+import {
+  clickNamedControl,
+  gotoWithRetry,
+  interactiveElements,
+  openPandaSession,
+  pandaSignedIn,
+  semanticTree
+} from "./panda-session.js";
 
 const toolName = "creator-scout";
 
@@ -31,11 +40,11 @@ Usage:
   node index.js run --request-file <json>
 
 Actions via args.action:
-  authenticate  Request and consume a CreatorScout magic link through Gmail.
-  status        Report whether the persistent profile is signed in.
+  authenticate  Request and consume a CreatorScout magic link through Gmail. Lightpanda by default; args: engine=lightpanda|chromium?
+  status        Report whether the persistent profile is signed in. Lightpanda by default; args: engine=lightpanda|chromium?
   checkout-quote Prepare and verify a CreatorScout Pro Stripe checkout without submitting payment.
   subscription-status Inspect the authenticated account for billing status without opening or submitting checkout.
-  search        Search by comparable game or genre. args: query, language?, recency?, revealEmails?, maxEmailLookups?, limit?, requireExactReference?, referenceTitles?.
+  search        Search by comparable game or genre with Lightpanda by default. args: query, language?, recency?, revealEmails?, maxEmailLookups?, limit?, requireExactReference?, referenceTitles?, engine=lightpanda|chromium?.
 
 When requireExactReference=true, referenceTitles must list the exact comparable title and any localized aliases. Unrelated result rows are removed before email lookup. Search output still requires provenance and campaign deduplication review.
 `);
@@ -105,7 +114,7 @@ async function freshMagicLink(arisa, startedAt) {
   throw new Error("CreatorScout magic-link email did not arrive in time");
 }
 
-async function authenticate(request, config) {
+async function authenticateChromium(request, config) {
   const context = await openContext(request.chatId, config);
   try {
     const page = context.pages()[0] || await context.newPage();
@@ -237,7 +246,7 @@ async function subscriptionStatus(request, config) {
   }
 }
 
-async function search(request, config) {
+async function searchChromium(request, config) {
   const query = String(request.args?.query || request.text || "").trim();
   if (!query) throw new Error("args.query is required");
   const timeoutMs = operationTimeout(request, config);
@@ -285,23 +294,180 @@ async function search(request, config) {
   }
 }
 
+function requestedEngine(request) {
+  const engine = String(request.args?.engine || "lightpanda").trim().toLowerCase();
+  if (!["lightpanda", "chromium"].includes(engine)) throw new Error("args.engine must be lightpanda or chromium");
+  return engine;
+}
+
+async function openCreatorScoutPanda(request, config) {
+  const timeoutMs = operationTimeout(request, config);
+  const arisa = createArisaClient({ toolName, chatId: request.chatId });
+  const session = await openPandaSession({ arisa, chatId: request.chatId, getChatToolStateDir, timeoutMs });
+  return { arisa, session, timeoutMs };
+}
+
+async function pandaStatus(request, config) {
+  const { session } = await openCreatorScoutPanda(request, config);
+  try {
+    const authenticated = await pandaSignedIn(session);
+    return { authenticated, engine: "lightpanda", lifecycle: authenticatedState(authenticated) };
+  } finally {
+    await session.close();
+  }
+}
+
+async function magicRedirect(link) {
+  const response = await fetch(link, { redirect: "manual" });
+  const location = response.headers.get("location");
+  if (!location) throw new Error(`CreatorScout magic-link verification did not redirect (${response.status})`);
+  const target = new URL(location, link);
+  if (target.protocol !== "https:" || !["creatorscout.dev", "www.creatorscout.dev"].includes(target.hostname)) {
+    throw new Error("CreatorScout magic-link verification returned an unexpected target");
+  }
+  return target.href;
+}
+
+async function authenticatePanda(request, config) {
+  const { arisa, session } = await openCreatorScoutPanda(request, config);
+  try {
+    if (await pandaSignedIn(session)) return { authenticated: true, reused: true, engine: "lightpanda" };
+    const startedAt = Date.now();
+    await gotoWithRetry(session, "https://www.creatorscout.dev/login");
+    await session.call("fill", { selector: 'input[type="email"]', value: config.EMAIL }, { actionLevel: "interact" });
+    await session.call("click", { selector: 'button[type="submit"]' }, { actionLevel: "commit", commitIntent: "submit-form" });
+    const { link, messageId } = await freshMagicLink(arisa, startedAt);
+    await gotoWithRetry(session, await magicRedirect(link));
+    await new Promise((resolve) => setTimeout(resolve, 2_500));
+    if (!(await pandaSignedIn(session))) throw new Error("CreatorScout did not retain the Lightpanda authenticated session");
+    await arisa.tools.run({ name: "gmail-workspace", args: { action: "mark-read", id: messageId } }, { timeoutMs: 30_000 }).catch(() => {});
+    return { authenticated: true, reused: false, engine: "lightpanda" };
+  } finally {
+    await session.close();
+  }
+}
+
+const recencyOptions = Object.freeze({ "7d": "7 d", "30d": "30 d", "90d": "90 d" });
+
+async function configurePandaFilters(session, { language, recency }) {
+  let elements = await interactiveElements(session);
+  const currentRecency = elements.find((element) => /^Last \d+ days$/.test(String(element.name || "")));
+  const currentDays = String(currentRecency?.name || "").match(/\d+/)?.[0];
+  const requestedDays = String(recency || "").match(/\d+/)?.[0];
+  if (!language && (!requestedDays || requestedDays === currentDays)) return;
+  if (!currentRecency?.backendNodeId) throw new Error("CreatorScout recency filter was not found");
+  await session.call("click", { backendNodeId: currentRecency.backendNodeId }, { actionLevel: "commit", commitIntent: "submit-form" });
+  elements = await interactiveElements(session);
+  if (language) {
+    const languageSelect = elements.find((element) => element.tagName === "select" && /Any language/.test(String(element.name || "")));
+    if (!languageSelect?.backendNodeId) throw new Error("CreatorScout language filter was not found");
+    await session.call("selectOption", { backendNodeId: languageSelect.backendNodeId, value: language }, { actionLevel: "interact" });
+  }
+  if (requestedDays && requestedDays !== currentDays) {
+    const desiredName = recencyOptions[recency];
+    const desired = elements.find((element) => element.name === desiredName);
+    if (!desiredName || !desired?.backendNodeId) throw new Error(`CreatorScout recency option was not found: ${recency}`);
+    await session.call("click", { backendNodeId: desired.backendNodeId }, { actionLevel: "commit", commitIntent: "submit-form" });
+  }
+}
+
+async function waitForPandaResults(session, timeoutMs) {
+  const deadline = Date.now() + timeoutMs;
+  let tree = "";
+  while (Date.now() < deadline) {
+    tree = await semanticTree(session);
+    if (/heading '\d+ creators who cover games like/i.test(tree)) return tree;
+    await new Promise((resolve) => setTimeout(resolve, 1_000));
+  }
+  throw new Error("CreatorScout Lightpanda search results timed out");
+}
+
+async function revealPandaEmails(session, parsed, maximum) {
+  const targets = parsed.rows.map((row, index) => ({ index, nodeId: row.findEmailNodeId })).filter((target) => target.nodeId).slice(0, maximum);
+  const attempted = new Set();
+  for (const target of targets) {
+    await session.call("click", { backendNodeId: target.nodeId }, { actionLevel: "commit", commitIntent: "submit-form" });
+    attempted.add(target.index);
+    await new Promise((resolve) => setTimeout(resolve, 2_500));
+  }
+  return attempted;
+}
+
+async function searchPanda(request, config) {
+  const query = String(request.args?.query || request.text || "").trim();
+  if (!query) throw new Error("args.query is required");
+  const timeoutMs = operationTimeout(request, config);
+  const { session } = await openCreatorScoutPanda(request, config);
+  try {
+    if (!(await pandaSignedIn(session))) throw new Error("CreatorScout authentication is required. Run action=authenticate.");
+    await gotoWithRetry(session, "https://www.creatorscout.dev/");
+    const language = String(request.args?.language || "").toLowerCase();
+    const recency = String(request.args?.recency || "90d");
+    await configurePandaFilters(session, { language, recency });
+    await session.call("fill", { selector: 'input[placeholder*="Paste your Steam"]', value: query }, { actionLevel: "interact" });
+    await session.call("click", { selector: 'button[type="submit"]' }, { actionLevel: "commit", commitIntent: "submit-form" });
+    let tree = await waitForPandaResults(session, timeoutMs);
+    let elements = await interactiveElements(session);
+    let parsed = parsePandaResults(tree, elements);
+    const reveal = asBoolean(request.args?.revealEmails, false);
+    const maxLookups = reveal ? boundedInteger(request.args?.maxEmailLookups, config.MAX_EMAIL_LOOKUPS || 3, 0, 20) : 0;
+    const attempted = maxLookups ? await revealPandaEmails(session, parsed, maxLookups) : new Set();
+    if (attempted.size) {
+      tree = await semanticTree(session);
+      elements = await interactiveElements(session);
+      parsed = parsePandaResults(tree, elements);
+    }
+    const strictReference = asBoolean(request.args?.requireExactReference, false);
+    const expectedTitles = referenceTitles(request.args);
+    if (strictReference && !expectedTitles.length) throw new Error("referenceTitles is required when requireExactReference=true");
+    const limit = boundedInteger(request.args?.limit, config.MAX_RESULTS || 20, 1, 100);
+    const results = [];
+    let filteredOut = 0;
+    for (const [index, row] of parsed.rows.entries()) {
+      const result = { ...row, referenceMatch: exactReferenceMatch(row.referenceTitle, expectedTitles) };
+      delete result.findEmailNodeId;
+      if (attempted.has(index)) result.lookup = result.email ? "found" : "not-found";
+      if (strictReference && !result.referenceMatch.exact) {
+        filteredOut += 1;
+        continue;
+      }
+      if (results.length < limit) results.push(result);
+    }
+    return {
+      query,
+      engine: "lightpanda",
+      total: parsed.total,
+      strictReference,
+      expectedTitles,
+      filteredOut,
+      emailLookups: attempted.size,
+      results
+    };
+  } finally {
+    await session.close();
+  }
+}
+
+async function chromiumStatus(request, config) {
+  const context = await openContext(request.chatId, config);
+  try {
+    const page = context.pages()[0] || await context.newPage();
+    const authenticated = await signedIn(page);
+    return { authenticated, engine: "chromium", lifecycle: authenticatedState(authenticated) };
+  } finally {
+    await context.close();
+  }
+}
+
 async function handle(request) {
   const config = await loadToolConfig(toolName, defaults, request.chatId);
   const action = String(request.args?.action || "status");
-  if (action === "authenticate") return authenticate(request, config);
+  const engine = requestedEngine(request);
+  if (action === "authenticate") return engine === "chromium" ? authenticateChromium(request, config) : authenticatePanda(request, config);
   if (action === "checkout-quote") return checkoutQuote(request, config);
   if (action === "subscription-status") return subscriptionStatus(request, config);
-  if (action === "search") return search(request, config);
-  if (action === "status") {
-    const context = await openContext(request.chatId, config);
-    try {
-      const page = context.pages()[0] || await context.newPage();
-      const authenticated = await signedIn(page);
-      return { authenticated, lifecycle: authenticatedState(authenticated) };
-    } finally {
-      await context.close();
-    }
-  }
+  if (action === "search") return engine === "chromium" ? searchChromium(request, config) : searchPanda(request, config);
+  if (action === "status") return engine === "chromium" ? chromiumStatus(request, config) : pandaStatus(request, config);
   throw new Error(`Unsupported action: ${action}`);
 }
 

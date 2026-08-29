@@ -15,14 +15,16 @@ test("normalizes a bounded read-only interaction sequence", async () => {
   assert.equal(steps[2].arguments.maxBytes, 131072);
 });
 
-test("mutation operations are opt-in and require replayable selectors", async () => {
+test("mutation operations are opt-in and accept selectors or fresh backend node ids", async () => {
   const fill = [{ tool: "fill", arguments: { selector: ".new-todo", value: "test" } }];
   await assert.rejects(normalizeInteractionSteps(fill), /actionLevel=interact/);
-  await assert.rejects(normalizeInteractionSteps([{ tool: "click", arguments: { backendNodeId: 4 } }], { allowMutations: true }), /selector is required/);
+  await assert.rejects(normalizeInteractionSteps([{ tool: "click", arguments: {} }], { allowMutations: true }), /selector or backendNodeId/);
   const normalized = await normalizeInteractionSteps(fill, { allowMutations: true });
   assert.equal(normalized[0].tool, "fill");
   assert.deepEqual(normalized[0].arguments, fill[0].arguments);
   assert.equal(normalized[0].actionLevel, "interact");
+  const backend = await normalizeInteractionSteps([{ tool: "click", arguments: { backendNodeId: 4 } }], { allowMutations: true });
+  assert.deepEqual(backend[0].arguments, { backendNodeId: 4 });
 });
 
 test("blocks unsupported capabilities and private navigation", async () => {

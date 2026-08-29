@@ -8,7 +8,7 @@ const homeDir = await mkdtemp(path.join(os.tmpdir(), "arisa-tool-registry-home-"
 process.env.HOME = homeDir;
 process.env.USERPROFILE = homeDir;
 
-const { ToolRegistry, createToolOutputParser, isolatedToolProcessInvocation } = await import("../src/core/tools/tool-registry.js");
+const { ToolRegistry, createToolOutputParser, isolatedToolProcessInvocation, readyDaemonAdmission } = await import("../src/core/tools/tool-registry.js");
 const { createToolOutputParser: directToolOutputParser } = await import("../src/core/tools/tool-process-output.js");
 const { isolatedToolProcessInvocation: directToolProcessInvocation } = await import("../src/core/tools/tool-process-runner.js");
 const {
@@ -240,6 +240,15 @@ test("reports dependency status in help and blocks a tool with a missing depende
     () => registry.run({ name: "dependent-tool", request: { args: {} } }),
     /Tool dependency missing/
   );
+});
+
+test("only a live ready daemon bypasses worker RSS spawn admission", () => {
+  const tool = { daemon: { protocol: "arisa-daemon-v1" } };
+  assert.deepEqual(readyDaemonAdmission(tool, { alive: true, state: "ready", restart: { requested: false } }), { ignoreWorkerRss: true });
+  assert.deepEqual(readyDaemonAdmission(tool, { alive: false, state: "ready", restart: { requested: false } }), {});
+  assert.deepEqual(readyDaemonAdmission(tool, { alive: true, state: "degraded", restart: { requested: false } }), {});
+  assert.deepEqual(readyDaemonAdmission(tool, { alive: true, state: "ready", restart: { requested: true } }), {});
+  assert.deepEqual(readyDaemonAdmission({}, { alive: true, state: "ready" }), {});
 });
 
 test("wraps declared tool runs in the shared execution governor", async () => {
