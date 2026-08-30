@@ -90,6 +90,12 @@ export const piConfigDefaults = Object.freeze({
     pressureConcurrent: 1,
     serializePercent: 60
   }),
+  turnCoordinator: Object.freeze({
+    enabled: true,
+    backgroundQueueTtlMs: 10 * 60_000,
+    interactiveQueueTtlMs: 0,
+    maxQueued: 100
+  }),
   compaction: Object.freeze({
     enabled: true,
     reserveTokens: 120_000,
@@ -155,6 +161,10 @@ export function applyConfigDefaults(config) {
       toolFanout: {
         ...piConfigDefaults.toolFanout,
         ...(configuredPi.toolFanout || {})
+      },
+      turnCoordinator: {
+        ...piConfigDefaults.turnCoordinator,
+        ...(configuredPi.turnCoordinator || {})
       },
       compaction: {
         ...piConfigDefaults.compaction,

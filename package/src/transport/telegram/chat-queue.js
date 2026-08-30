@@ -31,7 +31,7 @@ export function createChatStateStore() {
   };
 }
 
-export function createPromptExecutionReceipt(onStart = null) {
+export function createPromptExecutionReceipt(onStart = null, metadata = {}) {
   let resolve;
   let reject;
   let started = false;
@@ -43,6 +43,10 @@ export function createPromptExecutionReceipt(onStart = null) {
     promise,
     resolve,
     reject,
+    priority: metadata.priority || "background",
+    label: String(metadata.label || "scheduled agent turn"),
+    queueTtlMs: metadata.queueTtlMs,
+    deferStart: metadata.deferStart === true,
     start() {
       if (started) return;
       started = true;
@@ -179,7 +183,7 @@ export async function drainChatPromptQueue({
         chatState.continueAfterClose = false;
       }
       try {
-        currentReceipt?.start?.();
+        if (!currentReceipt?.deferStart) currentReceipt?.start?.();
         await processPrompt({ prompt: currentPrompt, ctx: currentCtx, receipt: currentReceipt });
         currentReceipt?.resolve({ status: "completed" });
       } catch (error) {

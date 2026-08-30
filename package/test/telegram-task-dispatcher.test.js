@@ -21,7 +21,10 @@ function createHarness(overrides = {}) {
     artifactStore: { forChat() { throw new Error("unexpected artifact access"); } },
     toolRegistry: {},
     resourceNotes: { async get() { return ""; } },
-    agentManager: { async runTool(input) { calls.push(["runTool", input]); return { ok: true }; } },
+    agentManager: {
+      async runTurn(options, work) { calls.push(["runTurn", options]); return work(); },
+      async runTool(input) { calls.push(["runTool", input]); return { ok: true }; }
+    },
     logger: null,
     ...overrides.dependencies
   });
@@ -74,7 +77,9 @@ test("passes bounded execution deadlines to scheduled prompts", async () => {
 
   const enqueues = calls.filter(([name]) => name === "enqueue");
   assert.equal(enqueues[0][1].timeoutMs, 900);
+  assert.equal(enqueues[0][1].priority, "background");
   assert.equal(enqueues[1][1].timeoutMs, 300);
+  assert.equal(enqueues[1][1].priority, "interactive");
 });
 
 test("acknowledges an agent event before executing it", async () => {
@@ -101,6 +106,7 @@ test("runs poll tools headlessly and confirms their result", async () => {
   });
 
   assert.deepEqual(calls, [
+    ["runTurn", { priority: "background", label: "poll tool checker" }],
     ["runTool", { name: "checker", request: { args: { cursor: "4" } }, chatId: 123 }],
     ["complete", "poll-1"]
   ]);
@@ -110,6 +116,7 @@ test("retries a known poll failure with backoff", async () => {
   const { calls, dispatcher } = createHarness({
     dependencies: {
       agentManager: {
+        async runTurn(options, work) { calls.push(["runTurn", options]); return work(); },
         async runTool(input) {
           calls.push(["runTool", input]);
           return { ok: false, status: "failed", error: "temporary checker failure" };
@@ -220,10 +227,11 @@ test("due-task dispatch retries one failure without blocking another task", asyn
 
   await dispatcher.dispatchDueTasks();
 
-  assert.deepEqual(calls, [
+  assert.deepEqual(calls.slice(0, 3), [
     ["claimDue", 10],
-    ["runTool", { name: "checker", request: { args: {} }, chatId: 123 }],
-    ["complete", "good"],
-    ["retryOrFail", "bad", "queue unavailable", { retryable: true }]
+    ["runTurn", { priority: "background", label: "poll tool checker" }],
+    ["runTool", { name: "checker", request: { args: {} }, chatId: 123 }]
   ]);
+  assert.ok(calls.some((call) => JSON.stringify(call) === JSON.stringify(["complete", "good"])));
+  assert.ok(calls.some((call) => JSON.stringify(call) === JSON.stringify(["retryOrFail", "bad", "queue unavailable", { retryable: true }])));
 });

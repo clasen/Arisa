@@ -16,6 +16,7 @@ import { materializeToolOutput } from "../tools/tool-output-materializer.js";
 import { WorkerHeapCircuitBreaker } from "./worker-heap-circuit-breaker.js";
 import { WorkerToolFanoutController } from "./worker-tool-fanout.js";
 import { compactionRotationRequest, normalizeSessionRotationPolicy } from "./session-rotation.js";
+import { AgentTurnCoordinator } from "./agent-turn-coordinator.js";
 
 const piValidationTimeoutMs = 60_000;
 const arisaToolNames = [
@@ -171,6 +172,10 @@ export class AgentManager {
       logger,
       config: config.pi.toolFanout
     });
+    this.turnCoordinator = new AgentTurnCoordinator({
+      logger,
+      config: config.pi.turnCoordinator
+    });
     this.sessions = this.sessionLifecycle.sessions;
     this.pendingNewSessions = this.sessionLifecycle.pendingNewSessions;
     this.pendingSessionHandoffs = this.sessionLifecycle.pendingSessionHandoffs;
@@ -207,6 +212,7 @@ export class AgentManager {
     this.sessionLifecycle.setSessionRotationPolicy(config.pi.sessionRotation);
     this.heapCircuitBreaker.setConfig(config.pi.heapCircuitBreaker);
     this.toolFanout.setConfig(config.pi.toolFanout);
+    this.turnCoordinator.setConfig(config.pi.turnCoordinator);
     this.config = config;
   }
 
@@ -233,7 +239,8 @@ export class AgentManager {
     return {
       ...diagnostic,
       heapCircuitBreaker: this.heapCircuitBreaker.getDiagnostic(),
-      toolFanout: this.toolFanout.getDiagnostic()
+      toolFanout: this.toolFanout.getDiagnostic(),
+      turnCoordinator: this.turnCoordinator.diagnostic()
     };
   }
 
@@ -485,7 +492,13 @@ export class AgentManager {
   }
 
   async close() {
+    this.turnCoordinator.close();
     await this.sessionLifecycle.closeAll();
+  }
+
+  async runTurn(options, work) {
+    if (typeof work !== "function") throw new Error("Agent turn work is required");
+    return this.turnCoordinator.run(options, work);
   }
 
   async runTool({ name, request, chatId, taskContext = null }) {

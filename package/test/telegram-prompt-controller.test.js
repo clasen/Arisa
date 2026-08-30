@@ -12,7 +12,8 @@ function createController(overrides = {}) {
     artifactStore: {},
     toolRegistry: {},
     agentManager: {
-      resetSession: (...args) => calls.reset.push(args)
+      resetSession: (...args) => calls.reset.push(args),
+      runTurn: async (_options, work) => work()
     },
     sessionSeeds: {
       clear: async (chatId) => calls.cleared.push(chatId)

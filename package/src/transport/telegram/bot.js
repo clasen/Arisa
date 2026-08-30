@@ -335,7 +335,7 @@ export async function createTelegramBot({ config, artifactStore, toolRegistry, t
     timer.unref?.();
   }
 
-  async function enqueueAsyncPrompt({ chatId, prompt, label, route: taskRoute, timeoutMs }) {
+  async function enqueueAsyncPrompt({ chatId, prompt, label, route: taskRoute, timeoutMs, priority = "background", queueTtlMs = undefined }) {
     let ctx = { chat: { id: chatId }, api: bot.api };
     const destination = taskRoute?.transport === "telegram" ? taskRoute.destination : null;
     if (destination?.chatId && destination?.threadId) {
@@ -359,6 +359,8 @@ export async function createTelegramBot({ config, artifactStore, toolRegistry, t
       label,
       ctx,
       waitForExecution: true,
+      turnPriority: priority,
+      turnQueueTtlMs: queueTtlMs,
       onExecutionStart: ({ reject }) => {
         if (!Number.isFinite(timeoutMs) || timeoutMs <= 0) return;
         timer = setTimeout(() => {

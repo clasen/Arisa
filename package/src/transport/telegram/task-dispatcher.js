@@ -72,7 +72,8 @@ export function createTelegramTaskDispatcher({
       prompt: await buildAsyncTaskPrompt({ task, artifactStore, toolRegistry, resourceNotes, logger }),
       label: `scheduled task ${task.id}`,
       route: task.route,
-      timeoutMs: agentTimeoutMs
+      timeoutMs: agentTimeoutMs,
+      priority: task.source?.toolName === "whatsapp-web" ? "interactive" : "background"
     });
   }
 
@@ -92,7 +93,8 @@ export function createTelegramTaskDispatcher({
       prompt: await buildAsyncEventPrompt(task, resourceNotes),
       label: `agent event ${task.id}`,
       route: task.route,
-      timeoutMs: eventTimeoutMs
+      timeoutMs: eventTimeoutMs,
+      priority: task.source?.toolName === "process-retrospective" ? "background" : "interactive"
     });
   }
 
@@ -100,11 +102,14 @@ export function createTelegramTaskDispatcher({
     const toolName = task.payload?.toolName;
     if (!toolName) throw new NonRetryableTaskError("poll_tool missing toolName");
     logger?.log("tasks", `polling tool ${toolName} (task ${task.id}) for chat ${chatId}`);
-    const result = await agentManager.runTool({
+    const result = await agentManager.runTurn({
+      priority: "background",
+      label: `poll tool ${toolName}`
+    }, () => agentManager.runTool({
       name: toolName,
       request: { args: task.payload.args || {} },
       chatId
-    });
+    }));
     if (result?.ok === false) {
       const error = new Error(result.error || `poll_tool ${toolName} failed`);
       if (result.status === "needs_config") error.retryable = false;

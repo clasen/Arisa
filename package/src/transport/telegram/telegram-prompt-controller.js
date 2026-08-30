@@ -157,8 +157,14 @@ export function createTelegramPromptController({
       });
     };
 
-    if (ctx) return withTyping(ctx, work);
-    return work();
+    return agentManager.runTurn({
+      priority: executionReceipt?.priority || "interactive",
+      label: executionReceipt?.label || `interactive prompt for ${sessionId}`,
+      queueTtlMs: executionReceipt?.queueTtlMs
+    }, () => {
+      executionReceipt?.start?.();
+      return ctx ? withTyping(ctx, work) : work();
+    });
   }
 
   function processChatPromptQueue({ chatId, prompt, label, ctx = null, beforeInitialPrompt, initialReceipt = null }) {
@@ -193,10 +199,17 @@ export function createTelegramPromptController({
     busyMessageMode = "queue",
     waitForExecution = false,
     onExecutionStart = null,
-    coalesceQueued = false
+    coalesceQueued = false,
+    turnPriority = "interactive",
+    turnQueueTtlMs = undefined
   }) {
     const chatState = getChatState(chatId);
-    const receipt = waitForExecution ? createPromptExecutionReceipt(onExecutionStart) : null;
+    const receipt = waitForExecution ? createPromptExecutionReceipt(onExecutionStart, {
+      priority: turnPriority,
+      label,
+      queueTtlMs: turnQueueTtlMs,
+      deferStart: true
+    }) : null;
 
     if (chatState.processing) {
       const incomingRoute = ctx ? contextRoute(ctx) : null;

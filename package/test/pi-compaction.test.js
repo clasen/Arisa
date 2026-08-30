@@ -33,6 +33,17 @@ test("merges partial session rotation overrides with defaults", () => {
   });
 });
 
+test("merges partial exclusive turn coordinator overrides with defaults", () => {
+  const config = applyConfigDefaults({ pi: { turnCoordinator: { backgroundQueueTtlMs: 30_000 } } });
+
+  assert.deepEqual(config.pi.turnCoordinator, {
+    enabled: true,
+    backgroundQueueTtlMs: 30_000,
+    interactiveQueueTtlMs: 0,
+    maxQueued: 100
+  });
+});
+
 test("merges partial Pi compaction overrides with defaults", () => {
   const config = applyConfigDefaults({
     pi: { compaction: { reserveTokens: 8_192 } }
