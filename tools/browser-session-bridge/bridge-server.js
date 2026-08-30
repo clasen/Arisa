@@ -2,7 +2,7 @@ import crypto from "node:crypto";
 import http from "node:http";
 import { chmod, mkdir, readdir, readFile, rename, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
-import { consumePairing, decryptEnvelope, encryptEnvelope, persistSession, validateSessionPayload } from "./session-store.js";
+import { consumePairing, decryptEnvelope, encryptEnvelope, persistDeviceSession, persistSession, validateSessionPayload } from "./session-store.js";
 
 function commonHeaders(contentType, length) {
   return {
@@ -181,7 +181,12 @@ async function consumeDeviceEnrollment(enrollmentsDir, token) {
   if (!/^[a-zA-Z0-9_-]{20,100}$/.test(String(token || ""))) throw new Error("Invalid enrollment token");
   const source = credentialFile(enrollmentsDir, token);
   const claimed = path.join(enrollmentsDir, `${token}.${crypto.randomUUID()}.processing.json`);
-  await rename(source, claimed);
+  try {
+    await rename(source, claimed);
+  } catch (error) {
+    if (error?.code === "ENOENT") throw new Error("Enrollment link already used or expired");
+    throw error;
+  }
   try {
     const enrollment = JSON.parse(await readFile(claimed, "utf8"));
     if (Date.now() >= new Date(enrollment.expiresAt).getTime()) throw new Error("Enrollment link expired");
@@ -299,15 +304,19 @@ export function startBridgeServer({ host, port, pairingsDir, enrollmentsDir, dev
       if (request.url === "/v1/revoke-device") {
         if (decrypted?.version !== 1 || decrypted?.action !== "revoke" || decrypted?.deviceId !== envelope.deviceId) throw new Error("Invalid revocation request");
         await rm(device.file, { force: true });
+        await rm(path.join(stateDirForChat(credential.chatId), "device-sessions", envelope.deviceId), { recursive: true, force: true });
         recentDeviceUses.delete(envelope.deviceId);
         return jsonResponse(response, 200, { ok: true, revoked: envelope.deviceId });
       }
 
       const session = validateSessionPayload(decrypted, maxCookies);
-      await persistSession(stateDirForChat(credential.chatId), session);
+      const chatStateDir = stateDirForChat(credential.chatId);
       if (device) {
+        await persistDeviceSession(chatStateDir, device.record.deviceId, session);
         recentDeviceUses.set(envelope.deviceId, Date.now());
         await recordDeviceUse(device.file, device.record);
+      } else {
+        await persistSession(chatStateDir, session);
       }
       const storageCount = Object.keys(session.webStorage?.local || {}).length + Object.keys(session.webStorage?.session || {}).length;
       await onSessionImported?.({

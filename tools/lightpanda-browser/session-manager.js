@@ -26,8 +26,11 @@ export class BrowserSessionManager {
     await this.reapExpired();
     if (this.sessions.size >= this.maxSessions) throw new Error(`Lightpanda session limit reached (${this.maxSessions}). Close or wait for an existing session to expire.`);
     const metadata = options.publicMetadata && typeof options.publicMetadata === "object" ? structuredClone(options.publicMetadata) : {};
-    if (metadata.resourceId && [...this.sessions.values()].some((session) => session.metadata?.resourceId === metadata.resourceId)) {
-      throw new Error(`An authenticated Lightpanda session is already active for ${metadata.resourceId}.`);
+    if (metadata.resourceId && [...this.sessions.values()].some((session) => (
+      session.metadata?.resourceId === metadata.resourceId
+      && (session.metadata?.deviceId || null) === (metadata.deviceId || null)
+    ))) {
+      throw new Error(`An authenticated Lightpanda session is already active for ${metadata.resourceId} in this browser profile.`);
     }
     const id = sessionId();
     const client = await this.createClient(options);
@@ -51,9 +54,13 @@ export class BrowserSessionManager {
     return [...this.sessions.values()].map((session) => this.describe(session));
   }
 
-  reuseByResource(resourceId) {
+  reuseByResource(resourceId, deviceId = null) {
     const normalized = String(resourceId || "");
-    const session = [...this.sessions.values()].find((candidate) => candidate.metadata?.resourceId === normalized);
+    const normalizedDevice = deviceId || null;
+    const session = [...this.sessions.values()].find((candidate) => (
+      candidate.metadata?.resourceId === normalized
+      && (candidate.metadata?.deviceId || null) === normalizedDevice
+    ));
     if (!session) return null;
     session.lastUsedAt = this.now();
     return { ...this.describe(session), reused: true };

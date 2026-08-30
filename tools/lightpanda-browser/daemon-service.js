@@ -142,9 +142,9 @@ export function createPersistentSessionService({ binary, config, createClient = 
     if (action === "session-open") return manager.open();
     if (action === "session-open-authenticated") {
       if (!profileStore) throw new Error("Authenticated Lightpanda profiles are unavailable.");
-      const reused = manager.reuseByResource(payload.resourceId);
+      const reused = manager.reuseByResource(payload.resourceId, payload.deviceId || null);
       if (reused) return reused;
-      const authenticatedProfile = await profileStore.open(payload.resourceId);
+      const authenticatedProfile = await profileStore.open(payload.resourceId, payload.deviceId || null);
       try {
         return await manager.open({ authenticatedProfile, publicMetadata: authenticatedProfile.publicMetadata });
       } catch (error) {

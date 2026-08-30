@@ -8,6 +8,12 @@ function resourceId(value) {
   return normalized;
 }
 
+function deviceId(value) {
+  const normalized = String(value || "").trim();
+  if (!/^[a-zA-Z0-9_-]{20,100}$/.test(normalized)) throw new Error("A valid browser profile deviceId is required.");
+  return normalized;
+}
+
 function normalizedDomain(value) {
   const domain = String(value || "").trim().toLowerCase().replace(/^\./, "");
   if (!/^(?=.{1,253}$)[a-z0-9.-]+$/.test(domain) || domain.includes("..")) throw new Error("Stored session contains an invalid cookie domain.");
@@ -100,9 +106,12 @@ export function assertResourceUrl(value, rawResourceId) {
 export function createAuthenticatedProfileStore({ bridgeStateDir, tmpDir }) {
   if (!bridgeStateDir || !tmpDir) throw new Error("Authenticated Lightpanda profile paths are required.");
 
-  async function open(rawResourceId) {
+  async function open(rawResourceId, rawDeviceId = null) {
     const hostname = resourceId(rawResourceId);
-    const sessionPath = path.join(bridgeStateDir, "sessions", `${hostname}.json`);
+    const profileId = rawDeviceId ? deviceId(rawDeviceId) : null;
+    const sessionPath = profileId
+      ? path.join(bridgeStateDir, "device-sessions", profileId, `${hostname}.json`)
+      : path.join(bridgeStateDir, "sessions", `${hostname}.json`);
     const session = JSON.parse(await readFile(sessionPath, "utf8"));
     if (String(session.resourceId || "").toLowerCase() !== hostname) throw new Error("Stored browser session identity does not match resourceId.");
     const cookies = validateCookies(session.cookies, hostname);
@@ -152,7 +161,7 @@ export function createAuthenticatedProfileStore({ bridgeStateDir, tmpDir }) {
       cookieJarPath,
       webStorage,
       finish,
-      publicMetadata: { authenticated: true, resourceId: hostname }
+      publicMetadata: { authenticated: true, resourceId: hostname, deviceId: profileId }
     };
   }
 

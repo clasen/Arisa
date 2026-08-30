@@ -52,7 +52,7 @@ Use `recipe-save` with a name, read/interact level, and validated steps. `recipe
 
 Pass `mode=interact` and `steps` as a JSON array string. At most 20 allowlisted operations run in one isolated browser context. Results include total and per-step latency plus observed peak browser-process RSS on Linux. Read operations include `goto`, `tree`, `links`, `markdown`, `html`, `extract`, form inspection, and bounded waits. Mutation operations (`fill`, `click`, `press`, `selectOption`, `setChecked`, `hover`, and `scroll`) require `allowMutations=true`.
 
-Selectors are required for element mutations so sequences remain reproducible. Arbitrary page-side evaluation, direct cookie access, environment access, and native agent/model execution are deliberately not exposed. Authenticated profiles consume cookies internally from the bridge and never return their values. The separate `session-capture` action exposes only bounded text-layout PNGs. Every explicit URL is validated before launch, Lightpanda blocks private networks during navigation and subresource loading, and the final URL is validated again.
+Selectors are required for element mutations so sequences remain reproducible. Arbitrary page-side evaluation, direct cookie access, environment access, and native agent/model execution are deliberately not exposed. Authenticated profiles consume cookies internally from the bridge, isolate same-domain sessions by bridge `deviceId`, and never return their values. The separate `session-capture` action exposes only bounded text-layout PNGs. Every explicit URL is validated before launch, Lightpanda blocks private networks during navigation and subresource loading, and the final URL is validated again.
 
 Example args:
 

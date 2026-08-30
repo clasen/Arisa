@@ -1,6 +1,6 @@
 import { spawn } from "node:child_process";
 import { fileURLToPath, pathToFileURL } from "node:url";
-import { mkdir, readFile, readdir, rm, stat } from "node:fs/promises";
+import { mkdir, readFile, rm, stat } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import defaults from "./config.js";
@@ -9,6 +9,7 @@ import { createChromeWebStoreAssets, fillChromeWebStoreDistribution, fillChromeW
 import { openWithLightpanda } from "./lightpanda-session.js";
 import { openWithSession } from "./session-browser.js";
 import { redactStoredCookieValues } from "./session-redaction.js";
+import { listStoredSessions, resolveStoredSession } from "./session-selection.js";
 
 const toolName = "browser-session-bridge";
 const toolDir = path.dirname(fileURLToPath(import.meta.url));
@@ -51,7 +52,7 @@ Actions via args.action:
   reviewer-revoke Revoke the Chrome Web Store reviewer setup URL.
   pair           Create a legacy encrypted one-time pairing code.
   list           List stored browser sessions without exposing cookie values.
-  open                     Open one same-site URL with a stored session. args: resourceId, url, maxChars?, engine=lightpanda|chromium (default lightpanda).
+  open                     Open one same-site URL with a stored profile session. args: resourceId, deviceId?, url, maxChars?, engine=lightpanda|chromium (default lightpanda).
   chrome-web-store-inspect      Inspect non-secret controls in one existing draft. args: draftUrl.
   chrome-web-store-fill-listing Complete and save the listing fields without submitting. args: draftUrl, description, category, language, homepageUrl, supportUrl.
   chrome-web-store-fill-privacy Complete and save accurate privacy disclosures without submitting. args: privacyUrl, privacyPolicyUrl.
@@ -61,7 +62,7 @@ Actions via args.action:
   chrome-web-store-replace-package Replace a draft item's ZIP package. ZIP artifact required; args: packageUrl.
   chrome-web-store-test-instructions Save durable reviewer instructions without submitting. args: testInstructionsUrl, instructions.
   chrome-web-store-withdraw     Withdraw one pending review back to Draft. args: itemUrl.
-  delete                   Delete one session. args: resourceId.
+  delete                   Delete one session. args: resourceId, deviceId?.
 
 The extension shares only cookies applicable to the active tab. Setup links expire and are consumed after one successful activation.
 `);
@@ -81,7 +82,7 @@ async function notifyDeviceActivated(event) {
 
 async function notifySessionImported(event) {
   await arisaClient(event.chatId).agent.enqueueEvent({
-    resourceId: event.resourceId,
+    resourceId: event.deviceId ? `${event.deviceId}:${event.resourceId}` : event.resourceId,
     acknowledgement: `Session received for ${event.resourceId}. The requested target is not validated yet.`,
     prompt: `The user explicitly shared an authenticated browser session for ${event.resourceId} through ${event.label || "Arisa Session Bridge"}. The bridge received ${event.cookieCount} domain-scoped cookies and ${event.storageCount || 0} web-storage entries at ${event.receivedAt}. This proves a session share only; it does not prove freshness, target access, or expected coverage. The transport already acknowledged it. If a pending task was waiting, run its target validation now; otherwise stay silent.`
   });
@@ -134,35 +135,6 @@ async function buildExtension(chatId) {
   });
 }
 
-async function listSessions(chatId) {
-  const sessionsDir = path.join(getChatToolStateDir(String(chatId), toolName), "sessions");
-  const files = (await readdir(sessionsDir).catch(() => [])).filter((file) => file.endsWith(".json"));
-  const sessions = [];
-  for (const file of files) {
-    try {
-      const record = JSON.parse(await readFile(path.join(sessionsDir, file), "utf8"));
-      sessions.push({
-        resourceId: record.resourceId,
-        sourceUrl: record.sourceUrl,
-        capturedAt: record.capturedAt,
-        receivedAt: record.receivedAt,
-        cookieCount: Array.isArray(record.cookies) ? record.cookies.length : 0,
-        storageCount: Object.keys(record.webStorage?.local || {}).length + Object.keys(record.webStorage?.session || {}).length,
-        connectionStatus: "session_shared",
-        targetValidation: { status: "not_validated", reason: "A consumer must prove the requested target." }
-      });
-    } catch {}
-  }
-  return sessions.sort((a, b) => String(b.receivedAt).localeCompare(String(a.receivedAt)));
-}
-
-async function deleteSession(chatId, resourceId) {
-  const normalized = String(resourceId || "").toLowerCase();
-  if (!/^(?=.{1,253}$)[a-z0-9.-]+$/.test(normalized) || normalized.includes("..")) throw new Error("A valid resourceId hostname is required");
-  const target = path.join(getChatToolStateDir(String(chatId), toolName), "sessions", `${normalized}.json`);
-  await rm(target, { force: true });
-  return normalized;
-}
 
 async function handleRequest(request) {
   const chatId = String(request.chatId || "");
@@ -174,6 +146,7 @@ async function handleRequest(request) {
   }
   if (action === "revoke-device") {
     const deviceId = await revokeDevice(path.join(daemon.paths.root, "devices"), chatId, request.args?.deviceId);
+    await rm(path.join(getChatToolStateDir(chatId, toolName), "device-sessions", deviceId), { recursive: true, force: true });
     return toolOk({ text: `Revoked browser profile ${deviceId}`, json: { revoked: deviceId }, mimeType: "application/json" });
   }
   if (action === "reviewer-revoke") {
@@ -186,21 +159,27 @@ async function handleRequest(request) {
     const output = await daemon.submit({ action, chatId, endpoint, label: "Chrome Web Store reviewer" }, { timeoutMs: 15000, readyTimeoutMs: 15000 });
     return toolOk({ text: "Chrome Web Store reviewer setup is ready", json: output, mimeType: "application/json" });
   }
-  if (action === "list") return toolOk({ text: "Stored browser sessions", json: { sessions: await listSessions(chatId) }, mimeType: "application/json" });
+  if (action === "list") {
+    const devices = await listDevices(path.join(daemon.paths.root, "devices"), chatId);
+    const stateDir = getChatToolStateDir(chatId, toolName);
+    return toolOk({ text: "Stored browser sessions", json: { sessions: await listStoredSessions({ stateDir, devices }) }, mimeType: "application/json" });
+  }
   if (action === "open") {
     const engine = String(request.args?.engine || "lightpanda").trim().toLowerCase();
     if (!new Set(["lightpanda", "chromium"]).has(engine)) throw new Error("engine must be lightpanda or chromium");
+    const stateDir = getChatToolStateDir(chatId, toolName);
+    const selected = await resolveStoredSession({ stateDir, resourceId: request.args?.resourceId, deviceId: request.args?.deviceId });
     const input = {
-      resourceId: request.args?.resourceId,
+      resourceId: selected.resourceId,
+      deviceId: selected.deviceId,
       url: request.args?.url,
       maxChars: positiveInteger(request.args?.maxChars, 30000, 1000, 100000)
     };
-    const stateDir = getChatToolStateDir(chatId, toolName);
     const opened = engine === "lightpanda"
       ? await openWithLightpanda({ arisa: arisaClient(chatId), ...input })
-      : { engine: "chromium", ...await openWithSession({ stateDir, ...input }) };
-    const safeOpened = await redactStoredCookieValues({ stateDir, resourceId: input.resourceId, page: opened });
-    return toolOk({ text: `Engine: ${safeOpened.engine}\nPage: ${safeOpened.url}\nTitle: ${safeOpened.title}\n\n${safeOpened.text}`, json: safeOpened, mimeType: "application/json" });
+      : { engine: "chromium", ...await openWithSession({ stateDir, sessionPath: selected.sessionPath, ...input }) };
+    const safeOpened = await redactStoredCookieValues({ stateDir, resourceId: input.resourceId, sessionPath: selected.sessionPath, page: opened });
+    return toolOk({ text: `Engine: ${safeOpened.engine}\nProfile: ${selected.deviceId || "legacy"}\nPage: ${safeOpened.url}\nTitle: ${safeOpened.title}\n\n${safeOpened.text}`, json: safeOpened, mimeType: "application/json" });
   }
   if (action === "chrome-web-store-publisher-contact") {
     const publisher = await fillChromeWebStorePublisherContact({
@@ -296,8 +275,9 @@ async function handleRequest(request) {
     });
   }
   if (action === "delete") {
-    const resourceId = await deleteSession(chatId, request.args?.resourceId);
-    return toolOk({ text: `Deleted browser session ${resourceId}`, json: { deleted: resourceId }, mimeType: "application/json" });
+    const selected = await resolveStoredSession({ stateDir: getChatToolStateDir(chatId, toolName), resourceId: request.args?.resourceId, deviceId: request.args?.deviceId });
+    await rm(selected.sessionPath, { force: true });
+    return toolOk({ text: `Deleted browser session ${selected.resourceId} for ${selected.deviceId || "legacy session"}`, json: { deleted: selected.resourceId, deviceId: selected.deviceId }, mimeType: "application/json" });
   }
   if (["pair", "device-pair", "setup"].includes(action)) {
     const config = await loadToolConfig(toolName, defaults, chatId);

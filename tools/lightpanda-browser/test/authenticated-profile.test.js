@@ -41,6 +41,29 @@ test("authenticated profile materializes private runtime cookies and refreshes t
   }
 });
 
+test("authenticated profile isolates the same domain by browser profile", async () => {
+  const setup = await fixture();
+  const deviceId = "device_profile_identifier_123";
+  try {
+    const legacyPath = path.join(setup.bridgeStateDir, "sessions", "example.com.json");
+    const deviceDir = path.join(setup.bridgeStateDir, "device-sessions", deviceId);
+    const devicePath = path.join(deviceDir, "example.com.json");
+    await mkdir(deviceDir, { recursive: true });
+    const deviceRecord = JSON.parse(await readFile(legacyPath, "utf8"));
+    deviceRecord.cookies[0].value = "profile-secret";
+    await writeFile(devicePath, JSON.stringify(deviceRecord));
+    const profile = await setup.store.open("example.com", deviceId);
+    assert.equal(profile.publicMetadata.deviceId, deviceId);
+    assert.equal(JSON.parse(await readFile(profile.cookiePath, "utf8"))[0].value, "profile-secret");
+    await writeFile(profile.cookieJarPath, JSON.stringify([{ ...deviceRecord.cookies[0], value: "profile-fresh" }]));
+    await profile.finish({ refresh: true });
+    assert.equal(JSON.parse(await readFile(devicePath, "utf8")).cookies[0].value, "profile-fresh");
+    assert.equal(JSON.parse(await readFile(legacyPath, "utf8")).cookies[0].value, "secret");
+  } finally {
+    await rm(setup.root, { recursive: true, force: true });
+  }
+});
+
 test("authenticated profile accepts storage-only bridge sessions", async () => {
   const setup = await fixture();
   try {

@@ -99,10 +99,11 @@ test("authenticated sessions are identified, unique per resource, and same-site 
       return clients[clients.push(fakeClient()) - 1];
     },
     profileStore: {
-      async open(resourceId) {
+      async open(resourceId, deviceId = null) {
         return {
           resourceId,
-          publicMetadata: { authenticated: true, resourceId },
+          deviceId,
+          publicMetadata: { authenticated: true, resourceId, deviceId },
           async finish() {}
         };
       }
@@ -116,12 +117,20 @@ test("authenticated sessions are identified, unique per resource, and same-site 
   const reused = await service.processJob({ action: "session-open-authenticated", resourceId: "example.com" });
   assert.equal(reused.id, session.id);
   assert.equal(reused.reused, true);
+  const profileSession = await service.processJob({
+    action: "session-open-authenticated",
+    resourceId: "example.com",
+    deviceId: "device_profile_identifier_123"
+  });
+  assert.notEqual(profileSession.id, session.id);
+  assert.equal(profileSession.deviceId, "device_profile_identifier_123");
+  assert.equal(profiles[1].deviceId, "device_profile_identifier_123");
   await assert.rejects(
     service.processJob({ action: "session-call", sessionId: session.id, tool: "goto", arguments: { url: "https://example.net/" } }),
     /left the shared session scope/
   );
   assert.equal(clients[0].closed, false);
-  assert.equal(service.manager.list().length, 1);
+  assert.equal(service.manager.list().length, 2);
   await service.close();
 });
 

@@ -7,7 +7,7 @@ const toolDir = new URL("../", import.meta.url);
 test("manifest declares the scoped managed daemon health contract", async () => {
   const manifest = JSON.parse(await readFile(new URL("tool.manifest.json", toolDir), "utf8"));
   assert.deepEqual(manifest.daemon, { scope: "chat", autoStart: true, health: "internal" });
-  assert.equal(manifest.version, "0.11.4");
+  assert.equal(manifest.version, "0.11.5");
   assert.equal(manifest.configSchema.SESSION_TTL_MS.type, "number");
   assert.equal(manifest.configSchema.MAX_SESSIONS.type, "number");
   assert.equal(manifest.configSchema.IDLE_TIMEOUT_MS.type, "number");

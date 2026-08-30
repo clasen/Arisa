@@ -30,11 +30,11 @@ function extractedPage(text) {
   return { title: "", text: String(text || "") };
 }
 
-export async function openWithLightpanda({ arisa, resourceId: rawResourceId, url: rawUrl, maxChars = 30_000 }) {
+export async function openWithLightpanda({ arisa, resourceId: rawResourceId, deviceId = null, url: rawUrl, maxChars = 30_000 }) {
   const resourceId = assertResourceId(rawResourceId);
   const url = assertSameSiteUrl(rawUrl, resourceId);
   const boundedChars = Math.min(100_000, Math.max(1_000, Number(maxChars) || 30_000));
-  const opened = await runLightpanda(arisa, { action: "session-open-authenticated", resourceId });
+  const opened = await runLightpanda(arisa, { action: "session-open-authenticated", resourceId, ...(deviceId ? { deviceId } : {}) });
   const sessionId = String(opened.json?.id || "");
   if (!sessionId) throw new Error("Lightpanda did not return a session id");
   await runLightpanda(arisa, {
@@ -57,6 +57,7 @@ export async function openWithLightpanda({ arisa, resourceId: rawResourceId, url
   return {
     engine: "lightpanda",
     resourceId,
+    ...(deviceId ? { deviceId } : {}),
     sessionId,
     reused: opened.json?.reused === true,
     url: String(extracted.json?.finalUrl || url.href),

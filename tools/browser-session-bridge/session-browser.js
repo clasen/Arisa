@@ -41,10 +41,10 @@ function toPlaywrightCookie(cookie) {
   return converted;
 }
 
-export async function openWithSession({ stateDir, resourceId: rawResourceId, url: rawUrl, maxChars = 30000 }) {
+export async function openWithSession({ stateDir, resourceId: rawResourceId, url: rawUrl, maxChars = 30000, sessionPath: selectedSessionPath = null, deviceId = null }) {
   const resourceId = assertResourceId(rawResourceId);
   const url = assertAllowedUrl(rawUrl, resourceId);
-  const sessionPath = path.join(stateDir, "sessions", `${resourceId}.json`);
+  const sessionPath = selectedSessionPath || path.join(stateDir, "sessions", `${resourceId}.json`);
   const session = JSON.parse(await readFile(sessionPath, "utf8"));
   if (!Array.isArray(session.cookies) || !session.cookies.length) throw new Error("Stored session has no cookies");
 
@@ -59,12 +59,12 @@ export async function openWithSession({ stateDir, resourceId: rawResourceId, url
         for (const [key, value] of Object.entries(webStorage.session || {})) sessionStorage.setItem(key, value);
       }, { origin: new URL(session.sourceUrl).origin, webStorage: session.webStorage });
     }
-    refreshSessionOnBrowserClose({ browser, context, stateDir, session });
+    refreshSessionOnBrowserClose({ browser, context, stateDir, session, sessionPath });
     const page = await context.newPage();
     await page.goto(url.href, { waitUntil: "domcontentloaded", timeout: 60000 });
     await page.waitForTimeout(2500);
     const text = (await page.locator("body").innerText()).trim().slice(0, Math.min(100000, Math.max(1000, maxChars)));
-    return { resourceId, url: page.url(), title: await page.title(), text };
+    return { resourceId, ...(deviceId ? { deviceId } : {}), url: page.url(), title: await page.title(), text };
   } finally {
     await browser.close();
   }

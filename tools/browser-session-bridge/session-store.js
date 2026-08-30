@@ -138,21 +138,22 @@ export function refreshedSession(session, browserCookies, refreshedAt = new Date
   return { ...session, cookies: normalized.cookies, refreshedAt };
 }
 
-export async function persistRefreshedSession(stateDir, session, browserCookies) {
+export async function persistRefreshedSession(stateDir, session, browserCookies, sessionPath = null) {
   const refreshed = refreshedSession(session, browserCookies);
   if (!refreshed) return false;
-  await persistSession(stateDir, refreshed);
+  if (sessionPath) await persistSessionFile(sessionPath, refreshed);
+  else await persistSession(stateDir, refreshed);
   return true;
 }
 
-export function refreshSessionOnBrowserClose({ browser, context, stateDir, session }) {
+export function refreshSessionOnBrowserClose({ browser, context, stateDir, session, sessionPath = null }) {
   const closeBrowser = browser.close.bind(browser);
   let closing = null;
   browser.close = () => {
     if (!closing) {
       closing = (async () => {
         try {
-          await persistRefreshedSession(stateDir, session, await context.cookies());
+          await persistRefreshedSession(stateDir, session, await context.cookies(), sessionPath);
         } finally {
           await closeBrowser();
         }
@@ -176,10 +177,8 @@ export async function consumePairing(pairingsDir, token) {
   }
 }
 
-export async function persistSession(stateDir, session) {
-  const sessionsDir = path.join(stateDir, "sessions");
-  await mkdir(sessionsDir, { recursive: true, mode: 0o700 });
-  const file = path.join(sessionsDir, `${session.resourceId}.json`);
+async function persistSessionFile(file, session) {
+  await mkdir(path.dirname(file), { recursive: true, mode: 0o700 });
   const temporary = `${file}.${crypto.randomUUID()}.tmp`;
   try {
     await writeFile(temporary, `${JSON.stringify(session, null, 2)}\n`, { mode: 0o600 });
@@ -189,4 +188,14 @@ export async function persistSession(stateDir, session) {
   } finally {
     await rm(temporary, { force: true });
   }
+}
+
+export async function persistSession(stateDir, session) {
+  return persistSessionFile(path.join(stateDir, "sessions", `${session.resourceId}.json`), session);
+}
+
+export async function persistDeviceSession(stateDir, deviceId, session) {
+  const id = String(deviceId || "");
+  if (!/^[a-zA-Z0-9_-]{20,100}$/.test(id)) throw new Error("Invalid device identifier");
+  return persistSessionFile(path.join(stateDir, "device-sessions", id, `${session.resourceId}.json`), session);
 }

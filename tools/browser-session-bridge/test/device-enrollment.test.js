@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdtemp, readFile, rm } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
@@ -99,6 +99,19 @@ test("activates a short-lived device enrollment exactly once", async (t) => {
     storageCount: 0,
     receivedAt: sessionEvents[0].receivedAt
   });
+  const isolatedSession = JSON.parse(await readFile(path.join(stateDir, "device-sessions", device.deviceId, "example.com.json"), "utf8"));
+  assert.equal(isolatedSession.resourceId, "example.com");
+  assert.equal(isolatedSession.cookies.length, 1);
+  await assert.rejects(readFile(path.join(stateDir, "sessions", "example.com.json"), "utf8"), { code: "ENOENT" });
+
+  const revocation = encryptEnvelope(device.secret, { version: 1, action: "revoke", deviceId: device.deviceId });
+  const revokedDevice = await fetch(`${endpoint}/v1/revoke-device`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ deviceId: device.deviceId, ...revocation })
+  });
+  assert.equal(revokedDevice.status, 200);
+  await assert.rejects(readFile(path.join(stateDir, "device-sessions", device.deviceId, "example.com.json"), "utf8"), { code: "ENOENT" });
 
   const repeated = await fetch(`${endpoint}/v1/activate-device`, {
     method: "POST",
@@ -106,6 +119,7 @@ test("activates a short-lived device enrollment exactly once", async (t) => {
     body: JSON.stringify({ token: setup.token, ...activation })
   });
   assert.equal(repeated.status, 400);
+  assert.deepEqual(await repeated.json(), { ok: false, error: "Enrollment link already used or expired" });
 
   const page = await fetch(`${endpoint}/connect`);
   assert.equal(page.status, 200);
