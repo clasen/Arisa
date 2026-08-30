@@ -1,6 +1,6 @@
 # Arisa Session Bridge Privacy Policy
 
-Last updated: August 16, 2026
+Last updated: August 30, 2026
 
 Arisa Session Bridge has one purpose: to let a user intentionally share the active site's browser session with an Arisa instance they control.
 
@@ -20,7 +20,7 @@ The extension does not collect browsing history, keystrokes, or sessions for ina
 
 Session data is encrypted with AES-256-GCM before transfer to the bridge endpoint configured by the user. The receiving Arisa instance stores imported sessions within that user's chat-scoped state. Cookie values are not returned in Arisa tool results.
 
-The extension stores its bridge endpoint, device identifier, and device secret locally in the dedicated browser profile. A temporary setup credential expires, is single-use, and is carried in a URL fragment so it is not sent in HTTP requests or referrers.
+The extension stores its bridge endpoint, device identifier, and device secret locally in the dedicated browser profile. A temporary setup credential expires, is single-use, arrives in a URL fragment so it is not sent in HTTP requests or referrers, and may be held in extension-local storage only until activation succeeds or the credential expires.
 
 ## Sharing and sale
 

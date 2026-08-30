@@ -1,3 +1,8 @@
+import { pendingSetupRecord, restorableSetupCode, setupFailureKind, setupStageMessage } from "./onboarding-state.js";
+
+const PENDING_SETUP_KEY = "arisaPendingSetup";
+const SETUP_FAILURE_KEY = "arisaLastSetupFailure";
+
 const setupSection = document.querySelector("#setup");
 const connectedSection = document.querySelector("#connected");
 const setupCodeInput = document.querySelector("#setup-code");
@@ -7,8 +12,19 @@ const forgetButton = document.querySelector("#forget");
 const sitePanel = document.querySelector("#site");
 const deviceLabel = document.querySelector("#device-label");
 const status = document.querySelector("#status");
+const setupProgress = [...document.querySelectorAll("#setup-progress li")];
 
 let device = null;
+
+function setSetupStage(stage) {
+  const order = ["detected", "permission", "activation", "connected"];
+  const current = order.indexOf(stage);
+  setupProgress.forEach((item) => {
+    const index = order.indexOf(item.dataset.stage);
+    item.classList.toggle("done", current > index || stage === "connected");
+    item.classList.toggle("current", current === index);
+  });
+}
 
 function setStatus(message, kind = "") {
   status.textContent = message;
@@ -159,17 +175,38 @@ async function activateEnrollment(enrollment) {
 async function connectProfile() {
   setStatus("");
   connectButton.disabled = true;
+  let stage = "validation";
+  let setup = null;
   try {
-    const setup = parseSetupCode(setupCodeInput.value);
+    const code = setupCodeInput.value.trim();
+    setup = parseSetupCode(code);
+    if (setup.type === "enrollment") {
+      await chrome.storage.local.set({ [PENDING_SETUP_KEY]: pendingSetupRecord(code, setup, { resume: true }) });
+    }
+    stage = "permission";
+    setSetupStage(stage);
+    setStatus(setupStageMessage(stage));
     await ensureEndpointPermission(setup.endpoint);
+    stage = "activation";
+    setSetupStage(stage);
+    setStatus(setupStageMessage(stage));
     device = setup.type === "enrollment" ? await activateEnrollment(setup) : setup;
     await chrome.storage.local.set({ arisaDevice: device });
+    await chrome.storage.local.remove([PENDING_SETUP_KEY, SETUP_FAILURE_KEY]);
     setupCodeInput.value = "";
+    setSetupStage("connected");
     showMode();
-    setStatus("Profile connected. Open a logged-in site and press Send current session.", "success");
+    setStatus(setupStageMessage("connected"), "success");
   } catch (error) {
     device = null;
-    setStatus(error.message || String(error), "error");
+    const kind = setupFailureKind(error, stage);
+    const stored = await chrome.storage.local.get(PENDING_SETUP_KEY).catch(() => ({}));
+    const pending = stored[PENDING_SETUP_KEY];
+    if (pending) await chrome.storage.local.set({
+      [PENDING_SETUP_KEY]: { ...pending, resume: false },
+      [SETUP_FAILURE_KEY]: { version: 1, kind, stage, at: new Date().toISOString() }
+    }).catch(() => {});
+    setStatus(`${setupStageMessage(stage)} Failed: ${error.message || String(error)}`, "error");
   } finally {
     connectButton.disabled = false;
   }
@@ -255,18 +292,35 @@ sendButton.addEventListener("click", sendCurrentSession);
 forgetButton.addEventListener("click", forgetProfile);
 
 async function initialize() {
-  const stored = await chrome.storage.local.get("arisaDevice");
+  const stored = await chrome.storage.local.get(["arisaDevice", PENDING_SETUP_KEY]);
   device = stored.arisaDevice || null;
   showMode();
   try {
     const { url } = await activeWebTab();
     sitePanel.textContent = `Current site: ${url.origin}`;
-    if (!device) {
-      const setupCode = setupCodeFromUrl(url);
-      if (setupCode) {
-        setupCodeInput.value = setupCode;
-        setStatus("Setup link detected. Choose Connect this profile.", "success");
-      }
+    if (device) return;
+    const detectedCode = setupCodeFromUrl(url);
+    if (detectedCode) {
+      const setup = parseSetupCode(detectedCode);
+      const pending = pendingSetupRecord(detectedCode, setup);
+      await chrome.storage.local.set({ [PENDING_SETUP_KEY]: pending });
+      setupCodeInput.value = detectedCode;
+      setSetupStage("detected");
+      setStatus(`${setupStageMessage("detected")} Choose Connect this profile.`, "success");
+      return;
+    }
+    const pendingCode = restorableSetupCode(stored[PENDING_SETUP_KEY]);
+    if (!pendingCode) {
+      if (stored[PENDING_SETUP_KEY]) await chrome.storage.local.remove(PENDING_SETUP_KEY);
+      return;
+    }
+    setupCodeInput.value = pendingCode;
+    setSetupStage("detected");
+    setStatus("Saved setup restored. Choose Connect this profile.", "success");
+    if (stored[PENDING_SETUP_KEY].resume) {
+      const pendingSetup = parseSetupCode(pendingCode);
+      const origins = [permissionPattern(pendingSetup.endpoint)];
+      if (await chrome.permissions.contains({ origins })) await connectProfile();
     }
   } catch (error) {
     if (!device) setStatus(error.message || String(error), "error");

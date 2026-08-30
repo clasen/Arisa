@@ -20,6 +20,11 @@
     <section id="setup" class="hidden">
       <div class="section-title"><span>&gt;</span> connect profile</div>
       <label for="setup-code">setup link detected automatically, or paste its code</label>
+      <ol id="setup-progress" class="setup-progress" aria-label="Connection progress">
+        <li data-stage="detected">link detected</li>
+        <li data-stage="permission">access granted</li>
+        <li data-stage="activation">profile connected</li>
+      </ol>
       <textarea id="setup-code" rows="3" spellcheck="false" placeholder="arisa-enroll://…"></textarea>
       <button id="connect" class="primary">connect this profile</button>
     </section>
@@ -39,6 +44,6 @@
 
     <p id="status" role="status" aria-live="polite"></p>
   </main>
-  <script src="popup.js"></script>
+  <script type="module" src="popup.js"></script>
 </body>
 </html>

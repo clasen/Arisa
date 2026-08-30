@@ -39,6 +39,11 @@ section { padding-top: 16px; }
 .section-title { margin-bottom: 12px; color: var(--purple); font-size: 12px; font-weight: 700; }
 .section-title span { margin-right: 7px; color: var(--green); }
 label { display: block; margin-bottom: 7px; color: var(--muted); font-size: 10px; line-height: 1.45; }
+.setup-progress { display: flex; gap: 5px; margin: 0 0 10px; padding: 0; list-style: none; counter-reset: setup; }
+.setup-progress li { flex: 1; padding: 6px 4px; border: 1px solid var(--line); border-radius: 4px; color: var(--muted); font-size: 8px; line-height: 1.25; text-align: center; }
+.setup-progress li::before { counter-increment: setup; content: counter(setup) ". "; color: var(--purple); }
+.setup-progress li.current { border-color: var(--yellow); color: var(--yellow); }
+.setup-progress li.done { border-color: var(--green); color: var(--green); }
 textarea {
   width: 100%;
   resize: none;

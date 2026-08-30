@@ -12,7 +12,7 @@ function decodeEnrollment(code) {
   return JSON.parse(Buffer.from(code.slice(prefix.length), "base64url").toString("utf8"));
 }
 
-test("activates a short-lived device enrollment exactly once", async (t) => {
+test("activates once and safely replays the same short-lived enrollment result", async (t) => {
   const root = await mkdtemp(path.join(os.tmpdir(), "arisa-bridge-enroll-"));
   t.after(() => rm(root, { recursive: true, force: true }));
   const pairingsDir = path.join(root, "pairings");
@@ -104,6 +104,17 @@ test("activates a short-lived device enrollment exactly once", async (t) => {
   assert.equal(isolatedSession.cookies.length, 1);
   await assert.rejects(readFile(path.join(stateDir, "sessions", "example.com.json"), "utf8"), { code: "ENOENT" });
 
+  const replay = await fetch(`${endpoint}/v1/activate-device`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ token: setup.token, ...activation })
+  });
+  assert.equal(replay.status, 200);
+  const replayBody = await replay.json();
+  assert.equal(replayBody.replayed, true);
+  assert.equal(decryptEnvelope(setup.activationSecret, replayBody).deviceId, device.deviceId);
+  assert.equal(deviceEvents.length, 1);
+
   const revocation = encryptEnvelope(device.secret, { version: 1, action: "revoke", deviceId: device.deviceId });
   const revokedDevice = await fetch(`${endpoint}/v1/revoke-device`, {
     method: "POST",
@@ -113,13 +124,13 @@ test("activates a short-lived device enrollment exactly once", async (t) => {
   assert.equal(revokedDevice.status, 200);
   await assert.rejects(readFile(path.join(stateDir, "device-sessions", device.deviceId, "example.com.json"), "utf8"), { code: "ENOENT" });
 
-  const repeated = await fetch(`${endpoint}/v1/activate-device`, {
+  const afterRevocation = await fetch(`${endpoint}/v1/activate-device`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ token: setup.token, ...activation })
   });
-  assert.equal(repeated.status, 400);
-  assert.deepEqual(await repeated.json(), { ok: false, error: "Enrollment link already used or expired" });
+  assert.equal(afterRevocation.status, 400);
+  assert.deepEqual(await afterRevocation.json(), { ok: false, error: "Enrollment link already used or expired" });
 
   const page = await fetch(`${endpoint}/connect`);
   assert.equal(page.status, 200);

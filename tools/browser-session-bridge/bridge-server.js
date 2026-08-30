@@ -42,7 +42,7 @@ function reviewerPage(response) {
 }
 
 function privacyPolicyPage(response, { headOnly = false } = {}) {
-  const encoded = Buffer.from(`<!doctype html><html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="referrer" content="no-referrer"><title>Arisa Session Bridge Privacy Policy</title><style>:root{color-scheme:dark;--bg:#1f2130;--surface:#282a36;--fg:#f8f8f2;--muted:#c5c8e6;--line:#44475a;--purple:#bd93f9;--orange:#ffb86c}*{box-sizing:border-box}body{max-width:760px;margin:48px auto;padding:24px;color:var(--fg);background:var(--bg);font:16px/1.65 ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,"Liberation Mono","Courier New",monospace}main{border:1px solid var(--line);border-radius:8px;padding:32px;background:var(--surface)}h1{margin-top:0;color:var(--orange);line-height:1.2}h2{margin-top:30px;color:var(--purple);font-size:19px}p,li{color:var(--muted)}strong{color:var(--fg)}a{color:var(--purple)}code{color:var(--orange)}</style></head><body><main><h1>Arisa Session Bridge Privacy Policy</h1><p><strong>Last updated:</strong> August 16, 2026</p><p>Arisa Session Bridge has one purpose: to let a user intentionally share the active site's browser session with an Arisa instance they control.</p><h2>Data processed</h2><p>Only when the user chooses <strong>Send current session</strong>, the extension processes:</p><ul><li>the active site's hostname and origin</li><li>cookies applicable to that active URL</li><li>localStorage and sessionStorage belonging to the active page</li><li>the capture time</li><li>a revocable bridge-device identifier</li></ul><p>The extension does not collect browsing history, keystrokes, or sessions for inactive sites. It requests access to the active site for this explicit action and removes that temporary access after reading its cookies and web storage.</p><h2>Use, transfer, and storage</h2><p>The extension uses this data only to transfer the user-selected session to the Arisa bridge endpoint paired by that user. Session data is encrypted with AES-256-GCM before transfer. The receiving Arisa instance stores imported sessions in that user's chat-scoped state. Cookie values are not returned in Arisa tool results.</p><p>The extension stores its bridge endpoint, device identifier, and device secret locally in the dedicated browser profile. Temporary setup credentials expire, are single-use, and remain in URL fragments so browsers do not send them in HTTP requests or referrers.</p><h2>Sharing and sale</h2><p>Arisa Session Bridge does not sell user data, use it for advertising, or transfer it to unrelated third parties. Data goes only to the Arisa bridge endpoint the user explicitly paired.</p><h2>Retention and deletion</h2><p>Users can revoke the browser profile with <strong>Forget</strong>, revoke it from Arisa, delete an imported site session, or log out of the source site. The user operating the receiving Arisa instance controls server-side retention.</p><h2>Security boundary</h2><p>Sharing a browser session grants the receiving Arisa instance the access represented by that session. Users should install the extension only in a dedicated browser profile and use least-privilege accounts. The extension does not bypass login, CAPTCHA, verification, approval, or anti-bot controls.</p><h2>Contact</h2><p>Privacy questions may be submitted through the <a href="https://github.com/clasen/Arisa">official Arisa project repository</a>.</p></main></body></html>`, "utf8");
+  const encoded = Buffer.from(`<!doctype html><html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="referrer" content="no-referrer"><title>Arisa Session Bridge Privacy Policy</title><style>:root{color-scheme:dark;--bg:#1f2130;--surface:#282a36;--fg:#f8f8f2;--muted:#c5c8e6;--line:#44475a;--purple:#bd93f9;--orange:#ffb86c}*{box-sizing:border-box}body{max-width:760px;margin:48px auto;padding:24px;color:var(--fg);background:var(--bg);font:16px/1.65 ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,"Liberation Mono","Courier New",monospace}main{border:1px solid var(--line);border-radius:8px;padding:32px;background:var(--surface)}h1{margin-top:0;color:var(--orange);line-height:1.2}h2{margin-top:30px;color:var(--purple);font-size:19px}p,li{color:var(--muted)}strong{color:var(--fg)}a{color:var(--purple)}code{color:var(--orange)}</style></head><body><main><h1>Arisa Session Bridge Privacy Policy</h1><p><strong>Last updated:</strong> August 30, 2026</p><p>Arisa Session Bridge has one purpose: to let a user intentionally share the active site's browser session with an Arisa instance they control.</p><h2>Data processed</h2><p>Only when the user chooses <strong>Send current session</strong>, the extension processes:</p><ul><li>the active site's hostname and origin</li><li>cookies applicable to that active URL</li><li>localStorage and sessionStorage belonging to the active page</li><li>the capture time</li><li>a revocable bridge-device identifier</li></ul><p>The extension does not collect browsing history, keystrokes, or sessions for inactive sites. It requests access to the active site for this explicit action and removes that temporary access after reading its cookies and web storage.</p><h2>Use, transfer, and storage</h2><p>The extension uses this data only to transfer the user-selected session to the Arisa bridge endpoint paired by that user. Session data is encrypted with AES-256-GCM before transfer. The receiving Arisa instance stores imported sessions in that user's chat-scoped state. Cookie values are not returned in Arisa tool results.</p><p>The extension stores its bridge endpoint, device identifier, and device secret locally in the dedicated browser profile. Temporary setup credentials expire, are single-use, arrive in URL fragments so browsers do not send them in HTTP requests or referrers, and may be held in extension-local storage only until activation succeeds or the credential expires.</p><h2>Sharing and sale</h2><p>Arisa Session Bridge does not sell user data, use it for advertising, or transfer it to unrelated third parties. Data goes only to the Arisa bridge endpoint the user explicitly paired.</p><h2>Retention and deletion</h2><p>Users can revoke the browser profile with <strong>Forget</strong>, revoke it from Arisa, delete an imported site session, or log out of the source site. The user operating the receiving Arisa instance controls server-side retention.</p><h2>Security boundary</h2><p>Sharing a browser session grants the receiving Arisa instance the access represented by that session. Users should install the extension only in a dedicated browser profile and use least-privilege accounts. The extension does not bypass login, CAPTCHA, verification, approval, or anti-bot controls.</p><h2>Contact</h2><p>Privacy questions may be submitted through the <a href="https://github.com/clasen/Arisa">official Arisa project repository</a>.</p></main></body></html>`, "utf8");
   response.writeHead(200, {
     ...commonHeaders("text/html; charset=UTF-8", encoded.length),
     "Content-Language": "en",
@@ -65,6 +65,41 @@ async function readJsonBody(request, maxBytes) {
 function credentialFile(directory, id) {
   if (!/^[a-zA-Z0-9_-]{20,100}$/.test(String(id || ""))) throw new Error("Invalid credential identifier");
   return path.join(directory, `${id}.json`);
+}
+
+function activationReceiptFile(enrollmentsDir, token) {
+  if (!/^[a-zA-Z0-9_-]{20,100}$/.test(String(token || ""))) throw new Error("Invalid enrollment token");
+  const id = crypto.createHash("sha256").update(token).digest("hex");
+  return path.join(enrollmentsDir, "activation-receipts", `${id}.json`);
+}
+
+async function readActivationReceipt(enrollmentsDir, token, devicesDir) {
+  const file = activationReceiptFile(enrollmentsDir, token);
+  try {
+    const receipt = JSON.parse(await readFile(file, "utf8"));
+    if (Date.now() >= new Date(receipt.expiresAt).getTime() || !receipt.response?.iv || !receipt.response?.ciphertext || !receipt.deviceId) {
+      await rm(file, { force: true });
+      return null;
+    }
+    await readFile(credentialFile(devicesDir, receipt.deviceId), "utf8");
+    return receipt.response;
+  } catch (error) {
+    await rm(file, { force: true });
+    return null;
+  }
+}
+
+async function writeActivationReceipt(enrollmentsDir, token, expiresAt, deviceId, response) {
+  const file = activationReceiptFile(enrollmentsDir, token);
+  await mkdir(path.dirname(file), { recursive: true, mode: 0o700 });
+  const temporary = `${file}.${crypto.randomUUID()}.tmp`;
+  try {
+    await writeFile(temporary, `${JSON.stringify({ version: 1, expiresAt, deviceId, response })}\n`, { mode: 0o600 });
+    await chmod(temporary, 0o600);
+    await rename(temporary, file);
+  } finally {
+    await rm(temporary, { force: true });
+  }
 }
 
 async function cleanupExpiredPairings(pairingsDir) {
@@ -184,7 +219,7 @@ async function consumeDeviceEnrollment(enrollmentsDir, token) {
   try {
     await rename(source, claimed);
   } catch (error) {
-    if (error?.code === "ENOENT") throw new Error("Enrollment link already used or expired");
+    if (error?.code === "ENOENT") throw Object.assign(new Error("Enrollment link already used or expired"), { code: "ENROLLMENT_NOT_FOUND" });
     throw error;
   }
   try {
@@ -197,7 +232,17 @@ async function consumeDeviceEnrollment(enrollmentsDir, token) {
 }
 
 async function activateDevice({ enrollmentsDir, devicesDir, envelope }) {
-  const enrollment = await consumeDeviceEnrollment(enrollmentsDir, envelope.token);
+  const replay = await readActivationReceipt(enrollmentsDir, envelope.token, devicesDir);
+  if (replay) return { response: replay, event: null, replayed: true };
+  let enrollment;
+  try {
+    enrollment = await consumeDeviceEnrollment(enrollmentsDir, envelope.token);
+  } catch (error) {
+    if (error?.code !== "ENROLLMENT_NOT_FOUND") throw error;
+    const racedReplay = await readActivationReceipt(enrollmentsDir, envelope.token, devicesDir);
+    if (racedReplay) return { response: racedReplay, event: null, replayed: true };
+    throw error;
+  }
   const payload = decryptEnvelope(enrollment.activationSecret, envelope);
   if (payload?.version !== 1 || payload?.action !== "activate") throw new Error("Invalid device activation request");
   await mkdir(devicesDir, { recursive: true, mode: 0o700 });
@@ -212,13 +257,16 @@ async function activateDevice({ enrollmentsDir, devicesDir, envelope }) {
   const file = credentialFile(devicesDir, record.deviceId);
   await writeFile(file, `${JSON.stringify(record)}\n`, { mode: 0o600 });
   await chmod(file, 0o600);
+  const response = encryptEnvelope(enrollment.activationSecret, {
+    version: 1,
+    deviceId: record.deviceId,
+    secret: record.secret,
+    label: record.label
+  });
+  await writeActivationReceipt(enrollmentsDir, envelope.token, enrollment.expiresAt, record.deviceId, response);
   return {
-    response: encryptEnvelope(enrollment.activationSecret, {
-      version: 1,
-      deviceId: record.deviceId,
-      secret: record.secret,
-      label: record.label
-    }),
+    response,
+    replayed: false,
     event: {
       chatId: record.chatId,
       deviceId: record.deviceId,
@@ -286,8 +334,8 @@ export function startBridgeServer({ host, port, pairingsDir, enrollmentsDir, dev
       }
       if (request.url === "/v1/activate-device") {
         const activated = await activateDevice({ enrollmentsDir, devicesDir, envelope });
-        await onDeviceActivated?.(activated.event).catch(() => {});
-        return jsonResponse(response, 200, { ok: true, ...activated.response });
+        if (activated.event) await onDeviceActivated?.(activated.event).catch(() => {});
+        return jsonResponse(response, 200, { ok: true, replayed: activated.replayed, ...activated.response });
       }
       let credential;
       let device = null;
