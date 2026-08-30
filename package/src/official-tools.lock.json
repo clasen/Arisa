@@ -47,13 +47,13 @@
       }
     },
     "campaign-draft-runner": {
-      "version": "0.8.0",
+      "version": "0.8.1",
       "files": {
         "README.md": "9d8c9d87edc66375b5f059bd5abb06a8b8ee743e979d77ffc4f5312f3ec7b57f",
         "batch-skip.js": "ad428464b739e7355e00ac7cf399247ce611fcef0470d97a73893701e5b07627",
         "config.js": "9b9c2d9686cebf17c3ba2630088c7028281883608f61054e733283aeb8d383cb",
         "discovery-operations.js": "a5e9f046358938a07ffba039085c5c48f829c6a2e05362d0d0230a37a3c47f60",
-        "index.js": "d7fd503c86069c73f590ce0fed2ab9fc05dc72ad969bbb5278134d685e8680f1",
+        "index.js": "3ee8ab5f2cc041ddcbeeeda7225f744b13a1ce843c25aabe693c0269a1aa681e",
         "operation-timeout.js": "9b1ced30ec9ed710bb9118b91f6f3feded5111a08e1e21abf163e4cfb91d7ad2",
         "package.json": "a25b7ed1dd2c30cd68c3c10feb8ee1752cac8cd55cd4344690ffad649e231ec1",
         "pitch-experiment.js": "3da9350dc862cab36a630f628d3b3c06974375facd999b8bdbeed8ebf15e63a3",
@@ -65,12 +65,13 @@
         "telemetry.js": "b3ededa1277d5028f7a8299926e16bb4dc06d70c470d3b97352c29080cfc0974",
         "test/batch-skip.test.js": "638d185dc0b38900afe6ee9058e733ae36583d0762a0ff0347fdf245df064abc",
         "test/discovery-operations.test.js": "bc3e7c877911278bf87ef2a5844990721570a4957b78478e2e916be869bc2159",
+        "test/orchestrator-fanout.test.js": "e882f2c22418d4d3bdc66223c8bf37ed2ca0fbb94ae99f0d828c9257ca551f6b",
         "test/pitch-experiment.test.js": "5c43901a9986b666f1094a7dc298adf2072dcb167ea023bb24fb5c9f13c152b0",
         "test/prospect-pool.test.js": "d0a81f21899b0055c210747008db2ed12afe11b3a57d3e80d1aae797732982d3",
         "test/selection-policy.test.js": "33967a965b47c50febb3533ab8cc7080b378f8e4dbed363f6c0304eb90da4277",
         "test/telemetry.test.js": "8e52a43fa9eb08fa0f3be124b72b7cd39258666cb88311b1df6978037372c257",
         "test/web-tool-default.test.js": "bafd71c48fc922d449b40b2603900c08a45ba3701ffa9a48e3e533219f1bd1a5",
-        "tool.manifest.json": "01d9bc9c602c6c6487a09c5faaeb621297d6db2054743b6a80f0527eaff93a5a"
+        "tool.manifest.json": "acd3a902aa0e52e4ea9429def5bc76808d0a33ead4fd3c670b8a737a2afb2c7b"
       },
       "toolDependencies": {
         "pr-campaign": "^0.1.0",

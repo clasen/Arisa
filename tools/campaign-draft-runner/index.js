@@ -1106,13 +1106,19 @@ function buildApprovedFactsBody({ renderedBody, opening, profile, language, appr
   ].filter(Boolean).join("\n\n");
 }
 
+async function runSequential(operations) {
+  const results = [];
+  for (const operation of operations) results.push(await operation());
+  return results;
+}
+
 async function captureBatchState(arisa, chatId, profile) {
   const stateDir = getChatToolStateDir(chatId, toolName);
-  const [campaign, draftRecipients, discoveryState, factStatus] = await Promise.all([
-    runTool(arisa, profile.campaignTool || defaults.CAMPAIGN_TOOL, { action: "status" }),
-    gmailDraftRecipients(arisa, profile),
-    readDiscoveryState(chatId).then((result) => result.data),
-    profile.factSheet ? getFactSheetStatus(stateDir, profile) : null
+  const [campaign, draftRecipients, discoveryState, factStatus] = await runSequential([
+    () => runTool(arisa, profile.campaignTool || defaults.CAMPAIGN_TOOL, { action: "status" }),
+    () => gmailDraftRecipients(arisa, profile),
+    () => readDiscoveryState(chatId).then((result) => result.data),
+    () => profile.factSheet ? getFactSheetStatus(stateDir, profile) : null
   ]);
   return {
     fingerprint: campaignStateFingerprint({
@@ -1196,10 +1202,10 @@ async function handleRun(request) {
       "sources-check": sourceCheck,
       "sources-record": sourceRecord,
       "discovery-summary": async () => {
-        const [campaign, contacts, sources] = await Promise.all([
-          runTool(arisa, campaignTool, { action: "status" }),
-          runTool(arisa, campaignTool, { action: "list-contacts", status: profile.contactStatus || "new", limit: "1000" }),
-          checkExhaustedSources(stateDir, profile.name, [])
+        const [campaign, contacts, sources] = await runSequential([
+          () => runTool(arisa, campaignTool, { action: "status" }),
+          () => runTool(arisa, campaignTool, { action: "list-contacts", status: profile.contactStatus || "new", limit: "1000" }),
+          () => checkExhaustedSources(stateDir, profile.name, [])
         ]);
         return {
           campaign,
@@ -1216,10 +1222,10 @@ async function handleRun(request) {
   }
 
   if (args.action === "eligibility-audit") {
-    const [allContacts, candidateContacts, draftRecipients] = await Promise.all([
-      listAllContacts(arisa, profile),
-      listContacts(arisa, profile),
-      gmailDraftRecipients(arisa, profile)
+    const [allContacts, candidateContacts, draftRecipients] = await runSequential([
+      () => listAllContacts(arisa, profile),
+      () => listContacts(arisa, profile),
+      () => gmailDraftRecipients(arisa, profile)
     ]);
     return { action: "eligibility-audit", profile: profile.name, ...auditEligibility(allContacts, candidateContacts, draftRecipients, profile) };
   }
@@ -1604,4 +1610,4 @@ async function main() {
 const isDirectRun = process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url);
 if (isDirectRun) main();
 
-export { DEFAULT_WEB_TOOL, activeQueries, assessSearchQuality, auditEligibility, batchSkipSettings, buildApprovedFactsBody, checkExhaustedSources, discoverContacts, draftingLanguage, eligibilityReasons, getFactSheetStatus, isSelectable, normalizeCanonicalUrls, recordExhaustedSources, runTool, selectPitchVariant, updateApprovedFacts, validateDraftContent };
+export { DEFAULT_WEB_TOOL, activeQueries, assessSearchQuality, auditEligibility, batchSkipSettings, buildApprovedFactsBody, checkExhaustedSources, discoverContacts, draftingLanguage, eligibilityReasons, getFactSheetStatus, isSelectable, normalizeCanonicalUrls, recordExhaustedSources, runSequential, runTool, selectPitchVariant, updateApprovedFacts, validateDraftContent };
