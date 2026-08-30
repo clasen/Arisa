@@ -1,1 +1,1 @@
-{"name":"video-analyze","version":"1.0.0","type":"module","private":true}
+{"name":"video-analyze","version":"2.0.0","type":"module","private":true,"scripts":{"test":"node --test"}}

@@ -2,7 +2,7 @@ import crypto from "node:crypto";
 import os from "node:os";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
-import { mkdir, readFile, stat, writeFile } from "node:fs/promises";
+import { mkdir, readFile, stat } from "node:fs/promises";
 import { spawn } from "node:child_process";
 import defaults from "./config.js";
 
@@ -14,7 +14,7 @@ const { toolOk, toolError } = await core("src/core/tools/tool-result.js");
 const { getChatToolTmpDir, getToolTmpDir, getToolConfigPath } = await core("src/runtime/paths.js");
 
 function help() {
-  console.log(`video-analyze\n\nUsage:\n  node index.js run --request-file <json>\n\nInput: a video artifact. Optional args: frames (default 12), columns (default 4), width (default 320).\nOutput: a ZIP containing contact-sheet.jpg and manifest.json.\nFor a transcript, run audio-extractor on the original video, then a transcription tool on the audio artifact.\n\nConfig: ${getToolConfigPath(toolName)}`);
+  console.log(`video-analyze\n\nUsage:\n  node index.js run --request-file <json>\n\nInput: a video artifact. Optional args: frames (default 12), columns (default 4), width (default 320).\nOutput: a timestamped JPEG contact sheet with timing metadata in the tool result.\nFor a transcript, run audio-extractor on the original video, then a transcription tool on the audio artifact.\n\nConfig: ${getToolConfigPath(toolName)}`);
 }
 function run(command, args) {
   return new Promise((resolve) => {
@@ -43,15 +43,29 @@ async function analyze(request, config) {
   const dir = chatId ? getChatToolTmpDir(chatId, toolName) : getToolTmpDir(toolName);
   await mkdir(dir, { recursive: true });
   const id = crypto.randomBytes(5).toString("hex"); const base = `${safeBase(input)}-grid-${id}`;
-  const grid = path.join(dir, "contact-sheet.jpg"); const manifest = path.join(dir, "manifest.json"); const archive = path.join(dir, `${base}.zip`);
-  const filter = `fps=${fps},scale=${width}:-2:force_original_aspect_ratio=decrease,pad=${width}:trunc(ow/a/2)*2:(ow-iw)/2:(oh-ih)/2,tile=${columns}x${rows}:padding=4:margin=4`;
+  const grid = path.join(dir, `${base}.jpg`);
+  const timestamp = "drawtext=text='%{pts\\:hms}':x=8:y=h-th-8:fontsize=18:fontcolor=white:box=1:boxcolor=black@0.65";
+  const filter = `fps=${fps},scale=${width}:-2:force_original_aspect_ratio=decrease,pad=${width}:trunc(ow/a/2)*2:(ow-iw)/2:(oh-ih)/2,${timestamp},tile=${columns}x${rows}:padding=4:margin=4`;
   const result = await run(config.FFMPEG_COMMAND || "ffmpeg", ["-y", "-i", input, "-vf", filter, "-frames:v", "1", "-q:v", "3", grid]);
   if (result.code) throw new Error(`ffmpeg failed: ${result.err || result.out}`.trim());
-  const timestamps = Array.from({ length: frames }, (_, i) => Number((((i + 0.5) * duration) / frames).toFixed(3)));
-  await writeFile(manifest, JSON.stringify({ source: path.basename(input), durationSeconds: Number(duration.toFixed(3)), frames, columns, rows, timestampsSeconds: timestamps, transcription: "Run audio-extractor on the source video, then openai-transcribe or whispermix-transcribe on its audio artifact." }, null, 2) + "\n", "utf8");
-  const zipped = await run("zip", ["-j", "-q", archive, grid, manifest]);
-  if (zipped.code) throw new Error(`zip failed: ${zipped.err || zipped.out}`.trim());
-  return toolOk({ filePath: archive, fileName: `${base}.zip`, kind: "document", mimeType: "application/zip", text: `Created a ${frames}-frame ${columns}x${rows} contact sheet for ${path.basename(input)}. The ZIP includes the grid and timing manifest.` });
+  const timestamps = Array.from({ length: frames }, (_, i) => Number(((i * duration) / frames).toFixed(3)));
+  const metadata = {
+    source: path.basename(input),
+    durationSeconds: Number(duration.toFixed(3)),
+    frames,
+    columns,
+    rows,
+    timestampsSeconds: timestamps,
+    transcription: "Run audio-extractor on the source video, then openai-transcribe or whispermix-transcribe on its audio artifact."
+  };
+  return toolOk({
+    filePath: grid,
+    fileName: `${base}.jpg`,
+    kind: "image",
+    mimeType: "image/jpeg",
+    text: `Created a timestamped ${frames}-frame ${columns}x${rows} contact sheet for ${path.basename(input)}.`,
+    json: metadata
+  });
 }
 async function main() {
   const [, , command, flag, requestFile] = process.argv;

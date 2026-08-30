@@ -568,12 +568,13 @@
       }
     },
     "video-analyze": {
-      "version": null,
+      "version": "2.0.0",
       "files": {
         "config.js": "72f05ac42eda19de47e232c2a0778c6cd99cb468d5b1a25eb8187e29e3a329a1",
-        "index.js": "082bb49495265cce3c26dfe1f47799274a2c66eb11e34542ca6bf9618ba1d276",
-        "package.json": "b3fd3984d11999b552f15be4f2c4664229954ffb11b1705770dd9fb320f5ab0c",
-        "tool.manifest.json": "61e544338a7c32c35b9caf784623bb74b5701245c64ce164c804309c3b6ffcbc"
+        "index.js": "c622ca371d8c9864079bae40e4a9a944960055605c891f1d89589dacb95f5154",
+        "package.json": "1bd75c7fc49cfe4b46c573ff24b0c3c0c79951d71e161dcf482ee14f04462a43",
+        "test/video-analyze.test.js": "2c999d27b5542b0a1ce0515943a8c6802c953dd83ad5cd3de53e1079ef08d936",
+        "tool.manifest.json": "af861dd0c9f04ad82e7267e2e362a35111aa675e4bfaf61a9747df8ecd991493"
       }
     },
     "video-downloader": {

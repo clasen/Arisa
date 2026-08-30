@@ -1,9 +1,10 @@
 {
   "name": "video-analyze",
-  "description": "Create a lightweight evenly sampled video contact sheet and JSON timing manifest with ffmpeg. Use audio-extractor and a transcription tool separately when a transcript is needed.",
+  "version": "2.0.0",
+  "description": "Create a lightweight timestamped video contact sheet with bounded timing metadata. Use audio-extractor and a transcription tool separately when a transcript is needed.",
   "entry": "index.js",
   "input": ["video/*"],
-  "output": ["application/zip"],
+  "output": ["image/jpeg"],
   "configSchema": {
     "FFMPEG_COMMAND": {"type":"string","required":false,"prompt":"Optional ffmpeg command."},
     "FFPROBE_COMMAND": {"type":"string","required":false,"prompt":"Optional ffprobe command."},
