@@ -1,4 +1,4 @@
-import { authorizeAction } from "./action-policy.js";
+import { authorizeAction, readTools } from "./action-policy.js";
 import { BrowserSessionManager } from "./session-manager.js";
 import { cleanupStaleCaptures, writeCapture } from "./capture.js";
 import { buildMcpCommand, McpProcess, normalizeInteractionSteps } from "./mcp-session.js";
@@ -17,6 +17,45 @@ function boundedInteger(value, fallback, minimum, maximum) {
 
 function hasWebStorage(webStorage) {
   return Object.keys(webStorage?.local || {}).length > 0 || Object.keys(webStorage?.session || {}).length > 0;
+}
+
+function batchControl(raw = {}) {
+  const repeatUntilIncludes = String(raw.repeatUntilIncludes || "").trim();
+  if (repeatUntilIncludes.length > 200) throw new Error("repeatUntilIncludes is too long.");
+  return {
+    includeOutput: raw.includeOutput !== false,
+    repeatUntilIncludes,
+    intervalMs: boundedInteger(raw.intervalMs, 1_000, 100, 5_000),
+    timeoutMs: boundedInteger(raw.timeoutMs, 15_000, 500, 60_000),
+    waitAfterMs: boundedInteger(raw.waitAfterMs, 0, 0, 5_000),
+    maxOutputBytes: raw.maxOutputBytes
+  };
+}
+
+async function pause(ms, signal) {
+  if (!ms) return;
+  await new Promise((resolve, reject) => {
+    const finish = () => {
+      signal?.removeEventListener("abort", abort);
+      resolve();
+    };
+    const timer = setTimeout(finish, ms);
+    const abort = () => {
+      clearTimeout(timer);
+      reject(Object.assign(new Error("Lightpanda session batch was cancelled."), { code: "DAEMON_JOB_CANCELLED" }));
+    };
+    signal?.addEventListener("abort", abort, { once: true });
+  });
+}
+
+async function finalUrlFromClient(client, lookup) {
+  try {
+    const current = String(await client.call("getUrl", {})).trim();
+    return current ? (await validatePublicUrl(current, lookup ? { lookup } : undefined)).href : null;
+  } catch (error) {
+    if (/FrameNotLoaded|no page is loaded/i.test(error.message || "")) return null;
+    throw error;
+  }
 }
 
 function storageInjectionScript(origin, webStorage) {
@@ -178,6 +217,81 @@ export function createPersistentSessionService({ binary, config, createClient = 
         if (operationCompleted && manager.has(payload.sessionId)) await manager.close(payload.sessionId, "unsafe-final-navigation");
         throw error;
       }
+    }
+    if (action === "session-batch") {
+      const rawSteps = payload.steps;
+      const steps = await normalizeInteractionSteps(rawSteps, {
+        actionLevel: payload.actionLevel,
+        commitIntent: payload.commitIntent,
+        allowMutations: payload.allowMutations === true,
+        lookup
+      });
+      const controls = rawSteps.map(batchControl);
+      for (const [index, control] of controls.entries()) {
+        if (control.repeatUntilIncludes && !readTools.has(steps[index].tool)) {
+          throw new Error(`repeatUntilIncludes is allowed only on read operations; step ${index + 1} uses ${steps[index].tool}.`);
+        }
+      }
+      const metadata = manager.metadata(payload.sessionId);
+      const totalOutputLimit = normalizeMaxOutputBytes(payload.maxOutputBytes ?? config.MAX_OUTPUT_BYTES);
+      const startedAt = Date.now();
+      return manager.executeWith(payload.sessionId, async (client) => {
+        const outputs = [];
+        let remainingOutputBytes = totalOutputLimit;
+        for (const [index, step] of steps.entries()) {
+          const control = controls[index];
+          const stepStartedAt = Date.now();
+          if (metadata.authenticated && step.arguments.url !== undefined) assertResourceUrl(step.arguments.url, metadata.resourceId);
+          const permission = await authorizeAction({ client, ...step, args: step.arguments });
+          const deadline = Date.now() + control.timeoutMs;
+          let rawText = "";
+          let attempts = 0;
+          do {
+            rawText = await client.call(step.tool, step.arguments);
+            attempts += 1;
+            if (!control.repeatUntilIncludes || rawText.toLowerCase().includes(control.repeatUntilIncludes.toLowerCase())) break;
+            if (Date.now() + control.intervalMs > deadline) {
+              throw Object.assign(new Error(`Lightpanda batch step ${index + 1} did not reach its expected text.`), {
+                code: "LIGHTPANDA_BATCH_CONDITION_TIMEOUT",
+                recoverable: true
+              });
+            }
+            await pause(control.intervalMs, signal);
+          } while (true);
+          let bounded = { text: "", bytes: 0, truncated: false };
+          if (control.includeOutput && remainingOutputBytes >= 1_024) {
+            const stepLimit = Math.min(
+              remainingOutputBytes,
+              normalizeMaxOutputBytes(control.maxOutputBytes, remainingOutputBytes)
+            );
+            bounded = boundUtf8(rawText, stepLimit);
+            remainingOutputBytes -= bounded.bytes;
+          }
+          outputs.push({
+            index: index + 1,
+            tool: step.tool,
+            permission,
+            attempts,
+            elapsedMs: Date.now() - stepStartedAt,
+            text: bounded.text,
+            bytes: bounded.bytes,
+            truncated: bounded.truncated,
+            outputIncluded: control.includeOutput
+          });
+          await pause(control.waitAfterMs, signal);
+        }
+        const finalUrl = await finalUrlFromClient(client, lookup);
+        if (metadata.authenticated && finalUrl) assertResourceUrl(finalUrl, metadata.resourceId);
+        return {
+          sessionId: payload.sessionId,
+          text: `Completed ${outputs.length} Lightpanda session operations in one bounded batch.`,
+          finalUrl,
+          elapsedMs: Date.now() - startedAt,
+          operations: outputs.length,
+          bytes: totalOutputLimit - remainingOutputBytes,
+          steps: outputs
+        };
+      }, { signal });
     }
     if (action === "session-probe") {
       await manager.execute(payload.sessionId, "goto", { url: healthUrl }, { signal });

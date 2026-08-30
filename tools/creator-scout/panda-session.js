@@ -54,6 +54,23 @@ export async function openPandaSession({ arisa, chatId, getChatToolStateDir, tim
     return toolOutput(result, tool);
   }
 
+  async function batch(steps, permission = {}) {
+    const result = await arisa.tools.run({
+      name: LIGHTPANDA_TOOL,
+      args: {
+        mode: "session-batch",
+        sessionId,
+        steps: JSON.stringify(steps),
+        actionLevel: permission.actionLevel || "read",
+        ...(permission.commitIntent ? { commitIntent: permission.commitIntent } : {}),
+        maxOutputBytes: permission.maxOutputBytes || 256 * 1024
+      }
+    }, { timeoutMs });
+    const output = toolOutput(result, "session-batch");
+    if (!Array.isArray(output.steps)) throw new Error("Lightpanda returned invalid session batch output");
+    return output.steps;
+  }
+
   async function close() {
     if (closed) return;
     closed = true;
@@ -64,7 +81,7 @@ export async function openPandaSession({ arisa, chatId, getChatToolStateDir, tim
     toolOutput(result, "session-close");
   }
 
-  return { sessionId, call, close };
+  return { sessionId, call, batch, close };
 }
 
 export async function gotoWithRetry(session, url, attempts = 3) {
@@ -99,6 +116,65 @@ export async function clickNamedControl(session, name, permission = {}) {
 }
 
 export async function pandaSignedIn(session) {
-  await gotoWithRetry(session, "https://www.creatorscout.dev/saved");
-  return /button 'Sign out'/.test(await semanticTree(session));
+  const outputs = await session.batch([
+    { tool: "goto", arguments: { url: "https://www.creatorscout.dev/saved" }, includeOutput: false },
+    { tool: "tree", arguments: {}, maxOutputBytes: 64 * 1024 }
+  ]);
+  return /button 'Sign out'/.test(String(outputs[1]?.text || ""));
+}
+
+export async function gotoAndInteractive(session, url, attempts = 3) {
+  let lastError;
+  for (let attempt = 0; attempt < attempts; attempt += 1) {
+    try {
+      const outputs = await session.batch([
+        { tool: "goto", arguments: { url }, includeOutput: false },
+        { tool: "interactiveElements", arguments: { limit: 100 }, maxOutputBytes: 128 * 1024 }
+      ]);
+      const elements = JSON.parse(String(outputs[1]?.text || "[]"));
+      if (!Array.isArray(elements)) throw new Error("Lightpanda returned invalid interactive elements");
+      return elements;
+    } catch (error) {
+      lastError = error;
+      if (attempt + 1 < attempts) await new Promise((resolve) => setTimeout(resolve, 1_000));
+    }
+  }
+  throw lastError;
+}
+
+export async function submitPandaSearch(session, { query, timeoutMs }) {
+  const outputs = await session.batch([
+    { tool: "fill", arguments: { selector: 'input[placeholder*="Paste your Steam"]', value: query }, includeOutput: false },
+    { tool: "click", arguments: { selector: 'button[type="submit"]' }, includeOutput: false },
+    {
+      tool: "tree",
+      arguments: {},
+      repeatUntilIncludes: "creators who cover games like",
+      intervalMs: 1_000,
+      timeoutMs,
+      maxOutputBytes: 128 * 1024
+    },
+    { tool: "interactiveElements", arguments: { limit: 100 }, maxOutputBytes: 128 * 1024 }
+  ], { actionLevel: "commit", commitIntent: "submit-form", maxOutputBytes: 384 * 1024 });
+  const elements = JSON.parse(String(outputs[3]?.text || "[]"));
+  if (!Array.isArray(elements)) throw new Error("Lightpanda returned invalid interactive elements");
+  return { tree: String(outputs[2]?.text || ""), elements };
+}
+
+export async function revealPandaEmailControls(session, nodeIds) {
+  const clicks = nodeIds.map((backendNodeId) => ({
+    tool: "click",
+    arguments: { backendNodeId },
+    includeOutput: false,
+    waitAfterMs: 2_500
+  }));
+  const outputs = await session.batch([
+    ...clicks,
+    { tool: "tree", arguments: {}, maxOutputBytes: 128 * 1024 },
+    { tool: "interactiveElements", arguments: { limit: 100 }, maxOutputBytes: 128 * 1024 }
+  ], { actionLevel: "commit", commitIntent: "submit-form", maxOutputBytes: 384 * 1024 });
+  const tree = String(outputs[clicks.length]?.text || "");
+  const elements = JSON.parse(String(outputs[clicks.length + 1]?.text || "[]"));
+  if (!Array.isArray(elements)) throw new Error("Lightpanda returned invalid interactive elements");
+  return { tree, elements };
 }

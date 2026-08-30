@@ -13,7 +13,7 @@ import { searchWeb } from "./web-search.js";
 const toolName = "lightpanda-browser";
 
 function help() {
-  console.log(`lightpanda-browser\n\nUsage:\n  node index.js --help\n  node index.js run --request-file <json>\n  node index.js daemon  # managed internally by Arisa\n\nModes:\n  status         Verify the installed Lightpanda binary.\n  search         Search the public web through bounded hedged HTTP providers.\n  open           Open a public JavaScript-rendered page as bounded Markdown.\n  render         Return the bounded rendered DOM as HTML.\n  extract-links  Extract bounded HTTP(S) links from the rendered DOM.\n  interact       Run a bounded, stateful MCP sequence in one ephemeral browser.\n  session-open   Open a temporary anonymous chat-scoped browser session.\n  session-open-authenticated Open a scoped session from browser-session-bridge cookies. args: resourceId.\n  session-call   Call one allowlisted MCP tool in an existing session.\n  session-capture Return a bounded text-layout PNG from an existing session.\n  session-list   List this chat's temporary sessions.\n  session-close  Close one temporary session explicitly and refresh authenticated cookies.\n  recipe-save    Save a validated read/interact sequence in chat-scoped state.\n  recipe-list    List this chat's deterministic recipes.\n  recipe-run     Revalidate and replay one recipe without a model.\n  recipe-delete  Delete one recipe.\n\nSearch input: request.args.query, request.text, or request.artifact.text.\nBrowse input URL: request.args.url, request.text, or request.artifact.text.\nInteract input: request.args.steps as a JSON array string. Mutation operations also require allowMutations=true.\nSession call args: sessionId, tool, toolArgs (JSON object string), actionLevel=read|interact|commit, commitIntent=submit-form|post-content|delete when required.\nCapture args: sessionId, selector?, fullPage?. Recipe args: name?, recipeId?, steps?, actionLevel=read|interact.\nOptional args: timeoutMs, maxOutputBytes, waitMs, waitSelector, selector, maxLinks, stripUi.\n\nAnonymous mode handles public search/rendering. Authenticated mode consumes only an explicitly shared, same-site browser-session-bridge session and never returns cookie values. It never falls back to Chromium silently.\n`);
+  console.log(`lightpanda-browser\n\nUsage:\n  node index.js --help\n  node index.js run --request-file <json>\n  node index.js daemon  # managed internally by Arisa\n\nModes:\n  status         Verify the installed Lightpanda binary.\n  search         Search the public web through bounded hedged HTTP providers.\n  open           Open a public JavaScript-rendered page as bounded Markdown.\n  render         Return the bounded rendered DOM as HTML.\n  extract-links  Extract bounded HTTP(S) links from the rendered DOM.\n  interact       Run a bounded, stateful MCP sequence in one ephemeral browser.\n  session-open   Open a temporary anonymous chat-scoped browser session.\n  session-open-authenticated Open a scoped session from browser-session-bridge cookies. args: resourceId.\n  session-call   Call one allowlisted MCP tool in an existing session.\n  session-batch  Run up to 20 allowlisted MCP operations under one bounded daemon job.\n  session-capture Return a bounded text-layout PNG from an existing session.\n  session-list   List this chat's temporary sessions.\n  session-close  Close one temporary session explicitly and refresh authenticated cookies.\n  recipe-save    Save a validated read/interact sequence in chat-scoped state.\n  recipe-list    List this chat's deterministic recipes.\n  recipe-run     Revalidate and replay one recipe without a model.\n  recipe-delete  Delete one recipe.\n\nSearch input: request.args.query, request.text, or request.artifact.text.\nBrowse input URL: request.args.url, request.text, or request.artifact.text.\nInteract input: request.args.steps as a JSON array string. Mutation operations also require allowMutations=true.\nSession call args: sessionId, tool, toolArgs (JSON object string), actionLevel=read|interact|commit, commitIntent=submit-form|post-content|delete when required.\nSession batch args: sessionId, steps (JSON array), actionLevel, commitIntent. Steps may set includeOutput=false, waitAfterMs, or bounded repeatUntilIncludes/intervalMs/timeoutMs.\nCapture args: sessionId, selector?, fullPage?. Recipe args: name?, recipeId?, steps?, actionLevel=read|interact.\nOptional args: timeoutMs, maxOutputBytes, waitMs, waitSelector, selector, maxLinks, stripUi.\n\nAnonymous mode handles public search/rendering. Authenticated mode consumes only an explicitly shared, same-site browser-session-bridge session and never returns cookie values. It never falls back to Chromium silently.\n`);
 }
 
 function coreImport(relativePath) {
@@ -48,6 +48,16 @@ function jsonObject(value, label) {
     catch { throw new Error(`${label} must be a JSON object string.`); }
   }
   if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) throw new Error(`${label} must be a JSON object string.`);
+  return parsed;
+}
+
+function jsonArray(value, label) {
+  let parsed = value;
+  if (typeof value === "string") {
+    try { parsed = JSON.parse(value); }
+    catch { throw new Error(`${label} must be a JSON array string.`); }
+  }
+  if (!Array.isArray(parsed) || parsed.length === 0) throw new Error(`${label} must be a non-empty JSON array string.`);
   return parsed;
 }
 
@@ -151,6 +161,18 @@ async function run(request) {
           sessionId,
           tool,
           arguments: jsonObject(request.args?.toolArgs ?? request.args?.arguments, "toolArgs"),
+          actionLevel: request.args?.actionLevel,
+          commitIntent: request.args?.commitIntent,
+          allowMutations: request.args?.allowMutations === true || request.args?.allowMutations === "true",
+          maxOutputBytes: request.args?.maxOutputBytes
+        }, { timeoutMs, readyTimeoutMs });
+        return toolOk({ text: output.text, json: output });
+      }
+      if (mode === "session-batch") {
+        const output = await daemon.submit({
+          action: mode,
+          sessionId,
+          steps: jsonArray(request.args?.steps, "steps"),
           actionLevel: request.args?.actionLevel,
           commitIntent: request.args?.commitIntent,
           allowMutations: request.args?.allowMutations === true || request.args?.allowMutations === "true",

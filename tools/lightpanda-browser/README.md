@@ -32,11 +32,13 @@ Version 0.11.2 restores bridge-provided localStorage/sessionStorage before the f
 
 Version 0.11.3 allows fresh `backendNodeId` targets returned by `interactiveElements` for policy-gated mutations. This lets deterministic adapters select controls by accessible name without weakening commit intent or sensitive-control checks.
 
+Version 0.11.4 adds `session-batch` for deterministic adapters that already know several consecutive operations. Up to 20 allowlisted steps execute under one session lock and one daemon job, with bounded per-step and total output. Steps may suppress unused output, wait briefly after an operation, or poll one operation for a bounded case-insensitive text marker. Every step retains the existing action policy, same-site scope, cancellation, timeout, and final-URL validation.
+
 ## Adaptive sessions
 
 1. Call `session-open` for anonymous browsing, or `session-open-authenticated` with a bridge `resourceId`, and retain the returned opaque `sessionId`.
-2. Call `session-call` with that id, one allowlisted MCP `tool`, and `toolArgs` as a JSON object string.
-3. Inspect the result and make the next call using the same id.
+2. Call `session-call` for one adaptive operation, or `session-batch` when a deterministic adapter already knows several consecutive operations.
+3. Inspect the bounded result and make the next call using the same id.
 4. Optionally call `session-capture` for a bounded text-layout PNG artifact.
 5. Call `session-close` when finished. Idle sessions also expire automatically.
 
@@ -80,7 +82,7 @@ Safety boundaries:
 - captured browser output is bounded between 1 KiB and 1 MiB, with a 128 KiB default;
 - compatibility failures are explicit; there is no silent Chromium fallback;
 - cookie values are accepted only from chat-scoped `browser-session-bridge` state, never from request arguments or artifacts, and never appear in output;
-- interaction sequences are capped at 20 operations and persistent actions use read/interact/commit levels;
+- interaction and session-batch sequences are capped at 20 operations and persistent actions use read/interact/commit levels;
 - commit-capable controls require a matching explicit intent, while purchase/payment and credential controls remain blocked;
 - native MCP runs with telemetry disabled and a minimal environment;
 - anonymous sessions and authenticated web storage exist only in daemon memory; authenticated cookie refresh is returned atomically to the bridge on close;

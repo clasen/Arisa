@@ -11,6 +11,8 @@ Search CreatorScout for YouTube and Twitch creators who cover comparable games o
 
 Pass `engine=chromium` to `authenticate`, `status`, or `search` only when Chromium is deliberately selected. Lightpanda failures never trigger automatic fallback.
 
+Version 1.4 groups deterministic Lightpanda navigation, result polling, extraction, and bounded email reveals through `session-batch`. This reduces tool IPC calls while preserving the same exact-reference filtering, action authorization, output bounds, and explicit session close.
+
 For outreach research, use `requireExactReference=true` with `referenceTitles`. Rows that do not mention an exact title or verified localized alias are removed before any email lookup. Search output remains evidence for later provenance and deduplication review; it does not add contacts or send messages.
 
 ## State and credentials

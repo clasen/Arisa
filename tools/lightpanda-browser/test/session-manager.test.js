@@ -151,6 +151,66 @@ test("recoverable MCP misses keep the adaptive session alive", async () => {
   await service.close();
 });
 
+test("session batch keeps one lock, polls in-process, and returns bounded selected outputs", async () => {
+  const calls = [];
+  let treeCalls = 0;
+  const client = fakeClient({
+    call: async (operation) => {
+      calls.push(operation);
+      if (operation === "tree") return ++treeCalls === 1 ? "loading" : "Creators who cover games like Castle Bravo";
+      if (operation === "getUrl") return "https://example.com/results";
+      return "ok";
+    }
+  });
+  const service = createPersistentSessionService({
+    binary: "/unused",
+    config: { SESSION_TTL_MS: 30_000, MAX_SESSIONS: 1, SESSION_SWEEP_MS: 10_000, MAX_OUTPUT_BYTES: 8_192 },
+    createClient: async () => client,
+    lookup: async () => [{ address: "93.184.216.34" }]
+  });
+  const session = await service.processJob({ action: "session-open" });
+  const output = await service.processJob({
+    action: "session-batch",
+    sessionId: session.id,
+    actionLevel: "read",
+    steps: [
+      { tool: "goto", arguments: { url: "https://example.com/results" }, includeOutput: false },
+      { tool: "tree", arguments: {}, repeatUntilIncludes: "creators who cover games like", intervalMs: 100, timeoutMs: 1_000 }
+    ]
+  });
+  assert.equal(output.operations, 2);
+  assert.equal(output.steps[0].text, "");
+  assert.equal(output.steps[1].attempts, 2);
+  assert.match(output.steps[1].text, /Castle Bravo/);
+  assert.equal(output.finalUrl, "https://example.com/results");
+  assert.deepEqual(calls, ["goto", "tree", "tree", "getUrl"]);
+  assert.equal(service.manager.list()[0].busy, false);
+  await service.close();
+});
+
+test("session batch never repeats interaction or commit operations", async () => {
+  const client = fakeClient();
+  const service = createPersistentSessionService({
+    binary: "/unused",
+    config: { SESSION_TTL_MS: 30_000, MAX_SESSIONS: 1, SESSION_SWEEP_MS: 10_000 },
+    createClient: async () => client,
+    lookup: async () => [{ address: "93.184.216.34" }]
+  });
+  const session = await service.processJob({ action: "session-open" });
+  await assert.rejects(
+    service.processJob({
+      action: "session-batch",
+      sessionId: session.id,
+      actionLevel: "commit",
+      commitIntent: "submit-form",
+      steps: [{ tool: "click", arguments: { selector: "#submit" }, repeatUntilIncludes: "done" }]
+    }),
+    /allowed only on read operations/
+  );
+  assert.equal(service.manager.list().length, 1);
+  await service.close();
+});
+
 test("session capture returns a bounded PNG file result", async () => {
   const root = await mkdtemp(path.join(os.tmpdir(), "lp-session-capture-"));
   const buffer = Buffer.alloc(24);

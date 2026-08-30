@@ -1,6 +1,6 @@
 {
   "name": "lightpanda-browser",
-  "version": "0.11.3",
+  "version": "0.11.4",
   "description": "Search and render the public web or use explicitly shared, same-site browser sessions through bounded chat-scoped Lightpanda profiles.",
   "entry": "index.js",
   "daemon": {

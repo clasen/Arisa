@@ -8,12 +8,12 @@ import { exactReferenceMatch, referenceTitles } from "./reference-match.js";
 import { authenticatedState, preparedCheckoutState, subscriptionState } from "./outcome-contract.js";
 import { parsePandaResults } from "./panda-results.js";
 import {
-  clickNamedControl,
+  gotoAndInteractive,
   gotoWithRetry,
-  interactiveElements,
   openPandaSession,
   pandaSignedIn,
-  semanticTree
+  revealPandaEmailControls,
+  submitPandaSearch
 } from "./panda-session.js";
 
 const toolName = "creator-scout";
@@ -349,48 +349,32 @@ async function authenticatePanda(request, config) {
 
 const recencyOptions = Object.freeze({ "7d": "7 d", "30d": "30 d", "90d": "90 d" });
 
-async function configurePandaFilters(session, { language, recency }) {
-  let elements = await interactiveElements(session);
+async function configurePandaFilters(session, { language, recency, initialElements }) {
+  let elements = initialElements;
   const currentRecency = elements.find((element) => /^Last \d+ days$/.test(String(element.name || "")));
   const currentDays = String(currentRecency?.name || "").match(/\d+/)?.[0];
   const requestedDays = String(recency || "").match(/\d+/)?.[0];
   if (!language && (!requestedDays || requestedDays === currentDays)) return;
   if (!currentRecency?.backendNodeId) throw new Error("CreatorScout recency filter was not found");
-  await session.call("click", { backendNodeId: currentRecency.backendNodeId }, { actionLevel: "commit", commitIntent: "submit-form" });
-  elements = await interactiveElements(session);
+  const opened = await session.batch([
+    { tool: "click", arguments: { backendNodeId: currentRecency.backendNodeId }, includeOutput: false },
+    { tool: "interactiveElements", arguments: { limit: 100 }, maxOutputBytes: 128 * 1024 }
+  ], { actionLevel: "commit", commitIntent: "submit-form" });
+  elements = JSON.parse(String(opened[1]?.text || "[]"));
+  if (!Array.isArray(elements)) throw new Error("Lightpanda returned invalid CreatorScout filters");
+  const changes = [];
   if (language) {
     const languageSelect = elements.find((element) => element.tagName === "select" && /Any language/.test(String(element.name || "")));
     if (!languageSelect?.backendNodeId) throw new Error("CreatorScout language filter was not found");
-    await session.call("selectOption", { backendNodeId: languageSelect.backendNodeId, value: language }, { actionLevel: "interact" });
+    changes.push({ tool: "selectOption", arguments: { backendNodeId: languageSelect.backendNodeId, value: language }, includeOutput: false });
   }
   if (requestedDays && requestedDays !== currentDays) {
     const desiredName = recencyOptions[recency];
     const desired = elements.find((element) => element.name === desiredName);
     if (!desiredName || !desired?.backendNodeId) throw new Error(`CreatorScout recency option was not found: ${recency}`);
-    await session.call("click", { backendNodeId: desired.backendNodeId }, { actionLevel: "commit", commitIntent: "submit-form" });
+    changes.push({ tool: "click", arguments: { backendNodeId: desired.backendNodeId }, includeOutput: false });
   }
-}
-
-async function waitForPandaResults(session, timeoutMs) {
-  const deadline = Date.now() + timeoutMs;
-  let tree = "";
-  while (Date.now() < deadline) {
-    tree = await semanticTree(session);
-    if (/heading '\d+ creators who cover games like/i.test(tree)) return tree;
-    await new Promise((resolve) => setTimeout(resolve, 1_000));
-  }
-  throw new Error("CreatorScout Lightpanda search results timed out");
-}
-
-async function revealPandaEmails(session, parsed, maximum) {
-  const targets = parsed.rows.map((row, index) => ({ index, nodeId: row.findEmailNodeId })).filter((target) => target.nodeId).slice(0, maximum);
-  const attempted = new Set();
-  for (const target of targets) {
-    await session.call("click", { backendNodeId: target.nodeId }, { actionLevel: "commit", commitIntent: "submit-form" });
-    attempted.add(target.index);
-    await new Promise((resolve) => setTimeout(resolve, 2_500));
-  }
-  return attempted;
+  if (changes.length) await session.batch(changes, { actionLevel: "commit", commitIntent: "submit-form" });
 }
 
 async function searchPanda(request, config) {
@@ -400,21 +384,21 @@ async function searchPanda(request, config) {
   const { session } = await openCreatorScoutPanda(request, config);
   try {
     if (!(await pandaSignedIn(session))) throw new Error("CreatorScout authentication is required. Run action=authenticate.");
-    await gotoWithRetry(session, "https://www.creatorscout.dev/");
+    const initialElements = await gotoAndInteractive(session, "https://www.creatorscout.dev/");
     const language = String(request.args?.language || "").toLowerCase();
     const recency = String(request.args?.recency || "90d");
-    await configurePandaFilters(session, { language, recency });
-    await session.call("fill", { selector: 'input[placeholder*="Paste your Steam"]', value: query }, { actionLevel: "interact" });
-    await session.call("click", { selector: 'button[type="submit"]' }, { actionLevel: "commit", commitIntent: "submit-form" });
-    let tree = await waitForPandaResults(session, timeoutMs);
-    let elements = await interactiveElements(session);
+    await configurePandaFilters(session, { language, recency, initialElements });
+    let { tree, elements } = await submitPandaSearch(session, { query, timeoutMs });
     let parsed = parsePandaResults(tree, elements);
     const reveal = asBoolean(request.args?.revealEmails, false);
     const maxLookups = reveal ? boundedInteger(request.args?.maxEmailLookups, config.MAX_EMAIL_LOOKUPS || 3, 0, 20) : 0;
-    const attempted = maxLookups ? await revealPandaEmails(session, parsed, maxLookups) : new Set();
+    const targets = parsed.rows
+      .map((row, index) => ({ index, nodeId: row.findEmailNodeId }))
+      .filter((target) => target.nodeId)
+      .slice(0, maxLookups);
+    const attempted = new Set(targets.map((target) => target.index));
     if (attempted.size) {
-      tree = await semanticTree(session);
-      elements = await interactiveElements(session);
+      ({ tree, elements } = await revealPandaEmailControls(session, targets.map((target) => target.nodeId)));
       parsed = parsePandaResults(tree, elements);
     }
     const strictReference = asBoolean(request.args?.requireExactReference, false);
