@@ -1,6 +1,6 @@
 {
   "name": "browser-session-bridge",
-  "version": "0.1.7",
+  "version": "0.1.8",
   "description": "Connect browser profiles and receive explicitly shared, domain-scoped sessions while keeping profile connection, session sharing, and target validation as separate states.",
   "entry": "index.js",
   "toolDependencies": {

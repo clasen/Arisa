@@ -1,6 +1,7 @@
 import { pendingSetupRecord, restorableSetupCode, setupFailureKind, setupStageMessage } from "./onboarding-state.js";
 import { temporarySiteOrigins } from "./site-permissions.js";
 import { pendingSessionSend, shouldResumeSessionSend } from "./session-send-state.js";
+import { isRestrictedScriptError } from "./restricted-pages.js";
 
 const PENDING_SESSION_SEND_KEY = "arisaPendingSessionSend";
 const PENDING_SETUP_KEY = "arisaPendingSetup";
@@ -223,20 +224,25 @@ async function postEncrypted(path, payload) {
 }
 
 async function readWebStorage(tabId) {
-  const [{ result } = {}] = await chrome.scripting.executeScript({
-    target: { tabId },
-    func: () => ({
-      local: Object.fromEntries(Array.from({ length: localStorage.length }, (_, index) => {
-        const key = localStorage.key(index);
-        return [key, localStorage.getItem(key)];
-      })),
-      session: Object.fromEntries(Array.from({ length: sessionStorage.length }, (_, index) => {
-        const key = sessionStorage.key(index);
-        return [key, sessionStorage.getItem(key)];
-      }))
-    })
-  });
-  return result || { local: {}, session: {} };
+  try {
+    const [{ result } = {}] = await chrome.scripting.executeScript({
+      target: { tabId },
+      func: () => ({
+        local: Object.fromEntries(Array.from({ length: localStorage.length }, (_, index) => {
+          const key = localStorage.key(index);
+          return [key, localStorage.getItem(key)];
+        })),
+        session: Object.fromEntries(Array.from({ length: sessionStorage.length }, (_, index) => {
+          const key = sessionStorage.key(index);
+          return [key, sessionStorage.getItem(key)];
+        }))
+      })
+    });
+    return result || { local: {}, session: {} };
+  } catch (error) {
+    if (isRestrictedScriptError(error)) return { local: {}, session: {} };
+    throw error;
+  }
 }
 
 async function sendCurrentSession() {
