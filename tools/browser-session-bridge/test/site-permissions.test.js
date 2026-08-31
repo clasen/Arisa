@@ -9,9 +9,11 @@ test("requests the parent Instagram origin needed for domain-scoped authenticati
   ]);
 });
 
-test("captures only the related Google Accounts cookie scope for the Chrome Web Store", () => {
+test("adds only Google Accounts cookies to any active Google product", () => {
   assert.deepEqual(relatedCookieUrls(new URL("https://chrome.google.com/webstore/devconsole/")).map(String), ["https://accounts.google.com/"]);
-  assert.deepEqual(relatedCookieUrls(new URL("https://mail.google.com/")), []);
+  assert.deepEqual(relatedCookieUrls(new URL("https://mail.google.com/")).map(String), ["https://accounts.google.com/"]);
+  assert.deepEqual(relatedCookieUrls(new URL("https://accounts.google.com/")), []);
+  assert.deepEqual(relatedCookieUrls(new URL("https://youtube.com/")), []);
 });
 
 test("does not broaden unrelated site permissions", () => {

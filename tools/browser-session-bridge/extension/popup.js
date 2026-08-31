@@ -242,7 +242,7 @@ async function sendCurrentSession() {
       return output;
     });
     if (!captures[0].cookies.length) throw new Error("No applicable cookies are available for this site");
-    if (captures.slice(1).some((capture) => !capture.cookies.length)) throw new Error("No Google Accounts cookies are available for Chrome Web Store authentication");
+    if (captures.slice(1).some((capture) => !capture.cookies.length)) throw new Error("No Google Accounts cookies are available for this Google product");
     const results = [];
     for (const capture of captures) {
       results.push(await postEncrypted("/v1/import-device", {

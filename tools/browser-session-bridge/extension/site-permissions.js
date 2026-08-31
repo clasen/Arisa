@@ -1,7 +1,8 @@
 const SHARED_COOKIE_DOMAINS = ["google.com", "instagram.com"];
 
 export function relatedCookieUrls(url) {
-  return url.hostname === "chrome.google.com" ? [new URL("https://accounts.google.com/")] : [];
+  const googleProduct = url.hostname === "google.com" || url.hostname.endsWith(".google.com");
+  return googleProduct && url.hostname !== "accounts.google.com" ? [new URL("https://accounts.google.com/")] : [];
 }
 
 export function temporarySiteOrigins(url) {
