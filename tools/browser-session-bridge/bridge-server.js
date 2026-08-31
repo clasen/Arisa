@@ -340,8 +340,6 @@ export function startBridgeServer({ host, port, pairingsDir, enrollmentsDir, dev
       let credential;
       let device = null;
       if (["/v1/import-device", "/v1/revoke-device"].includes(request.url)) {
-        const lastUsed = recentDeviceUses.get(envelope.deviceId) || 0;
-        if (request.url === "/v1/import-device" && Date.now() - lastUsed < 1500) throw Object.assign(new Error("Please wait before sharing again"), { statusCode: 429 });
         device = await deviceCredential(devicesDir, envelope.deviceId);
         credential = device.record;
       } else {
@@ -358,10 +356,14 @@ export function startBridgeServer({ host, port, pairingsDir, enrollmentsDir, dev
       }
 
       const session = validateSessionPayload(decrypted, maxCookies);
+      const lastUse = recentDeviceUses.get(envelope.deviceId);
+      if (device && lastUse?.resourceId === session.resourceId && Date.now() - lastUse.at < 1500) {
+        throw Object.assign(new Error("Please wait before sharing this site again"), { statusCode: 429 });
+      }
       const chatStateDir = stateDirForChat(credential.chatId);
       if (device) {
         await persistDeviceSession(chatStateDir, device.record.deviceId, session);
-        recentDeviceUses.set(envelope.deviceId, Date.now());
+        recentDeviceUses.set(envelope.deviceId, { at: Date.now(), resourceId: session.resourceId });
         await recordDeviceUse(device.file, device.record);
       } else {
         await persistSession(chatStateDir, session);

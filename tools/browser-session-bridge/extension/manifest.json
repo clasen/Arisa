@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Arisa Session Bridge",
-  "version": "1.4.2",
+  "version": "1.4.3",
   "description": "Send the active site session from a dedicated Chrome or Brave profile to Arisa.",
   "permissions": ["activeTab", "cookies", "storage"],
   "optional_host_permissions": ["http://*/*", "https://*/*"],

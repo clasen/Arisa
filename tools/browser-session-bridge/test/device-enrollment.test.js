@@ -88,7 +88,29 @@ test("activates once and safely replays the same short-lived enrollment result",
     body: JSON.stringify({ deviceId: device.deviceId, ...imported })
   });
   assert.equal(importResponse.status, 200);
-  assert.equal(sessionEvents.length, 1);
+
+  const relatedImport = encryptEnvelope(device.secret, {
+    version: 1,
+    resourceId: "accounts.example.com",
+    sourceUrl: "https://accounts.example.com/",
+    capturedAt: new Date().toISOString(),
+    cookies: [{ name: "account", value: "secret", domain: "accounts.example.com", path: "/", secure: true, httpOnly: true, sameSite: "lax", session: true }]
+  });
+  const relatedResponse = await fetch(`${endpoint}/v1/import-device`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ deviceId: device.deviceId, ...relatedImport })
+  });
+  assert.equal(relatedResponse.status, 200);
+  const duplicateResponse = await fetch(`${endpoint}/v1/import-device`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ deviceId: device.deviceId, ...relatedImport })
+  });
+  assert.equal(duplicateResponse.status, 429);
+  assert.deepEqual(await duplicateResponse.json(), { ok: false, error: "Please wait before sharing this site again" });
+
+  assert.equal(sessionEvents.length, 2);
   assert.deepEqual(sessionEvents[0], {
     chatId: "chat-1",
     deviceId: device.deviceId,
