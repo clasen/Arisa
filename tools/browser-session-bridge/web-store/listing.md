@@ -10,7 +10,7 @@ Intentionally share the active site's session with your own Arisa assistant from
 
 ## Description
 
-Arisa Session Bridge lets you explicitly send the active site's cookies and web storage to an Arisa instance you control.
+Arisa Session Bridge lets you explicitly send the active site's applicable cookies to an Arisa instance you control.
 
 Use it in a dedicated Chrome or Brave profile named Arisa. Connect the profile once with a temporary, single-use setup link. After that, open a logged-in site, select the extension, and choose **Send current session**.
 
@@ -41,6 +41,5 @@ English
 
 - `activeTab`: identify the site selected by the user after the extension action is invoked
 - `cookies`: read cookies applicable to the selected site when the user chooses **Send current session**
-- `storage`: retain the revocable bridge-device credential in the dedicated browser profile
-- `scripting`: read localStorage and sessionStorage from the active page only when the user chooses **Send current session**
+- `storage`: retain the revocable bridge-device credential and short-lived recovery state in the dedicated browser profile
 - optional HTTP/HTTPS host access: temporarily read session state for the active site and communicate with the exact bridge endpoint approved during initial setup; active-site access is removed after the read, while only the bridge origin remains persistent

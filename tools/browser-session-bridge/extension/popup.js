@@ -1,7 +1,6 @@
 import { pendingSetupRecord, restorableSetupCode, setupFailureKind, setupStageMessage } from "./onboarding-state.js";
 import { temporarySiteOrigins } from "./site-permissions.js";
 import { pendingSessionSend, shouldResumeSessionSend } from "./session-send-state.js";
-import { isRestrictedScriptError } from "./restricted-pages.js";
 
 const PENDING_SESSION_SEND_KEY = "arisaPendingSessionSend";
 const PENDING_SETUP_KEY = "arisaPendingSetup";
@@ -223,28 +222,6 @@ async function postEncrypted(path, payload) {
   return result;
 }
 
-async function readWebStorage(tabId) {
-  try {
-    const [{ result } = {}] = await chrome.scripting.executeScript({
-      target: { tabId },
-      func: () => ({
-        local: Object.fromEntries(Array.from({ length: localStorage.length }, (_, index) => {
-          const key = localStorage.key(index);
-          return [key, localStorage.getItem(key)];
-        })),
-        session: Object.fromEntries(Array.from({ length: sessionStorage.length }, (_, index) => {
-          const key = sessionStorage.key(index);
-          return [key, sessionStorage.getItem(key)];
-        }))
-      })
-    });
-    return result || { local: {}, session: {} };
-  } catch (error) {
-    if (isRestrictedScriptError(error)) return { local: {}, session: {} };
-    throw error;
-  }
-}
-
 async function sendCurrentSession() {
   setStatus("");
   sendButton.disabled = true;
@@ -252,14 +229,13 @@ async function sendCurrentSession() {
     await ensureEndpointPermission(device.endpoint);
     const { tab, url } = await activeWebTab();
     await chrome.storage.local.set({ [PENDING_SESSION_SEND_KEY]: pendingSessionSend(tab, url) });
-    const { cookies, webStorage } = await withTemporarySitePermission(url, async () => ({
-      cookies: (await chrome.cookies.getAll({ url: url.href }))
+    const cookies = await withTemporarySitePermission(url, async () =>
+      (await chrome.cookies.getAll({ url: url.href }))
         .filter((cookie) => !cookie.expirationDate || cookie.expirationDate * 1000 > Date.now())
-        .map(serializableCookie),
-      webStorage: await readWebStorage(tab.id)
-    }));
-    const storageCount = Object.keys(webStorage.local).length + Object.keys(webStorage.session).length;
-    if (!cookies.length && !storageCount) throw new Error("No cookies or web storage are available for this site");
+        .map(serializableCookie)
+    );
+    const webStorage = { local: {}, session: {} };
+    if (!cookies.length) throw new Error("No applicable cookies are available for this site");
     const result = await postEncrypted("/v1/import-device", {
       version: 2,
       resourceId: url.hostname,
@@ -269,7 +245,7 @@ async function sendCurrentSession() {
       webStorage
     });
     await chrome.storage.local.remove(PENDING_SESSION_SEND_KEY);
-    setStatus(`Sent ${result.cookieCount} cookies and ${result.storageCount} storage entries for ${result.resourceId}.`, "success");
+    setStatus(`Sent ${result.cookieCount} cookies for ${result.resourceId}.`, "success");
   } catch (error) {
     await chrome.storage.local.remove(PENDING_SESSION_SEND_KEY).catch(() => {});
     setStatus(error.message || String(error), "error");

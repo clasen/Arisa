@@ -53,13 +53,13 @@ Actions via args.action:
   pair           Create a legacy encrypted one-time pairing code.
   list           List stored browser sessions without exposing cookie values.
   open                     Open one same-site URL with a stored profile session. args: resourceId, deviceId?, url, maxChars?, engine=lightpanda|chromium (default lightpanda).
-  chrome-web-store-inspect      Inspect non-secret controls in one existing draft. args: draftUrl.
+  chrome-web-store-inspect      Inspect non-secret controls in one existing draft. args: draftUrl, deviceId?.
   chrome-web-store-fill-listing Complete and save the listing fields without submitting. args: draftUrl, description, category, language, homepageUrl, supportUrl.
   chrome-web-store-fill-privacy Complete and save accurate privacy disclosures without submitting. args: privacyUrl, privacyPolicyUrl.
   chrome-web-store-fill-distribution Save free, public, all-region distribution without submitting. args: distributionUrl.
   chrome-web-store-publisher-contact Add the publisher contact email and start verification. args: settingsUrl, contactEmail.
-  chrome-web-store-upload       Upload an extension ZIP as a new draft without submitting it. ZIP artifact required; args: dashboardUrl.
-  chrome-web-store-replace-package Replace a draft item's ZIP package. ZIP artifact required; args: packageUrl.
+  chrome-web-store-upload       Upload an extension ZIP as a new draft without submitting it. ZIP artifact required; args: dashboardUrl, deviceId?.
+  chrome-web-store-replace-package Replace a draft item's ZIP package. ZIP artifact required; args: packageUrl, deviceId?.
   chrome-web-store-test-instructions Save durable reviewer instructions without submitting. args: testInstructionsUrl, instructions.
   chrome-web-store-withdraw     Withdraw one pending review back to Draft. args: itemUrl.
   delete                   Delete one session. args: resourceId, deviceId?.
@@ -184,6 +184,7 @@ async function handleRequest(request) {
   if (action === "chrome-web-store-publisher-contact") {
     const publisher = await fillChromeWebStorePublisherContact({
       stateDir: getChatToolStateDir(chatId, toolName),
+      deviceId: request.args?.deviceId,
       settingsUrl: request.args?.settingsUrl,
       contactEmail: request.args?.contactEmail
     });
@@ -192,6 +193,7 @@ async function handleRequest(request) {
   if (action === "chrome-web-store-fill-distribution") {
     const distribution = await fillChromeWebStoreDistribution({
       stateDir: getChatToolStateDir(chatId, toolName),
+      deviceId: request.args?.deviceId,
       distributionUrl: request.args?.distributionUrl
     });
     return toolOk({ text: "Chrome Web Store distribution saved as a draft. It was not submitted for review.", json: distribution, mimeType: "application/json" });
@@ -199,11 +201,12 @@ async function handleRequest(request) {
   if (action === "chrome-web-store-fill-privacy") {
     const privacy = await fillChromeWebStorePrivacy({
       stateDir: getChatToolStateDir(chatId, toolName),
+      deviceId: request.args?.deviceId,
       privacyUrl: request.args?.privacyUrl,
       fields: {
         singlePurpose: "Let a user explicitly share the active site's browser session with an Arisa instance they control.",
         activeTab: "Identifies the site selected by the user when they open the extension popup and choose to send that site's session.",
-        cookies: "Reads cookies plus local/session storage for the active site only after the user explicitly chooses Send current session. The session is encrypted before transfer to the paired Arisa bridge.",
+        cookies: "Reads applicable cookies only after the user explicitly chooses Send current session. Site localStorage, sessionStorage, and IndexedDB are not read. The session is encrypted before transfer to the paired Arisa bridge.",
         storage: "Stores the paired bridge endpoint and revocable device credential locally in the dedicated browser profile so the user does not need to reconnect for every session share.",
         dataTypes: ["Authentication information", "Web history"],
         privacyPolicyUrl: request.args?.privacyPolicyUrl
@@ -220,6 +223,7 @@ async function handleRequest(request) {
     });
     const filled = await fillChromeWebStoreListing({
       stateDir: getChatToolStateDir(chatId, toolName),
+      deviceId: request.args?.deviceId,
       draftUrl: request.args?.draftUrl,
       description,
       category: request.args?.category || "Productivity",
@@ -233,6 +237,7 @@ async function handleRequest(request) {
   if (action === "chrome-web-store-inspect") {
     const inspected = await inspectChromeWebStoreDraft({
       stateDir: getChatToolStateDir(chatId, toolName),
+      deviceId: request.args?.deviceId,
       draftUrl: request.args?.draftUrl
     });
     return toolOk({ text: "Chrome Web Store draft controls inspected", json: inspected, mimeType: "application/json" });
@@ -240,6 +245,7 @@ async function handleRequest(request) {
   if (action === "chrome-web-store-test-instructions") {
     const saved = await fillChromeWebStoreTestInstructions({
       stateDir: getChatToolStateDir(chatId, toolName),
+      deviceId: request.args?.deviceId,
       testInstructionsUrl: request.args?.testInstructionsUrl,
       instructions: request.args?.instructions
     });
@@ -249,6 +255,7 @@ async function handleRequest(request) {
     if (!request.artifact?.path) throw new Error("A ZIP artifact is required");
     const replaced = await replaceChromeWebStorePackage({
       stateDir: getChatToolStateDir(chatId, toolName),
+      deviceId: request.args?.deviceId,
       packageUrl: request.args?.packageUrl,
       zipPath: request.artifact.path
     });
@@ -257,6 +264,7 @@ async function handleRequest(request) {
   if (action === "chrome-web-store-withdraw") {
     const withdrawn = await withdrawChromeWebStoreReview({
       stateDir: getChatToolStateDir(chatId, toolName),
+      deviceId: request.args?.deviceId,
       itemUrl: request.args?.itemUrl
     });
     return toolOk({ text: withdrawn.withdrawn ? "Chrome Web Store review withdrawn. The item is now a draft." : "Chrome Web Store item was already a draft.", json: withdrawn, mimeType: "application/json" });
@@ -265,6 +273,7 @@ async function handleRequest(request) {
     if (!request.artifact?.path) throw new Error("A ZIP artifact is required");
     const uploaded = await uploadChromeWebStoreDraft({
       stateDir: getChatToolStateDir(chatId, toolName),
+      deviceId: request.args?.deviceId,
       dashboardUrl: request.args?.dashboardUrl,
       zipPath: request.artifact.path
     });

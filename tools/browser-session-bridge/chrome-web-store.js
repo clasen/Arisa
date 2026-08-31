@@ -3,6 +3,7 @@ import path from "node:path";
 import { pathToFileURL } from "node:url";
 import { chromium } from "playwright";
 import { refreshSessionOnBrowserClose } from "./session-store.js";
+import { resolveStoredSession } from "./session-selection.js";
 
 function playwrightSameSite(value) {
   if (value === "strict") return "Strict";
@@ -40,36 +41,42 @@ async function validateZip(filePath) {
   if (!details.isFile() || details.size < 1 || details.size > 2_000_000_000) throw new Error("Invalid Chrome Web Store package size");
 }
 
-async function readStoredSession(stateDir, resourceId) {
-  const sessionPath = path.join(stateDir, "sessions", `${resourceId}.json`);
+async function selectedStoredSession(stateDir, resourceId, deviceId) {
+  const selected = await resolveStoredSession({ stateDir, resourceId, deviceId });
   try {
-    return JSON.parse(await readFile(sessionPath, "utf8"));
+    return { ...selected, session: JSON.parse(await readFile(selected.sessionPath, "utf8")) };
   } catch (error) {
     throw new Error(`Stored ${resourceId} session is invalid: ${error.message || String(error)}`);
   }
 }
 
-async function chromeWebStoreCookies(stateDir, session) {
+async function readStoredSession(stateDir, resourceId) {
+  return (await selectedStoredSession(stateDir, resourceId)).session;
+}
+
+async function chromeWebStoreCookies(stateDir, session, deviceId) {
   const cookies = new Map(session.cookies.map((cookie) => [`${cookie.domain}\n${cookie.path || "/"}\n${cookie.name}`, cookie]));
   try {
-    const accounts = await readStoredSession(stateDir, "accounts.google.com");
+    const accounts = deviceId
+      ? (await selectedStoredSession(stateDir, "accounts.google.com", deviceId)).session
+      : await readStoredSession(stateDir, "accounts.google.com");
     for (const cookie of accounts.cookies || []) {
       cookies.set(`${cookie.domain}\n${cookie.path || "/"}\n${cookie.name}`, cookie);
     }
   } catch (error) {
-    if (!String(error?.message || error).includes("ENOENT")) throw error;
+    if (!/ENOENT|No accounts\.google\.com session is stored/.test(String(error?.message || error))) throw error;
   }
   return [...cookies.values()];
 }
 
-async function authenticatedContext(stateDir, resourceId, browser) {
+async function authenticatedContext(stateDir, resourceId, deviceId, browser) {
   if (resourceId !== "chrome.google.com") throw new Error("The chrome.google.com browser session is required");
-  const session = await readStoredSession(stateDir, resourceId);
-  if (!Array.isArray(session.cookies) || !session.cookies.length) throw new Error("Stored Chrome Web Store session has no cookies");
+  const selected = await selectedStoredSession(stateDir, resourceId, deviceId);
+  if (!Array.isArray(selected.session.cookies) || !selected.session.cookies.length) throw new Error("Stored Chrome Web Store session has no cookies");
   const context = await browser.newContext();
-  const cookies = await chromeWebStoreCookies(stateDir, session);
+  const cookies = await chromeWebStoreCookies(stateDir, selected.session, deviceId);
   await context.addCookies(cookies.map(toPlaywrightCookie));
-  refreshSessionOnBrowserClose({ browser, context, stateDir, session });
+  refreshSessionOnBrowserClose({ browser, context, stateDir, session: selected.session, sessionPath: selected.sessionPath });
   return context;
 }
 
@@ -162,11 +169,11 @@ async function chooseStoreOption(page, placeholder, option) {
   await exact.click();
 }
 
-export async function fillChromeWebStoreListing({ stateDir, resourceId = "chrome.google.com", draftUrl, description, category, language, homepageUrl, supportUrl, iconPath, screenshotPath }) {
+export async function fillChromeWebStoreListing({ stateDir, resourceId = "chrome.google.com", deviceId, draftUrl, description, category, language, homepageUrl, supportUrl, iconPath, screenshotPath }) {
   const url = validateDashboardUrl(draftUrl);
   const browser = await chromium.launch({ headless: true });
   try {
-    const context = await authenticatedContext(stateDir, resourceId, browser);
+    const context = await authenticatedContext(stateDir, resourceId, deviceId, browser);
     const page = await context.newPage();
     await page.goto(url.href, { waitUntil: "domcontentloaded", timeout: 60000 });
     await page.waitForTimeout(2500);
@@ -201,11 +208,11 @@ export async function fillChromeWebStoreListing({ stateDir, resourceId = "chrome
   }
 }
 
-export async function fillChromeWebStorePrivacy({ stateDir, resourceId = "chrome.google.com", privacyUrl, fields }) {
+export async function fillChromeWebStorePrivacy({ stateDir, resourceId = "chrome.google.com", deviceId, privacyUrl, fields }) {
   const url = validateDashboardUrl(privacyUrl);
   const browser = await chromium.launch({ headless: true });
   try {
-    const context = await authenticatedContext(stateDir, resourceId, browser);
+    const context = await authenticatedContext(stateDir, resourceId, deviceId, browser);
     const page = await context.newPage();
     await page.goto(url.href, { waitUntil: "domcontentloaded", timeout: 60000 });
     await page.waitForTimeout(2500);
@@ -238,13 +245,13 @@ export async function fillChromeWebStorePrivacy({ stateDir, resourceId = "chrome
   }
 }
 
-export async function fillChromeWebStorePublisherContact({ stateDir, resourceId = "chrome.google.com", settingsUrl, contactEmail }) {
+export async function fillChromeWebStorePublisherContact({ stateDir, resourceId = "chrome.google.com", deviceId, settingsUrl, contactEmail }) {
   const url = validateDashboardUrl(settingsUrl);
   const email = String(contactEmail || "").trim().toLowerCase();
   if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) throw new Error("A valid publisher contact email is required");
   const browser = await chromium.launch({ headless: true });
   try {
-    const context = await authenticatedContext(stateDir, resourceId, browser);
+    const context = await authenticatedContext(stateDir, resourceId, deviceId, browser);
     const page = await context.newPage();
     await page.goto(url.href, { waitUntil: "domcontentloaded", timeout: 60000 });
     await page.waitForTimeout(2500);
@@ -274,11 +281,11 @@ export async function fillChromeWebStorePublisherContact({ stateDir, resourceId 
   }
 }
 
-export async function fillChromeWebStoreDistribution({ stateDir, resourceId = "chrome.google.com", distributionUrl }) {
+export async function fillChromeWebStoreDistribution({ stateDir, resourceId = "chrome.google.com", deviceId, distributionUrl }) {
   const url = validateDashboardUrl(distributionUrl);
   const browser = await chromium.launch({ headless: true });
   try {
-    const context = await authenticatedContext(stateDir, resourceId, browser);
+    const context = await authenticatedContext(stateDir, resourceId, deviceId, browser);
     const page = await context.newPage();
     await page.goto(url.href, { waitUntil: "domcontentloaded", timeout: 60000 });
     await page.waitForTimeout(2500);
@@ -307,11 +314,11 @@ export async function fillChromeWebStoreDistribution({ stateDir, resourceId = "c
   }
 }
 
-export async function inspectChromeWebStoreDraft({ stateDir, resourceId = "chrome.google.com", draftUrl }) {
+export async function inspectChromeWebStoreDraft({ stateDir, resourceId = "chrome.google.com", deviceId, draftUrl }) {
   const url = validateDashboardUrl(draftUrl);
   const browser = await chromium.launch({ headless: true });
   try {
-    const context = await authenticatedContext(stateDir, resourceId, browser);
+    const context = await authenticatedContext(stateDir, resourceId, deviceId, browser);
     const page = await context.newPage();
     await page.goto(url.href, { waitUntil: "domcontentloaded", timeout: 60000 });
     await page.waitForTimeout(2500);
@@ -328,20 +335,23 @@ export async function inspectChromeWebStoreDraft({ stateDir, resourceId = "chrom
       value: element.getAttribute("data-value"),
       text: element.textContent?.trim().slice(0, 120) || null
     })));
-    const links = await page.locator("a").evaluateAll((elements) => elements.map((element) => ({ text: element.textContent?.trim().replace(/\s+/g, " ").slice(0, 120), href: element.href })).filter((item) => /Access|Test instructions|Privacy|Distribution|Store listing|Settings/i.test(item.text || "")));
+    const links = await page.locator("a").evaluateAll((elements) => elements
+      .map((element) => ({ text: element.textContent?.trim().replace(/\s+/g, " ").slice(0, 120), href: element.href }))
+      .filter((item) => item.href.startsWith("https://chrome.google.com/webstore/devconsole") || /Access|Test instructions|Privacy|Distribution|Store listing|Settings/i.test(item.text || ""))
+      .slice(0, 100));
     return { url: page.url(), title: await page.title(), controls, links };
   } finally {
     await browser.close();
   }
 }
 
-export async function fillChromeWebStoreTestInstructions({ stateDir, resourceId = "chrome.google.com", testInstructionsUrl, instructions }) {
+export async function fillChromeWebStoreTestInstructions({ stateDir, resourceId = "chrome.google.com", deviceId, testInstructionsUrl, instructions }) {
   const url = validateDashboardUrl(testInstructionsUrl);
   const text = String(instructions || "").trim();
   if (!text || text.length > 500) throw new Error("Chrome Web Store test instructions must be 1 to 500 characters");
   const browser = await chromium.launch({ headless: true });
   try {
-    const context = await authenticatedContext(stateDir, resourceId, browser);
+    const context = await authenticatedContext(stateDir, resourceId, deviceId, browser);
     const page = await context.newPage();
     await page.goto(url.href, { waitUntil: "domcontentloaded", timeout: 60000 });
     await page.waitForTimeout(2500);
@@ -357,12 +367,12 @@ export async function fillChromeWebStoreTestInstructions({ stateDir, resourceId 
   }
 }
 
-export async function replaceChromeWebStorePackage({ stateDir, resourceId = "chrome.google.com", packageUrl, zipPath }) {
+export async function replaceChromeWebStorePackage({ stateDir, resourceId = "chrome.google.com", deviceId, packageUrl, zipPath }) {
   const url = validateDashboardUrl(packageUrl);
   await validateZip(zipPath);
   const browser = await chromium.launch({ headless: true });
   try {
-    const context = await authenticatedContext(stateDir, resourceId, browser);
+    const context = await authenticatedContext(stateDir, resourceId, deviceId, browser);
     const page = await context.newPage();
     await page.goto(url.href, { waitUntil: "domcontentloaded", timeout: 60000 });
     await page.waitForTimeout(2500);
@@ -379,11 +389,11 @@ export async function replaceChromeWebStorePackage({ stateDir, resourceId = "chr
   }
 }
 
-export async function withdrawChromeWebStoreReview({ stateDir, resourceId = "chrome.google.com", itemUrl }) {
+export async function withdrawChromeWebStoreReview({ stateDir, resourceId = "chrome.google.com", deviceId, itemUrl }) {
   const url = validateDashboardUrl(itemUrl);
   const browser = await chromium.launch({ headless: true });
   try {
-    const context = await authenticatedContext(stateDir, resourceId, browser);
+    const context = await authenticatedContext(stateDir, resourceId, deviceId, browser);
     const page = await context.newPage();
     await page.goto(url.href, { waitUntil: "domcontentloaded", timeout: 60000 });
     await page.waitForTimeout(2500);
@@ -421,12 +431,12 @@ export async function withdrawChromeWebStoreReview({ stateDir, resourceId = "chr
   }
 }
 
-export async function uploadChromeWebStoreDraft({ stateDir, resourceId = "chrome.google.com", dashboardUrl, zipPath }) {
+export async function uploadChromeWebStoreDraft({ stateDir, resourceId = "chrome.google.com", deviceId, dashboardUrl, zipPath }) {
   const url = validateDashboardUrl(dashboardUrl);
   await validateZip(zipPath);
   const browser = await chromium.launch({ headless: true });
   try {
-    const context = await authenticatedContext(stateDir, resourceId, browser);
+    const context = await authenticatedContext(stateDir, resourceId, deviceId, browser);
     const page = await context.newPage();
     await page.goto(url.href, { waitUntil: "domcontentloaded", timeout: 60000 });
     await page.waitForTimeout(2000);

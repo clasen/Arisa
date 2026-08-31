@@ -10,11 +10,10 @@ When the user chooses **Send current session**, the extension processes:
 
 - the active site's hostname and origin
 - cookies applicable to that active URL
-- localStorage and sessionStorage belonging to that active page
 - the capture time
 - a revocable bridge-device identifier
 
-On Chrome-restricted pages such as the extensions gallery, page scripting is prohibited, so the extension omits web storage and continues only with applicable cookies. The extension does not collect browsing history, keystrokes, or sessions for inactive sites. It requests host access only during this explicit action and removes that access after reading cookies and web storage. Instagram and Google also require temporary access to their parent domain so Chrome can expose authentication cookies shared across their subdomains; unrelated sites remain exact-host only.
+The extension does not read site localStorage, sessionStorage, or IndexedDB. It does not collect browsing history, keystrokes, or sessions for inactive sites. It requests host access only during this explicit action and removes that access after reading applicable cookies. Instagram and Google also require temporary access to their parent domain so Chrome can expose authentication cookies shared across their subdomains; unrelated sites remain exact-host only.
 
 ## Transfer and storage
 
