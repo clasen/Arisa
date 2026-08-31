@@ -18,7 +18,8 @@ The extension:
 
 - acts only after you open its popup and choose an action
 - uses active-tab access for the selected site
-- requests temporary host access to the active site only when sending, then removes it
+- requests temporary host access only when sending, then removes it
+- when sharing the Chrome Web Store, also stores a separate session containing cookies applicable to Google Accounts so its redirecting login can be reused
 - retains persistent host access only for your configured Arisa bridge endpoint
 - encrypts session payloads with AES-256-GCM
 - never displays or returns cookie values through Arisa tool output

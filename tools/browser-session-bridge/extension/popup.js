@@ -1,5 +1,5 @@
 import { pendingSetupRecord, restorableSetupCode, setupFailureKind, setupStageMessage } from "./onboarding-state.js";
-import { temporarySiteOrigins } from "./site-permissions.js";
+import { relatedCookieUrls, temporarySiteOrigins } from "./site-permissions.js";
 import { pendingSessionSend, shouldResumeSessionSend } from "./session-send-state.js";
 
 const PENDING_SESSION_SEND_KEY = "arisaPendingSessionSend";
@@ -222,6 +222,12 @@ async function postEncrypted(path, payload) {
   return result;
 }
 
+async function applicableCookies(url) {
+  return (await chrome.cookies.getAll({ url: url.href }))
+    .filter((cookie) => !cookie.expirationDate || cookie.expirationDate * 1000 > Date.now())
+    .map(serializableCookie);
+}
+
 async function sendCurrentSession() {
   setStatus("");
   sendButton.disabled = true;
@@ -229,23 +235,27 @@ async function sendCurrentSession() {
     await ensureEndpointPermission(device.endpoint);
     const { tab, url } = await activeWebTab();
     await chrome.storage.local.set({ [PENDING_SESSION_SEND_KEY]: pendingSessionSend(tab, url) });
-    const cookies = await withTemporarySitePermission(url, async () =>
-      (await chrome.cookies.getAll({ url: url.href }))
-        .filter((cookie) => !cookie.expirationDate || cookie.expirationDate * 1000 > Date.now())
-        .map(serializableCookie)
-    );
-    const webStorage = { local: {}, session: {} };
-    if (!cookies.length) throw new Error("No applicable cookies are available for this site");
-    const result = await postEncrypted("/v1/import-device", {
-      version: 2,
-      resourceId: url.hostname,
-      sourceUrl: url.origin,
-      capturedAt: new Date().toISOString(),
-      cookies,
-      webStorage
+    const relatedUrls = relatedCookieUrls(url);
+    const captures = await withTemporarySitePermission(url, async () => {
+      const output = [{ url, cookies: await applicableCookies(url) }];
+      for (const relatedUrl of relatedUrls) output.push({ url: relatedUrl, cookies: await applicableCookies(relatedUrl) });
+      return output;
     });
+    if (!captures[0].cookies.length) throw new Error("No applicable cookies are available for this site");
+    if (captures.slice(1).some((capture) => !capture.cookies.length)) throw new Error("No Google Accounts cookies are available for Chrome Web Store authentication");
+    const results = [];
+    for (const capture of captures) {
+      results.push(await postEncrypted("/v1/import-device", {
+        version: 2,
+        resourceId: capture.url.hostname,
+        sourceUrl: capture.url.origin,
+        capturedAt: new Date().toISOString(),
+        cookies: capture.cookies,
+        webStorage: { local: {}, session: {} }
+      }));
+    }
     await chrome.storage.local.remove(PENDING_SESSION_SEND_KEY);
-    setStatus(`Sent ${result.cookieCount} cookies for ${result.resourceId}.`, "success");
+    setStatus(`Sent ${results.map((result) => `${result.cookieCount} cookies for ${result.resourceId}`).join(" and ")}.`, "success");
   } catch (error) {
     await chrome.storage.local.remove(PENDING_SESSION_SEND_KEY).catch(() => {});
     setStatus(error.message || String(error), "error");

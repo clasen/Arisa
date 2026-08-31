@@ -56,15 +56,17 @@ async function readStoredSession(stateDir, resourceId) {
 
 async function chromeWebStoreCookies(stateDir, session, deviceId) {
   const cookies = new Map(session.cookies.map((cookie) => [`${cookie.domain}\n${cookie.path || "/"}\n${cookie.name}`, cookie]));
-  try {
-    const accounts = deviceId
-      ? (await selectedStoredSession(stateDir, "accounts.google.com", deviceId)).session
-      : await readStoredSession(stateDir, "accounts.google.com");
-    for (const cookie of accounts.cookies || []) {
-      cookies.set(`${cookie.domain}\n${cookie.path || "/"}\n${cookie.name}`, cookie);
+  for (const accountResource of ["accounts.google.com", "myaccount.google.com"]) {
+    try {
+      const accountSession = deviceId
+        ? (await selectedStoredSession(stateDir, accountResource, deviceId)).session
+        : await readStoredSession(stateDir, accountResource);
+      for (const cookie of accountSession.cookies || []) {
+        cookies.set(`${cookie.domain}\n${cookie.path || "/"}\n${cookie.name}`, cookie);
+      }
+    } catch (error) {
+      if (!new RegExp(`ENOENT|No ${accountResource.replaceAll(".", "\\.")} session is stored`).test(String(error?.message || error))) throw error;
     }
-  } catch (error) {
-    if (!/ENOENT|No accounts\.google\.com session is stored/.test(String(error?.message || error))) throw error;
   }
   return [...cookies.values()];
 }

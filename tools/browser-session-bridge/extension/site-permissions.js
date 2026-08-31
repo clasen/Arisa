@@ -1,5 +1,9 @@
 const SHARED_COOKIE_DOMAINS = ["google.com", "instagram.com"];
 
+export function relatedCookieUrls(url) {
+  return url.hostname === "chrome.google.com" ? [new URL("https://accounts.google.com/")] : [];
+}
+
 export function temporarySiteOrigins(url) {
   const origins = [`${url.protocol}//${url.hostname}/*`];
   for (const domain of SHARED_COOKIE_DOMAINS) {
