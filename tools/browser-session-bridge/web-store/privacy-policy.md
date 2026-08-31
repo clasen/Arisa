@@ -14,7 +14,7 @@ When the user chooses **Send current session**, the extension processes:
 - the capture time
 - a revocable bridge-device identifier
 
-The extension does not collect browsing history, keystrokes, or sessions for inactive sites. It requests host access for the active site only during this explicit action and removes that access after reading its cookies and web storage.
+The extension does not collect browsing history, keystrokes, or sessions for inactive sites. It requests host access only during this explicit action and removes that access after reading cookies and web storage. Instagram and Google also require temporary access to their parent domain so Chrome can expose authentication cookies shared across their subdomains; unrelated sites remain exact-host only.
 
 ## Transfer and storage
 

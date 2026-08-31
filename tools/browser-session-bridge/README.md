@@ -36,7 +36,7 @@ The setup link expires, is consumed after one activation, and keeps its temporar
 
 Arisa immediately confirms receipt before continuing any pending browser work.
 
-The extension uses `activeTab` for the selected site rather than permanent access to every site. When the user sends a session, it requests host access for that active site only while reading applicable cookies plus that page's local/session storage, then removes access. Persistent host permission is retained only for the configured bridge endpoint. Session payloads use AES-256-GCM, remain chat-scoped, and never expose stored session values in tool output.
+The extension uses `activeTab` for the selected site rather than permanent access to every site. When the user sends a session, it requests host access only while reading applicable cookies plus that page's local/session storage, then removes access. Instagram and Google temporarily include their parent-domain wildcard so Chrome can expose authentication cookies scoped to `.instagram.com` or `.google.com`; unrelated sites remain exact-host only. Persistent host permission is retained only for the configured bridge endpoint. Session payloads use AES-256-GCM, remain chat-scoped, and never expose stored session values in tool output.
 
 Sessions are keyed by both the paired browser profile and the site domain. Peter and Amy can therefore share the same domain without overwriting each other. `list` returns the profile label and `deviceId`; `open` and `delete` require `deviceId` whenever more than one profile has shared that domain.
 

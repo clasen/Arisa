@@ -1,4 +1,5 @@
 import { pendingSetupRecord, restorableSetupCode, setupFailureKind, setupStageMessage } from "./onboarding-state.js";
+import { temporarySiteOrigins } from "./site-permissions.js";
 
 const PENDING_SETUP_KEY = "arisaPendingSetup";
 const SETUP_FAILURE_KEY = "arisaLastSetupFailure";
@@ -99,12 +100,6 @@ async function ensureEndpointPermission(endpoint) {
   const origins = [permissionPattern(endpoint)];
   if (await chrome.permissions.contains({ origins })) return;
   if (!(await chrome.permissions.request({ origins }))) throw new Error("Bridge endpoint permission was not granted");
-}
-
-function temporarySiteOrigins(url) {
-  const origins = [`${url.protocol}//${url.hostname}/*`];
-  if (url.hostname === "google.com" || url.hostname.endsWith(".google.com")) origins.push(`${url.protocol}//*.google.com/*`);
-  return [...new Set(origins)];
 }
 
 async function withTemporarySitePermission(url, operation) {
