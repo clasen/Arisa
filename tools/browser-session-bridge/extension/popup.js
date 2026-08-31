@@ -1,6 +1,8 @@
 import { pendingSetupRecord, restorableSetupCode, setupFailureKind, setupStageMessage } from "./onboarding-state.js";
 import { temporarySiteOrigins } from "./site-permissions.js";
+import { pendingSessionSend, shouldResumeSessionSend } from "./session-send-state.js";
 
+const PENDING_SESSION_SEND_KEY = "arisaPendingSessionSend";
 const PENDING_SETUP_KEY = "arisaPendingSetup";
 const SETUP_FAILURE_KEY = "arisaLastSetupFailure";
 
@@ -243,6 +245,7 @@ async function sendCurrentSession() {
   try {
     await ensureEndpointPermission(device.endpoint);
     const { tab, url } = await activeWebTab();
+    await chrome.storage.local.set({ [PENDING_SESSION_SEND_KEY]: pendingSessionSend(tab, url) });
     const { cookies, webStorage } = await withTemporarySitePermission(url, async () => ({
       cookies: (await chrome.cookies.getAll({ url: url.href }))
         .filter((cookie) => !cookie.expirationDate || cookie.expirationDate * 1000 > Date.now())
@@ -259,8 +262,10 @@ async function sendCurrentSession() {
       cookies,
       webStorage
     });
+    await chrome.storage.local.remove(PENDING_SESSION_SEND_KEY);
     setStatus(`Sent ${result.cookieCount} cookies and ${result.storageCount} storage entries for ${result.resourceId}.`, "success");
   } catch (error) {
+    await chrome.storage.local.remove(PENDING_SESSION_SEND_KEY).catch(() => {});
     setStatus(error.message || String(error), "error");
   } finally {
     sendButton.disabled = false;
@@ -276,7 +281,7 @@ async function forgetProfile() {
     setStatus(`Local connection removed. Server revocation failed: ${error.message || String(error)}`, "error");
   } finally {
     device = null;
-    await chrome.storage.local.remove("arisaDevice");
+    await chrome.storage.local.remove(["arisaDevice", PENDING_SESSION_SEND_KEY]);
     showMode();
     forgetButton.disabled = false;
   }
@@ -287,13 +292,26 @@ sendButton.addEventListener("click", sendCurrentSession);
 forgetButton.addEventListener("click", forgetProfile);
 
 async function initialize() {
-  const stored = await chrome.storage.local.get(["arisaDevice", PENDING_SETUP_KEY]);
+  const stored = await chrome.storage.local.get(["arisaDevice", PENDING_SETUP_KEY, PENDING_SESSION_SEND_KEY]);
   device = stored.arisaDevice || null;
   showMode();
   try {
-    const { url } = await activeWebTab();
+    const { tab, url } = await activeWebTab();
     sitePanel.textContent = `Current site: ${url.origin}`;
-    if (device) return;
+    if (device) {
+      const pendingSend = stored[PENDING_SESSION_SEND_KEY];
+      if (!pendingSend) return;
+      if (!shouldResumeSessionSend(pendingSend, tab, url)) {
+        await chrome.storage.local.remove(PENDING_SESSION_SEND_KEY);
+        return;
+      }
+      const origins = temporarySiteOrigins(url);
+      if (await chrome.permissions.contains({ origins })) {
+        setStatus("Site access granted. Resuming secure session send…");
+        await sendCurrentSession();
+      }
+      return;
+    }
     const detectedCode = setupCodeFromUrl(url);
     if (detectedCode) {
       const setup = parseSetupCode(detectedCode);

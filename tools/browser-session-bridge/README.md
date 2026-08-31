@@ -15,7 +15,7 @@ The intended release path is the Chrome Web Store, which also works in Brave and
 3. Open the extension and choose **Connect this profile**.
 4. Approve access to the bridge endpoint once.
 
-The popup saves an unexpired pending setup before requesting permission, restores it if Chrome closes the popup, shows each onboarding stage, and resumes after permission without requiring the link to be pasted again. A completed activation may be replayed with the same link until expiry if its response was interrupted; it never creates a second profile connection or revives a revoked profile.
+The popup saves an unexpired pending setup before requesting permission, restores it if Chrome closes the popup, shows each onboarding stage, and resumes after permission without requiring the link to be pasted again. Session sending uses the same recovery pattern: if Chrome closes the popup while granting site access, reopening the extension resumes the original-tab capture automatically instead of requiring a second Send click. A completed activation may be replayed with the same link until expiry if its response was interrupted; it never creates a second profile connection or revives a revoked profile.
 
 The setup link expires, is consumed after one activation, and keeps its temporary activation credential in the URL fragment so it is not sent in HTTP requests or referrers. The permanent profile credential is returned inside an AES-256-GCM encrypted response and is never present in the setup URL. Bridge endpoints may use a scoped HTTPS base path, such as `https://example.com/session-bridge`, when deployed behind a reverse proxy.
 

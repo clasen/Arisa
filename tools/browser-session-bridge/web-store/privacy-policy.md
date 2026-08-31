@@ -20,7 +20,7 @@ The extension does not collect browsing history, keystrokes, or sessions for ina
 
 Session data is encrypted with AES-256-GCM before transfer to the bridge endpoint configured by the user. The receiving Arisa instance stores imported sessions within that user's chat-scoped state. Cookie values are not returned in Arisa tool results.
 
-The extension stores its bridge endpoint, device identifier, and device secret locally in the dedicated browser profile. A temporary setup credential expires, is single-use, arrives in a URL fragment so it is not sent in HTTP requests or referrers, and may be held in extension-local storage only until activation succeeds or the credential expires.
+The extension stores its bridge endpoint, device identifier, and device secret locally in the dedicated browser profile. A temporary setup credential expires, is single-use, arrives in a URL fragment so it is not sent in HTTP requests or referrers, and may be held in extension-local storage only until activation succeeds or the credential expires. If a site-permission prompt interrupts a send, the extension retains only the pending tab identifier and origin for up to two minutes so reopening the popup can resume it.
 
 ## Sharing and sale
 

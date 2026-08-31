@@ -13,26 +13,27 @@
       }
     },
     "browser-session-bridge": {
-      "version": "0.1.6",
+      "version": "0.1.7",
       "files": {
-        "bridge-server.js": "6382203e57e81d9a246ce0c566ed1d2809833bd7849d60a14ea5d595b727b06b",
+        "bridge-server.js": "86af76312fb74dbca6de3625163d04a9378a25851f5eb37ff414595035e05a7a",
         "chrome-web-store.js": "a6bd9553f1490d5ccda3fe3044c30ee6fe243f422e69a5000bc844884e6d1e95",
         "config.js": "45c8e9e9a159b9125d6ea3458c616926c2ba2b5327fdfd750aa05316d3ce5af8",
         "extension/icons/icon-128.png": "a55af49bb570bd5471fc0a2e15a6bcaf3f76a2c5e7439f16bb1829682b343380",
         "extension/icons/icon-16.png": "a4aedb49e2227222a68dc56455812a9e17938fd197b1f30268f02d6c9f7bf95e",
         "extension/icons/icon-32.png": "2dfc9e6e7ec6b4e9feb9c1326d65116cda8e53306c65c84074c818c9e7f6a2a2",
         "extension/icons/icon-48.png": "2f316f1f2fbc72227e7e1f14cf1ff1553a12fc9aab139799f1ee2970c0303deb",
-        "extension/manifest.json": "0b6c08b5ad0b5ac1e310bdb40da23f8ae25a12117be1d9c7968cfc9a34950932",
+        "extension/manifest.json": "83a2aab5f7def1af8a46ad48496727ee8829f428c0ec4a8fe6484c2b0a7c91c6",
         "extension/onboarding-state.js": "79f5601ac66686b0d371bbfa8c9e38e12fd23213f3ad309f8c9c6d55c1f856cb",
         "extension/popup.css": "8044a298f91790d38c8e84823d10951baffcf823bee5c330f3f297db125a5726",
         "extension/popup.html": "2f8590991f9941b50ad61d0a7563a0a073eae5a5e980251fe16e19fe86c7a94f",
-        "extension/popup.js": "2491cd4b5f415d93a0c31fb8280bf4b80cb1dff017fa67ef25f7bfa6e0a74e80",
+        "extension/popup.js": "afddd1d217969ca10b5b0d309b8765ba0e08b21df1555355195958ca36d212a0",
+        "extension/session-send-state.js": "ec574454825679d8d3eb1fc5692d9a9fcbf133f3d9ac3621648ad09e76ff4abc",
         "extension/site-permissions.js": "2d7983cbf69731be3ce3e9e7f4e2910b17ed2c62609736e11d1c706d4c716d0e",
         "index.js": "28e090f1f0542f54f73b88fa3dcdb9dc198cd54ae9653a3048b2d9d4e5374e83",
         "lightpanda-session.js": "57c713dafac531617d7285122b2098c1e0b2f334e43144632f2b1fc79405f789",
-        "package-lock.json": "42af3877544d66d37dc7b2fe34f19df0a4c1939f4e76cbff6890251e30b1b757",
-        "package.json": "e22224663fbd0126c985eb4a901efafc924b606f8ad17967d2dc84dc321ce8e1",
-        "README.md": "a8f7d67349045bdb7f3fba27a9f9eea8b3b783e3b05769ad13472f11b4faa49b",
+        "package-lock.json": "78fb6e197e683edfd29a1a66c5bd1082582857819fb5af96f71fa1461f759bd4",
+        "package.json": "880424a9559571ebc9cc1a2be2271ec94b770867c243384c961546e74548daca",
+        "README.md": "4b17bfb53f6b992940142b7bf04cd545dc1289b385dc2a99374b8e44f79c862e",
         "session-browser.js": "7af716a1c0d6793b82ebbaaf64ec3e8f73dfc52b3c9aceef2179d2d859e32a9c",
         "session-redaction.js": "c2393023c1d3b7634432606ad82a96d79c1f093d9b0a6440d955d0ae419c8393",
         "session-selection.js": "da5a4f55ccc8ba22791840943288e7aecacd730425c03f05c2bc10fd6a14341f",
@@ -43,10 +44,11 @@
         "test/session-redaction.test.js": "e45b5cbd19eea7996d57141b5185c3a6e4c79989e4cb7253272fc66cd2cbd719",
         "test/session-refresh.test.js": "c619a3790d0f1ba9c6fcbd4509d96c43ee0d8c5a292382ffaf744defdc9c5cac",
         "test/session-selection.test.js": "ee1a15d42b156403d46d789a3ecf0a9c8f0019a00ab908276297d031243a89f5",
+        "test/session-send-state.test.js": "c8ccbdf0863c5de85f784e7e32436591fe2db16a2ef4c554f671c6352736d5b6",
         "test/site-permissions.test.js": "480b8696092305b1954a15952a9600a151d32dbcfa19607ab0fe08c00a403b02",
-        "tool.manifest.json": "38d3dfbf1b7bdf8041544c68bce76e327d4a1de2c494269abe3ec6f27318323e",
+        "tool.manifest.json": "d55212cedfea0690e27c0c98d6cee4167aaebc6c7051ec8ea0f72e0e77f9de60",
         "web-store/listing.md": "557ade0f4df672b47c5ccc6e52ce6a57364594e52c5b6bdff2b9425f74877102",
-        "web-store/privacy-policy.md": "0a04b71443cba5874b1ada4e7d457ef5cfd1a39993e39aaa29832976e2c701b0"
+        "web-store/privacy-policy.md": "54ad268e8875cd230a7a9deae766fb14330df508d9fba100b968018a35c85ddd"
       }
     },
     "campaign-draft-runner": {
