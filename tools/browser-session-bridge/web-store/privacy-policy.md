@@ -1,6 +1,6 @@
 # Arisa Session Bridge Privacy Policy
 
-Last updated: August 30, 2026
+Last updated: September 1, 2026
 
 Arisa Session Bridge has one purpose: to let a user intentionally share the active site's browser session with an Arisa instance they control.
 
@@ -12,12 +12,13 @@ When the user chooses **Send current session**, the extension processes:
 - cookies applicable to that active URL
 - the capture time
 - a revocable bridge-device identifier
+- bounded standard request metadata sent automatically by the browser: User-Agent, language, and available client hints
 
 The extension does not read site localStorage, sessionStorage, or IndexedDB. It does not collect browsing history, keystrokes, or sessions for inactive sites. It requests host access only during this explicit action and removes that access after reading applicable cookies. Instagram and Google also require temporary access to their parent domain so Chrome can expose authentication cookies shared across their subdomains; unrelated sites remain exact-host only. When the active site is a `*.google.com` product, the extension also stores a separate session containing cookies applicable to `accounts.google.com`, because Google authentication may redirect away before that host can be shared manually. It does not collect host-only cookies from other Google products unless that product is the active site.
 
 ## Transfer and storage
 
-Session data is encrypted with AES-256-GCM before transfer to the bridge endpoint configured by the user. The receiving Arisa instance stores imported sessions within that user's chat-scoped state. Cookie values are not returned in Arisa tool results.
+Session data is encrypted with AES-256-GCM before transfer to the bridge endpoint configured by the user. The receiving Arisa instance stores imported sessions and bounded browser request metadata within that user's chat-scoped state. Cookie values are not returned in Arisa tool results. The bridge does not persist the network address as browser identity metadata.
 
 The extension stores its bridge endpoint, device identifier, and device secret locally in the dedicated browser profile. A temporary setup credential expires, is single-use, arrives in a URL fragment so it is not sent in HTTP requests or referrers, and may be held in extension-local storage only until activation succeeds or the credential expires. If a site-permission prompt interrupts a send, the extension retains only the pending tab identifier and origin for up to two minutes so reopening the popup can resume it.
 

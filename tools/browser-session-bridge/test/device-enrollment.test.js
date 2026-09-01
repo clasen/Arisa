@@ -84,7 +84,14 @@ test("activates once and safely replays the same short-lived enrollment result",
   });
   const importResponse = await fetch(`${endpoint}/v1/import-device`, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: {
+      "Content-Type": "application/json",
+      "User-Agent": "Test Browser/1.0",
+      "Accept-Language": "es-AR,es;q=0.9",
+      "Sec-CH-UA": "\"Test Browser\";v=\"1\"",
+      "Sec-CH-UA-Platform": "\"Linux\"",
+      "Sec-CH-UA-Mobile": "?0"
+    },
     body: JSON.stringify({ deviceId: device.deviceId, ...imported })
   });
   assert.equal(importResponse.status, 200);
@@ -126,6 +133,13 @@ test("activates once and safely replays the same short-lived enrollment result",
   assert.equal(isolatedSession.resourceId, "example.com");
   assert.equal(isolatedSession.cookies.length, 1);
   assert.deepEqual(sourceSession, isolatedSession);
+  assert.deepEqual(sourceSession.browserIdentity, {
+    userAgent: "Test Browser/1.0",
+    acceptLanguage: "es-AR,es;q=0.9",
+    clientHints: "\"Test Browser\";v=\"1\"",
+    platformHint: "\"Linux\"",
+    mobileHint: "?0"
+  });
   await assert.rejects(readFile(path.join(stateDir, "sessions", "example.com.json"), "utf8"), { code: "ENOENT" });
 
   const replay = await fetch(`${endpoint}/v1/activate-device`, {
