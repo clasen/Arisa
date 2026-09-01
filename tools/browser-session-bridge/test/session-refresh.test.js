@@ -1,6 +1,9 @@
 import assert from "node:assert/strict";
+import { mkdtemp, readFile, rm } from "node:fs/promises";
+import os from "node:os";
+import path from "node:path";
 import test from "node:test";
-import { refreshedSession, validateSessionPayload } from "../session-store.js";
+import { persistSession, refreshSessionOnBrowserClose, refreshedSession, validateSessionPayload } from "../session-store.js";
 
 const session = {
   version: 1,
@@ -47,4 +50,24 @@ test("does not erase a session when no refreshed cookie remains in scope", () =>
   assert.equal(refreshedSession(session, [
     { name: "accounts", value: "excluded", domain: "accounts.google.com", path: "/", sameSite: "Lax", expires: -1 }
   ]), null);
+});
+
+test("does not refresh a shared session when target validation fails", async () => {
+  const stateDir = await mkdtemp(path.join(os.tmpdir(), "bridge-refresh-gate-"));
+  let browserClosed = false;
+  try {
+    await persistSession(stateDir, session);
+    const browser = { close: async () => { browserClosed = true; } };
+    const context = {
+      cookies: async () => [{ name: "sid", value: "failed-attempt", domain: ".google.com", path: "/", secure: true, httpOnly: true, sameSite: "Lax", expires: 2_000_000_000 }]
+    };
+    refreshSessionOnBrowserClose({ browser, context, stateDir, session, shouldPersist: () => false });
+    await browser.close();
+    const stored = JSON.parse(await readFile(path.join(stateDir, "sessions", "chrome.google.com.json"), "utf8"));
+    assert.equal(browserClosed, true);
+    assert.equal(stored.cookies[0].value, "old");
+    assert.equal(stored.refreshedAt, undefined);
+  } finally {
+    await rm(stateDir, { recursive: true, force: true });
+  }
 });

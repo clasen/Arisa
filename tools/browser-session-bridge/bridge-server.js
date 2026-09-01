@@ -2,7 +2,7 @@ import crypto from "node:crypto";
 import http from "node:http";
 import { chmod, mkdir, readdir, readFile, rename, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
-import { consumePairing, decryptEnvelope, encryptEnvelope, persistDeviceSession, persistSession, validateSessionPayload } from "./session-store.js";
+import { consumePairing, decryptEnvelope, encryptEnvelope, persistDeviceSession, persistDeviceSourceSession, persistSession, validateSessionPayload } from "./session-store.js";
 
 function commonHeaders(contentType, length) {
   return {
@@ -351,6 +351,7 @@ export function startBridgeServer({ host, port, pairingsDir, enrollmentsDir, dev
         if (decrypted?.version !== 1 || decrypted?.action !== "revoke" || decrypted?.deviceId !== envelope.deviceId) throw new Error("Invalid revocation request");
         await rm(device.file, { force: true });
         await rm(path.join(stateDirForChat(credential.chatId), "device-sessions", envelope.deviceId), { recursive: true, force: true });
+        await rm(path.join(stateDirForChat(credential.chatId), "device-source-sessions", envelope.deviceId), { recursive: true, force: true });
         recentDeviceUses.delete(envelope.deviceId);
         return jsonResponse(response, 200, { ok: true, revoked: envelope.deviceId });
       }
@@ -362,6 +363,7 @@ export function startBridgeServer({ host, port, pairingsDir, enrollmentsDir, dev
       }
       const chatStateDir = stateDirForChat(credential.chatId);
       if (device) {
+        await persistDeviceSourceSession(chatStateDir, device.record.deviceId, session);
         await persistDeviceSession(chatStateDir, device.record.deviceId, session);
         recentDeviceUses.set(envelope.deviceId, { at: Date.now(), resourceId: session.resourceId });
         await recordDeviceUse(device.file, device.record);

@@ -71,6 +71,17 @@ async function chromeWebStoreCookies(stateDir, session, deviceId) {
   return [...cookies.values()];
 }
 
+function chromeWebStoreTargetValidated(context) {
+  return context.pages().some((page) => {
+    try {
+      const url = new URL(page.url());
+      return url.protocol === "https:" && url.hostname === "chrome.google.com" && url.pathname.startsWith("/webstore/devconsole/");
+    } catch {
+      return false;
+    }
+  });
+}
+
 async function authenticatedContext(stateDir, resourceId, deviceId, browser) {
   if (resourceId !== "chrome.google.com") throw new Error("The chrome.google.com browser session is required");
   const selected = await selectedStoredSession(stateDir, resourceId, deviceId);
@@ -78,7 +89,14 @@ async function authenticatedContext(stateDir, resourceId, deviceId, browser) {
   const context = await browser.newContext();
   const cookies = await chromeWebStoreCookies(stateDir, selected.session, deviceId);
   await context.addCookies(cookies.map(toPlaywrightCookie));
-  refreshSessionOnBrowserClose({ browser, context, stateDir, session: selected.session, sessionPath: selected.sessionPath });
+  refreshSessionOnBrowserClose({
+    browser,
+    context,
+    stateDir,
+    session: selected.session,
+    sessionPath: selected.sessionPath,
+    shouldPersist: () => chromeWebStoreTargetValidated(context)
+  });
   return context;
 }
 

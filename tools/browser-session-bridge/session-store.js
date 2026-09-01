@@ -146,14 +146,14 @@ export async function persistRefreshedSession(stateDir, session, browserCookies,
   return true;
 }
 
-export function refreshSessionOnBrowserClose({ browser, context, stateDir, session, sessionPath = null }) {
+export function refreshSessionOnBrowserClose({ browser, context, stateDir, session, sessionPath = null, shouldPersist = () => true }) {
   const closeBrowser = browser.close.bind(browser);
   let closing = null;
   browser.close = () => {
     if (!closing) {
       closing = (async () => {
         try {
-          await persistRefreshedSession(stateDir, session, await context.cookies(), sessionPath);
+          if (await shouldPersist()) await persistRefreshedSession(stateDir, session, await context.cookies(), sessionPath);
         } finally {
           await closeBrowser();
         }
@@ -194,8 +194,18 @@ export async function persistSession(stateDir, session) {
   return persistSessionFile(path.join(stateDir, "sessions", `${session.resourceId}.json`), session);
 }
 
-export async function persistDeviceSession(stateDir, deviceId, session) {
+function validatedDeviceId(deviceId) {
   const id = String(deviceId || "");
   if (!/^[a-zA-Z0-9_-]{20,100}$/.test(id)) throw new Error("Invalid device identifier");
+  return id;
+}
+
+export async function persistDeviceSession(stateDir, deviceId, session) {
+  const id = validatedDeviceId(deviceId);
   return persistSessionFile(path.join(stateDir, "device-sessions", id, `${session.resourceId}.json`), session);
+}
+
+export async function persistDeviceSourceSession(stateDir, deviceId, session) {
+  const id = validatedDeviceId(deviceId);
+  return persistSessionFile(path.join(stateDir, "device-source-sessions", id, `${session.resourceId}.json`), session);
 }

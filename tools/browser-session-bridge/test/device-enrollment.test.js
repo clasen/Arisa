@@ -122,8 +122,10 @@ test("activates once and safely replays the same short-lived enrollment result",
     receivedAt: sessionEvents[0].receivedAt
   });
   const isolatedSession = JSON.parse(await readFile(path.join(stateDir, "device-sessions", device.deviceId, "example.com.json"), "utf8"));
+  const sourceSession = JSON.parse(await readFile(path.join(stateDir, "device-source-sessions", device.deviceId, "example.com.json"), "utf8"));
   assert.equal(isolatedSession.resourceId, "example.com");
   assert.equal(isolatedSession.cookies.length, 1);
+  assert.deepEqual(sourceSession, isolatedSession);
   await assert.rejects(readFile(path.join(stateDir, "sessions", "example.com.json"), "utf8"), { code: "ENOENT" });
 
   const replay = await fetch(`${endpoint}/v1/activate-device`, {
@@ -145,6 +147,7 @@ test("activates once and safely replays the same short-lived enrollment result",
   });
   assert.equal(revokedDevice.status, 200);
   await assert.rejects(readFile(path.join(stateDir, "device-sessions", device.deviceId, "example.com.json"), "utf8"), { code: "ENOENT" });
+  await assert.rejects(readFile(path.join(stateDir, "device-source-sessions", device.deviceId, "example.com.json"), "utf8"), { code: "ENOENT" });
 
   const afterRevocation = await fetch(`${endpoint}/v1/activate-device`, {
     method: "POST",
