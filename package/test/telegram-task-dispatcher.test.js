@@ -7,6 +7,10 @@ function createHarness(overrides = {}) {
   const taskStore = {
     async fail(...args) { calls.push(["fail", ...args]); return { status: "failed" }; },
     async complete(...args) { calls.push(["complete", ...args]); return { status: "done" }; },
+    async blockAuth(taskId, error, resolution) {
+      calls.push(["blockAuth", taskId, error.message, resolution]);
+      return { status: "blocked_auth", authBlockedNew: true, runAt: "2026-09-02T05:00:00.000Z" };
+    },
     async retryOrFail(taskId, error, options) {
       calls.push(["retryOrFail", taskId, error.message, options]);
       return { status: options.retryable ? "pending" : "failed" };
@@ -110,6 +114,55 @@ test("runs poll tools headlessly and confirms their result", async () => {
     ["runTool", { name: "checker", request: { args: { cursor: "4" } }, chatId: 123 }],
     ["complete", "poll-1"]
   ]);
+});
+
+test("pauses a poll once when its tool reports terminal authentication failure", async () => {
+  const resolution = {
+    type: "reauthentication_required",
+    retryAfterSeconds: 3600,
+    probeArgs: { action: "auth-status" }
+  };
+  const { calls, dispatcher } = createHarness({
+    dependencies: {
+      agentManager: {
+        async runTurn(options, work) { calls.push(["runTurn", options]); return work(); },
+        async runTool(input) {
+          calls.push(["runTool", input]);
+          return { ok: false, status: "blocked_auth", error: "authentication expired", resolution };
+        }
+      }
+    }
+  });
+
+  await dispatcher.runClaimedTask({
+    id: "poll-auth",
+    kind: "poll_tool",
+    payload: { chatId: 123, toolName: "checker", args: { action: "poll" } }
+  });
+
+  assert.deepEqual(calls.at(-2), ["blockAuth", "poll-auth", "authentication expired", resolution]);
+  assert.deepEqual(calls.at(-1), [
+    "send",
+    123,
+    "⚠️ Arisa automation paused for authentication\nTool: checker\nReason: authentication expired\nNext authentication check: 2026-09-02T05:00:00.000Z",
+    undefined
+  ]);
+});
+
+test("uses a lightweight auth probe before resuming blocked poll work", async () => {
+  const { calls, dispatcher } = createHarness();
+  await dispatcher.runClaimedTask({
+    id: "poll-resume",
+    kind: "poll_tool",
+    authBlock: { probeArgs: { action: "auth-status" }, retryAfterSeconds: 3600 },
+    payload: { chatId: 123, toolName: "checker", args: { action: "poll" } }
+  });
+
+  assert.deepEqual(calls.filter(([name]) => name === "runTool").map((call) => call[1].request.args), [
+    { action: "auth-status" },
+    { action: "poll" }
+  ]);
+  assert.deepEqual(calls.at(-1), ["complete", "poll-resume"]);
 });
 
 test("retries a known poll failure with backoff", async () => {

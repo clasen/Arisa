@@ -170,6 +170,16 @@ function retryDelayMs(task) {
   return Math.max(1, Math.round(seconds * 1000));
 }
 
+function normalizeAuthResolution(resolution = {}) {
+  const value = resolution && typeof resolution === "object" && !Array.isArray(resolution) ? resolution : {};
+  const retryAfterSeconds = Math.max(300, boundedPositiveNumber(value.retryAfterSeconds, 3_600, 86_400));
+  const probeArgs = value.probeArgs && typeof value.probeArgs === "object" && !Array.isArray(value.probeArgs)
+    ? structuredClone(value.probeArgs)
+    : {};
+  if (JSON.stringify(probeArgs).length > 4_096) throw new Error("Authentication probe arguments are too large");
+  return { retryAfterSeconds, probeArgs };
+}
+
 function failTask(task, error) {
   const failedAt = new Date().toISOString();
   task.status = "failed";
@@ -232,7 +242,7 @@ export class TaskStore {
     return this.mutate(async (tasks) => {
       const now = Date.now();
       const due = tasks
-        .filter((task) => task.status === "pending"
+        .filter((task) => ["pending", "blocked_auth"].includes(task.status)
           && task.runAt
           && !Number.isNaN(Date.parse(task.runAt))
           && Date.parse(task.runAt) <= now)
@@ -275,7 +285,7 @@ export class TaskStore {
         if (task.status === "running") {
           const interruptedAt = new Date(now).toISOString();
           if (task.claimedAt && !task.executionStartedAt) {
-            task.status = "pending";
+            task.status = task.authBlock ? "blocked_auth" : "pending";
             task.attempts = Math.max(0, Number(task.attempts || 0) - 1);
             task.lastError = "execution interrupted before start";
             task.lastFailedAt = interruptedAt;
@@ -294,8 +304,11 @@ export class TaskStore {
           delete task.claimedAt;
           delete task.executionStartedAt;
           if (task.kind === "poll_tool") {
-            task.status = "pending";
-            task.runAt = new Date(now + retryDelayMs(task)).toISOString();
+            task.status = task.authBlock ? "blocked_auth" : "pending";
+            const delayMs = task.authBlock
+              ? Number(task.authBlock.retryAfterSeconds || 3_600) * 1_000
+              : retryDelayMs(task);
+            task.runAt = new Date(now + delayMs).toISOString();
             delete task.startedAt;
           } else {
             const nextRunAt = computeNextRunAt(task, now);
@@ -337,6 +350,7 @@ export class TaskStore {
       delete task.error;
       delete task.lastOutcome;
       delete task.consecutiveFailures;
+      delete task.authBlock;
       delete task.claimedAt;
       delete task.executionStartedAt;
       if (nextRunAt) {
@@ -351,6 +365,35 @@ export class TaskStore {
       task.updatedAt = completedAt;
       compactTerminalTask(task);
       return { result: structuredClone(task) };
+    });
+  }
+
+  async blockAuth(taskId, error, resolution = {}) {
+    return this.mutate(async (tasks) => {
+      const task = tasks.find((item) => item.id === taskId);
+      if (!task) return { result: null, changed: false };
+      const now = Date.now();
+      const checkedAt = new Date(now).toISOString();
+      const normalized = normalizeAuthResolution(resolution);
+      const wasBlocked = Boolean(task.authBlock);
+      task.status = "blocked_auth";
+      task.runAt = new Date(now + (normalized.retryAfterSeconds * 1_000)).toISOString();
+      task.attempts = 0;
+      task.authBlock = {
+        firstBlockedAt: task.authBlock?.firstBlockedAt || checkedAt,
+        lastCheckedAt: checkedAt,
+        ...normalized
+      };
+      task.lastError = error instanceof Error ? error.message : String(error);
+      task.lastFailedAt = checkedAt;
+      task.updatedAt = checkedAt;
+      if (task.claimedAt) task.lastClaimedAt = task.claimedAt;
+      if (task.executionStartedAt) task.lastExecutionStartedAt = task.executionStartedAt;
+      delete task.startedAt;
+      delete task.claimedAt;
+      delete task.executionStartedAt;
+      delete task.error;
+      return { result: { ...structuredClone(task), authBlockedNew: !wasBlocked } };
     });
   }
 

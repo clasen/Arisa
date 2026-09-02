@@ -121,6 +121,38 @@ test("recovers interrupted running tasks for retry after restart", async () => {
   );
 });
 
+test("persists auth blocks, claims only due probes, and clears the block after success", async () => {
+  await resetHome();
+  const store = new TaskStore();
+  await store.add({
+    id: "auth-poll",
+    kind: "poll_tool",
+    runAt: new Date(Date.now() - 1000).toISOString(),
+    payload: { toolName: "checker", args: { action: "poll" } },
+    recurrence: { type: "interval", everySeconds: 60 }
+  });
+
+  await store.claimDue();
+  const blocked = await store.blockAuth("auth-poll", "authentication expired", {
+    retryAfterSeconds: 3600,
+    probeArgs: { action: "auth-status" }
+  });
+  assert.equal(blocked.status, "blocked_auth");
+  assert.equal(blocked.authBlockedNew, true);
+  assert.deepEqual(blocked.authBlock.probeArgs, { action: "auth-status" });
+  assert.deepEqual(await store.claimDue(), []);
+
+  store.tasks.find((task) => task.id === "auth-poll").runAt = new Date(Date.now() - 1000).toISOString();
+  await store.save();
+  const [probe] = await store.claimDue();
+  assert.equal(probe.status, "running");
+  assert.ok(probe.authBlock);
+
+  const completed = await store.complete("auth-poll");
+  assert.equal(completed.status, "pending");
+  assert.equal(completed.authBlock, undefined);
+});
+
 test("completes one-off tasks and re-schedules recurring interval tasks", async () => {
   await resetHome();
   const store = new TaskStore();

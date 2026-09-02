@@ -18,7 +18,8 @@ export function createTaskRunner({ taskStore, dispatch, laneKey = (task) => task
   async function reportTerminalFailure(task, updated, error) {
     const isTerminal = updated?.status === "failed"
       || updated?.status === "outcome_uncertain"
-      || updated?.terminalFailure === true;
+      || updated?.terminalFailure === true
+      || updated?.authBlockedNew === true;
     if (!isTerminal || typeof onTerminalFailure !== "function") return;
     try {
       await onTerminalFailure({ task, result: updated, error });
@@ -37,9 +38,12 @@ export function createTaskRunner({ taskStore, dispatch, laneKey = (task) => task
       logger?.log("tasks", `task ${task.id} completed after confirmed execution`);
       return { taskId: task.id, status: "completed" };
     } catch (error) {
-      const retryOptions = { retryable: error?.retryable !== false };
-      if (error?.outcomeUncertain === true) retryOptions.outcomeUncertain = true;
-      const updated = await taskStore.retryOrFail(task.id, error, retryOptions);
+      const updated = error?.authBlocked === true
+        ? await taskStore.blockAuth(task.id, error, error.authResolution)
+        : await taskStore.retryOrFail(task.id, error, {
+            retryable: error?.retryable !== false,
+            ...(error?.outcomeUncertain === true ? { outcomeUncertain: true } : {})
+          });
       const status = updated?.status || "missing";
       logger?.log("tasks", `task ${task.id} ${status}: ${errorMessage(error)}`);
       await reportTerminalFailure(task, updated, error);
