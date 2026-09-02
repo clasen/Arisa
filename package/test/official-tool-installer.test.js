@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import crypto from "node:crypto";
+import { execFileSync } from "node:child_process";
 import { cp, mkdir, mkdtemp, readFile, readdir, rm, symlink, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
@@ -88,7 +89,19 @@ test("every bundled official tool lock matches the catalog source", async () => 
     );
     const manifest = JSON.parse(await readFile(path.join(source, "tool.manifest.json"), "utf8"));
     assert.equal(manifest.version ?? null, entry.version ?? null, `${name} version`);
+    assert.deepEqual(manifest.toolDependencies || {}, entry.toolDependencies || {}, `${name} tool dependencies`);
   }
+});
+
+test("the bundled lock commit contains the exact catalog snapshot", async () => {
+  const lock = JSON.parse(await readFile(new URL("../src/official-tools.lock.json", import.meta.url), "utf8"));
+  const repositoryRoot = fileURLToPath(new URL("../../", import.meta.url));
+  execFileSync("git", ["cat-file", "-e", `${lock.commit}^{commit}`], { cwd: repositoryRoot });
+  const changedTools = execFileSync("git", ["diff", "--name-only", lock.commit, "--", "tools"], {
+    cwd: repositoryRoot,
+    encoding: "utf8"
+  }).trim();
+  assert.equal(changedTools, "", `Bundled lock commit does not match catalog source:\n${changedTools}`);
 });
 
 test("rejects symbolic links before deployment", async (t) => {

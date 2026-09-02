@@ -1,7 +1,7 @@
 {
   "version": 1,
   "repository": "https://github.com/clasen/Arisa.git",
-  "commit": "84b8728dea97871bccc5f9f3c96bbdd876e3766e",
+  "commit": "2256f9e19f26f23826b9a9062d3a9643b511bb3c",
   "tools": {
     "audio-extractor": {
       "version": null,
@@ -13,10 +13,11 @@
       }
     },
     "browser-session-bridge": {
-      "version": "0.2.3",
+      "version": "0.2.5",
       "files": {
-        "bridge-server.js": "7fb628cba4d68fad99ae4dfdc5fab1afa904656a15f336878611ce504e0b89bf",
-        "chrome-web-store.js": "f7a58df8c3a68335e78f965ebbd6d64ed60d7c78dab255cc9200735b9a2722e7",
+        "README.md": "79cb347ead539309429eca19ba6e9c472e4790ec1ab39a20bba71a4149f61f15",
+        "bridge-server.js": "03722a2657ba74bf34de9cae683b8f23242657da87c05771dd413a38fb446eca",
+        "chrome-web-store.js": "4b588d1288dee754c5d8afd609b8c1f67f73d23de7dda247b7a2ff8b68f7ef60",
         "config.js": "45c8e9e9a159b9125d6ea3458c616926c2ba2b5327fdfd750aa05316d3ce5af8",
         "extension/icons/icon-128.png": "a55af49bb570bd5471fc0a2e15a6bcaf3f76a2c5e7439f16bb1829682b343380",
         "extension/icons/icon-16.png": "a4aedb49e2227222a68dc56455812a9e17938fd197b1f30268f02d6c9f7bf95e",
@@ -31,24 +32,26 @@
         "extension/site-permissions.js": "83f9aa4d0295318fc730bd561c2db9d1aacf36152319090e99d12f62deea11ad",
         "index.js": "c01a6b825da4587a550ecec560a558cc6736200e73b6831f5919000c7b81679d",
         "lightpanda-session.js": "57c713dafac531617d7285122b2098c1e0b2f334e43144632f2b1fc79405f789",
-        "package-lock.json": "db39f00e7849631f93050d93670c47797e5d0732330cc0f496c3014c426a94ed",
-        "package.json": "7ea065a7ace16cc51ffd18a07924e42d4cf92be01e43c37f1620bff756f43283",
-        "README.md": "79cb347ead539309429eca19ba6e9c472e4790ec1ab39a20bba71a4149f61f15",
+        "package-lock.json": "b97f5a333df234fecde788d0f90b620d39e02fee6079c1b4347baaabd8010b1b",
+        "package.json": "5c9edd6155b6b4868cc87d474e808dfc23567bc312e0d1e0230d8f9f0a1cc081",
         "session-browser.js": "7af716a1c0d6793b82ebbaaf64ec3e8f73dfc52b3c9aceef2179d2d859e32a9c",
         "session-redaction.js": "c2393023c1d3b7634432606ad82a96d79c1f093d9b0a6440d955d0ae419c8393",
         "session-selection.js": "da5a4f55ccc8ba22791840943288e7aecacd730425c03f05c2bc10fd6a14341f",
-        "session-store.js": "82562ab625f2e72d1b33ea6e59f0e71f3de10fbfedb42b7099e9b1f2e23086be",
-        "test/device-enrollment.test.js": "53f9da425e506de265199a467ff16834fce9441b5482a0c99c7a5170cfd3e91d",
+        "session-store.js": "ee85e5b9696e542bb535a996743ddbbd2093fc66e18873a2f1c7a27707a83994",
+        "test/device-enrollment.test.js": "a4246f4cb19e959ef4b8a83f60664887b624526b0e5646e5ec1fdb93750082b0",
         "test/lightpanda-session.test.js": "1fa6c1693a5008c173ec6c5c97effe001b68c535c7a3d4530500c0c4b691c532",
         "test/onboarding-state.test.js": "889f7746bbdb51320e68447560459d2a5d812e4b135de08a7b6e94ef5a142250",
         "test/session-redaction.test.js": "e45b5cbd19eea7996d57141b5185c3a6e4c79989e4cb7253272fc66cd2cbd719",
-        "test/session-refresh.test.js": "c619a3790d0f1ba9c6fcbd4509d96c43ee0d8c5a292382ffaf744defdc9c5cac",
+        "test/session-refresh.test.js": "ffa688433185c08696761f189df244ed9ac212731b012a3eb9a91da05b43dd56",
         "test/session-selection.test.js": "ee1a15d42b156403d46d789a3ecf0a9c8f0019a00ab908276297d031243a89f5",
         "test/session-send-state.test.js": "c8ccbdf0863c5de85f784e7e32436591fe2db16a2ef4c554f671c6352736d5b6",
         "test/site-permissions.test.js": "27c297475c38ee1cbe7c7df210c767c157e03ecd379cde99a1b502268bda56ab",
-        "tool.manifest.json": "286bfce2e0770bf1f51decedcf974664cd184e1c146c4fdeb40500e346aa7856",
+        "tool.manifest.json": "820f6060f077b95c286168f175e5521bc67b043425cae69c5be40834d5016454",
         "web-store/listing.md": "3e6d7aab1f60142984c3f8c18d92bf23646dc901644c6b71bdb979802bcf320c",
-        "web-store/privacy-policy.md": "3e92198fbf80196a044c1d58d83577d959e91136302f994e3ffe1327013ebda8"
+        "web-store/privacy-policy.md": "eaaaa6066b36ef56896321d62b6ac4596d62104a0591d4edceb8c6040c47fd5c"
+      },
+      "toolDependencies": {
+        "lightpanda-browser": "^0.11.5"
       }
     },
     "campaign-draft-runner": {
@@ -115,6 +118,7 @@
     "creator-scout": {
       "version": "1.4.0",
       "files": {
+        "README.md": "6895b2c0cc3a230ddf3f59f1c4670b12070464f8e742bfdf40a04120a7fefaea",
         "config.js": "bab728665650b986c0eaef8e1be1c259ec42b1f83df4217c9780f5468d3c7666",
         "index.js": "a544e5dbac9cb92e996c2b07690a18481a20b8b10c13c397412581ec9ac6bb04",
         "outcome-contract.js": "5685bd8fbe4fcb608ee43a0148201206283013c1a60855c974a928c1d312480a",
@@ -122,13 +126,16 @@
         "package.json": "19c61d77ec90fce64d1a3baa1acc5b29af23f7c0574964504bc69b19e38aa34f",
         "panda-results.js": "24a31263b4a03e2c2719d9c54be7b5c022b17fb7dcb249eed33b93882518145b",
         "panda-session.js": "69878ff01bfbf26afe4db0e2e6489b211e3aca100ba5353befefaea009636bb5",
-        "README.md": "6895b2c0cc3a230ddf3f59f1c4670b12070464f8e742bfdf40a04120a7fefaea",
         "reference-match.js": "5ceb71bfe57763258d89c60936bb7e5b3166b6aa7127f9d2f8da49f01298f46b",
         "test/outcome-contract.test.js": "dda85d1f56880b30d7fad3e8a27aacbb0808d91fc0addac6e0c38f9f0c4849bf",
         "test/panda-results.test.js": "b918d6341251822292fe3e375ab66694a0f71f3c7a24e91be263ee36e5f3e92c",
         "test/panda-session.test.js": "6cfa4e0543fab77c502c1103c60d8cb7d16040770e7aa5c034a47e0292de8521",
         "test/reference-match.test.js": "38572ee3756f4ff0b0c61942dda0a19c9d06697826051cf0924dd3c47fc99b67",
         "tool.manifest.json": "5368082b6808dc9b5966a46afcc6042cc82aabef0cd55ed65b4e783a4cb2579e"
+      },
+      "toolDependencies": {
+        "lightpanda-browser": "^0.11.4",
+        "browser-session-bridge": "^0.1.3"
       }
     },
     "file-document": {
@@ -177,27 +184,27 @@
     "lightpanda-browser": {
       "version": "0.11.5",
       "files": {
+        "BENCHMARK.md": "9c732c65f6d8bceb4e73c1a03d298d5140d919f50269f982bd0ec6c1b21fa8b6",
+        "COMPATIBILITY-MIGRATION.md": "230e12e8ddac837b7772519693e530c43d2158b69c671036bf246fb3a9e35561",
+        "LIMITS.md": "6c0ec9624c76de8ddf09b82a4da1dba1b89a48a1f0e71a083ffbcf7a3d5401fb",
+        "README.md": "c79a9a24d2fe804a7ce3e160e8308b1ac0039461cbfd012347aaa61f841f5fed",
         "action-policy.js": "66c6ad39f65378ccf8ed54177f5a3665e23ef82818c30fb05d28cd58cba9b2ab",
         "authenticated-profile.js": "2bbb96c4d25a108c44256514c1c9b4e61e1f125e470ab35c5e02515216cd1b33",
         "benchmark-latest.json": "c5524e6d42479578579fd7db0e50857ff0831ca219e611b821ad1e0a4fade303",
         "benchmark-policy.js": "2c3763d7f327293c9d54ca24da9e65b94dc304af44908c1e196a4af45ed49a89",
-        "BENCHMARK.md": "9c732c65f6d8bceb4e73c1a03d298d5140d919f50269f982bd0ec6c1b21fa8b6",
         "binary.js": "accd3f1f536ae7ceee4dbfcee2de9ac56fc1ae343656238d62003233417257f1",
         "browser-operation.js": "51384d146d45fda8c672d3d6672fa223b715ad40c3c5b5878719e9df38151592",
         "capture.js": "b68b198d494c762822c6da079a556dd3463e681557f2abef1387d9cd41abaf4c",
-        "COMPATIBILITY-MIGRATION.md": "230e12e8ddac837b7772519693e530c43d2158b69c671036bf246fb3a9e35561",
         "config.js": "d08eb436df15540a53b02cf72e117c7fc8ead80195dbd53764a17598c9e565c5",
         "daemon-service.js": "10e70ed64f1fe8c7660044f6ce24e78d01da75a50322bfc08f42248c14ad5226",
         "index.js": "5fc54aec13fb27c6b55e20aed132853b79c44041f45ea4b0f4b47b00c205da16",
         "limit-suite-latest.json": "3d30f958d2d6c1e9dfcaf53e40a401ae288bf264a97ba6c3b64a25a08031feb0",
         "limit-suite-policy.js": "61440ee2e7f557ab2f3c74f8ef4ec2ec85fd2fb7fc53a4121e1f0d066670ea17",
-        "LIMITS.md": "6c0ec9624c76de8ddf09b82a4da1dba1b89a48a1f0e71a083ffbcf7a3d5401fb",
         "mcp-session.js": "cd4a1e6d3c9d80c399fda8f313d69e38fa22a9b24789d7919832a56df7dc90c2",
         "output-bounds.js": "08ab730d0d8722c5e0e761911a509653dd23d8eb4d8c2abf2d9c5e8432870bdd",
         "package-lock.json": "815dfdb89ce94b543e520955480e322438abd2b71fad4c4ddd699838b8622b65",
         "package.json": "934ae0f55d1baea305c28f12c0c9faccdd864244d899663c96f9083d96442841",
         "process-metrics.js": "e39d2980abb581ca0b917d0d33a1d71922ce49b679a7e96cf16a6a66b81d879a",
-        "README.md": "c79a9a24d2fe804a7ce3e160e8308b1ac0039461cbfd012347aaa61f841f5fed",
         "recipe-store.js": "358ac391ae86e0bfb82fc5b55bd08cfe3fd4fa56ac12a5ad4ad5abfa43c9a6c6",
         "scripts/benchmark.js": "f1bb939984460d84118317f9b4f811e0df80f590b0a441cd62a56eb97bb69b37",
         "scripts/install-lightpanda.js": "ba4a2f9e5ffae80b9375578731d68eff25997333cb9e3e443b155f7834948205",
@@ -255,6 +262,7 @@
     "master-slave": {
       "version": "0.1.9",
       "files": {
+        "README.md": "a75f87df7906fe143d2ecaddfe9263561db17436df7ec2c4a8d985e1e3e8996e",
         "batch-cancellation.js": "b9ca57dfcca4f1a672d5435536b7eb83547dba98ed3fd09f34376f1d995bb97f",
         "batch-runner.js": "97756a03b36278cd0315cc16da0c34a7821c322149c51ba6666f1c5081dbecbc",
         "chat-state-store.js": "50de39aa33432733bb688eb01968e314a32b169324a66d0f0089b2a19ed9c880",
@@ -271,7 +279,6 @@
         "master-domain.js": "10b7dfb43eb9939eb5baec54f742076cc73a2add6589a0ff57c51bc79c236faf",
         "network-session.js": "6ef332ef9694ff211f4aed1e8b6ff4df3614a1d4c63affe6fdd00409329ec431",
         "package.json": "774af304ec05a24461318172882a28373e568b5240d8eee9a31a286997b9a403",
-        "README.md": "a75f87df7906fe143d2ecaddfe9263561db17436df7ec2c4a8d985e1e3e8996e",
         "remote-runtime.js": "d38b7a28f36e8f1be1d4826a056a03d0ebc2b9b17be277e010be25048797a562",
         "slave-operations.js": "5a8967e2006f3f30ee221614d25fbf7863ffd9c717fd7eeeb0ba981c8c8c367a",
         "state-store.js": "c56849a3f1b9c990128276e17963034a7836abacedc44f2e500d5732ebf9e451",
