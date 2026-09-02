@@ -395,6 +395,7 @@ test("selectScheduledTasks bounds history while keeping active tasks", () => {
     status: "done"
   }));
   tasks[0] = { id: "pending-1", status: "pending" };
+  tasks[1] = { id: "blocked-1", status: "blocked_auth" };
 
   const result = selectScheduledTasks(tasks);
 
@@ -402,7 +403,7 @@ test("selectScheduledTasks bounds history while keeping active tasks", () => {
   assert.equal(result.returned, 50);
   assert.equal(result.limit, 50);
   assert.equal(result.truncated, true);
-  assert.equal(result.tasks[0].id, "pending-1");
+  assert.deepEqual(result.tasks.slice(0, 2).map((task) => task.id), ["blocked-1", "pending-1"]);
 });
 
 test("selectScheduledTasks honors an explicit status and limit", () => {

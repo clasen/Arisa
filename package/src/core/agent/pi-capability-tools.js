@@ -121,7 +121,7 @@ export function createPiCapabilityTools({ capabilityService, telegram, chatId, p
     defineTool({
       name: "list_scheduled_tasks",
       label: "List scheduled tasks",
-      description: "List scheduled async tasks for the current Telegram chat. Results default to 50 tasks, always include pending/running tasks, and accept an optional limit up to 100.",
+      description: "List scheduled async tasks for the current Telegram chat. Results default to 50 tasks, always include pending, running, and authentication-blocked tasks, and accept an optional limit up to 100.",
       parameters: Type.Object({
         status: Type.Optional(Type.String()),
         limit: Type.Optional(Type.Integer({ minimum: 1, maximum: maxScheduledTaskListLimit }))
@@ -138,7 +138,7 @@ export function createPiCapabilityTools({ capabilityService, telegram, chatId, p
     defineTool({
       name: "cancel_all_scheduled_tasks",
       label: "Cancel all scheduled tasks",
-      description: "Cancel all pending or running async tasks for the current Telegram chat.",
+      description: "Cancel all active async tasks, including authentication-blocked tasks, for the current Telegram chat.",
       parameters: Type.Object({}),
       execute: async () => jsonResult(await execute("cancel_all_scheduled_tasks", "tasks.cancelAll"))
     }),

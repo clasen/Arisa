@@ -106,7 +106,7 @@ export function createTuiCapabilityTools(client) {
     defineTool({
       name: "cancel_all_scheduled_tasks",
       label: "Cancel all scheduled tasks",
-      description: "Cancel all pending or running owner-scoped Arisa tasks.",
+      description: "Cancel all active owner-scoped Arisa tasks, including authentication-blocked tasks.",
       parameters: Type.Object({}),
       execute: async () => jsonResult(await client.tasks.cancelAll())
     })

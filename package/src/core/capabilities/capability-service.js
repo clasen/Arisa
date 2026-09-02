@@ -71,11 +71,12 @@ export function selectScheduledTasks(tasks = [], { status, limit = defaultSchedu
     maxScheduledTaskListLimit
   );
   const allTasks = Array.isArray(tasks) ? tasks : [];
+  const activeStatuses = new Set(["pending", "running", "blocked_auth"]);
   const orderedTasks = status
     ? [...allTasks].reverse()
     : [
-        ...allTasks.filter((task) => task.status === "pending" || task.status === "running").reverse(),
-        ...allTasks.filter((task) => task.status !== "pending" && task.status !== "running").reverse()
+        ...allTasks.filter((task) => activeStatuses.has(task.status)).reverse(),
+        ...allTasks.filter((task) => !activeStatuses.has(task.status)).reverse()
       ];
   const visibleTasks = orderedTasks.slice(0, resolvedLimit);
   return {
