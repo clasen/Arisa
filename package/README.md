@@ -127,8 +127,10 @@ Slave runs only the IPC host, daemon supervisor and installed tools. Connections
 are authenticated, encrypted, initiated by Slave and restricted by per-Slave
 roots and capability grants.
 
-Linux with systemd is the first supported Slave target. Bootstrap uses a
-single-use URL issued by Master:
+Arisa Slave supports Linux with systemd, macOS with launchd, and Windows with
+Task Scheduler. On desktop systems, run bootstrap as the normal user so the
+persistent background task retains access to that user's browser profile.
+Bootstrap uses a single-use URL issued by Master:
 
 ```bash
 npm i -g arisa && arisa slave tcp://198.51.100.12:4719/arisa_secret_v1_<secret>

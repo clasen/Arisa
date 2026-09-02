@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { access, mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
+import { access, mkdir, mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
@@ -8,9 +8,15 @@ import { parseSlaveBootstrapUrl } from "../src/runtime/slave-bootstrap-url.js";
 import { withSecureRequestFile } from "../src/runtime/secure-request-file.js";
 import { ensureMasterSlaveTool, formatSlaveStatus, runSlaveBootstrap, runSlaveCli } from "../src/runtime/slave-cli.js";
 import {
+  buildSlaveLaunchdPlist,
   buildSlaveSystemdUnit,
+  buildSlaveWindowsLauncher,
+  buildSlaveWindowsTaskXml,
+  controlSlaveService,
   getSlavePaths,
+  installSlaveLaunchdService,
   installSlaveSystemdService,
+  installSlaveWindowsService,
   registerSlaveServiceProcess,
   selectSlaveServiceAccount
 } from "../src/runtime/slave-service.js";
@@ -75,6 +81,14 @@ test("selects the invoking service account without prompting", async () => {
     await selectSlaveServiceAccount({ euid: 0, currentUser: "root", environment: {} }),
     { scope: "system", user: "root", root: true, dedicated: false }
   );
+  assert.deepEqual(
+    await selectSlaveServiceAccount({
+      platform: "win32",
+      currentUser: "martin.clasen",
+      environment: { USERDOMAIN: "MCL4SEN", USERNAME: "martin.clasen" }
+    }),
+    { scope: "user", user: "MCL4SEN\\martin.clasen", root: false, dedicated: false }
+  );
 });
 
 test("builds a dedicated headless systemd service with isolated state", () => {
@@ -106,7 +120,7 @@ test("escapes systemd WorkingDirectory paths without quoting the entire value", 
 
 test("reports Master connectivity separately from pairing and daemon readiness", () => {
   const text = formatSlaveStatus({
-    systemd: { running: true, status: "active" },
+    service: { running: true, status: "active", serviceManager: "launchd" },
     diagnostic: {
       daemon: { state: "ready" },
       role: "slave",
@@ -118,6 +132,7 @@ test("reports Master connectivity separately from pairing and daemon readiness",
       pendingSecrets: 0
     }
   });
+  assert.match(text, /Service \(launchd\): active/);
   assert.match(text, /Daemon: ready/);
   assert.match(text, /Paired: yes/);
   assert.match(text, /Connected: no/);
@@ -161,6 +176,207 @@ test("installs and restarts the Linux systemd target after pairing", async (t) =
     ["systemctl", ["enable", "arisa-slave.service"]],
     ["systemctl", ["restart", "arisa-slave.service"]]
   ]);
+});
+
+test("builds and installs a macOS launchd service with isolated state", async (t) => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "arisa-slave-launchd-"));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  const account = { scope: "user", user: "tester", root: false, dedicated: false };
+  const slaveHome = path.join(root, "home & state");
+  const entryFile = "/Applications/Arisa & Tools/index.js";
+  const plist = buildSlaveLaunchdPlist({
+    account,
+    slaveHome,
+    entryFile,
+    nodePath: "/opt/homebrew/bin/node",
+    environment: { PATH: "/opt/homebrew/bin:/usr/bin" }
+  });
+  assert.match(plist, /<string>com\.arisa\.slave<\/string>/);
+  assert.match(plist, /<string>\/Applications\/Arisa &amp; Tools\/index\.js<\/string>/);
+  assert.match(plist, /<string>\/opt\/homebrew\/bin:\/usr\/bin<\/string>/);
+  assert.match(plist, /<key>RunAtLoad<\/key>\n  <true\/>/);
+  assert.match(plist, /<key>KeepAlive<\/key>\n  <true\/>/);
+
+  const calls = [];
+  const unitDir = path.join(root, "LaunchAgents");
+  const result = await installSlaveLaunchdService({
+    account,
+    slaveHome,
+    entryFile,
+    execute: async (command, args) => {
+      calls.push([command, args]);
+      if (args[0] === "bootout") throw new Error("not loaded");
+      return { stdout: "", stderr: "" };
+    },
+    environment: { PATH: "/opt/homebrew/bin:/usr/bin" },
+    platform: "darwin",
+    uid: 501,
+    userUnitDir: unitDir
+  });
+  assert.equal(result.serviceManager, "launchd");
+  assert.equal(result.serviceTarget, "gui/501/com.arisa.slave");
+  assert.equal(await access(result.unitFile).then(() => true, () => false), true);
+  assert.deepEqual(calls.slice(1), [
+    ["launchctl", ["bootstrap", "gui/501", result.unitFile]],
+    ["launchctl", ["enable", "gui/501/com.arisa.slave"]],
+    ["launchctl", ["kickstart", "-k", "gui/501/com.arisa.slave"]]
+  ]);
+});
+
+test("controls a persisted macOS launchd service", async (t) => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "arisa-slave-launchd-control-"));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  const paths = getSlavePaths(root);
+  await mkdir(paths.state, { recursive: true });
+  await writeFile(paths.descriptorFile, `${JSON.stringify({
+    serviceManager: "launchd",
+    serviceTarget: "gui/501/com.arisa.slave",
+    unitFile: "/Users/tester/Library/LaunchAgents/com.arisa.slave.plist"
+  })}\n`);
+  const calls = [];
+  const execute = async (command, args) => {
+    calls.push([command, args]);
+    return { stdout: "", stderr: "" };
+  };
+  const status = await controlSlaveService(paths, "status", { execute });
+  assert.deepEqual(status, { running: true, status: "active", serviceManager: "launchd" });
+  await controlSlaveService(paths, "restart", { execute });
+  assert.deepEqual(calls, [
+    ["launchctl", ["print", "gui/501/com.arisa.slave"]],
+    ["launchctl", ["print", "gui/501/com.arisa.slave"]],
+    ["launchctl", ["enable", "gui/501/com.arisa.slave"]],
+    ["launchctl", ["kickstart", "-k", "gui/501/com.arisa.slave"]]
+  ]);
+});
+
+test("builds, installs, and controls a Windows scheduled Slave task", async (t) => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "arisa-slave-windows-"));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  const account = { scope: "user", user: "MCL4SEN\\martin.clasen", root: false, dedicated: false };
+  const entryFile = path.join(root, "Arisa & Tools", "index.js");
+  const launcher = buildSlaveWindowsLauncher({
+    slaveHome: path.join(root, "slave's home"),
+    entryFile,
+    nodePath: path.join(root, "Node", "node.exe")
+  });
+  assert.match(launcher, /process\.env\.ARISA_SLAVE_HOME/);
+  assert.match(launcher, /slave's home/);
+  assert.match(launcher, /"--service-runner"/);
+  assert.match(launcher, /windowsHide: true/);
+  assert.doesNotThrow(() => new Function(launcher));
+
+  const taskXml = buildSlaveWindowsTaskXml({
+    account,
+    launcherFile: path.join(root, "arisa-slave-launcher.cjs"),
+    nodePath: path.join(root, "Node", "node.exe")
+  });
+  assert.match(taskXml, /<UserId>MCL4SEN\\martin\.clasen<\/UserId>/);
+  assert.match(taskXml, /<RestartOnFailure>/);
+  assert.match(taskXml, /Node\/node\.exe/);
+  assert.match(taskXml, /arisa-slave-launcher\.cjs/);
+  assert.match(taskXml, /<WorkingDirectory>/);
+
+  const calls = [];
+  const result = await installSlaveWindowsService({
+    account,
+    slaveHome: path.join(root, "home"),
+    entryFile,
+    execute: async (command, args) => {
+      calls.push([command, args]);
+      if (args[0] === "/End") throw new Error("not running");
+      return { stdout: "", stderr: "" };
+    },
+    platform: "win32"
+  });
+  assert.equal(result.serviceManager, "windows-task");
+  assert.equal(result.serviceTarget, "Arisa Slave");
+  assert.equal(await access(result.launcherFile).then(() => true, () => false), true);
+  assert.equal(await access(result.unitFile).then(() => true, () => false), true);
+  const persistedLauncher = await readFile(result.launcherFile);
+  assert.deepEqual([...persistedLauncher.subarray(0, 3)], [0xef, 0xbb, 0xbf]);
+  const persistedTask = await readFile(result.unitFile);
+  assert.deepEqual([...persistedTask.subarray(0, 2)], [0xff, 0xfe]);
+  assert.match(persistedTask.toString("utf16le"), /<Task version="1\.4"/);
+  assert.deepEqual(calls.slice(1), [
+    ["schtasks.exe", ["/Create", "/TN", "Arisa Slave", "/XML", result.unitFile, "/F"]],
+    ["schtasks.exe", ["/Run", "/TN", "Arisa Slave"]]
+  ]);
+
+  const paths = result.paths;
+  await writeFile(paths.descriptorFile, `${JSON.stringify({
+    serviceManager: "windows-task",
+    serviceTarget: "Arisa Slave",
+    unitFile: result.unitFile,
+    launcherFile: result.launcherFile
+  })}\n`);
+  await writeFile(paths.pidFile, `${process.pid}\n`);
+  calls.length = 0;
+  const status = await controlSlaveService(paths, "status", { execute: async (command, args) => {
+    calls.push([command, args]);
+    return { stdout: "", stderr: "" };
+  } });
+  assert.deepEqual(status, { running: true, status: "active", serviceManager: "windows-task" });
+  assert.deepEqual(calls, [["schtasks.exe", ["/Query", "/TN", "Arisa Slave"]]]);
+});
+
+test("bootstraps macOS through launchd and persists its service identity", async (t) => {
+  const home = await mkdtemp(path.join(os.tmpdir(), "arisa-slave-macos-bootstrap-"));
+  t.after(() => rm(home, { recursive: true, force: true }));
+  const paths = getSlavePaths(home);
+  const account = { scope: "user", user: "tester", root: false, dedicated: false };
+  const unitFile = "/Users/tester/Library/LaunchAgents/com.arisa.slave.plist";
+  await runSlaveBootstrap(`tcp://198.51.100.12:4719/${secret}`, {
+    paths,
+    entryFile: "/opt/arisa/src/index.js",
+    platform: "darwin",
+    selectAccount: async () => account,
+    ensureTool: async () => {},
+    invokeTool: async () => ({ ok: true }),
+    installService: async (options) => {
+      assert.equal(options.platform, "darwin");
+      return {
+        serviceManager: "launchd",
+        serviceTarget: "gui/501/com.arisa.slave",
+        unitFile
+      };
+    },
+    output: { log: () => {} }
+  });
+  const descriptor = JSON.parse(await readFile(paths.descriptorFile, "utf8"));
+  assert.equal(descriptor.serviceManager, "launchd");
+  assert.equal(descriptor.serviceTarget, "gui/501/com.arisa.slave");
+  assert.equal(descriptor.unitFile, unitFile);
+  assert.deepEqual(descriptor.account, account);
+});
+
+test("bootstraps Windows through Task Scheduler and persists its service identity", async (t) => {
+  const home = await mkdtemp(path.join(os.tmpdir(), "arisa-slave-windows-bootstrap-"));
+  t.after(() => rm(home, { recursive: true, force: true }));
+  const paths = getSlavePaths(home);
+  const account = { scope: "user", user: "MCL4SEN\\martin.clasen", root: false, dedicated: false };
+  const launcherFile = path.join(home, "state", "arisa-slave-launcher.cjs");
+  await runSlaveBootstrap(`tcp://198.51.100.12:4719/${secret}`, {
+    paths,
+    entryFile: "/opt/arisa/src/index.js",
+    platform: "win32",
+    selectAccount: async () => account,
+    ensureTool: async () => {},
+    invokeTool: async () => ({ ok: true }),
+    installService: async (options) => {
+      assert.equal(options.platform, "win32");
+      return {
+        serviceManager: "windows-task",
+        serviceTarget: "Arisa Slave",
+        unitFile: path.join(home, "state", "arisa-slave-task.xml"),
+        launcherFile
+      };
+    },
+    output: { log: () => {} }
+  });
+  const descriptor = JSON.parse(await readFile(paths.descriptorFile, "utf8"));
+  assert.equal(descriptor.serviceManager, "windows-task");
+  assert.equal(descriptor.serviceTarget, "Arisa Slave");
+  assert.equal(descriptor.launcherFile, launcherFile);
 });
 
 test("validates before effects and keeps the bootstrap secret out of service metadata", async (t) => {
@@ -298,7 +514,7 @@ test("combines systemd and local tool diagnostics for Slave status", async (t) =
     paths: getSlavePaths(home),
     controlService: async (_paths, operation) => {
       assert.equal(operation, "status");
-      return { running: true, status: "active" };
+      return { running: true, status: "active", serviceManager: "systemd" };
     },
     toolInstalled: async () => true,
     invokeTool: async (_paths, args) => {
@@ -321,8 +537,8 @@ test("combines systemd and local tool diagnostics for Slave status", async (t) =
     },
     output: { log: (line) => output.push(line) }
   });
-  assert.equal(result.systemd.running, true);
-  assert.match(output[0], /Systemd: active/);
+  assert.equal(result.service.running, true);
+  assert.match(output[0], /Service \(systemd\): active/);
   assert.match(output[0], /Daemon: ready/);
   assert.match(output[0], /Role: slave/);
   assert.match(output[0], /Endpoint: tcp:\/\/198\.51\.100\.12:4719/);

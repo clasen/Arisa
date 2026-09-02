@@ -11,7 +11,7 @@ import { withSecureRequestFile } from "./secure-request-file.js";
 import {
   controlSlaveService,
   getSlavePaths,
-  installSlaveSystemdService,
+  installSlaveService,
   isSlaveToolInstalled,
   readSlaveServiceDescriptor,
   registerSlaveServiceProcess,
@@ -138,11 +138,13 @@ function parseSlaveToolOutput(result) {
   return result?.output && typeof result.output === "object" ? result.output : result;
 }
 
-export function formatSlaveStatus({ systemd, diagnostic }) {
+export function formatSlaveStatus({ service, systemd, diagnostic }) {
+  const serviceStatus = service || systemd;
+  const manager = serviceStatus?.serviceManager || (systemd ? "systemd" : "service");
   const jobs = diagnostic?.jobs && typeof diagnostic.jobs === "object" ? diagnostic.jobs : {};
   return [
     "Arisa Slave status",
-    `Systemd: ${systemd.running ? "active" : systemd.status || "inactive"}`,
+    `Service (${manager}): ${serviceStatus?.running ? "active" : serviceStatus?.status || "inactive"}`,
     `Daemon: ${diagnostic?.daemon?.state || diagnostic?.daemonState || "unknown"}`,
     `Role: ${diagnostic?.role || "unknown"}`,
     `Endpoint: ${diagnostic?.endpoint || "not configured"}`,
@@ -167,14 +169,14 @@ export async function runSlaveBootstrap(url, {
   paths = getSlavePaths(resolveSlaveHome()),
   selectAccount = selectSlaveServiceAccount,
   ensureTool = ensureMasterSlaveTool,
-  installService = installSlaveSystemdService,
+  installService = installSlaveService,
   invokeTool = invokeSlaveTool,
   entryFile,
   output = console,
   platform = process.platform
 } = {}) {
   parseSlaveBootstrapUrl(url);
-  if (platform !== "linux") throw new Error("Arisa Slave service installation currently requires Linux with systemd");
+  if (!["linux", "darwin", "win32"].includes(platform)) throw new Error(`Arisa Slave service installation is not supported on ${platform}`);
   const account = await selectAccount();
   await ensureSlaveConfig(paths);
   await ensureTool(paths);
@@ -188,8 +190,16 @@ export async function runSlaveBootstrap(url, {
   } catch (error) {
     throw explainSlaveBootstrapError(error);
   }
-  await installService({ account, slaveHome: paths.home, entryFile });
-  await writeSlaveServiceDescriptor(paths, { version: 1, account, installedAt: new Date().toISOString() });
+  const installedService = await installService({ account, slaveHome: paths.home, entryFile, platform });
+  await writeSlaveServiceDescriptor(paths, {
+    version: 1,
+    account,
+    serviceManager: installedService?.serviceManager || ({ darwin: "launchd", win32: "windows-task" }[platform] || "systemd"),
+    serviceTarget: installedService?.serviceTarget || null,
+    unitFile: installedService?.unitFile || null,
+    launcherFile: installedService?.launcherFile || null,
+    installedAt: new Date().toISOString()
+  });
   output.log(`Arisa Slave paired and running as ${account.user}${account.root ? " (root)" : ""}.`);
   return result;
 }
@@ -240,12 +250,12 @@ export async function runSlaveCli({
   }
   if (action === "status") {
     if (positionals.length !== 1) throw new Error("arisa slave status does not accept additional arguments");
-    const systemd = await controlService(paths, "status");
+    const service = await controlService(paths, "status");
     const diagnostic = await toolInstalled(paths, toolName)
       ? parseSlaveToolOutput(await invokeTool(paths, { action: "slave.status" }))
       : { daemonState: "not-installed", role: "slave", paired: false, toolCount: 0, pendingSecrets: 0 };
-    output.log(formatSlaveStatus({ systemd, diagnostic }));
-    return { systemd, diagnostic };
+    output.log(formatSlaveStatus({ service, diagnostic }));
+    return { service, diagnostic };
   }
   if (action === "log") {
     if (positionals.length !== 1) throw new Error("arisa slave log does not accept additional arguments");
