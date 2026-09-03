@@ -47,6 +47,7 @@ export function createPiCapabilityTools({ capabilityService, telegram, chatId, p
     context: {
       ...baseContext,
       taskContext: telegram.getTaskContext(),
+      agentTaskExecution: telegram.getAgentTaskExecution?.() || null,
       ...context
     }
   });

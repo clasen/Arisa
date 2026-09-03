@@ -135,11 +135,13 @@ test("persists auth blocks, claims only due probes, and clears the block after s
   await store.claimDue();
   const blocked = await store.blockAuth("auth-poll", "authentication expired", {
     retryAfterSeconds: 3600,
-    probeArgs: { action: "auth-status" }
+    probeArgs: { action: "auth-status" },
+    toolName: "checker"
   });
   assert.equal(blocked.status, "blocked_auth");
   assert.equal(blocked.authBlockedNew, true);
   assert.deepEqual(blocked.authBlock.probeArgs, { action: "auth-status" });
+  assert.equal(blocked.authBlock.toolName, "checker");
   assert.deepEqual(await store.claimDue(), []);
 
   store.tasks.find((task) => task.id === "auth-poll").runAt = new Date(Date.now() - 1000).toISOString();

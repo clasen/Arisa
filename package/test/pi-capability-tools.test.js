@@ -5,6 +5,7 @@ import { createPiCapabilityTools } from "../src/core/agent/pi-capability-tools.j
 function createHarness() {
   const calls = [];
   let taskContext = { transportChatId: "chat-1", messageThreadId: 10 };
+  const agentTaskExecution = { blockedAuth: null };
   const capabilityService = {
     async execute(request) {
       calls.push(request);
@@ -15,6 +16,7 @@ function createHarness() {
   };
   const telegram = {
     getTaskContext: () => taskContext,
+    getAgentTaskExecution: () => agentTaskExecution,
     sendMedia: async () => {}
   };
   const tools = createPiCapabilityTools({
@@ -62,4 +64,5 @@ test("Pi tool execution resolves the current Telegram task context per call", as
 
   assert.equal(harness.calls[0].context.taskContext.messageThreadId, 10);
   assert.equal(harness.calls[1].context.taskContext.messageThreadId, 20);
+  assert.equal(harness.calls[0].context.agentTaskExecution, harness.calls[1].context.agentTaskExecution);
 });

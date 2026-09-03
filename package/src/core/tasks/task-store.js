@@ -177,7 +177,8 @@ function normalizeAuthResolution(resolution = {}) {
     ? structuredClone(value.probeArgs)
     : {};
   if (JSON.stringify(probeArgs).length > 4_096) throw new Error("Authentication probe arguments are too large");
-  return { retryAfterSeconds, probeArgs };
+  const toolName = typeof value.toolName === "string" ? value.toolName.trim().slice(0, 128) : "";
+  return { retryAfterSeconds, probeArgs, ...(toolName ? { toolName } : {}) };
 }
 
 function failTask(task, error) {

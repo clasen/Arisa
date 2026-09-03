@@ -9,7 +9,7 @@ function createHarness(overrides = {}) {
     async complete(...args) { calls.push(["complete", ...args]); return { status: "done" }; },
     async blockAuth(taskId, error, resolution) {
       calls.push(["blockAuth", taskId, error.message, resolution]);
-      return { status: "blocked_auth", authBlockedNew: true, runAt: "2026-09-02T05:00:00.000Z" };
+      return { status: "blocked_auth", authBlockedNew: true, authBlock: resolution, runAt: "2026-09-02T05:00:00.000Z" };
     },
     async retryOrFail(taskId, error, options) {
       calls.push(["retryOrFail", taskId, error.message, options]);
@@ -140,13 +140,68 @@ test("pauses a poll once when its tool reports terminal authentication failure",
     payload: { chatId: 123, toolName: "checker", args: { action: "poll" } }
   });
 
-  assert.deepEqual(calls.at(-2), ["blockAuth", "poll-auth", "authentication expired", resolution]);
+  assert.deepEqual(calls.at(-2), ["blockAuth", "poll-auth", "authentication expired", { ...resolution, toolName: "checker" }]);
   assert.deepEqual(calls.at(-1), [
     "send",
     123,
     "⚠️ Arisa automation paused for authentication\nTool: checker\nReason: authentication expired\nNext authentication check: 2026-09-02T05:00:00.000Z",
     undefined
   ]);
+});
+
+test("pauses a recurring agent task after a nested tool reports blocked authentication", async () => {
+  const resolution = {
+    type: "reauthentication_required",
+    retryAfterSeconds: 3600,
+    probeArgs: { action: "status" }
+  };
+  const { calls, dispatcher } = createHarness({
+    dependencies: {
+      enqueueAsyncPrompt: async (input) => {
+        calls.push(["enqueue", input]);
+        input.agentTaskExecution.blockedAuth = {
+          toolName: "creator-scout",
+          error: "authentication expired",
+          resolution
+        };
+      }
+    }
+  });
+
+  await dispatcher.runClaimedTask({
+    id: "agent-auth",
+    kind: "agent_task",
+    payload: { chatId: 123, prompt: "run harvest" },
+    recurrence: { type: "interval", everySeconds: 14400 }
+  });
+
+  assert.deepEqual(calls.at(-2), ["blockAuth", "agent-auth", "authentication expired", { ...resolution, toolName: "creator-scout" }]);
+  assert.deepEqual(calls.at(-1), [
+    "send",
+    123,
+    "⚠️ Arisa automation paused for authentication\nTool: creator-scout\nReason: authentication expired\nNext authentication check: 2026-09-02T05:00:00.000Z",
+    undefined
+  ]);
+  assert.equal(calls.some(([name]) => name === "complete"), false);
+});
+
+test("probes a blocked agent task before starting another reasoning turn", async () => {
+  const { calls, dispatcher } = createHarness();
+  await dispatcher.runClaimedTask({
+    id: "agent-resume",
+    kind: "agent_task",
+    authBlock: { toolName: "creator-scout", probeArgs: { action: "status" }, retryAfterSeconds: 3600 },
+    payload: { chatId: 123, prompt: "run harvest" }
+  });
+
+  assert.deepEqual(calls[0], ["runTurn", { priority: "background", label: "authentication probe creator-scout" }]);
+  assert.deepEqual(calls[1], ["runTool", {
+    name: "creator-scout",
+    request: { args: { action: "status" } },
+    chatId: 123
+  }]);
+  assert.equal(calls.filter(([name]) => name === "enqueue").length, 1);
+  assert.deepEqual(calls.at(-1), ["complete", "agent-resume"]);
 });
 
 test("uses a lightweight auth probe before resuming blocked poll work", async () => {

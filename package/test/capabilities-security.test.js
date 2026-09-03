@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { createArisaCapabilities } from "../src/runtime/arisa-capabilities.js";
+import { createCapabilityService } from "../src/core/capabilities/capability-service.js";
 
 function createFakeArtifactStore() {
   const stores = new Map();
@@ -292,6 +293,41 @@ test("normalizes tool run args and rejects arrays", async () => {
     }),
     /args must be an object/
   );
+});
+
+test("records blocked authentication and stops later tools inside an agent task", async () => {
+  const execution = { blockedAuth: null };
+  const resolution = { retryAfterSeconds: 3600, probeArgs: { action: "status" } };
+  let executions = 0;
+  const service = createCapabilityService({
+    artifactStore: createFakeArtifactStore(),
+    toolRegistry: { async load() {} },
+    toolExecutor: {
+      async runTool() {
+        executions += 1;
+        return { ok: false, status: "blocked_auth", error: "authentication expired", resolution };
+      }
+    }
+  });
+  const run = (name) => service.execute({
+    method: "tools.run",
+    actorToolName: "run_tool",
+    chatId: "chat-1",
+    params: { name, args: {} },
+    context: { agentTaskExecution: execution }
+  });
+
+  await run("creator-scout");
+  assert.deepEqual(execution.blockedAuth, {
+    toolName: "creator-scout",
+    error: "authentication expired",
+    resolution
+  });
+
+  const skipped = await run("campaign-draft-runner");
+  assert.equal(skipped.status, "blocked_prerequisite");
+  assert.equal(skipped.resolution.prerequisiteStatus, "blocked_auth");
+  assert.equal(executions, 1);
 });
 
 test("rejects missing artifact input before running a tool", async () => {

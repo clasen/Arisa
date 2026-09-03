@@ -41,7 +41,7 @@ function buildFailureNotice({ task, result, error }) {
   if (result?.authBlockedNew === true) {
     return [
       "⚠️ Arisa automation paused for authentication",
-      `Tool: ${task.payload?.toolName || "unknown"}`,
+      `Tool: ${result.authBlock?.toolName || task.payload?.toolName || "unknown"}`,
       `Reason: ${safeErrorSummary(error)}`,
       `Next authentication check: ${result.runAt}`
     ].join("\n");
@@ -72,17 +72,62 @@ export function createTelegramTaskDispatcher({
   const agentTimeoutMs = boundedTimeout(taskTimeouts.agentTimeoutMs, 15 * 60_000);
   const eventTimeoutMs = boundedTimeout(taskTimeouts.eventTimeoutMs, 5 * 60_000);
 
+  const runBackgroundTool = (toolName, chatId, args, label) => agentManager.runTurn({
+    priority: "background",
+    label
+  }, () => agentManager.runTool({ name: toolName, request: { args }, chatId }));
+
+  function throwToolFailure(result, toolName, fallbackResolution) {
+    const error = new Error(result?.error || `${toolName} failed`);
+    if (result?.status === "blocked_auth" || fallbackResolution) {
+      error.retryable = false;
+      error.authBlocked = true;
+      error.authResolution = {
+        ...(result?.resolution || fallbackResolution || {}),
+        toolName
+      };
+    } else if (result?.status === "needs_config") {
+      error.retryable = false;
+    } else if (result?.status === "outcome_uncertain") {
+      error.retryable = false;
+      error.outcomeUncertain = true;
+    }
+    throw error;
+  }
+
   async function dispatchAgentTask(task, chatId) {
     if (!task.payload.prompt) throw new NonRetryableTaskError("agent_task missing prompt");
+    if (task.authBlock?.toolName) {
+      const probe = await runBackgroundTool(
+        task.authBlock.toolName,
+        chatId,
+        task.authBlock.probeArgs || {},
+        `authentication probe ${task.authBlock.toolName}`
+      );
+      if (probe?.ok === false) throwToolFailure(probe, task.authBlock.toolName, task.authBlock);
+      logger?.log("tasks", `authentication restored for ${task.authBlock.toolName} (task ${task.id})`);
+    }
+
     logger?.log("tasks", `running task ${task.id} for chat ${chatId}`);
+    const agentTaskExecution = { blockedAuth: null };
     await enqueueAsyncPrompt({
       chatId,
       prompt: await buildAsyncTaskPrompt({ task, artifactStore, toolRegistry, resourceNotes, logger }),
       label: `scheduled task ${task.id}`,
       route: task.route,
       timeoutMs: agentTimeoutMs,
-      priority: task.source?.toolName === "whatsapp-web" ? "interactive" : "background"
+      priority: task.source?.toolName === "whatsapp-web" ? "interactive" : "background",
+      agentTaskExecution
     });
+    if (agentTaskExecution.blockedAuth) {
+      const blocked = agentTaskExecution.blockedAuth;
+      throwToolFailure({
+        ok: false,
+        status: "blocked_auth",
+        error: blocked.error,
+        resolution: blocked.resolution
+      }, blocked.toolName);
+    }
   }
 
   async function dispatchAgentEvent(task, chatId) {
@@ -111,34 +156,16 @@ export function createTelegramTaskDispatcher({
     if (!toolName) throw new NonRetryableTaskError("poll_tool missing toolName");
     logger?.log("tasks", `polling tool ${toolName} (task ${task.id}) for chat ${chatId}`);
 
-    const runTool = (args) => agentManager.runTurn({
-      priority: "background",
-      label: `poll tool ${toolName}`
-    }, () => agentManager.runTool({ name: toolName, request: { args }, chatId }));
-
-    function throwFailure(result, fallbackResolution) {
-      const error = new Error(result?.error || `poll_tool ${toolName} failed`);
-      if (result?.status === "blocked_auth" || fallbackResolution) {
-        error.retryable = false;
-        error.authBlocked = true;
-        error.authResolution = result?.resolution || fallbackResolution;
-      } else if (result?.status === "needs_config") {
-        error.retryable = false;
-      } else if (result?.status === "outcome_uncertain") {
-        error.retryable = false;
-        error.outcomeUncertain = true;
-      }
-      throw error;
-    }
+    const runTool = (args) => runBackgroundTool(toolName, chatId, args, `poll tool ${toolName}`);
 
     if (task.authBlock) {
       const probe = await runTool(task.authBlock.probeArgs || {});
-      if (probe?.ok === false) throwFailure(probe, task.authBlock);
+      if (probe?.ok === false) throwToolFailure(probe, toolName, task.authBlock);
       logger?.log("tasks", `authentication restored for ${toolName} (task ${task.id})`);
     }
 
     const result = await runTool(task.payload.args || {});
-    if (result?.ok === false) throwFailure(result);
+    if (result?.ok === false) throwToolFailure(result, toolName);
   }
 
   async function dispatchTask(task) {

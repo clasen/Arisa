@@ -113,7 +113,8 @@ export function createTelegramSessionBridgeController({
           chatId: route.transportChatId,
           threadId: route.topicThreadId
         }
-      } : null
+      } : null,
+      getAgentTaskExecution: () => route.agentTaskExecution || null
     };
   }
 

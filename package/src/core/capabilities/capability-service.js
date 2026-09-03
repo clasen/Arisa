@@ -48,6 +48,17 @@ function normalizeAcknowledgement(value) {
   return acknowledgement;
 }
 
+function recordAgentTaskAuthBlock(execution, toolName, result) {
+  if (!execution || execution.blockedAuth || result?.ok !== false || result?.status !== "blocked_auth") return;
+  execution.blockedAuth = {
+    toolName,
+    error: String(result.error || `${toolName} authentication is required`).slice(0, 1_000),
+    resolution: result.resolution && typeof result.resolution === "object"
+      ? structuredClone(result.resolution)
+      : {}
+  };
+}
+
 function inferDeliveryMethod(artifact) {
   if (artifact.kind === "audio" || (artifact.mimeType || "").startsWith("audio/")) return "audio";
   if (artifact.kind === "image" || (artifact.mimeType || "").startsWith("image/")) return "photo";
@@ -178,6 +189,19 @@ export function createCapabilityService({
       if (!toolExecutor?.runTool) throw new Error("tools.run requires toolExecutor");
       const scopedChatId = requireChatId(chatId, method);
       const targetToolName = requireString(params.name, "name");
+      const blocked = context.agentTaskExecution?.blockedAuth;
+      if (blocked) {
+        return {
+          ok: false,
+          status: "blocked_prerequisite",
+          error: `Authentication for ${blocked.toolName} is blocking this scheduled task.`,
+          resolution: {
+            type: "blocked_prerequisite",
+            prerequisiteStatus: "blocked_auth",
+            toolName: blocked.toolName
+          }
+        };
+      }
       const chatArtifactStore = artifactStore.forChat(scopedChatId);
       const artifact = params.artifactId
         ? await chatArtifactStore.get(requireString(params.artifactId, "artifactId"))
@@ -197,6 +221,7 @@ export function createCapabilityService({
         chatId: scopedChatId,
         taskContext: context.taskContext || null
       });
+      recordAgentTaskAuthBlock(context.agentTaskExecution, targetToolName, result);
       if (params.deliver && result.output?.artifactId) {
         const generated = await chatArtifactStore.get(result.output.artifactId);
         if (generated?.path) {

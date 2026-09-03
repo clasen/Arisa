@@ -418,7 +418,8 @@ export class AgentManager {
       initializeForumTopic: (...args) => telegramTarget.current.initializeForumTopic(...args),
       prepareRestartReceipt: (...args) => telegramTarget.current.prepareRestartReceipt(...args),
       cancelRestartReceipt: (...args) => telegramTarget.current.cancelRestartReceipt(...args),
-      getTaskContext: (...args) => telegramTarget.current.getTaskContext?.(...args) || null
+      getTaskContext: (...args) => telegramTarget.current.getTaskContext?.(...args) || null,
+      getAgentTaskExecution: (...args) => telegramTarget.current.getAgentTaskExecution?.(...args) || null
     };
     const assertAccess = () => accessGuardTarget.current();
     const customTools = guardTools([

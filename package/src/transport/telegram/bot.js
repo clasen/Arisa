@@ -335,7 +335,7 @@ export async function createTelegramBot({ config, artifactStore, toolRegistry, t
     timer.unref?.();
   }
 
-  async function enqueueAsyncPrompt({ chatId, prompt, label, route: taskRoute, timeoutMs, priority = "background", queueTtlMs = undefined }) {
+  async function enqueueAsyncPrompt({ chatId, prompt, label, route: taskRoute, timeoutMs, priority = "background", queueTtlMs = undefined, agentTaskExecution = null }) {
     let ctx = { chat: { id: chatId }, api: bot.api };
     const destination = taskRoute?.transport === "telegram" ? taskRoute.destination : null;
     if (destination?.chatId && destination?.threadId) {
@@ -349,7 +349,11 @@ export async function createTelegramBot({ config, artifactStore, toolRegistry, t
       if (!route.ok) throw new Error("Scheduled owner-workspace destination is unavailable.");
       registerRoute(ctx, route);
     }
-    const route = contextRoute(ctx);
+    const route = {
+      ...contextRoute(ctx),
+      ...(agentTaskExecution ? { agentTaskExecution } : {})
+    };
+    registerRoute(ctx, route);
     const chatState = getChatState(route.sessionId);
     if (chatState.processing) await ensureQueuedTelegramTyping(chatState, ctx);
     let timer = null;
