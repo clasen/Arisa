@@ -15,7 +15,7 @@ process.env.ARISA_PACKAGE_DIR = arisaPackageDir;
 
 const args = process.argv.slice(2);
 const cli = parseCliArgs(args);
-const command = cli.positionals[0] || "run";
+const command = cli.flags.help ? "help" : cli.positionals[0] || "run";
 const forceBootstrap = Boolean(cli.flags.bootstrap);
 const verbose = !cli.flags.silent;
 const serviceRunner = Boolean(cli.flags["service-runner"]);
@@ -226,7 +226,35 @@ async function runForeground() {
   }
 }
 
+function printHelp() {
+  console.log([
+    "Usage: arisa [command] [options]",
+    "",
+    "Commands:",
+    "  run       Run Arisa in the foreground (default)",
+    "  tui       Open the terminal interface",
+    "  start     Start the background service",
+    "  stop      Stop the background service",
+    "  restart   Restart the background service",
+    "  status    Show background service status",
+    "  log       Show background service logs",
+    "  flush     Remove Arisa state while stopped",
+    "  slave     Manage a Slave host",
+    "  help      Show this help",
+    "",
+    "Options:",
+    "  --help    Show this help",
+    "  --silent  Reduce runtime logging",
+    "  --bootstrap  Reopen interactive setup"
+  ].join("\n"));
+}
+
 async function main() {
+  if (command === "help") {
+    printHelp();
+    return;
+  }
+
   if (slaveCommand) {
     const { runSlaveCli } = await import("./runtime/slave-cli.js");
     const result = await runSlaveCli({
@@ -332,6 +360,12 @@ async function main() {
     const result = await flushArisaHome();
     console.log(`Arisa state removed: ${result.path}`);
     return;
+  }
+
+  if (command !== "run") {
+    const error = new Error(`Unknown Arisa command: ${command}`);
+    error.code = "ARISA_UNKNOWN_COMMAND";
+    throw error;
   }
 
   await runForeground();
