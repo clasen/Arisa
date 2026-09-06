@@ -1,13 +1,6 @@
-import { AuthStorage } from "@earendil-works/pi-coding-agent";
-import { piAuthFile } from "../../platform/paths.js";
+import { createPiRuntime, supportsProviderOAuth } from "./pi-runtime.js";
 
 export function createPiOAuthLogin({ provider, onAuth, onDeviceCode, onPrompt, onProgress, onSelect } = {}) {
-  const authStorage = AuthStorage.create(piAuthFile);
-  const oauthProvider = authStorage.getOAuthProviders().find((item) => item.id === provider);
-  if (!oauthProvider) {
-    throw new Error(`No internal OAuth login flow is available for ${provider}.`);
-  }
-
   let resolveManualCode;
   const manualCodePromise = new Promise((resolve) => {
     resolveManualCode = resolve;
@@ -15,7 +8,6 @@ export function createPiOAuthLogin({ provider, onAuth, onDeviceCode, onPrompt, o
 
   const controller = {
     provider,
-    oauthProvider,
     manualInputRequested: false,
     submitManualCode(value) {
       if (!resolveManualCode) return false;
@@ -31,25 +23,33 @@ export function createPiOAuthLogin({ provider, onAuth, onDeviceCode, onPrompt, o
     promise: null
   };
 
-  controller.promise = authStorage.login(provider, {
-    onAuth: async (params) => {
-      await onAuth?.({ ...params, controller });
-    },
-    onDeviceCode: async (params) => {
-      await onDeviceCode?.({ ...params, controller });
-    },
-    onPrompt: async (params) => {
-      if (!onPrompt) return "";
-      return onPrompt({ ...params, controller });
-    },
-    onProgress: (message) => {
-      onProgress?.(message);
-    },
-    onSelect: async (params) => {
-      if (!onSelect) return params.options?.[0]?.id;
-      return onSelect({ ...params, controller });
-    },
-    onManualCodeInput: () => controller.waitForManualCode()
+  controller.promise = createPiRuntime().then(async (runtime) => {
+    if (!supportsProviderOAuth(provider, runtime)) {
+      throw new Error(`No internal OAuth login flow is available for ${provider}.`);
+    }
+    let notifications = Promise.resolve();
+    let notificationError;
+    const credential = await runtime.login(provider, "oauth", {
+      notify(event) {
+        notifications = notifications.then(async () => {
+          if (event.type === "auth_url") await onAuth?.({ ...event, controller });
+          else if (event.type === "device_code") await onDeviceCode?.({ ...event, controller });
+          else await onProgress?.(event.message);
+        }).catch((error) => { notificationError = error; });
+      },
+      async prompt(params) {
+        await notifications;
+        if (notificationError) throw notificationError;
+        if (params.type === "select") {
+          return onSelect ? onSelect({ ...params, controller }) : params.options?.[0]?.id;
+        }
+        if (params.type === "manual_code") return controller.waitForManualCode();
+        return onPrompt ? onPrompt({ ...params, controller }) : "";
+      }
+    });
+    await notifications;
+    if (notificationError) throw notificationError;
+    return credential;
   }).finally(() => {
     controller.submitManualCode("");
   });

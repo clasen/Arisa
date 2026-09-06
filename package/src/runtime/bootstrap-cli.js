@@ -66,7 +66,7 @@ async function runInternalPiLogin(provider, { rl = null } = {}) {
 
 export async function collectCliBootstrapChoices({ telegramApiKey, rl, ask }) {
   const telegramMaxChatIds = Number(await ask("Maximum authorized chat IDs", "1"));
-  const runtime = createPiRuntime();
+  const runtime = await createPiRuntime();
   const providers = sortBootstrapProviders(listPiProviders(runtime));
   console.log("\nAvailable Pi providers:");
   providers.forEach((item, index) => console.log(`${index + 1}. ${formatProviderOption(item)}`));
@@ -89,7 +89,7 @@ export async function collectCliBootstrapChoices({ telegramApiKey, rl, ask }) {
   while (true) {
     piApiKey = (await rl.question(`Pi API key for ${selectedProvider.provider} (optional): `)).trim();
     if (piApiKey) break;
-    if (hasProviderAuth(selectedProvider.provider, createPiRuntime())) break;
+    if (hasProviderAuth(selectedProvider.provider, await createPiRuntime())) break;
     if (!providerSupportsOAuth) {
       console.log(`No existing Pi auth found for ${selectedProvider.provider}. This provider requires an API key.`);
       continue;
@@ -100,7 +100,7 @@ export async function collectCliBootstrapChoices({ telegramApiKey, rl, ask }) {
     } catch (error) {
       console.log(`Internal Pi login failed: ${error instanceof Error ? error.message : String(error)}`);
     }
-    if (hasProviderAuth(selectedProvider.provider, createPiRuntime())) {
+    if (hasProviderAuth(selectedProvider.provider, await createPiRuntime())) {
       console.log(`Detected Pi auth for ${selectedProvider.provider}. Continuing bootstrap.`);
       break;
     }

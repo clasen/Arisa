@@ -40,7 +40,7 @@ function restorePreviousSelection(agentConfig, key, hadSelections, previousSelec
 
 export function createTelegramModelControls({ config, saveConfig, agentManager, contextRoute }) {
   async function getProviderModels() {
-    const runtime = createPiRuntime({
+    const runtime = await createPiRuntime({
       provider: config.pi.provider,
       apiKey: config.pi.apiKey
     });

@@ -1,4 +1,4 @@
-﻿export const MODEL_SPEEDS = Object.freeze([1, 1.5]);
+export const MODEL_SPEEDS = Object.freeze([1, 1.5]);
 
 export function normalizeModelSpeed(speed) {
   const value = Number(speed);
@@ -17,6 +17,7 @@ export function modelSupportsSpeed(model) {
       || model.id === "gpt-5.5"
       || model.id === "gpt-5.6"
       || model.id.startsWith("gpt-5.6-")
+      || model.id === "gpt-6-astra"
     );
 }
 
@@ -40,6 +41,7 @@ export function createModelSpeedController(streamFn, initialSpeed) {
       speed = normalizeModelSpeed(nextSpeed);
     },
     streamFn(model, context, options) {
+      if (!modelSupportsSpeed(model)) return streamFn(model, context, options);
       const serviceTier = speedToServiceTier(speed);
       const onPayload = options?.onPayload;
       return streamFn(model, context, {

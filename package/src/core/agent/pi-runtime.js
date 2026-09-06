@@ -1,34 +1,29 @@
-import { AuthStorage, ModelRegistry } from "@earendil-works/pi-coding-agent";
+import { ModelRuntime } from "@earendil-works/pi-coding-agent";
 import { piAuthFile } from "../../platform/paths.js";
 
 function compareText(a, b) {
   return a.localeCompare(b, undefined, { sensitivity: "base", numeric: true });
 }
 
-export function createPiRuntime({ provider, apiKey } = {}) {
-  const authStorage = AuthStorage.create(piAuthFile);
+export async function createPiRuntime({ provider, apiKey } = {}) {
+  const runtime = await ModelRuntime.create({ authPath: piAuthFile });
   if (provider && apiKey) {
-    authStorage.setRuntimeApiKey(provider, apiKey);
+    await runtime.setRuntimeApiKey(provider, apiKey);
   }
-  const modelRegistry = ModelRegistry.create(authStorage);
-  const oauthProviders = authStorage.getOAuthProviders();
-  return { authStorage, modelRegistry, oauthProviders };
+  return runtime;
 }
 
-export function hasProviderAuth(provider, { authStorage, modelRegistry }) {
-  return modelRegistry.hasConfiguredAuth(provider) || authStorage.hasAuth(provider);
+export function hasProviderAuth(provider, runtime) {
+  return runtime.getProviderAuthStatus(provider).configured;
 }
 
-export function supportsProviderOAuth(provider, { oauthProviders }) {
-  return oauthProviders.some((item) => item.id === provider);
+export function supportsProviderOAuth(provider, runtime) {
+  return Boolean(runtime.getProvider(provider)?.auth.oauth);
 }
 
-export function listPiProviders(runtime = createPiRuntime()) {
-  const { modelRegistry, oauthProviders } = runtime;
-  const allModels = modelRegistry.getAll();
-  const oauthIds = new Set(oauthProviders.map((item) => item.id));
+export function listPiProviders(runtime) {
   const counts = new Map();
-  for (const model of allModels) {
+  for (const model of runtime.getModels()) {
     counts.set(model.provider, (counts.get(model.provider) || 0) + 1);
   }
 
@@ -36,7 +31,7 @@ export function listPiProviders(runtime = createPiRuntime()) {
     .map((provider) => ({
       provider,
       authConfigured: hasProviderAuth(provider, runtime),
-      supportsOAuth: oauthIds.has(provider),
+      supportsOAuth: supportsProviderOAuth(provider, runtime),
       modelCount: counts.get(provider) || 0
     }))
     .sort((a, b) => {
@@ -46,10 +41,8 @@ export function listPiProviders(runtime = createPiRuntime()) {
     });
 }
 
-export function listProviderModels(provider, runtime = createPiRuntime()) {
-  return runtime.modelRegistry
-    .getAll()
-    .filter((model) => model.provider === provider)
+export function listProviderModels(provider, runtime) {
+  return [...runtime.getModels(provider)]
     .sort((a, b) => compareText(a.name || a.id, b.name || b.id));
 }
 

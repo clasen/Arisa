@@ -50,7 +50,7 @@ export function createTelegramAuthController({
     if (!detected) return false;
 
     try {
-      await api.sendMessage(chatId, buildPiAuthTelegramMessage({ config, chatId, issue: detected }));
+      await api.sendMessage(chatId, await buildPiAuthTelegramMessage({ config, chatId, issue: detected }));
       markPromptErrorNotified(error);
       return true;
     } catch (notifyError) {
@@ -66,11 +66,11 @@ export function createTelegramAuthController({
       agentManager.clearSessionCache(chatId);
       issue = null;
       logger?.log("telegram", `Pi auth renewal completed for chat ${chatId}`);
-      await api.sendMessage(chatId, buildPiAuthTelegramMessage({ config, chatId, verified: true }));
+      await api.sendMessage(chatId, await buildPiAuthTelegramMessage({ config, chatId, verified: true }));
     } catch (error) {
       const detected = rememberValidationFailure(error);
       logger?.error("telegram", `Pi auth renewal failed for chat ${chatId}: ${getErrorMessage(error)}`);
-      await api.sendMessage(chatId, buildPiAuthTelegramMessage({ config, chatId, issue: detected })).catch((notifyError) => {
+      await api.sendMessage(chatId, await buildPiAuthTelegramMessage({ config, chatId, issue: detected })).catch((notifyError) => {
         logger?.error("telegram", `auth renewal failure notice failed for chat ${chatId}: ${getErrorMessage(notifyError)}`);
       });
     } finally {
@@ -140,17 +140,17 @@ export function createTelegramAuthController({
     const authorization = await authorize(ctx);
     if (!authorization.ok) return;
 
-    const status = getPiAuthStatus(config, ctx.chat.id);
+    const status = await getPiAuthStatus(config, ctx.chat.id);
     if (status.hasApiKey || !status.supportsOAuth) {
       await withTyping(ctx, async () => {
         try {
           await agentManager.validateAgent();
           agentManager.clearSessionCache(ctx.chat.id);
           issue = null;
-          await ctx.reply(buildPiAuthTelegramMessage({ config, chatId: ctx.chat.id, verified: true }));
+          await ctx.reply(await buildPiAuthTelegramMessage({ config, chatId: ctx.chat.id, verified: true }));
         } catch (error) {
           const detected = rememberValidationFailure(error);
-          await ctx.reply(buildPiAuthTelegramMessage({ config, chatId: ctx.chat.id, issue: detected }));
+          await ctx.reply(await buildPiAuthTelegramMessage({ config, chatId: ctx.chat.id, issue: detected }));
         }
       });
       return;
@@ -163,7 +163,7 @@ export function createTelegramAuthController({
         : "Pi login is already in progress. Paste the redirect URL or code here when you have it.");
     } catch (error) {
       const detected = rememberValidationFailure(error);
-      await ctx.reply(buildPiAuthTelegramMessage({ config, chatId: ctx.chat.id, issue: detected }));
+      await ctx.reply(await buildPiAuthTelegramMessage({ config, chatId: ctx.chat.id, issue: detected }));
     }
   }
 

@@ -126,8 +126,8 @@ function requiresProviderAuth(model) {
 export async function createArisaTuiRuntime({ config, client, logger } = {}) {
   const chatId = resolveTuiChatId(config);
   const policy = buildPiToolPolicy({ config, customToolNames: tuiToolNames });
-  const piRuntime = createPiRuntime({ provider: config.pi.provider, apiKey: config.pi.apiKey });
-  const model = piRuntime.modelRegistry.find(config.pi.provider, config.pi.model);
+  const piRuntime = await createPiRuntime({ provider: config.pi.provider, apiKey: config.pi.apiKey });
+  const model = piRuntime.getModel(config.pi.provider, config.pi.model);
   if (!model) throw new Error(`Model not found: ${config.pi.provider}/${config.pi.model}`);
   if (requiresProviderAuth(model) && !config.pi.apiKey && !hasProviderAuth(config.pi.provider, piRuntime)) {
     throw new Error(`No auth found for ${config.pi.provider}. Complete Arisa bootstrap first.`);
@@ -141,8 +141,7 @@ export async function createArisaTuiRuntime({ config, client, logger } = {}) {
     const services = await createAgentSessionServices({
       cwd,
       agentDir: arisaHomeDir,
-      authStorage: piRuntime.authStorage,
-      modelRegistry: piRuntime.modelRegistry,
+      modelRuntime: piRuntime,
       settingsManager,
       resourceLoaderOptions: {
         agentsFilesOverride: (current) => appendArisaAgentsFile(current, arisaAgentsContent)
@@ -158,8 +157,8 @@ export async function createArisaTuiRuntime({ config, client, logger } = {}) {
       excludeTools: policy.excludeTools,
       customTools
     });
-    const speedController = createModelSpeedController(created.session.agent.streamFn, config.pi.speed);
-    created.session.agent.streamFn = speedController.streamFn;
+    const speedController = createModelSpeedController(created.session.agent.streamFunction, config.pi.speed);
+    created.session.agent.streamFunction = speedController.streamFn;
     logger?.log("tui", `opened ${created.session.sessionFile || "in-memory session"} for owner scope ${chatId}`);
     return { ...created, services, diagnostics: services.diagnostics };
   };

@@ -323,22 +323,21 @@ export class AgentManager {
 
   async validatePiAgent(config = this.config) {
     this.logger?.log("agent", "validating Pi session");
-    const { authStorage, modelRegistry } = createPiRuntime({
+    const modelRuntime = await createPiRuntime({
       provider: config.pi.provider,
       apiKey: config.pi.apiKey
     });
-    const model = modelRegistry.find(config.pi.provider, config.pi.model);
+    const model = modelRuntime.getModel(config.pi.provider, config.pi.model);
     if (!model) {
       throw new Error(`Model not found: ${config.pi.provider}/${config.pi.model}`);
     }
-    if (requiresProviderAuth(model) && !config.pi.apiKey && !hasProviderAuth(config.pi.provider, { authStorage, modelRegistry })) {
+    if (requiresProviderAuth(model) && !config.pi.apiKey && !hasProviderAuth(config.pi.provider, modelRuntime)) {
       throw new Error(`No auth found for ${config.pi.provider}. Provide a Pi API key in bootstrap, or authenticate with Pi login for this provider during bootstrap.`);
     }
 
     const settingsManager = createPiSettingsManager(config);
     const { session } = await createAgentSession({
-      authStorage,
-      modelRegistry,
+      modelRuntime,
       model,
       settingsManager,
       sessionManager: SessionManager.inMemory()
@@ -386,13 +385,13 @@ export class AgentManager {
       this.pendingNewSessions.add(sessionKey);
     }
 
-    const { authStorage, modelRegistry } = createPiRuntime({
+    const modelRuntime = await createPiRuntime({
       provider: this.config.pi.provider,
       apiKey: this.config.pi.apiKey
     });
-    const model = modelRegistry.find(this.config.pi.provider, effectiveModelId);
+    const model = modelRuntime.getModel(this.config.pi.provider, effectiveModelId);
     if (!model) throw new Error(`Model not found: ${this.config.pi.provider}/${effectiveModelId}`);
-    if (requiresProviderAuth(model) && !this.config.pi.apiKey && !hasProviderAuth(this.config.pi.provider, { authStorage, modelRegistry })) {
+    if (requiresProviderAuth(model) && !this.config.pi.apiKey && !hasProviderAuth(this.config.pi.provider, modelRuntime)) {
       throw new Error(`No auth found for ${this.config.pi.provider}. Re-run bootstrap and complete login for this provider before Telegram starts.`);
     }
     const thinkingLevel = clampModelThinkingLevel(model, modelSelection.thinkingLevel);
@@ -441,8 +440,7 @@ export class AgentManager {
       cwd: policy.workspaceDir,
       agentDir: arisaHomeDir,
       resourceLoader,
-      authStorage,
-      modelRegistry,
+      modelRuntime,
       model,
       thinkingLevel,
       tools: policy.tools,
@@ -451,8 +449,8 @@ export class AgentManager {
       settingsManager,
       sessionManager
     });
-    const speedController = createModelSpeedController(session.agent.streamFn, speed);
-    session.agent.streamFn = speedController.streamFn;
+    const speedController = createModelSpeedController(session.agent.streamFunction, speed);
+    session.agent.streamFunction = speedController.streamFn;
 
     if (!hasExistingSession) {
       this.logger?.log("agent", `created new session for chat ${sessionKey}`);
@@ -480,7 +478,7 @@ export class AgentManager {
 
   async getAvailableModels(chatId) {
     const { listProviderModels } = await import("./pi-runtime.js");
-    const runtime = createPiRuntime({ provider: this.config.pi.provider, apiKey: this.config.pi.apiKey });
+    const runtime = await createPiRuntime({ provider: this.config.pi.provider, apiKey: this.config.pi.apiKey });
     return listProviderModels(this.config.pi.provider, runtime);
   }
 

@@ -33,8 +33,8 @@ export function getPiAuthIssue(error) {
   return null;
 }
 
-export function getPiAuthStatus(config, chatId = null) {
-  const runtime = createPiRuntime({
+export async function getPiAuthStatus(config, chatId = null) {
+  const runtime = await createPiRuntime({
     provider: config.pi.provider,
     apiKey: config.pi.apiKey
   });
@@ -51,8 +51,8 @@ export function getPiAuthStatus(config, chatId = null) {
   };
 }
 
-export function buildPiAuthTelegramMessage({ config, chatId = null, issue = null, verified = false }) {
-  const status = getPiAuthStatus(config, chatId);
+export async function buildPiAuthTelegramMessage({ config, chatId = null, issue = null, verified = false }) {
+  const status = await getPiAuthStatus(config, chatId);
   let title = `Pi authentication status for ${status.provider}/${status.model}.`;
   if (issue) {
     title = `Pi authentication needs attention for ${status.provider}/${status.model}.`;
@@ -95,8 +95,8 @@ export function buildPiAuthTelegramMessage({ config, chatId = null, issue = null
   return lines.join("\n");
 }
 
-export function buildPiAuthRecoveryBlockedMessage({ config, chatId = null, issue = null, renewalActive = false }) {
-  const status = getPiAuthStatus(config, chatId);
+export async function buildPiAuthRecoveryBlockedMessage({ config, chatId = null, issue = null, renewalActive = false }) {
+  const status = await getPiAuthStatus(config, chatId);
   const lines = [
     `Pi authentication is not ready for ${status.provider}/${status.model}.`,
     "I did not send your message to the agent."

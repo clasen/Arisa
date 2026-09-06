@@ -42,7 +42,7 @@ test("ignores unrelated Pi errors", () => {
   assert.equal(getPiAuthIssue(new Error("")), null);
 });
 
-test("reports the active chat model after authentication", () => {
+test("reports the active chat model after authentication", async () => {
   const config = {
     pi: {
       provider: "openai-codex",
@@ -60,7 +60,7 @@ test("reports the active chat model after authentication", () => {
     }
   };
 
-  const message = buildPiAuthTelegramMessage({ config, chatId: 123, verified: true });
+  const message = await buildPiAuthTelegramMessage({ config, chatId: 123, verified: true });
 
   assert.match(message, /^Pi authentication is working for openai-codex\/gpt-5\.6\./);
   assert.doesNotMatch(message, /gpt-5\.5/);

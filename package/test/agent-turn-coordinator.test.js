@@ -25,13 +25,16 @@ test("interactive turns run before queued background turns without overlapping",
   assert.equal(coordinator.diagnostic().completed, 3);
 });
 
-test("background turns expire safely before execution when their queue TTL elapses", async () => {
+test("background turns expire safely before execution when their queue TTL elapses", async (t) => {
+  t.mock.timers.enable({ apis: ["setTimeout"] });
   const coordinator = new AgentTurnCoordinator();
   const releaseActive = await coordinator.acquire({ priority: "interactive", label: "active" });
-  await assert.rejects(
+  const expired = assert.rejects(
     coordinator.acquire({ priority: "background", label: "stale batch", queueTtlMs: 10 }),
     (error) => error.code === "AGENT_TURN_QUEUE_EXPIRED" && error.retryable === true && error.outcomeUncertain === false
   );
+  t.mock.timers.tick(10);
+  await expired;
   assert.equal(coordinator.diagnostic().expired, 1);
   releaseActive();
 });

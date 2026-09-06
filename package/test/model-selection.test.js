@@ -355,17 +355,18 @@ test("maps supported model speeds to provider service tiers", () => {
 
 test("applies Pi speed to every provider request and updates it in place", async () => {
   const calls = [];
+  const model = { provider: "openai-codex", api: "openai-codex-responses", id: "gpt-5.6-sol" };
   const controller = createModelSpeedController((model, context, options) => {
     calls.push({ model, context, options });
     return "stream";
   }, 1);
 
-  assert.equal(controller.streamFn("model", "context", {
+  assert.equal(controller.streamFn(model, "context", {
     signal: "signal",
     onPayload: (payload) => ({ ...payload, preserved: true })
   }), "stream");
   controller.setSpeed(1.5);
-  controller.streamFn("model", "context", { signal: "signal" });
+  controller.streamFn(model, "context", { signal: "signal" });
 
   assert.equal(calls[0].options.serviceTier, "default");
   assert.equal(calls[1].options.serviceTier, "priority");

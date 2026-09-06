@@ -413,7 +413,7 @@ export async function createTelegramBot({ config, artifactStore, toolRegistry, t
     const auth = await authorizeContext(ctx);
     if (!auth.ok) return;
     if (authController.getIssue()) {
-      await ctx.reply(authController.buildBlockedMessage(ctx.chat.id));
+      await ctx.reply(await authController.buildBlockedMessage(ctx.chat.id));
       return;
     }
     await handleNewCommand(ctx);
@@ -540,7 +540,7 @@ export async function createTelegramBot({ config, artifactStore, toolRegistry, t
     if (await authController.submitRenewalInput(ctx)) return;
 
     if (authController.getIssue()) {
-      await ctx.reply(authController.buildBlockedMessage(ctx.chat.id));
+      await ctx.reply(await authController.buildBlockedMessage(ctx.chat.id));
       return;
     }
 
@@ -552,7 +552,7 @@ export async function createTelegramBot({ config, artifactStore, toolRegistry, t
       if (wasPromptErrorNotified(error)) return;
       const issue = getPiAuthIssue(error);
       await ctx.reply(issue
-        ? buildPiAuthTelegramMessage({ config, chatId: ctx.chat.id, issue })
+        ? await buildPiAuthTelegramMessage({ config, chatId: ctx.chat.id, issue })
         : getErrorMessage(error));
     });
   });

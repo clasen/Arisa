@@ -23,7 +23,7 @@ import {
 
 export async function runTelegramBootstrap({ telegramApiKey, setupToken, botInfo }) {
   const bot = new Bot(telegramApiKey);
-  const runtime = createPiRuntime();
+  const runtime = await createPiRuntime();
   const providers = sortBootstrapProviders(listPiProviders(runtime));
   let setupChatId = null;
   let chatMeta = {};
@@ -90,7 +90,7 @@ export async function runTelegramBootstrap({ telegramApiKey, setupToken, botInfo
 
   const askModel = async (ctx = null, page = 0) => {
     state = "model";
-    const models = sortBootstrapModels(selectedProvider.provider, listProviderModels(selectedProvider.provider, createPiRuntime()));
+    const models = sortBootstrapModels(selectedProvider.provider, listProviderModels(selectedProvider.provider, await createPiRuntime()));
     const keyboard = buildPagedInlineKeyboard("model", models.map((model) => ({ text: formatPiModelOption(model) })), {
       page,
       pageSize: telegramConfigDefaults.modelPickerPageSize
@@ -119,7 +119,7 @@ export async function runTelegramBootstrap({ telegramApiKey, setupToken, botInfo
   };
 
   const askAuthMethod = async (ctx = null) => {
-    const providerRuntime = createPiRuntime();
+    const providerRuntime = await createPiRuntime();
     const selectedAuthReady = hasProviderAuth(selectedProvider.provider, providerRuntime);
     const providerSupportsOAuth = supportsProviderOAuth(selectedProvider.provider, providerRuntime);
     const buttons = [];
@@ -142,7 +142,7 @@ export async function runTelegramBootstrap({ telegramApiKey, setupToken, botInfo
     try {
       await login.promise;
       activeLogin = null;
-      if (hasProviderAuth(selectedProvider.provider, createPiRuntime())) {
+      if (hasProviderAuth(selectedProvider.provider, await createPiRuntime())) {
         await sendSetupMessage(`Detected Pi auth for ${selectedProvider.provider}.`);
         await askBackground();
         return;
@@ -157,7 +157,7 @@ export async function runTelegramBootstrap({ telegramApiKey, setupToken, botInfo
   };
 
   const startPiLogin = async () => {
-    if (hasProviderAuth(selectedProvider.provider, createPiRuntime())) {
+    if (hasProviderAuth(selectedProvider.provider, await createPiRuntime())) {
       await sendSetupMessage(`Existing Pi auth for ${selectedProvider.provider} detected.`);
       await askBackground();
       return;
@@ -248,7 +248,7 @@ export async function runTelegramBootstrap({ telegramApiKey, setupToken, botInfo
       return;
     }
     if (action === "model" && state === "model") {
-      const models = sortBootstrapModels(selectedProvider.provider, listProviderModels(selectedProvider.provider, createPiRuntime()));
+      const models = sortBootstrapModels(selectedProvider.provider, listProviderModels(selectedProvider.provider, await createPiRuntime()));
       selectedModel = models[Number(rawValue)];
       if (!selectedModel) return;
       await askAuthMethod(ctx);
@@ -256,7 +256,7 @@ export async function runTelegramBootstrap({ telegramApiKey, setupToken, botInfo
     }
     if (action === "auth" && state === "auth-method") {
       if (rawValue === "existing") {
-        if (hasProviderAuth(selectedProvider.provider, createPiRuntime())) {
+        if (hasProviderAuth(selectedProvider.provider, await createPiRuntime())) {
           await askBackground(ctx);
         } else {
           await sendSetupMessage(`No existing Pi auth found for ${selectedProvider.provider}.`);
