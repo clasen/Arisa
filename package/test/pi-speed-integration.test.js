@@ -45,7 +45,7 @@ test("speed picker updates Astra in place, persists per topic, and closes unchan
     answerCallbackQuery: async (answer) => answers.push(answer)
   };
   await controls.showSpeedPicker(ctx);
-  assert.equal(replies[0][1]?.reply_markup.inline_keyboard[1][0].callback_data, "speed:1.5");
+  assert.equal(replies[0][1]?.reply_markup.inline_keyboard[1][0].callback_data, "speed:2");
   const handler = createTelegramModelCallbackHandler({
     ...controls, config,
     authorizeContext: async () => ({ ok: true }),
@@ -54,13 +54,14 @@ test("speed picker updates Astra in place, persists per topic, and closes unchan
   });
   ctx.callbackQuery = { data: "speed:1.5", message: { message_id: 456 } };
   await handler(ctx);
-  assert.deepEqual(updates, [["123:topic:7", 1.5]]);
-  assert.equal(resolveChatSpeed(writes[0], "123:topic:7"), 1.5);
+  assert.deepEqual(updates, [["123:topic:7", 2]]);
+  assert.equal(resolveChatSpeed(writes[0], "123:topic:7"), 2);
   assert.equal(resolveChatSpeed(config, "123:topic:8"), 1);
   assert.equal(resolveChatModelSelection(config, "123:topic:7").sessionRevision, 0);
+  ctx.callbackQuery.data = "speed:2";
   await handler(ctx);
   assert.equal(writes.length, 1);
-  assert.match(replies.at(-1)[2], /Already using speed 1.5x/);
+  assert.match(replies.at(-1)[2], /Already using speed 2.0x/);
   ctx.callbackQuery.data = "speed:1";
   await handler(ctx);
   assert.equal(resolveChatSpeed(config, "123:topic:7"), 1);
@@ -99,15 +100,15 @@ test("Pi SDK sends the selected speed in the actual Codex payload across turns",
     ...options, transport: "sse", maxRetries: 0
   }), 1);
   session.agent.streamFunction = controller.streamFn;
-  for (const speed of [1, 1.5, 1]) {
+  for (const speed of [1, 1.5, 2, 1]) {
     controller.setSpeed(speed);
     await session.prompt("Reply OK");
     const message = session.messages.at(-1);
     assert.equal(message.stopReason, "stop", message.errorMessage);
     assert.equal(requests.at(-1).model, model.id);
-    assert.equal(requests.at(-1).service_tier, speed === 1.5 ? "priority" : "default");
+    assert.equal(requests.at(-1).service_tier, speed > 1 ? "priority" : "default");
   }
-  assert.equal(requests.length, 3);
+  assert.equal(requests.length, 4);
 });
 
 test("speed control leaves unsupported provider payloads and hooks untouched", async () => {
@@ -148,7 +149,7 @@ test("Arisa creates and reuses Telegram sessions and opens its TUI with the inst
     try {
       assert.equal(context.session.model.id, "gpt-6-astra");
       assert.equal(context.session.agent.streamFunction, context.speedController.streamFn);
-      assert.equal(context.speedController.speed, 1.5);
+      assert.equal(context.speedController.speed, 2);
       await manager.setModelSpeed("123", 1);
       selectChatSpeed(config, "123", 1);
       const reused = await manager.getSessionContext("123", {});

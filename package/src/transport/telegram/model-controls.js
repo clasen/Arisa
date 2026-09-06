@@ -8,7 +8,7 @@ import {
   selectChatThinkingLevel
 } from "../../core/agent/model-selection.js";
 import { clampModelThinkingLevel, createPiRuntime, listModelThinkingLevels, listProviderModels, modelSupportsThinking } from "../../core/agent/pi-runtime.js";
-import { clampModelSpeed, MODEL_SPEEDS, modelSupportsSpeed } from "../../core/agent/model-speed.js";
+import { clampModelSpeed, listModelSpeeds, modelSupportsSpeed } from "../../core/agent/model-speed.js";
 import { buildEffortPicker, buildModelPicker, buildSpeedPicker, reverseModelOrder } from "./model-picker.js";
 
 function chatKey(chatId) {
@@ -89,12 +89,12 @@ export function createTelegramModelControls({ config, saveConfig, agentManager, 
     const model = models.find((item) => item.id === resolveChatModel(config, route.sessionId));
     if (!model) throw new Error(`Model not found for provider ${agentConfig.provider}`);
     if (!modelSupportsSpeed(model)) {
-      return editOrReplyText(ctx, `${model.provider}/${model.id} does not support speed 1.5x.`);
+      return editOrReplyText(ctx, `${model.provider}/${model.id} does not support fast mode.`);
     }
     const picker = buildSpeedPicker({
       provider: model.provider,
       modelId: model.id,
-      speeds: MODEL_SPEEDS,
+      speeds: listModelSpeeds(model),
       selectedSpeed: resolveChatSpeed(config, route.sessionId)
     });
     return editOrReplyPicker(ctx, picker);

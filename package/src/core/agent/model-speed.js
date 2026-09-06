@@ -1,4 +1,4 @@
-export const MODEL_SPEEDS = Object.freeze([1, 1.5]);
+export const MODEL_SPEEDS = Object.freeze([1, 1.5, 2]);
 
 export function normalizeModelSpeed(speed) {
   const value = Number(speed);
@@ -21,13 +21,21 @@ export function modelSupportsSpeed(model) {
     );
 }
 
+export function modelFastSpeed(modelId) {
+  return modelId === "gpt-6-astra" ? 2 : 1.5;
+}
+
+export function listModelSpeeds(model) {
+  return modelSupportsSpeed(model) ? [1, modelFastSpeed(model.id)] : [1];
+}
+
 export function clampModelSpeed(model, speed) {
   const normalized = normalizeModelSpeed(speed);
-  return normalized === 1.5 && !modelSupportsSpeed(model) ? 1 : normalized;
+  return normalized > 1 && modelSupportsSpeed(model) ? modelFastSpeed(model.id) : 1;
 }
 
 export function speedToServiceTier(speed) {
-  return normalizeModelSpeed(speed) === 1.5 ? "priority" : "default";
+  return normalizeModelSpeed(speed) > 1 ? "priority" : "default";
 }
 
 export function createModelSpeedController(streamFn, initialSpeed) {

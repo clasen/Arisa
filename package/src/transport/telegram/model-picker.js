@@ -37,7 +37,7 @@ export function parseEffortPickerAction(data) {
 
 export function parseSpeedPickerAction(data) {
   if (data === "noop:page") return { type: "noop", value: null };
-  const speed = /^speed:(1(?:\.5)?)$/.exec(String(data || ""));
+  const speed = /^speed:(1(?:\.5)?|2)$/.exec(String(data || ""));
   return speed ? { type: "speed", speed: Number(speed[1]) } : null;
 }
 

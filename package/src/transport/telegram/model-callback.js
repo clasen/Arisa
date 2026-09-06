@@ -1,7 +1,7 @@
 import { getErrorMessage } from "../../core/agent/auth-flow.js";
 import { resolveChatModel, resolveChatSpeed, resolveChatThinkingLevel } from "../../core/agent/model-selection.js";
 import { clampModelThinkingLevel, listModelThinkingLevels, modelSupportsThinking } from "../../core/agent/pi-runtime.js";
-import { modelSupportsSpeed } from "../../core/agent/model-speed.js";
+import { clampModelSpeed, modelSupportsSpeed } from "../../core/agent/model-speed.js";
 import { parseEffortPickerAction, parseModelPickerAction, parseSpeedPickerAction } from "./model-picker.js";
 
 export async function closeModelPicker(ctx, { messageText, callbackText }) {
@@ -181,9 +181,10 @@ export function createTelegramModelCallbackHandler({
           return;
         }
         if (!modelSupportsSpeed(model)) {
-          await ctx.answerCallbackQuery({ text: "This model does not support speed 1.5x.", show_alert: true });
+          await ctx.answerCallbackQuery({ text: "This model does not support fast mode.", show_alert: true });
           return;
         }
+        action.speed = clampModelSpeed(model, action.speed);
         const currentSpeed = resolveChatSpeed(config, modelChatId);
         if (action.speed === currentSpeed) {
           await closeModelPicker(ctx, {

@@ -1,4 +1,4 @@
-import { normalizeModelSpeed } from "./model-speed.js";
+import { modelFastSpeed, normalizeModelSpeed } from "./model-speed.js";
 
 function chatKey(chatId) {
   return String(chatId);
@@ -49,9 +49,10 @@ export function resolveChatThinkingLevel(config, chatId) {
 }
 
 export function resolveChatSpeed(config, chatId) {
-  const speed = resolveChatModelSelection(config, chatId).speed;
+  const { speed, model } = resolveChatModelSelection(config, chatId);
   if (speed === undefined) throw new Error("Model speed is not configured for the active runtime");
-  return speed;
+  // Preserve legacy fast selections while displaying the model-specific multiplier.
+  return speed > 1 ? modelFastSpeed(model) : speed;
 }
 
 export function selectChatModel(config, chatId, model, { thinkingLevel, speed } = {}) {

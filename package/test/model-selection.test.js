@@ -197,7 +197,7 @@ test("builds and parses the speed picker", () => {
   assert.match(picker.replyMarkup.inline_keyboard[1][0].text, /^✓ 1\.5x$/);
   assert.deepEqual(parseSpeedPickerAction("speed:1.5"), { type: "speed", speed: 1.5 });
   assert.deepEqual(parseSpeedPickerAction("speed:1"), { type: "speed", speed: 1 });
-  assert.equal(parseSpeedPickerAction("speed:2"), null);
+  assert.equal(parseSpeedPickerAction("speed:3"), null);
 });
 
 test("closes the picker after selecting the already active model and effort", async () => {
@@ -350,7 +350,16 @@ test("maps supported model speeds to provider service tiers", () => {
   assert.equal(clampModelSpeed({ ...fastModel, id: "gpt-5.3" }, 1.5), 1);
   assert.equal(speedToServiceTier(1), "default");
   assert.equal(speedToServiceTier(1.5), "priority");
-  assert.throws(() => normalizeModelSpeed(2), /Invalid model speed/);
+  assert.equal(normalizeModelSpeed(2), 2);
+  assert.equal(speedToServiceTier(2), "priority");
+  const legacyConfig = { pi: { provider: "openai-codex", model: "gpt-6-astra", speed: 1.5 } };
+  assert.equal(resolveChatSpeed(legacyConfig, "legacy"), 2);
+  assert.equal(legacyConfig.pi.speed, 1.5);
+  assert.equal(clampModelSpeed({ ...fastModel, id: "gpt-6-astra" }, 1.5), 2);
+  assert.equal(clampModelSpeed({ ...fastModel, id: "gpt-6-astra" }, 2), 2);
+  assert.equal(clampModelSpeed(fastModel, 2), 1.5);
+  assert.deepEqual(parseSpeedPickerAction("speed:2"), { type: "speed", speed: 2 });
+  assert.throws(() => normalizeModelSpeed(3), /Invalid model speed/);
 });
 
 test("applies Pi speed to every provider request and updates it in place", async () => {
