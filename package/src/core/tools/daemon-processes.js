@@ -56,6 +56,7 @@ export function daemonPaths(toolNameOrOptions, scope) {
     instanceId: getDaemonInstanceId(identity.scope),
     root,
     commandsDir: path.join(root, "commands"),
+    resultsDir: path.join(root, "results"),
     pidFile: path.join(root, "daemon.pid"),
     metaFile: path.join(root, "daemon.meta.json"),
     statusFile: path.join(root, "status.json"),
@@ -186,6 +187,13 @@ export async function readDaemonDiagnostic({ toolName, scope, autoStart = false 
       nextAt: status.nextRestartAt || null
     },
     disposition: daemonDisposition({ state, alive, autoStart: Boolean(autoStart), restartRequested }),
+    journal: status.journal && typeof status.journal === "object" ? {
+      active: Number(status.journal.active || 0),
+      completed: Number(status.journal.completed || 0),
+      migrated: Number(status.journal.migrated || 0),
+      pruned: Number(status.journal.pruned || 0),
+      scanMs: Number(status.journal.scanMs || 0)
+    } : null,
     updatedAt: status.updatedAt || null,
     logFile: paths.logFile
   };
@@ -275,7 +283,8 @@ export async function unregisterManagedDaemon(toolNameOrOptions, { scope } = {})
     rm(paths.startLockFile, { force: true }),
     rm(paths.capabilityFile, { force: true }),
     process.platform === "win32" ? Promise.resolve() : rm(paths.socketFile, { force: true }),
-    rm(paths.commandsDir, { recursive: true, force: true })
+    rm(paths.commandsDir, { recursive: true, force: true }),
+    rm(paths.resultsDir, { recursive: true, force: true })
   ]);
   return { toolName: paths.toolName, scope: paths.scope, instanceId: paths.instanceId };
 }

@@ -12,6 +12,9 @@ export const daemonConfigDefaults = Object.freeze({
   startupTimeoutMs: 120_000,
   stopTimeoutMs: 3_000,
   queuePollIntervalMs: 250,
+  journalRetentionMs: 24 * 60 * 60_000,
+  journalMaxCompleted: 2_048,
+  journalSweepIntervalMs: 5 * 60_000,
   streamBufferBytes: 1_048_576,
   ipcFrameBytes: 1_048_576
 });

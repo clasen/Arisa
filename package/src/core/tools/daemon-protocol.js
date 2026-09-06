@@ -10,7 +10,7 @@ export function daemonJobPaths(paths, id) {
   return {
     request: path.join(paths.commandsDir, `${id}.request.json`),
     processing: path.join(paths.commandsDir, `${id}.processing.json`),
-    result: path.join(paths.commandsDir, `${id}.result.json`)
+    result: path.join(paths.resultsDir || paths.commandsDir, `${id}.result.json`)
   };
 }
 

@@ -21,7 +21,10 @@ const policy = {
   restartBackoffMaxMs: 40,
   startupTimeoutMs: 2_000,
   stopTimeoutMs: 300,
-  queuePollIntervalMs: 10
+  queuePollIntervalMs: 10,
+  journalRetentionMs: 24 * 60 * 60_000,
+  journalMaxCompleted: 128,
+  journalSweepIntervalMs: 60_000
 };
 
 await mkdir(path.join(homeDir, "state"), { recursive: true });
@@ -51,8 +54,10 @@ const {
 const { submitDaemonControl: directSubmitDaemonControl } = await import("../src/core/tools/daemon-client.js");
 const {
   DAEMON_EVENT_TYPES: directDaemonEventTypes,
-  DAEMON_PROTOCOL_VERSION: directDaemonProtocolVersion
+  DAEMON_PROTOCOL_VERSION: directDaemonProtocolVersion,
+  daemonJobPaths
 } = await import("../src/core/tools/daemon-protocol.js");
+const { maintainDaemonJournal } = await import("../src/core/tools/daemon-journal.js");
 const { createToolProcessSupervisor, formatDaemonOutcome } = await import("../src/runtime/tool-process-supervisor.js");
 const { superviseDaemon } = await import("../src/core/tools/daemon-health.js");
 const { ToolRegistry } = await import("../src/core/tools/tool-registry.js");
@@ -127,7 +132,7 @@ test("streams ordered daemon events and persists the terminal result", async () 
   assert.deepEqual(output, { echo: "done" });
   assert.deepEqual(events.map((event) => event.type), ["accepted", "progress", "chunk", "completed"]);
   assert.deepEqual(events.map((event) => event.sequence), [1, 2, 3, 4]);
-  assert.ok((await readdir(runtime.paths.commandsDir)).some((file) => file.endsWith(".result.json")));
+  assert.ok((await readdir(runtime.paths.resultsDir)).some((file) => file.endsWith(".result.json")));
   await runtime.stop();
 });
 
@@ -140,7 +145,7 @@ test("cancels a timed-out job without restarting the shared daemon", async () =>
   );
 
   const terminal = await waitFor(async () => {
-    const result = await readJson(path.join(runtime.paths.commandsDir, `${jobId}.result.json`), null);
+    const result = await readJson(daemonJobPaths(runtime.paths, jobId).result, null);
     return result?.terminal || null;
   });
   assert.equal(terminal.type, "failed");
@@ -190,6 +195,41 @@ test("recovers queued and accepted journal records after daemon start", async ()
   assert.deepEqual(queued, { echo: "queued" });
   assert.deepEqual(accepted, { echo: "accepted" });
   await runtime.stop();
+});
+
+test("migrates and bounds completed daemon journal records outside the active queue", async () => {
+  const paths = daemonPaths({ toolName: "journal-test", scope: { type: "chat", chatId: "303" } });
+  await maintainDaemonJournal(paths);
+  for (let index = 0; index < 5; index += 1) {
+    await writeJson(path.join(paths.commandsDir, `legacy-${index}.result.json`), {
+      id: `legacy-${index}`,
+      terminal: { version: 1, jobId: `legacy-${index}`, type: "completed", sequence: 2, payload: { output: { index } } }
+    });
+  }
+  await writeJson(path.join(paths.commandsDir, "legacy-active.request.json"), {
+    id: "legacy-active",
+    status: "queued",
+    payload: { value: "active" }
+  });
+  await writeJson(path.join(paths.commandsDir, "legacy-active.result.json"), {
+    id: "legacy-active",
+    terminal: { version: 1, jobId: "legacy-active", type: "completed", sequence: 2, payload: { output: { active: true } } }
+  });
+
+  const journal = await maintainDaemonJournal(paths, {
+    journalRetentionMs: 60_000,
+    journalMaxCompleted: 2
+  });
+  const activeFiles = await readdir(paths.commandsDir);
+  const resultFiles = await readdir(paths.resultsDir);
+
+  assert.equal(journal.active, 1);
+  assert.equal(journal.completed, 3);
+  assert.equal(journal.migrated, 3);
+  assert.equal(journal.pruned, 3);
+  assert.deepEqual(activeFiles, ["legacy-active.request.json"]);
+  assert.equal(resultFiles.includes("legacy-active.result.json"), true);
+  assert.equal(resultFiles.length, 3);
 });
 
 test("isolates daemon process files and context by chat scope", async () => {

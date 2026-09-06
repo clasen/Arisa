@@ -1,5 +1,5 @@
 import net from "node:net";
-import { chmod, mkdir, readdir, rename, rm, unlink } from "node:fs/promises";
+import { chmod, readdir, rename, rm, unlink } from "node:fs/promises";
 import {
   ensureDaemonCapability,
   readJson,
@@ -7,6 +7,7 @@ import {
   writeJson
 } from "./daemon-processes.js";
 import { loadDaemonPolicy } from "./daemon-policy.js";
+import { ensureDaemonJournal, maintainDaemonJournal } from "./daemon-journal.js";
 import {
   DAEMON_CONTROL_FIELD,
   DAEMON_PROTOCOL_VERSION,
@@ -37,7 +38,7 @@ export function createDaemonWorker({ toolName, paths }) {
   let statusWrite = Promise.resolve();
 
   async function ensure() {
-    await mkdir(paths.commandsDir, { recursive: true });
+    await ensureDaemonJournal(paths);
   }
 
   async function getPid() {
@@ -96,6 +97,7 @@ export function createDaemonWorker({ toolName, paths }) {
       streamBufferBytes: policy.streamBufferBytes || 1_048_576
     };
     const subscribers = new Map();
+    const deliveredSequences = new WeakMap();
     const activeJobs = new Map();
     const cancelledJobs = new Set();
     let lastActivity = Date.now();
@@ -103,21 +105,42 @@ export function createDaemonWorker({ toolName, paths }) {
     let exiting = false;
     let acceptingWork = true;
     let processRequested = false;
+    let journalMaintenance = Promise.resolve();
 
-    await ensure();
+    function maintainJournal() {
+      const operation = journalMaintenance
+        .catch(() => {})
+        .then(() => maintainDaemonJournal(paths, policy));
+      journalMaintenance = operation;
+      return operation;
+    }
+
+    const journal = await maintainJournal();
     const capabilityToken = process.env.ARISA_DAEMON_CAPABILITY || await ensureDaemonCapability(paths);
     await writeStatus({
       state: "starting",
       pid: process.pid,
       heartbeatAt: new Date().toISOString(),
       supportsRecovery: typeof recover === "function",
+      journal,
       message: "Daemon work loop started; waiting for health check"
     });
+
+    async function sendFrame(socket, frame) {
+      const delivered = deliveredSequences.get(socket) || new Map();
+      if ((delivered.get(frame.jobId) || 0) >= frame.sequence) return true;
+      const sent = await writeDaemonSocketFrame(socket, frame, ipcLimits);
+      if (sent) {
+        delivered.set(frame.jobId, frame.sequence);
+        deliveredSequences.set(socket, delivered);
+      }
+      return sent;
+    }
 
     async function publish(frame) {
       const sockets = [...(subscribers.get(frame.jobId) || [])];
       for (const socket of sockets) {
-        if (!(await writeDaemonSocketFrame(socket, frame, ipcLimits))) subscribers.get(frame.jobId)?.delete(socket);
+        if (!(await sendFrame(socket, frame))) subscribers.get(frame.jobId)?.delete(socket);
       }
     }
 
@@ -276,7 +299,7 @@ export function createDaemonWorker({ toolName, paths }) {
           subscribers.get(jobId).add(socket);
           subscribedJobs.add(jobId);
           readJson(daemonJobPaths(paths, jobId).result, null).then((result) => {
-            if (result?.terminal) return writeDaemonSocketFrame(socket, result.terminal, ipcLimits);
+            if (result?.terminal) return sendFrame(socket, result.terminal);
             return processQueue();
           }).catch(() => socket.destroy());
         }
@@ -293,10 +316,19 @@ export function createDaemonWorker({ toolName, paths }) {
     const heartbeatTimer = setInterval(() => {
       writeStatus({ heartbeatAt: new Date().toISOString() }).catch(() => {});
     }, policy.heartbeatIntervalMs);
+    const journalTimer = setInterval(() => {
+      maintainJournal()
+        .then((journal) => writeStatus({ journal }))
+        .catch((error) => writeStatus({
+          lastError: { at: new Date().toISOString(), phase: "journal", message: error?.message || String(error) }
+        }));
+    }, policy.journalSweepIntervalMs || 5 * 60_000);
+    journalTimer.unref?.();
     const idleTimer = idleTimeoutMs > 0 ? setInterval(async () => {
       if (processing || exiting || Date.now() - lastActivity <= idleTimeoutMs) return;
       exiting = true;
       clearInterval(heartbeatTimer);
+      clearInterval(journalTimer);
       clearInterval(idleTimer);
       await beforeExit?.();
       await writeStatus({ state: "stopped", restartRequested: false, nextRestartAt: null, message: "Idle timeout reached" });
