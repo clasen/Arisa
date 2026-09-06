@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
@@ -57,7 +57,7 @@ test("serializes 100 concurrent artifact writes across store instances", async (
     })
   )));
 
-  const persisted = JSON.parse(await readFile(getChatArtifactsIndexFile(chatId), "utf8"));
+  const persisted = await new ArtifactStore().forChat(chatId).listRecent(100);
   assert.equal(persisted.length, 100);
   assert.equal(new Set(persisted.map((artifact) => artifact.id)).size, 100);
   assert.deepEqual(
@@ -72,7 +72,7 @@ test("refuses to overwrite a corrupt artifact index", async () => {
   await resetHome();
   const chatId = "corrupt-chat";
   const indexFile = getChatArtifactsIndexFile(chatId);
-  await new ArtifactStore().forChat(chatId).createText({ text: "safe", source: { type: "test" } });
+  await mkdir(path.dirname(indexFile), { recursive: true });
   await writeFile(indexFile, "{truncated", "utf8");
 
   await assert.rejects(

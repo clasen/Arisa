@@ -46,8 +46,13 @@ export function getChatArtifactsDir(chatId) {
   return path.join(getChatDir(chatId), "artifacts");
 }
 
+// Legacy JSON index; retained unchanged as a migration backup.
 export function getChatArtifactsIndexFile(chatId) {
   return path.join(getChatDir(chatId), "state", "artifacts.json");
+}
+
+export function getChatArtifactsDatabaseFile(chatId) {
+  return path.join(getChatDir(chatId), "state", "artifacts.sqlite");
 }
 
 export function getChatSessionSeedFile(chatId) {

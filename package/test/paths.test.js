@@ -9,6 +9,7 @@ import {
   chatsDir,
   createIpcSocketPath,
   getChatArtifactsDir,
+  getChatArtifactsDatabaseFile,
   getChatSessionSeedFile,
   getChatTelegramWorkspacesFile,
   getChatToolConfigPath,
@@ -31,6 +32,7 @@ test("keeps chat artifact paths scoped below the chat directory", () => {
   const artifactsDir = getChatArtifactsDir("chat-1");
 
   assert.equal(artifactsDir, path.join(chatsDir, "chat-1", "artifacts"));
+  assert.equal(getChatArtifactsDatabaseFile("chat-1"), path.join(chatsDir, "chat-1", "state", "artifacts.sqlite"));
 });
 
 test("keeps pending session seeds scoped below the chat state directory", () => {

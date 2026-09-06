@@ -1,10 +1,10 @@
-import { copyFile, mkdir, open, readFile, rename, unlink, writeFile } from "node:fs/promises";
+import { copyFile, mkdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 import crypto from "node:crypto";
-import { getChatArtifactsDir, getChatArtifactsIndexFile } from "../../platform/paths.js";
+import { getChatArtifactsDir, getChatArtifactsIndexFile, getChatArtifactsDatabaseFile } from "../../platform/paths.js";
+import { withArtifactIndex, appendArtifact, getArtifact, listRecentArtifacts } from "./artifact-index.js";
 
 const UTF8_BOM = Buffer.from([0xef, 0xbb, 0xbf]);
-const indexOperations = new Map();
 
 function id() {
   return crypto.randomUUID();
@@ -43,94 +43,27 @@ async function copyArtifactFile(originalPath, destPath, mimeType) {
   return writeFile(destPath, withUtf8Bom(content));
 }
 
-async function serializeIndexOperation(indexFile, operation) {
-  const previous = indexOperations.get(indexFile) || Promise.resolve();
-  const current = previous.catch(() => {}).then(operation);
-  indexOperations.set(indexFile, current);
-  try {
-    return await current;
-  } finally {
-    if (indexOperations.get(indexFile) === current) indexOperations.delete(indexFile);
-  }
-}
-
-async function syncParentDirectory(file) {
-  let handle;
-  try {
-    handle = await open(path.dirname(file), "r");
-    await handle.sync();
-  } catch {
-    // Some platforms do not support fsync on directories; rename remains atomic there.
-  } finally {
-    await handle?.close().catch(() => {});
-  }
-}
-
-async function writeJsonAtomically(file, value) {
-  await mkdir(path.dirname(file), { recursive: true });
-  const temporary = `${file}.${process.pid}.${id()}.tmp`;
-  let handle;
-  try {
-    handle = await open(temporary, "wx", 0o600);
-    await handle.writeFile(`${JSON.stringify(value, null, 2)}\n`, "utf8");
-    await handle.sync();
-    await handle.close();
-    handle = null;
-    await rename(temporary, file);
-    await syncParentDirectory(file);
-  } catch (error) {
-    await handle?.close().catch(() => {});
-    await unlink(temporary).catch(() => {});
-    throw error;
-  }
-}
-
 class ChatArtifactStore {
   constructor(chatId) {
     this.chatId = String(chatId);
     this.rootDir = getChatArtifactsDir(this.chatId);
-    this.indexFile = getChatArtifactsIndexFile(this.chatId);
-    this.items = null;
-  }
-
-  async reload() {
-    try {
-      const parsed = JSON.parse(await readFile(this.indexFile, "utf8"));
-      if (!Array.isArray(parsed)) throw new Error("Artifact index must contain a JSON array");
-      this.items = parsed;
-    } catch (error) {
-      if (error?.code === "ENOENT") {
-        this.items = [];
-        return;
-      }
-      throw new Error(`Artifact index is unreadable: ${this.indexFile}`, { cause: error });
-    }
+    this.index = {
+      chatId: this.chatId,
+      legacyFile: getChatArtifactsIndexFile(this.chatId),
+      databaseFile: getChatArtifactsDatabaseFile(this.chatId)
+    };
   }
 
   async init() {
     await mkdir(this.rootDir, { recursive: true });
-    if (!this.items) await this.reload();
+    await withArtifactIndex(this.index, () => {});
   }
 
   async appendToIndex(artifact) {
-    return serializeIndexOperation(this.indexFile, async () => {
-      await this.reload();
-      this.items.push(artifact);
-      await writeJsonAtomically(this.indexFile, this.items);
-      return artifact;
-    });
-  }
-
-  async readIndex() {
-    return serializeIndexOperation(this.indexFile, async () => {
-      await this.reload();
-      return this.items;
-    });
+    return withArtifactIndex(this.index, (db) => appendArtifact(db, artifact));
   }
 
   async createText({ text, mimeType = "text/plain", source, metadata = {} }) {
-    await this.init();
-    await this.reload();
     const artifact = {
       id: id(),
       chatId: this.chatId,
@@ -146,7 +79,6 @@ class ChatArtifactStore {
 
   async createFileArtifact({ fileName, kind, mimeType, source, metadata = {}, writeFileContent }) {
     await this.init();
-    await this.reload();
     const artifactId = id();
     const dir = path.join(this.rootDir, artifactId);
     await mkdir(dir, { recursive: true });
@@ -188,15 +120,14 @@ class ChatArtifactStore {
   }
 
   async get(artifactId) {
-    await this.init();
-    const items = await this.readIndex();
-    return items.find((item) => item.id === artifactId) || null;
+    return withArtifactIndex(this.index, (db) => getArtifact(db, artifactId));
   }
 
   async listRecent(limit = 20) {
-    await this.init();
-    const items = await this.readIndex();
-    return [...items].slice(-limit).reverse();
+    if (!Number.isSafeInteger(limit) || limit < 0 || limit > 1000) {
+      throw new RangeError("Artifact list limit must be an integer between 0 and 1000");
+    }
+    return withArtifactIndex(this.index, (db) => listRecentArtifacts(db, limit));
   }
 }
 

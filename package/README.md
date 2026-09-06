@@ -102,7 +102,8 @@ Global:
 
 Per chat (`~/.arisa/chats/<chatId>/`):
 - artifact files are stored under `artifacts/`
-- the artifact index is stored in `state/artifacts.json`
+- the artifact index is stored in `state/artifacts.sqlite`; the legacy `state/artifacts.json` is imported once, incrementally, and retained unchanged as a migration backup
+- artifact reads and writes use indexed SQLite operations rather than loading the chat's complete history into memory; see [low-memory operation and migration](LOW-MEMORY.md)
 - Pi sessions live under `state/pi-sessions/<revision>/`
 - chat-scoped tool config overrides live in `config/tools/<tool>/config.js`
 - chat-scoped daemon infrastructure lives in `state/tools/<tool>/daemon/`; persistent tool data stays beside it

@@ -1,7 +1,5 @@
 #!/usr/bin/env node
 
-import { bootstrapIfNeeded } from "./runtime/bootstrap.js";
-import { applyRuntimeOverrides, createApp } from "./runtime/create-app.js";
 import { loadConfig } from "./core/config/config-store.js";
 import { createLogger } from "./runtime/logger.js";
 import { getServiceStatus, handoffServiceRestart, registerServiceProcess, restartService, serviceEntryFile, startService, stopService, unregisterServiceProcess } from "./runtime/service-manager.js";
@@ -10,10 +8,8 @@ import { recordUnexpectedWorkerExit } from "./runtime/worker-recovery-report.js"
 import { flushArisaHome } from "./runtime/flush.js";
 import { readPackageVersion, showServiceLogs } from "./runtime/log-viewer.js";
 import { arisaPackageDir } from "./platform/paths.js";
-import { runSlaveCli } from "./runtime/slave-cli.js";
 import { unregisterSlaveServiceProcess } from "./runtime/slave-service.js";
 import { protectCoreFromOom } from "./runtime/oom-protection.js";
-import { runTui } from "./runtime/tui.js";
 
 process.env.ARISA_PACKAGE_DIR = arisaPackageDir;
 
@@ -128,7 +124,13 @@ process.once("SIGINT", () => {
   shutdown(0);
 });
 
+async function bootstrapIfNeeded(options) {
+  const bootstrap = await import("./runtime/bootstrap.js");
+  return bootstrap.bootstrapIfNeeded(options);
+}
+
 async function startRuntimeApp() {
+  const { createApp } = await import("./runtime/create-app.js");
   const app = await createApp({
     logger,
     runtimeOverrides,
@@ -142,6 +144,7 @@ async function startRuntimeApp() {
 }
 
 async function startBackgroundService() {
+  const { applyRuntimeOverrides } = await import("./runtime/create-app.js");
   const persistedConfig = await loadConfig();
   applyRuntimeOverrides(persistedConfig, runtimeOverrides);
   const result = await startService({ verbose, cliArgs: toServiceRunnerArgs(cli.nestedFlags) });
@@ -155,6 +158,7 @@ async function startBackgroundService() {
 }
 
 async function restartBackgroundService() {
+  const { applyRuntimeOverrides } = await import("./runtime/create-app.js");
   const persistedConfig = await loadConfig();
   applyRuntimeOverrides(persistedConfig, runtimeOverrides);
   const result = await restartService({
@@ -224,6 +228,7 @@ async function runForeground() {
 
 async function main() {
   if (slaveCommand) {
+    const { runSlaveCli } = await import("./runtime/slave-cli.js");
     const result = await runSlaveCli({
       positionals: cli.positionals.slice(1),
       flags: cli.flags,
@@ -265,6 +270,7 @@ async function main() {
   }
 
   if (command === "tui") {
+    const { runTui } = await import("./runtime/tui.js");
     await runTui({ logger });
     return;
   }
