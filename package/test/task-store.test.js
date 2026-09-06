@@ -144,8 +144,10 @@ test("persists auth blocks, claims only due probes, and clears the block after s
   assert.equal(blocked.authBlock.toolName, "checker");
   assert.deepEqual(await store.claimDue(), []);
 
-  store.tasks.find((task) => task.id === "auth-poll").runAt = new Date(Date.now() - 1000).toISOString();
-  await store.save();
+  await store.mutate((tasks) => {
+    tasks[0].runAt = new Date(Date.now() - 1000).toISOString();
+    return { result: null };
+  }, { id: "auth-poll" });
   const [probe] = await store.claimDue();
   assert.equal(probe.status, "running");
   assert.ok(probe.authBlock);
@@ -248,7 +250,8 @@ test("startup recovery compacts historical terminal tasks without changing activ
 
   const store = new TaskStore();
   assert.deepEqual(await store.recoverInterrupted(), []);
-  const persisted = JSON.parse(await readFile(tasksFile, "utf8"));
+  const persisted = await new TaskStore().list();
+  assert.equal(JSON.parse(await readFile(tasksFile, "utf8"))[0].payload.prompt, "obsolete prompt");
   const historical = persisted.find((task) => task.id === "historical-done");
   const active = persisted.find((task) => task.id === "active-pending");
 
@@ -278,8 +281,10 @@ test("backs off known failures and fails after the attempt limit", async () => {
   assert.ok(Date.parse(retrying.runAt) > Date.now());
 
   retrying.runAt = runAt;
-  store.tasks.find((task) => task.id === "retrying").runAt = runAt;
-  await store.save();
+  await store.mutate((tasks) => {
+    tasks[0].runAt = runAt;
+    return { result: null };
+  }, { id: "retrying" });
   await store.claimDue();
   const failed = await store.retryOrFail("retrying", "still broken");
   assert.equal(failed.status, "failed");

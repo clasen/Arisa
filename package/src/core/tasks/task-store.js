@@ -1,7 +1,5 @@
-import { mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
-import path from "node:path";
 import crypto from "node:crypto";
-import { tasksFile } from "../../platform/paths.js";
+import { withTaskDatabase, transaction, selectTasks, persistTaskChanges } from "./task-database.js";
 
 const DEFAULT_RETRY = Object.freeze({
   maxAttempts: 3,
@@ -12,43 +10,6 @@ const DEFAULT_RETRY = Object.freeze({
 
 const TERMINAL_STATUSES = new Set(["done", "failed", "outcome_uncertain"]);
 const TERMINAL_PAYLOAD_KEYS = ["chatId", "toolName", "resourceId", "artifactId"];
-
-const taskFileOperations = new Map();
-
-async function serializeTaskFileOperation(operation) {
-  const previous = taskFileOperations.get(tasksFile) || Promise.resolve();
-  const current = previous.catch(() => {}).then(operation);
-  taskFileOperations.set(tasksFile, current);
-  try {
-    return await current;
-  } finally {
-    if (taskFileOperations.get(tasksFile) === current) taskFileOperations.delete(tasksFile);
-  }
-}
-
-async function waitForTaskFileOperations() {
-  await (taskFileOperations.get(tasksFile) || Promise.resolve()).catch(() => {});
-}
-
-async function loadTasksFile() {
-  try {
-    const parsed = JSON.parse(await readFile(tasksFile, "utf8"));
-    return Array.isArray(parsed) ? parsed.map(migrateTask) : [];
-  } catch {
-    return [];
-  }
-}
-
-async function saveTasksFile(tasks) {
-  await mkdir(path.dirname(tasksFile), { recursive: true });
-  const temporaryFile = `${tasksFile}.${process.pid}.${crypto.randomUUID()}.tmp`;
-  try {
-    await writeFile(temporaryFile, `${JSON.stringify(tasks, null, 2)}\n`, { encoding: "utf8", mode: 0o600 });
-    await rename(temporaryFile, tasksFile);
-  } finally {
-    await rm(temporaryFile, { force: true }).catch(() => {});
-  }
-}
 
 function taskId() {
   return crypto.randomUUID();
@@ -193,64 +154,51 @@ function failTask(task, error) {
 }
 
 export class TaskStore {
-  constructor() {
-    this.tasks = null;
+  constructor(storage = {}) {
+    this.storage = storage;
   }
 
   async init() {
-    if (!this.tasks) await this.reload();
+    this.read(() => undefined);
   }
 
-  async reload() {
-    await waitForTaskFileOperations();
-    this.tasks = await loadTasksFile();
+  read(operation) {
+    return withTaskDatabase(migrateTask, operation, this.storage);
   }
 
-  async mutate(operation) {
-    return serializeTaskFileOperation(async () => {
-      this.tasks = await loadTasksFile();
-      const { result, changed = true } = await operation(this.tasks);
-      if (changed) await saveTasksFile(this.tasks);
+  async mutate(operation, filter = {}) {
+    return this.read((db) => transaction(db, () => {
+      const tasks = selectTasks(db, filter);
+      const before = new Map(tasks.map((task) => [task.id, JSON.stringify(task)]));
+      const outcome = operation(tasks);
+      if (outcome?.then) throw new Error("Task mutations must be synchronous");
+      const { result, changed = true } = outcome;
+      if (changed) persistTaskChanges(db, before, tasks);
       return result;
-    });
-  }
-
-  async save() {
-    const tasks = structuredClone(this.tasks || []);
-    return serializeTaskFileOperation(async () => {
-      this.tasks = tasks;
-      await saveTasksFile(tasks);
-    });
+    }));
   }
 
   async add(task, defaults = {}) {
-    return this.mutate(async (tasks) => {
+    return this.mutate((tasks) => {
       const normalized = normalizeTask(task, defaults);
       tasks.push(normalized);
       return { result: structuredClone(normalized) };
-    });
+    }, { empty: true });
   }
 
   async addMany(tasksToAdd = [], defaults = {}) {
-    return this.mutate(async (tasks) => {
+    return this.mutate((tasks) => {
       const created = tasksToAdd.map((task) => normalizeTask(task, defaults));
       tasks.push(...created);
       return { result: structuredClone(created), changed: created.length > 0 };
-    });
+    }, { empty: true });
   }
 
   async claimDue(limit = 10) {
-    return this.mutate(async (tasks) => {
-      const now = Date.now();
-      const due = tasks
-        .filter((task) => ["pending", "blocked_auth"].includes(task.status)
-          && task.runAt
-          && !Number.isNaN(Date.parse(task.runAt))
-          && Date.parse(task.runAt) <= now)
-        .sort((left, right) => Date.parse(left.runAt) - Date.parse(right.runAt)
-          || Date.parse(left.createdAt || 0) - Date.parse(right.createdAt || 0)
-          || String(left.id).localeCompare(String(right.id)))
-        .slice(0, limit);
+    const now = Date.now();
+    if (!Number.isSafeInteger(limit) || limit < 0) throw new Error("Invalid task claim limit");
+    return this.mutate((tasks) => {
+      const due = tasks;
 
       const claimedAt = new Date(now).toISOString();
       for (const task of due) {
@@ -263,21 +211,21 @@ export class TaskStore {
       }
 
       return { result: structuredClone(due), changed: due.length > 0 };
-    });
+    }, { due: { now, limit } });
   }
 
   async markExecutionStarted(taskId) {
-    return this.mutate(async (tasks) => {
+    return this.mutate((tasks) => {
       const task = tasks.find((item) => item.id === taskId);
       if (!task || task.status !== "running") return { result: null, changed: false };
       task.executionStartedAt = new Date().toISOString();
       task.updatedAt = task.executionStartedAt;
       return { result: structuredClone(task) };
-    });
+    }, { id: taskId });
   }
 
   async recoverInterrupted() {
-    return this.mutate(async (tasks) => {
+    return this.mutate((tasks) => {
       const recovered = [];
       let compacted = false;
       const now = Date.now();
@@ -336,7 +284,7 @@ export class TaskStore {
   }
 
   async complete(taskId) {
-    return this.mutate(async (tasks) => {
+    return this.mutate((tasks) => {
       const task = tasks.find((item) => item.id === taskId);
       if (!task) return { result: null, changed: false };
 
@@ -366,11 +314,11 @@ export class TaskStore {
       task.updatedAt = completedAt;
       compactTerminalTask(task);
       return { result: structuredClone(task) };
-    });
+    }, { id: taskId });
   }
 
   async blockAuth(taskId, error, resolution = {}) {
-    return this.mutate(async (tasks) => {
+    return this.mutate((tasks) => {
       const task = tasks.find((item) => item.id === taskId);
       if (!task) return { result: null, changed: false };
       const now = Date.now();
@@ -395,11 +343,11 @@ export class TaskStore {
       delete task.executionStartedAt;
       delete task.error;
       return { result: { ...structuredClone(task), authBlockedNew: !wasBlocked } };
-    });
+    }, { id: taskId });
   }
 
   async retryOrFail(taskId, error, { retryable = true, outcomeUncertain = false } = {}) {
-    return this.mutate(async (tasks) => {
+    return this.mutate((tasks) => {
       const task = tasks.find((item) => item.id === taskId);
       if (!task) return { result: null, changed: false };
       const message = error instanceof Error ? error.message : String(error);
@@ -465,45 +413,38 @@ export class TaskStore {
       delete task.claimedAt;
       delete task.executionStartedAt;
       return { result: structuredClone(task) };
-    });
+    }, { id: taskId });
   }
 
   async fail(taskId, error) {
-    return this.mutate(async (tasks) => {
+    return this.mutate((tasks) => {
       const task = tasks.find((item) => item.id === taskId);
       return task
         ? { result: failTask(task, error) }
         : { result: null, changed: false };
-    });
+    }, { id: taskId });
   }
 
   async list(filter = {}) {
-    await this.reload();
-    return this.tasks.filter((task) => {
-      if (filter.chatId && String(task.payload?.chatId) !== String(filter.chatId)) return false;
-      if (filter.status && task.status !== filter.status) return false;
-      if (filter.kind && task.kind !== filter.kind) return false;
-      return true;
-    }).map((task) => structuredClone(task));
+    return this.read((db) => selectTasks(db, filter));
   }
 
   async get(taskId) {
-    await this.reload();
-    const task = this.tasks.find((item) => item.id === taskId);
-    return task ? structuredClone(task) : null;
+    if (typeof taskId !== "string" || !taskId) return null;
+    return this.read((db) => selectTasks(db, { id: taskId })[0] || null);
   }
 
   async cancel(taskId) {
-    return this.mutate(async (tasks) => {
+    return this.mutate((tasks) => {
       const index = tasks.findIndex((item) => item.id === taskId);
       if (index === -1) return { result: null, changed: false };
       const [task] = tasks.splice(index, 1);
       return { result: structuredClone(task) };
-    });
+    }, { id: taskId });
   }
 
   async cancelAll(filter = {}) {
-    return this.mutate(async (tasks) => {
+    return this.mutate((tasks) => {
       const removed = [];
       const remaining = tasks.filter((task) => {
         if (filter.chatId && String(task.payload?.chatId) !== String(filter.chatId)) return true;
@@ -514,6 +455,6 @@ export class TaskStore {
       });
       tasks.splice(0, tasks.length, ...remaining);
       return { result: removed, changed: removed.length > 0 };
-    });
+    }, filter);
   }
 }

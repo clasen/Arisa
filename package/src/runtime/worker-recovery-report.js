@@ -2,7 +2,7 @@ import crypto from "node:crypto";
 import { mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { readRecentLogLines } from "./log-viewer.js";
-import { arisaPackageDir, serviceLogFile, stateDir, tasksFile } from "../platform/paths.js";
+import { arisaPackageDir, serviceLogFile, stateDir } from "../platform/paths.js";
 
 export const workerRecoveryReportFile = path.join(stateDir, "worker-recovery-report.json");
 
@@ -70,9 +70,12 @@ export function summarizeRecoveryEvidence(lines, report) {
   };
 }
 
-async function interruptedTaskCount(report, file = tasksFile) {
+async function interruptedTaskCount(report, file) {
   try {
-    const document = JSON.parse(await readFile(file, "utf8"));
+    // Explicit JSON input is retained for offline reports. Runtime reads the live DB.
+    const document = file
+      ? JSON.parse(await readFile(file, "utf8"))
+      : await new (await import("../core/tasks/task-store.js")).TaskStore().list();
     const tasks = Array.isArray(document) ? document : document.tasks || [];
     const occurredAt = new Date(report.occurredAt).getTime();
     return tasks.filter((task) => {
@@ -98,7 +101,7 @@ async function runtimeVersion() {
 export async function loadWorkerRecoveryReport({
   reportFile = workerRecoveryReportFile,
   logFile = serviceLogFile,
-  taskFile = tasksFile,
+  taskFile,
   readLines = readRecentLogLines,
   getVersion = runtimeVersion
 } = {}) {

@@ -25,7 +25,8 @@ export function createIpcSocketPath({ homeDir = arisaHomeDir, platform = process
 }
 
 export const arisaIpcSocketFile = createIpcSocketPath();
-export const tasksFile = path.join(stateDir, "tasks.json");
+export const tasksFile = path.join(stateDir, "tasks.json"); // Legacy migration source; retained unchanged.
+export const tasksDatabaseFile = path.join(stateDir, "tasks.sqlite");
 export const toolsDir = path.join(arisaHomeDir, "tools");
 export const chatsDir = path.join(arisaHomeDir, "chats");
 export const toolStateDir = path.join(stateDir, "tools");
