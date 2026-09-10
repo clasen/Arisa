@@ -1,6 +1,7 @@
 import {
   buildPiAuthRecoveryBlockedMessage,
   buildPiAuthTelegramMessage,
+  buildPiRequestFailureMessage,
   getErrorMessage,
   getPiAuthIssue,
   getPiAuthStatus
@@ -37,12 +38,16 @@ export function createTelegramAuthController({
   }
 
   function rememberValidationFailure(error) {
-    const detected = rememberIssue(error) || {
-      kind: "validation-failed",
-      message: getErrorMessage(error)
-    };
-    issue = detected;
-    return detected;
+    // Quota, network and server failures must never latch the Telegram auth gate.
+    issue = getPiAuthIssue(error);
+    return issue;
+  }
+
+  async function buildValidationFailureMessage(chatId, error) {
+    const detected = rememberValidationFailure(error);
+    return detected
+      ? buildPiAuthTelegramMessage({ config, chatId, issue: detected })
+      : buildPiRequestFailureMessage(error);
   }
 
   async function notifyIssueIfNeeded(chatId, error) {
@@ -62,15 +67,14 @@ export function createTelegramAuthController({
   async function finishRenewal(chatId, renewal) {
     try {
       await renewal.promise;
-      await agentManager.validateAgent();
-      agentManager.clearSessionCache(chatId);
       issue = null;
+      agentManager.clearSessionCache(chatId);
+      await agentManager.validateAgent();
       logger?.log("telegram", `Pi auth renewal completed for chat ${chatId}`);
       await api.sendMessage(chatId, await buildPiAuthTelegramMessage({ config, chatId, verified: true }));
     } catch (error) {
-      const detected = rememberValidationFailure(error);
-      logger?.error("telegram", `Pi auth renewal failed for chat ${chatId}: ${getErrorMessage(error)}`);
-      await api.sendMessage(chatId, await buildPiAuthTelegramMessage({ config, chatId, issue: detected })).catch((notifyError) => {
+      logger?.error("telegram", `Pi auth renewal or validation failed for chat ${chatId}: ${getErrorMessage(error)}`);
+      await api.sendMessage(chatId, await buildValidationFailureMessage(chatId, error)).catch((notifyError) => {
         logger?.error("telegram", `auth renewal failure notice failed for chat ${chatId}: ${getErrorMessage(notifyError)}`);
       });
     } finally {
@@ -141,7 +145,9 @@ export function createTelegramAuthController({
     if (!authorization.ok) return;
 
     const status = await getPiAuthStatus(config, ctx.chat.id);
-    if (status.hasApiKey || !status.supportsOAuth) {
+    const canValidateStoredAuth = status.hasStoredAuth && !issue && !renewals.has(chatKey(ctx.chat.id));
+    // A stored OAuth login may still be valid even when the provider has no quota.
+    if (status.hasApiKey || !status.supportsOAuth || canValidateStoredAuth) {
       await withTyping(ctx, async () => {
         try {
           await agentManager.validateAgent();
@@ -149,8 +155,7 @@ export function createTelegramAuthController({
           issue = null;
           await ctx.reply(await buildPiAuthTelegramMessage({ config, chatId: ctx.chat.id, verified: true }));
         } catch (error) {
-          const detected = rememberValidationFailure(error);
-          await ctx.reply(await buildPiAuthTelegramMessage({ config, chatId: ctx.chat.id, issue: detected }));
+          await ctx.reply(await buildValidationFailureMessage(ctx.chat.id, error));
         }
       });
       return;
@@ -162,8 +167,7 @@ export function createTelegramAuthController({
         ? "Starting Pi login from Telegram..."
         : "Pi login is already in progress. Paste the redirect URL or code here when you have it.");
     } catch (error) {
-      const detected = rememberValidationFailure(error);
-      await ctx.reply(await buildPiAuthTelegramMessage({ config, chatId: ctx.chat.id, issue: detected }));
+      await ctx.reply(await buildValidationFailureMessage(ctx.chat.id, error));
     }
   }
 
