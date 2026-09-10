@@ -36,7 +36,7 @@ const {
   stopManagedDaemon,
   writeJson
 } = await importCore("core/tools/daemon-processes.js");
-const { getChatToolStateDir, getToolStateDir, tasksFile } = await importCore("runtime/paths.js");
+const { getChatToolStateDir, getToolStateDir } = await importCore("runtime/paths.js");
 
 const require = createRequire(import.meta.url);
 const WebP = require("node-webpmux");
@@ -525,12 +525,12 @@ async function setDaemonAutoStart(chatId, autoStart) {
   await registerManagedDaemon({ ...runtime.registration, autoStart });
 }
 
-async function readTasks() {
-  return readArray(tasksFile);
+async function readTasks(chatId) {
+  return createArisaClient({ toolName, chatId }).tasks.list({});
 }
 
-async function writeTasks(tasks) {
-  await writeJson(tasksFile, tasks);
+async function addTask(chatId, task) {
+  return createArisaClient({ toolName, chatId }).tasks.add({ task });
 }
 
 function isTechnicalWhatsAppNotification(message) {
@@ -586,7 +586,7 @@ function buildIncomingBurstPrompt(items) {
 }
 
 function taskContainsIncomingMessage(task, numericChatId, messageId) {
-  if (task.source?.toolName !== toolName || task.source?.chatId !== numericChatId) return false;
+  if (task.source?.toolName !== toolName || String(task.source?.chatId) !== String(numericChatId)) return false;
   const messageIds = Array.isArray(task.source?.messageIds) ? task.source.messageIds : [task.source?.messageId];
   return messageIds.includes(messageId);
 }
@@ -653,7 +653,7 @@ function incomingBurstTask(chatId, items, burst = {}) {
     status: "pending",
     createdAt: now,
     updatedAt: now,
-    kind: "agent_task",
+    kind: "agent_event",
     runAt: now,
     payload: { chatId, prompt: buildIncomingBurstPrompt(items), artifactId: artifactIds.length === 1 ? artifactIds[0] : "" },
     recurrence: null,
@@ -679,7 +679,7 @@ function incomingBurstTask(chatId, items, burst = {}) {
 async function enqueueArisaTaskForIncomingBurst(chatId, items, burst = {}) {
   const numericChatId = Number(chatId);
   const messageIds = items.map((item) => item.message.id);
-  const existingTasks = await readTasks();
+  const existingTasks = await readTasks(numericChatId);
   if (messageIds.every((id) => hasIncomingMessageTask(existingTasks, numericChatId, id))) return;
   const wakeGate = await classifyWakeGate(chatId, items);
   if (wakeGate.enabled && wakeGate.mode === "enforce" && !wakeGate.wake) {
@@ -692,16 +692,7 @@ async function enqueueArisaTaskForIncomingBurst(chatId, items, burst = {}) {
     return { suppressed: true, messageCount: messageIds.length, reason: wakeGate.reason };
   }
   const task = incomingBurstTask(numericChatId, items, { ...burst, wakeGate });
-  for (let attempt = 0; attempt < 3; attempt += 1) {
-    const tasks = attempt === 0 ? existingTasks : await readTasks();
-    if (messageIds.every((id) => hasIncomingMessageTask(tasks, numericChatId, id))) return;
-    tasks.push(task);
-    await writeTasks(tasks);
-    await sleep(100 + attempt * 150);
-    const persisted = await readTasks();
-    if (messageIds.every((id) => hasIncomingMessageTask(persisted, numericChatId, id))) return;
-  }
-  await writeChatStatus(chatId, { state: "ready", live: true, pid: process.pid, message: `WhatsApp is ready. Warning: failed to persist agent task for ${messageIds.length} incoming message(s).` });
+  await addTask(numericChatId, task);
 }
 
 async function enqueueArisaTaskForIncomingMessage(chatId, message, artifact = null, transcript = "") {
@@ -710,14 +701,13 @@ async function enqueueArisaTaskForIncomingMessage(chatId, message, artifact = nu
 
 async function enqueueWhatsAppReadyTask(chatId) {
   const numericChatId = Number(chatId);
-  const tasks = await readTasks();
   const createdAt = new Date().toISOString();
-  tasks.push({
+  await addTask(numericChatId, {
     id: crypto.randomUUID(),
     status: "pending",
     createdAt,
     updatedAt: createdAt,
-    kind: "agent_task",
+    kind: "agent_event",
     runAt: createdAt,
     payload: {
       chatId: numericChatId,
@@ -727,7 +717,6 @@ async function enqueueWhatsAppReadyTask(chatId) {
     recurrence: null,
     source: { type: "tool", toolName, chatId: numericChatId, event: "login_ready", occurredAt: createdAt }
   });
-  await writeTasks(tasks);
 }
 
 function renderQr(qr) {
