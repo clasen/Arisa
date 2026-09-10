@@ -1,6 +1,7 @@
 import crypto from "node:crypto";
 import http from "node:http";
-import { chmod, mkdir, readdir, readFile, rename, rm, writeFile } from "node:fs/promises";
+import { chmod, mkdir, open, readdir, readFile, rename, rm, writeFile } from "node:fs/promises";
+import { assertFreshCapture, deleteDeviceState, importReceiptPath, readImportReceipt, writeImportReceipt } from "./import-receipts.js";
 import path from "node:path";
 import { consumePairing, decryptEnvelope, encryptEnvelope, persistDeviceSession, persistDeviceSourceSession, persistSession, validateSessionPayload } from "./session-store.js";
 
@@ -59,7 +60,7 @@ function reviewerPage(response) {
 }
 
 function privacyPolicyPage(response, { headOnly = false } = {}) {
-  const encoded = Buffer.from(`<!doctype html><html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="referrer" content="no-referrer"><title>Arisa Session Bridge Privacy Policy</title><style>:root{color-scheme:dark;--bg:#1f2130;--surface:#282a36;--fg:#f8f8f2;--muted:#c5c8e6;--line:#44475a;--purple:#bd93f9;--orange:#ffb86c}*{box-sizing:border-box}body{max-width:760px;margin:48px auto;padding:24px;color:var(--fg);background:var(--bg);font:16px/1.65 ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,"Liberation Mono","Courier New",monospace}main{border:1px solid var(--line);border-radius:8px;padding:32px;background:var(--surface)}h1{margin-top:0;color:var(--orange);line-height:1.2}h2{margin-top:30px;color:var(--purple);font-size:19px}p,li{color:var(--muted)}strong{color:var(--fg)}a{color:var(--purple)}code{color:var(--orange)}</style></head><body><main><h1>Arisa Session Bridge Privacy Policy</h1><p><strong>Last updated:</strong> September 1, 2026</p><p>Arisa Session Bridge has one purpose: to let a user intentionally share the active site's browser session with an Arisa instance they control.</p><h2>Data processed</h2><p>Only when the user chooses <strong>Send current session</strong>, the extension processes:</p><ul><li>the active site's hostname and origin</li><li>cookies applicable to that active URL</li><li>the capture time</li><li>a revocable bridge-device identifier</li><li>bounded standard request metadata sent automatically by the browser: User-Agent, language, and available client hints</li></ul><p>The extension does not read site localStorage, sessionStorage, or IndexedDB. It does not collect browsing history, keystrokes, or sessions for inactive sites. It requests access only for this explicit action and removes that temporary access after reading applicable cookies. Instagram and Google also require temporary parent-domain access so Chrome can expose authentication cookies shared across their subdomains; unrelated sites remain exact-host only. When the active site is a *.google.com product, the extension also stores a separate session containing cookies applicable to accounts.google.com, because Google authentication may redirect away before that host can be shared manually. It does not collect host-only cookies from other Google products unless that product is the active site.</p><h2>Use, transfer, and storage</h2><p>The extension uses this data only to transfer the user-selected session to the Arisa bridge endpoint paired by that user. Session data is encrypted with AES-256-GCM before transfer. The receiving Arisa instance stores imported sessions and bounded browser request metadata in that user's chat-scoped state. Cookie values are not returned in Arisa tool results. The bridge does not persist the network address as browser identity metadata.</p><p>The extension stores its bridge endpoint, device identifier, and device secret locally in the dedicated browser profile. Temporary setup credentials expire, are single-use, arrive in URL fragments so browsers do not send them in HTTP requests or referrers, and may be held in extension-local storage only until activation succeeds or the credential expires. If a site-permission prompt interrupts a send, only its pending tab identifier and origin are retained for up to two minutes so reopening the popup can resume it.</p><h2>Sharing and sale</h2><p>Arisa Session Bridge does not sell user data, use it for advertising, or transfer it to unrelated third parties. Data goes only to the Arisa bridge endpoint the user explicitly paired.</p><h2>Retention and deletion</h2><p>Users can revoke the browser profile with <strong>Forget</strong>, revoke it from Arisa, delete an imported site session, or log out of the source site. The user operating the receiving Arisa instance controls server-side retention.</p><h2>Security boundary</h2><p>Sharing a browser session grants the receiving Arisa instance the access represented by that session. Users should install the extension only in a dedicated browser profile and use least-privilege accounts. The extension does not bypass login, CAPTCHA, verification, approval, or anti-bot controls.</p><h2>Contact</h2><p>Privacy questions may be submitted through the <a href="https://github.com/clasen/Arisa">official Arisa project repository</a>.</p></main></body></html>`, "utf8");
+  const encoded = Buffer.from(`<!doctype html><html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="referrer" content="no-referrer"><title>Arisa Session Bridge Privacy Policy</title><style>:root{color-scheme:dark;--bg:#1f2130;--surface:#282a36;--fg:#f8f8f2;--muted:#c5c8e6;--line:#44475a;--purple:#bd93f9;--orange:#ffb86c}*{box-sizing:border-box}body{max-width:760px;margin:48px auto;padding:24px;color:var(--fg);background:var(--bg);font:16px/1.65 ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,"Liberation Mono","Courier New",monospace}main{border:1px solid var(--line);border-radius:8px;padding:32px;background:var(--surface)}h1{margin-top:0;color:var(--orange);line-height:1.2}h2{margin-top:30px;color:var(--purple);font-size:19px}p,li{color:var(--muted)}strong{color:var(--fg)}a{color:var(--purple)}code{color:var(--orange)}</style></head><body><main><h1>Arisa Session Bridge Privacy Policy</h1><p><strong>Last updated:</strong> September 10, 2026</p><p>Arisa Session Bridge has one purpose: to let a user intentionally share the active site's browser session with an Arisa instance they control.</p><h2>Data processed</h2><p>Only when the user chooses <strong>Send current session</strong>, the extension processes:</p><ul><li>the active site's hostname and origin</li><li>cookies applicable to that active URL</li><li>the capture time</li><li>a revocable bridge-device identifier</li><li>bounded standard request metadata sent automatically by the browser: User-Agent, language, and available client hints</li></ul><p>The extension does not read site localStorage, sessionStorage, or IndexedDB. It does not collect browsing history, keystrokes, or sessions for inactive sites. It requests access only for this explicit action and removes that temporary access after reading applicable cookies. Instagram and Google also require temporary parent-domain access so Chrome can expose authentication cookies shared across their subdomains; unrelated sites remain exact-host only. When the active site is a *.google.com product, the extension also stores a separate session containing cookies applicable to accounts.google.com, because Google authentication may redirect away before that host can be shared manually. It does not collect host-only cookies from other Google products unless that product is the active site.</p><h2>Use, transfer, and storage</h2><p>The extension uses this data only to transfer the user-selected session to the Arisa bridge endpoint paired by that user. Session data is encrypted with AES-256-GCM before transfer. The receiving Arisa instance stores imported sessions and bounded browser request metadata in that user's chat-scoped state. Cookie values are not returned in Arisa tool results. The bridge does not persist the network address as browser identity metadata.</p><p>The extension stores its bridge endpoint, device identifier, and device secret locally in the dedicated browser profile. Temporary setup credentials expire, are single-use, arrive in URL fragments so browsers do not send them in HTTP requests or referrers, and may be held in extension-local storage only until activation succeeds or the credential expires. A background service worker completes user-authorized operations after the popup closes. Pending sends retain the tab identifier, origin, device identifier, operation identifier, capture time, and acquired permission patterns for up to two minutes, without cookies. A recovery alarm resumes consented setup or cleans expired work when the browser runs; it does not start new shares. The bridge retains cookie-free import receipts for 24 hours, cleaning expired receipts on subsequent imports, and non-secret revocation markers for retry safety.</p><h2>Sharing and sale</h2><p>Arisa Session Bridge does not sell user data, use it for advertising, or transfer it to unrelated third parties. Data goes only to the Arisa bridge endpoint the user explicitly paired.</p><h2>Retention and deletion</h2><p>Users can revoke the browser profile with <strong>Forget</strong>, revoke it from Arisa, delete an imported site session, or log out of the source site. Deletion removes both working and source cookie copies. If revocation is not confirmed, Forget retains the local credential so the user can retry. The user operating the receiving Arisa instance controls server-side retention.</p><h2>Security boundary</h2><p>Sharing a browser session grants the receiving Arisa instance the access represented by that session. Users should install the extension only in a dedicated browser profile and use least-privilege accounts. The extension does not bypass login, CAPTCHA, verification, approval, or anti-bot controls.</p><h2>Contact</h2><p>Privacy questions may be submitted through the <a href="https://github.com/clasen/Arisa">official Arisa project repository</a>.</p></main></body></html>`, "utf8");
   response.writeHead(200, {
     ...commonHeaders("text/html; charset=UTF-8", encoded.length),
     "Content-Language": "en",
@@ -98,7 +99,7 @@ async function readActivationReceipt(enrollmentsDir, token, devicesDir) {
       await rm(file, { force: true });
       return null;
     }
-    await readFile(credentialFile(devicesDir, receipt.deviceId), "utf8");
+    await deviceCredential(devicesDir, receipt.deviceId);
     return receipt.response;
   } catch (error) {
     await rm(file, { force: true });
@@ -253,6 +254,14 @@ async function activateDevice({ enrollmentsDir, devicesDir, envelope }) {
   if (replay) return { response: replay, event: null, replayed: true };
   let enrollment;
   try {
+    // Authenticate before consuming a single-use enrollment. Malformed requests
+    // must not destroy a legitimate user's setup link.
+    const pending = JSON.parse(await readFile(credentialFile(enrollmentsDir, envelope.token), "utf8").catch((error) => {
+      if (error.code === "ENOENT") throw Object.assign(new Error("Enrollment link already used or expired"), { code: "ENROLLMENT_NOT_FOUND" });
+      throw error;
+    }));
+    const request = decryptEnvelope(pending.activationSecret, envelope);
+    if (request?.version !== 1 || request?.action !== "activate") throw new Error("Invalid device activation request");
     enrollment = await consumeDeviceEnrollment(enrollmentsDir, envelope.token);
   } catch (error) {
     if (error?.code !== "ENROLLMENT_NOT_FOUND") throw error;
@@ -309,12 +318,18 @@ export async function revokeDevice(devicesDir, chatId, deviceId) {
   const file = credentialFile(devicesDir, deviceId);
   const record = JSON.parse(await readFile(file, "utf8"));
   if (String(record.chatId) !== String(chatId)) throw new Error("Device does not belong to this chat");
+  await writeFile(`${file}.revoked`, JSON.stringify({ chatId: record.chatId, deviceId: record.deviceId }), { mode: 0o600 });
   await rm(file, { force: true });
   return record.deviceId;
 }
 
 async function deviceCredential(devicesDir, deviceId) {
   const file = credentialFile(devicesDir, deviceId);
+  const revoked = await readFile(`${file}.revoked`, "utf8").then(() => true).catch((error) => {
+    if (error.code === "ENOENT") return false;
+    throw error;
+  });
+  if (revoked) throw new Error("Browser profile is revoked");
   const record = JSON.parse(await readFile(file, "utf8"));
   if (!record.secret || !record.chatId) throw new Error("Invalid device credential");
   return { file, record };
@@ -322,13 +337,26 @@ async function deviceCredential(devicesDir, deviceId) {
 
 async function recordDeviceUse(file, record) {
   const updated = { ...record, lastUsedAt: new Date().toISOString() };
-  await writeFile(file, `${JSON.stringify(updated)}\n`, { mode: 0o600 });
-  await chmod(file, 0o600);
+  // Never recreate a credential concurrently removed by revocation.
+  const handle = await open(file, "r+");
+  try {
+    await handle.truncate(0);
+    await handle.writeFile(`${JSON.stringify(updated)}\n`);
+  } finally { await handle.close(); }
 }
 
 export function startBridgeServer({ host, port, pairingsDir, enrollmentsDir, devicesDir, reviewersDir, maxBodyBytes, maxCookies, stateDirForChat, onDeviceActivated, onSessionImported }) {
   const recentDeviceUses = new Map();
   const recentReviewerUses = new Map();
+  const operations = new Map();
+  async function acquire(key) {
+    const previous = operations.get(key) || Promise.resolve();
+    let release;
+    const current = new Promise((resolve) => { release = resolve; });
+    operations.set(key, current);
+    await previous;
+    return () => { release(); if (operations.get(key) === current) operations.delete(key); };
+  }
   const server = http.createServer(async (request, response) => {
     if (request.method === "OPTIONS") return jsonResponse(response, 204, {});
     if (request.method === "GET" && request.url === "/health") return jsonResponse(response, 200, { ok: true });
@@ -339,8 +367,12 @@ export function startBridgeServer({ host, port, pairingsDir, enrollmentsDir, dev
     }
     if (request.method !== "POST" || !["/v1/activate-device", "/v1/import", "/v1/import-device", "/v1/revoke-device", "/v1/reviewer-enrollment"].includes(request.url)) return jsonResponse(response, 404, { ok: false, error: "Not found" });
 
+    let releaseOperation;
     try {
       const envelope = await readJsonBody(request, maxBodyBytes);
+      const identity = envelope?.deviceId || envelope?.token;
+      if (!/^[a-zA-Z0-9_-]{20,100}$/.test(String(identity || ""))) throw new Error("Invalid credential identifier");
+      releaseOperation = await acquire(`${envelope.deviceId ? "device" : "token"}:${identity}`);
       if (request.url === "/v1/reviewer-enrollment") {
         const reviewerId = reviewerCredentialId(envelope.token);
         const lastUsed = recentReviewerUses.get(reviewerId) || 0;
@@ -357,6 +389,14 @@ export function startBridgeServer({ host, port, pairingsDir, enrollmentsDir, dev
       let credential;
       let device = null;
       if (["/v1/import-device", "/v1/revoke-device"].includes(request.url)) {
+        if (request.url === "/v1/revoke-device") {
+          const marker = await readFile(`${credentialFile(devicesDir, envelope.deviceId)}.revoked`, "utf8").then(JSON.parse).catch(() => null);
+          if (marker) {
+            await rm(credentialFile(devicesDir, envelope.deviceId), { force: true });
+            await deleteDeviceState(stateDirForChat(marker.chatId), envelope.deviceId);
+            return jsonResponse(response, 200, { ok: true, revoked: envelope.deviceId });
+          }
+        }
         device = await deviceCredential(devicesDir, envelope.deviceId);
         credential = device.record;
       } else {
@@ -366,19 +406,22 @@ export function startBridgeServer({ host, port, pairingsDir, enrollmentsDir, dev
       const decrypted = decryptEnvelope(credential.secret, envelope);
       if (request.url === "/v1/revoke-device") {
         if (decrypted?.version !== 1 || decrypted?.action !== "revoke" || decrypted?.deviceId !== envelope.deviceId) throw new Error("Invalid revocation request");
-        await rm(device.file, { force: true });
-        await rm(path.join(stateDirForChat(credential.chatId), "device-sessions", envelope.deviceId), { recursive: true, force: true });
-        await rm(path.join(stateDirForChat(credential.chatId), "device-source-sessions", envelope.deviceId), { recursive: true, force: true });
+        await revokeDevice(devicesDir, credential.chatId, envelope.deviceId);
+        await deleteDeviceState(stateDirForChat(credential.chatId), envelope.deviceId);
         recentDeviceUses.delete(envelope.deviceId);
         return jsonResponse(response, 200, { ok: true, revoked: envelope.deviceId });
       }
 
+      const chatStateDir = stateDirForChat(credential.chatId);
+      const receiptFile = device ? importReceiptPath(chatStateDir, device.record.deviceId, envelope, decrypted) : null;
+      const receipt = receiptFile ? await readImportReceipt(receiptFile) : null;
+      if (receipt) return jsonResponse(response, 200, { ...receipt, replayed: true });
+      assertFreshCapture(decrypted);
       const session = { ...validateSessionPayload(decrypted, maxCookies), browserIdentity: requestBrowserIdentity(request) };
       const lastUse = recentDeviceUses.get(envelope.deviceId);
       if (device && lastUse?.resourceId === session.resourceId && Date.now() - lastUse.at < 1500) {
         throw Object.assign(new Error("Please wait before sharing this site again"), { statusCode: 429 });
       }
-      const chatStateDir = stateDirForChat(credential.chatId);
       if (device) {
         await persistDeviceSourceSession(chatStateDir, device.record.deviceId, session);
         await persistDeviceSession(chatStateDir, device.record.deviceId, session);
@@ -388,6 +431,8 @@ export function startBridgeServer({ host, port, pairingsDir, enrollmentsDir, dev
         await persistSession(chatStateDir, session);
       }
       const storageCount = Object.keys(session.webStorage?.local || {}).length + Object.keys(session.webStorage?.session || {}).length;
+      const importResult = { ok: true, resourceId: session.resourceId, cookieCount: session.cookies.length, storageCount, receivedAt: session.receivedAt };
+      if (receiptFile) await writeImportReceipt(receiptFile, importResult);
       await onSessionImported?.({
         chatId: String(credential.chatId),
         deviceId: device?.record?.deviceId || null,
@@ -407,6 +452,8 @@ export function startBridgeServer({ host, port, pairingsDir, enrollmentsDir, dev
       });
     } catch (error) {
       return jsonResponse(response, error.statusCode || 400, { ok: false, error: error.message || "Import failed" });
+    } finally {
+      releaseOperation?.();
     }
   });
 

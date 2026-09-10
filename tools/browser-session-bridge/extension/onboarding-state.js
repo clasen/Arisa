@@ -17,7 +17,7 @@ export function pendingSetupRecord(code, setup, { resume = false, now = Date.now
 
 export function restorableSetupCode(record, now = Date.now()) {
   if (record?.version !== 1 || typeof record.code !== "string" || !record.code.startsWith("arisa-enroll://")) return "";
-  if (record.code.length > MAX_SETUP_CODE_LENGTH || new Date(record.expiresAt || 0).getTime() <= now) return "";
+  if (record.code.length > MAX_SETUP_CODE_LENGTH || !Number.isFinite(Date.parse(record.expiresAt)) || Date.parse(record.expiresAt) <= now) return "";
   return record.code;
 }
 

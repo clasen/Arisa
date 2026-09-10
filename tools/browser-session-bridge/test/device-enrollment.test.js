@@ -51,6 +51,11 @@ test("activates once and safely replays the same short-lived enrollment result",
   assert.equal(setup.deviceId, undefined);
   assert.equal(setup.secret, undefined);
 
+  const invalidActivation = await fetch(`${endpoint}/v1/activate-device`, {
+    method: "POST", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ token: setup.token, iv: "invalid", ciphertext: "invalid" })
+  });
+  assert.equal(invalidActivation.status, 400);
   const activation = encryptEnvelope(setup.activationSecret, { version: 1, action: "activate" });
   const first = await fetch(`${endpoint}/v1/activate-device`, {
     method: "POST",
@@ -114,8 +119,8 @@ test("activates once and safely replays the same short-lived enrollment result",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ deviceId: device.deviceId, ...relatedImport })
   });
-  assert.equal(duplicateResponse.status, 429);
-  assert.deepEqual(await duplicateResponse.json(), { ok: false, error: "Please wait before sharing this site again" });
+  assert.equal(duplicateResponse.status, 200);
+  assert.equal((await duplicateResponse.json()).replayed, true);
 
   assert.equal(sessionEvents.length, 2);
   assert.deepEqual(sessionEvents[0], {
@@ -160,6 +165,11 @@ test("activates once and safely replays the same short-lived enrollment result",
     body: JSON.stringify({ deviceId: device.deviceId, ...revocation })
   });
   assert.equal(revokedDevice.status, 200);
+  const repeatedRevoke = await fetch(`${endpoint}/v1/revoke-device`, {
+    method: "POST", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ deviceId: device.deviceId, ...revocation })
+  });
+  assert.equal(repeatedRevoke.status, 200);
   await assert.rejects(readFile(path.join(stateDir, "device-sessions", device.deviceId, "example.com.json"), "utf8"), { code: "ENOENT" });
   await assert.rejects(readFile(path.join(stateDir, "device-source-sessions", device.deviceId, "example.com.json"), "utf8"), { code: "ENOENT" });
 

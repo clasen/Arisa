@@ -10,6 +10,7 @@ import { openWithLightpanda } from "./lightpanda-session.js";
 import { openWithSession } from "./session-browser.js";
 import { redactStoredCookieValues } from "./session-redaction.js";
 import { listStoredSessions, resolveStoredSession } from "./session-selection.js";
+import { deleteDeviceState, deleteSelectedSession } from "./import-receipts.js";
 
 const toolName = "browser-session-bridge";
 const toolDir = path.dirname(fileURLToPath(import.meta.url));
@@ -112,8 +113,8 @@ function runProcess(command, args, options = {}) {
 
 function normalizedEndpoint(value) {
   const endpoint = new URL(String(value || ""));
-  if (!["http:", "https:"].includes(endpoint.protocol) || endpoint.username || endpoint.password || endpoint.search || endpoint.hash) {
-    throw new Error("PUBLIC_BASE_URL must be a plain HTTP(S) origin");
+  if ((endpoint.protocol !== "https:" && !(endpoint.protocol === "http:" && ["localhost", "127.0.0.1", "[::1]"].includes(endpoint.hostname))) || endpoint.username || endpoint.password || endpoint.search || endpoint.hash) {
+    throw new Error("PUBLIC_BASE_URL requires HTTPS (HTTP is allowed only on localhost)");
   }
   const pathname = endpoint.pathname.replace(/\/+$/, "");
   return `${endpoint.origin}${pathname === "/" ? "" : pathname}`;
@@ -146,7 +147,7 @@ async function handleRequest(request) {
   }
   if (action === "revoke-device") {
     const deviceId = await revokeDevice(path.join(daemon.paths.root, "devices"), chatId, request.args?.deviceId);
-    await rm(path.join(getChatToolStateDir(chatId, toolName), "device-sessions", deviceId), { recursive: true, force: true });
+    await deleteDeviceState(getChatToolStateDir(chatId, toolName), deviceId);
     return toolOk({ text: `Revoked browser profile ${deviceId}`, json: { revoked: deviceId }, mimeType: "application/json" });
   }
   if (action === "reviewer-revoke") {
@@ -285,7 +286,7 @@ async function handleRequest(request) {
   }
   if (action === "delete") {
     const selected = await resolveStoredSession({ stateDir: getChatToolStateDir(chatId, toolName), resourceId: request.args?.resourceId, deviceId: request.args?.deviceId });
-    await rm(selected.sessionPath, { force: true });
+    await deleteSelectedSession(getChatToolStateDir(chatId, toolName), selected);
     return toolOk({ text: `Deleted browser session ${selected.resourceId} for ${selected.deviceId || "legacy session"}`, json: { deleted: selected.resourceId, deviceId: selected.deviceId }, mimeType: "application/json" });
   }
   if (["pair", "device-pair", "setup"].includes(action)) {

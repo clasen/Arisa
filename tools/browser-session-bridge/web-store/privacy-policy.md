@@ -1,6 +1,6 @@
 # Arisa Session Bridge Privacy Policy
 
-Last updated: September 1, 2026
+Last updated: September 10, 2026
 
 Arisa Session Bridge has one purpose: to let a user intentionally share the active site's browser session with an Arisa instance they control.
 
@@ -20,7 +20,7 @@ The extension does not read site localStorage, sessionStorage, or IndexedDB. It 
 
 Session data is encrypted with AES-256-GCM before transfer to the bridge endpoint configured by the user. The receiving Arisa instance stores imported sessions and bounded browser request metadata within that user's chat-scoped state. Cookie values are not returned in Arisa tool results. The bridge does not persist the network address as browser identity metadata.
 
-The extension stores its bridge endpoint, device identifier, and device secret locally in the dedicated browser profile. A temporary setup credential expires, is single-use, arrives in a URL fragment so it is not sent in HTTP requests or referrers, and may be held in extension-local storage only until activation succeeds or the credential expires. If a site-permission prompt interrupts a send, the extension retains only the pending tab identifier and origin for up to two minutes so reopening the popup can resume it.
+The extension stores its bridge endpoint, device identifier, and device secret locally in the dedicated browser profile. A temporary setup credential expires, is single-use, arrives in a URL fragment so it is not sent in HTTP requests or referrers, and may be held in extension-local storage only until activation succeeds or the credential expires. A background service worker completes user-authorized operations even if the popup closes. It retains the pending tab identifier, origin, device identifier, operation identifier, capture time, and acquired permission patterns for up to two minutes. A recovery alarm resumes consented setup or cleans expired work when the browser runs; it does not start new shares. Pending records never contain cookies. The bridge retains cookie-free import receipts for 24 hours, cleaning expired receipts on subsequent imports, and non-secret revocation markers for retry safety.
 
 ## Sharing and sale
 
@@ -28,7 +28,7 @@ The extension does not sell data, use data for advertising, or transfer data to 
 
 ## Retention and deletion
 
-Users can revoke the browser profile with **Forget**, revoke it from Arisa, delete an imported site session, or log out of the source site. Retention on the receiving server is controlled by the user operating that Arisa instance.
+Users can revoke the browser profile with **Forget**, revoke it from Arisa, delete an imported site session, or log out of the source site. Deletion removes both working and source cookie copies. If server revocation is not confirmed, Forget retains the local credential so the user can retry. Retention on the receiving server is controlled by the user operating that Arisa instance.
 
 ## Security boundary
 

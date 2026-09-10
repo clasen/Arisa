@@ -16,7 +16,7 @@ Use it in a dedicated Chrome or Brave profile named Arisa. Connect the profile o
 
 The extension:
 
-- acts only after you open its popup and choose an action
+- starts operations only after you choose an action, then completes them in the background if the popup closes
 - uses active-tab access for the selected site
 - requests temporary host access only when sending, then removes it
 - when sharing a `*.google.com` product, also stores a separate session containing cookies applicable to Google Accounts so redirecting authentication can be reused
@@ -43,4 +43,5 @@ English
 - `activeTab`: identify the site selected by the user after the extension action is invoked
 - `cookies`: read cookies applicable to the selected site when the user chooses **Send current session**
 - `storage`: retain the revocable bridge-device credential and short-lived recovery state in the dedicated browser profile
+- `alarms`: resume an already-authorized connection or clean expired pending work after background-worker suspension; does not initiate new session shares
 - optional HTTP/HTTPS host access: temporarily read session state for the active site and communicate with the exact bridge endpoint approved during initial setup; active-site access is removed after the read, while only the bridge origin remains persistent
