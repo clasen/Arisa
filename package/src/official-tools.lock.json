@@ -1,7 +1,7 @@
 {
   "version": 1,
   "repository": "https://github.com/clasen/Arisa.git",
-  "commit": "cd56fc014986c8f0c9e1f4901cdc8ea705c9bf20",
+  "commit": "773dc5b7dd81e628ec63632bd9d7c32e4cb468fd",
   "tools": {
     "audio-extractor": {
       "version": null,
@@ -316,7 +316,7 @@
         "oauth-device.js": "698aa9255bae47190c63527db7680aaab4f06392a108a0ff6444e32d31b7b89f",
         "oauth-watch-plan.js": "b1bbed52eeb0e2e50dd52d733897ebd70573fea3ff5f023b3c63347f92633d3e",
         "package.json": "15e02c7df79f72215e3b13af3aa8d6eba9ddd281509dc6bfeffc9ceb43bcba92",
-        "pnpm-lock.yaml": "7f91f5b317bb9635a28168ae0224719c336e0ccbf356c1467ec22cc8d2c154ea",
+        "pnpm-lock.yaml": "fa60c4eced54fabd33553bd7e0e8e313e9749fea80381e333bfeb3c028aef879",
         "state-store.js": "a8fb63096b8efdec8de1cb386eff371f1552f3fd71d96f25036e1c724285e0af",
         "test/mcp-client.test.js": "26a7fe3ffa33ad454eced32c7fab12975ac5c0914041dea68cb7e5467e753a10",
         "tool-routing.js": "b3405c9879443cdc257a1e97d4968859a8654e62ff7cfb90ec3a7a992a62e311",
