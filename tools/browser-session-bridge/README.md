@@ -52,7 +52,7 @@ The `reviewer-setup` action creates one durable, revocable reviewer URL for conf
 
 ## Tests
 
-Run `npm test` for unit and HTTP integration tests. Run `RUN_BROWSER_TESTS=1 npm test` to include the Chromium worker/popup lifecycle test. That test closes the extension page during a real activation request and checks persisted connection state after reopening; it stubs the permission API and does not replace a manual Chrome/Brave permission-prompt check.
+Run `pnpm test` for unit and HTTP integration tests. Run `RUN_BROWSER_TESTS=1 pnpm test` to include the Chromium worker/popup lifecycle test. That test closes the extension page during a real activation request and checks persisted connection state after reopening; it stubs the permission API and does not replace a manual Chrome/Brave permission-prompt check.
 
 ## Daemon availability
 

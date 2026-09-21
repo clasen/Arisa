@@ -8,5 +8,6 @@
     "install-browser": "node scripts/install-lightpanda.js",
     "benchmark": "node scripts/benchmark.js",
     "limit-suite": "node scripts/limit-suite.js"
-  }
+  },
+  "packageManager": "pnpm@11.3.0"
 }

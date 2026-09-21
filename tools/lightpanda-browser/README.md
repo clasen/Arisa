@@ -94,7 +94,7 @@ Safety boundaries:
 The installer downloads the matching Linux nightly release into Arisa's global tool state directory, verifies the SHA-256 digest published by GitHub, installs atomically, and records a non-secret receipt.
 
 ```bash
-ARISA_PACKAGE_DIR=/path/to/arisa/package npm run install-browser
+ARISA_PACKAGE_DIR=/path/to/arisa/package pnpm run install-browser
 ```
 
 ## CLI
@@ -104,7 +104,7 @@ node index.js --help
 node index.js run --request-file request.json
 ```
 
-Run tests with `npm test`. Run the bounded compatibility and resource probe with `ARISA_PACKAGE_DIR=/path/to/arisa/package npm run limit-suite`. See `COMPATIBILITY-MIGRATION.md` for the evidence-based Chromium replacement matrix.
+Run tests with `pnpm test`. Run the bounded compatibility and resource probe with `ARISA_PACKAGE_DIR=/path/to/arisa/package pnpm run limit-suite`. See `COMPATIBILITY-MIGRATION.md` for the evidence-based Chromium replacement matrix.
 
 ## Engine switching
 
@@ -118,9 +118,9 @@ Run tests with `npm test`. Run the bounded compatibility and resource probe with
 Run the fixed three-page, one-repetition benchmark with:
 
 ```bash
-ARISA_PACKAGE_DIR=/path/to/arisa/package npm run benchmark
+ARISA_PACKAGE_DIR=/path/to/arisa/package pnpm run benchmark
 # Exceptional opt-in only; never part of routine checks:
-INCLUDE_CHROMIUM=true ARISA_PACKAGE_DIR=/path/to/arisa/package npm run benchmark
+INCLUDE_CHROMIUM=true ARISA_PACKAGE_DIR=/path/to/arisa/package pnpm run benchmark
 ```
 
 The original 2026-08-28 directional run measured a median 21.3 MiB RSS and 1492.9 ms for Lightpanda, but its success rule only checked for non-empty output. Version 0.4 corrects that flaw: every fixture now requires specific semantic content, and the JavaScript fixture waits for network idle. Historical results remain host-specific observations and must not be treated as current semantic pass rates until the benchmark is rerun. See `BENCHMARK.md` and `benchmark-latest.json`.
