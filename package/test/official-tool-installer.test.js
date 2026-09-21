@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import crypto from "node:crypto";
 import { execFileSync } from "node:child_process";
-import { cp, mkdir, mkdtemp, readFile, readdir, rm, symlink, writeFile } from "node:fs/promises";
+import { chmod, cp, mkdir, mkdtemp, readFile, readdir, rm, symlink, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -135,6 +135,44 @@ test("installs a verified staged tree without overwriting an existing tool", asy
     /Refusing to overwrite/
   );
 });
+
+for (const exitCode of [0, 1]) {
+  test(`uses the pnpm lock without falling back to npm when pnpm exits ${exitCode}`, async (t) => {
+    const { root, source, files } = await fixture(t);
+    for (const [name, content] of Object.entries({
+      "package.json": JSON.stringify({ dependencies: { example: "1.0.0" } }),
+      "pnpm-lock.yaml": "lockfileVersion: '9.0'\n"
+    })) {
+      await writeFile(path.join(source, name), content);
+      files[name] = await digest(path.join(source, name));
+    }
+    const bin = path.join(root, "bin");
+    const callsFile = path.join(root, "calls.jsonl");
+    await mkdir(bin);
+    for (const manager of ["pnpm", "npm"]) {
+      const executable = path.join(bin, manager);
+      await writeFile(executable, `#!${process.execPath}\nrequire('node:fs').appendFileSync(${JSON.stringify(callsFile)}, JSON.stringify([${JSON.stringify(manager)}, ...process.argv.slice(2)]) + '\\n');\nprocess.exit(${manager === "pnpm" ? exitCode : 0});\n`);
+      await chmod(executable, 0o755);
+    }
+    const previousPath = process.env.PATH;
+    process.env.PATH = `${bin}${path.delimiter}${previousPath}`;
+    t.after(() => { process.env.PATH = previousPath; });
+    const install = () => installLockedOfficialTool({
+      toolName: "master-slave",
+      lock: lock(files),
+      destination: path.join(root, "installed", "master-slave"),
+      checkout: async ({ checkoutDir }) => {
+        await mkdir(path.join(checkoutDir, "tools"), { recursive: true });
+        await cp(source, path.join(checkoutDir, "tools", "master-slave"), { recursive: true });
+      },
+      validate: async () => {}
+    });
+    if (exitCode) await assert.rejects(install, /pnpm failed/);
+    else await install();
+    const calls = (await readFile(callsFile, "utf8")).trim().split("\n").map(JSON.parse);
+    assert.deepEqual(calls, [["pnpm", "install", "--frozen-lockfile", "--prod"]]);
+  });
+}
 
 test("loads the bundled lock before selecting the canonical tool destination", async (t) => {
   const { root, files } = await fixture(t);

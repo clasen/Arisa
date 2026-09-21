@@ -149,7 +149,9 @@ async function installPackageDependencies(toolDir) {
   }
   const dependencyCount = Object.keys(packageJson.dependencies || {}).length + Object.keys(packageJson.optionalDependencies || {}).length;
   if (!dependencyCount) return { installed: false };
-  if (await exists(path.join(toolDir, "package-lock.json"))) {
+  if (await exists(path.join(toolDir, "pnpm-lock.yaml"))) {
+    await runCommand("pnpm", ["install", "--frozen-lockfile", "--prod"], { cwd: toolDir });
+  } else if (await exists(path.join(toolDir, "package-lock.json"))) {
     await runCommand("npm", ["ci", "--omit=dev"], { cwd: toolDir });
   } else {
     await runCommand("npm", ["install", "--omit=dev"], { cwd: toolDir });
