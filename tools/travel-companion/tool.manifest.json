@@ -1,0 +1,16 @@
+{
+  "name": "travel-companion",
+  "version": "0.3.0",
+  "description": "Maintain isolated trip itineraries, reservations, tasks, provisions, map links and source-dated flight observations and weather insights. Queue guarded reminders and bounded proactive reviews for a bound WhatsApp resource or the owning Telegram chat; never books or pays.",
+  "entry": "index.js",
+  "input": ["text/plain", "application/json"],
+  "output": ["application/json", "text/plain"],
+  "category": "travel",
+  "keywords": ["trip", "travel", "itinerary", "flight", "reservation", "reminder", "organizer", "maps", "provisions", "weather", "forecast", "climate", "whatsapp", "telegram"],
+  "configSchema": {
+    "POLL_SECONDS": {"type":"number", "required":false, "prompt":"Polling interval in seconds, at least 60."},
+    "REVIEW_INTERVAL_HOURS": {"type":"number", "required":false, "prompt":"Minimum hours between proactive reviews, at least 1."},
+    "REVIEW_HORIZON_DAYS": {"type":"number", "required":false, "prompt":"Days before travel during which proactive review may run."},
+    "MAX_REMINDER_LATENESS_MINUTES": {"type":"number", "required":false, "prompt":"Maximum reminder lateness before marking it expired instead of sending."}
+  }
+}
