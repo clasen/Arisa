@@ -10,6 +10,7 @@ import qrcodeTerminal from "qrcode-terminal";
 import QRCode from "qrcode";
 import pkg from "whatsapp-web.js";
 import defaults from "./config.js";
+import { normalizeAudio } from "./audio-normalization.js";
 import { cacheBudgetBytes, chromiumCacheArgs, chromiumCacheUsage, pruneChromiumCaches } from "./browser-cache.js";
 import { burstBypassNames, createMessageBurstCoordinator } from "./message-burst.js";
 import {
@@ -94,6 +95,7 @@ Modes:
   set-profile-picture Set the current WhatsApp account profile picture from an image artifact.
   broadcast  Send one message to multiple recipients from this chat's session. Enables watch by default. Supports humanized delay/typing.
   inbox      Read/process received WhatsApp replies from this chat's local inbox.
+  transcribe Recover and transcribe media using args.messageId (exact serialized ID) and optional args.remote.
   sync       Backfill recent messages from known chats/groups into the inbox.
   wait-reply Wait for a reply from an optional recipient after sending.
   react      React to a WhatsApp message by id, or the latest inbox message.
@@ -877,7 +879,10 @@ async function downloadMessageMedia(message, attempts = 4) {
     try {
       const media = await message.downloadMedia();
       if (media?.data && media?.mimetype) return media;
-    } catch {}
+      console.error(`[media-download] empty result; type=${message.type}; hasMedia=${Boolean(message.hasMedia)}`);
+    } catch (error) {
+      console.error(`[media-download] ${shortError(error)}`);
+    }
     await sleep(750 + attempt * 750);
   }
   return null;
@@ -984,8 +989,27 @@ async function captureIncomingMessage(ownerChatId, message) {
   }
   if (!(await isWatchEnabled(ownerChatId))) return;
 
-  const artifact = await storeIncomingMediaArtifact(message, ownerChatId, { senderId, fromName: inboxMessage.fromName, chatName: inboxMessage.chatName });
-  const transcript = await transcribeIncomingAudio(ownerChatId, inboxMessage, artifact);
+  const context = { senderId, fromName: inboxMessage.fromName, chatName: inboxMessage.chatName };
+  let artifact;
+  let transcript = "";
+  if (["ptt", "audio"].includes(message.type)) {
+    const result = await normalizeAudio({
+      download: () => storeIncomingMediaArtifact(message, ownerChatId, context),
+      transcribe: (audio) => transcribeIncomingAudio(ownerChatId, inboxMessage, audio),
+      sleep
+    });
+    artifact = result.artifact;
+    transcript = result.transcript;
+    inboxMessage.normalizationStatus = result.status;
+    inboxMessage.normalizationError = result.error || "";
+    inboxMessage.transcript = transcript;
+    inboxMessage.artifactId = artifact?.id || "";
+    inboxMessage.body = transcript || "[Audio normalization failed; contents unavailable. Do not infer speech from this status.]";
+    if (result.error) console.error(`[audio-normalization] ${result.error}`);
+    await updateInboxMessages(ownerChatId, (messages) => messages.map((item) => item.id === inboxMessage.id ? { ...item, ...inboxMessage } : item));
+  } else {
+    artifact = await storeIncomingMediaArtifact(message, ownerChatId, context);
+  }
   await burstCoordinatorForChat(ownerChatId).add(ownerChatId, inboxMessage, artifact, transcript);
 }
 
@@ -1383,16 +1407,14 @@ class SessionManager {
       message = messages.find((item) => serializedWhatsAppId(item.id) === messageId || serializedWhatsAppId(item.id).includes(messageId));
     }
     if (!message) throw new Error(`WhatsApp message not found: ${messageId}`);
-    let artifact = await storeIncomingMediaArtifact(message, chatId, { transcribedOnDemand: true });
-    if (!artifact?.id && job.remote) {
-      const chat = await record.client.getChatById(job.remote);
-      const messages = await chat.fetchMessages({ limit: number(job.limit, 50) });
-      const fetched = messages.find((item) => serializedWhatsAppId(item.id) === messageId || serializedWhatsAppId(item.id).includes(messageId));
-      if (fetched) artifact = await storeIncomingMediaArtifact(fetched, chatId, { transcribedOnDemand: true, fetchedFromChat: true });
-    }
-    if (!artifact?.id) throw new Error("Could not download media from WhatsApp message");
-    const transcript = await transcribeIncomingAudio(chatId, { type: message.type || job.messageType || "audio" }, artifact);
-    if (!transcript) throw new Error("Audio transcription failed or returned empty text");
+    const result = await normalizeAudio({
+      download: () => storeIncomingMediaArtifact(message, chatId, { transcribedOnDemand: true }),
+      transcribe: (audio) => transcribeIncomingAudio(chatId, { type: message.type || "audio" }, audio),
+      sleep
+    });
+    const { artifact, transcript } = result;
+    if (result.status !== "completed") throw new Error(`Audio normalization failed after retries: ${result.error}`);
+    await updateInboxMessages(chatId, (messages) => messages.map((item) => item.id === messageId ? { ...item, body: transcript, transcript, artifactId: artifact.id, normalizationStatus: "completed", normalizationError: "" } : item));
     record.lastActivity = Date.now();
     return { messageId, artifactId: artifact.id, mimeType: artifact.mimeType, kind: artifact.kind, transcript };
   }

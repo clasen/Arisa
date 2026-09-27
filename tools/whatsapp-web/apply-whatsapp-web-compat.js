@@ -1,4 +1,5 @@
 ﻿import { createRequire } from "node:module";
+import { applyMediaCompatibility } from "./media-compat.js";
 import path from "node:path";
 import { readFile, writeFile } from "node:fs/promises";
 
@@ -333,5 +334,7 @@ let changed = 0;
 for (const replacement of replacements) {
   if (await applyReplacement(replacement)) changed += 1;
 }
+
+await applyMediaCompatibility(packageRoot);
 
 console.log(`whatsapp-web.js compatibility patch ready (${changed} source replacement${changed === 1 ? "" : "s"}).`);
