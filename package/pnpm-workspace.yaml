@@ -10,6 +10,7 @@ minimumReleaseAgeExclude:
   - '@earendil-works/chord@0.85.1'
 
 overrides:
+  '@earendil-works/pi-coding-agent>undici': '8.10.2'
   'node-fetch@2.7.0>whatwg-url': '13.0.0'
   '@protobufjs/utf8@<=1.1.0': '>=1.1.1'
   basic-ftp@<=5.2.1: '>=5.2.2'
