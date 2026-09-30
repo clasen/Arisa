@@ -24,10 +24,7 @@ export function createChatStateStore() {
       const key = String(chatId);
       return states.get(key) || reset(key);
     },
-    reset,
-    anyProcessing() {
-      return [...states.values()].some((state) => state.processing);
-    }
+    reset
   };
 }
 
@@ -148,7 +145,7 @@ export async function routeBusyPrompt({
   return { disposition: "queued" };
 }
 
-function stopQueuedTyping(chatState) {
+export function stopQueuedTelegramTyping(chatState) {
   chatState.stopQueuedTyping?.();
   chatState.stopQueuedTyping = null;
 }
@@ -206,7 +203,7 @@ export async function drainChatPromptQueue({
       chatState.continueAfterClose = false;
     }
   } finally {
-    stopQueuedTyping(chatState);
+    stopQueuedTelegramTyping(chatState);
     chatState.processing = false;
     chatState.activeSession = null;
   }

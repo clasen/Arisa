@@ -132,11 +132,6 @@ export async function ensureQueuedTelegramTyping(chatState, ctx) {
   chatState.stopQueuedTyping = await startTelegramTyping(ctx);
 }
 
-export function stopQueuedTelegramTyping(chatState) {
-  chatState.stopQueuedTyping?.();
-  chatState.stopQueuedTyping = null;
-}
-
 async function withTyping(ctx, work) {
   const stopTyping = await startTelegramTyping(ctx);
   try {

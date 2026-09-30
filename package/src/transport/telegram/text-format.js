@@ -49,24 +49,3 @@ export function renderTelegramHtml(text = "") {
 
   return parts.join("");
 }
-
-export function splitTelegramText(text = "", maxLength = 3500) {
-  const source = String(text || "").trim();
-  if (!source) return [];
-  if (source.length <= maxLength) return [source];
-
-  const chunks = [];
-  let remaining = source;
-
-  while (remaining.length > maxLength) {
-    let cut = remaining.lastIndexOf("\n\n", maxLength);
-    if (cut < Math.floor(maxLength / 2)) cut = remaining.lastIndexOf("\n", maxLength);
-    if (cut < Math.floor(maxLength / 2)) cut = remaining.lastIndexOf(" ", maxLength);
-    if (cut <= 0) cut = maxLength;
-    chunks.push(remaining.slice(0, cut).trim());
-    remaining = remaining.slice(cut).trimStart();
-  }
-
-  if (remaining) chunks.push(remaining);
-  return chunks;
-}

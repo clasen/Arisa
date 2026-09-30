@@ -89,27 +89,42 @@ export function withTaskDatabase(migrate, operation, {
   }
 }
 
-export function selectTasks(db, filter = {}) {
-  if (filter.empty) return [];
+const activeStatusesSql = "('pending', 'running', 'blocked_auth')";
+
+function whereClause(filter, values) {
   const conditions = [];
-  const values = [];
   for (const [key, column] of [["id", "id"], ["chatId", "chat_id"], ["status", "status"], ["kind", "kind"]]) {
     if (filter[key]) {
       conditions.push(`${column} = ?`);
       values.push(String(filter[key]));
     }
   }
-  let order = "seq";
-  let limit = "";
   if (filter.due) {
     conditions.push("status IN ('pending', 'blocked_auth')", "run_at <= ?");
     values.push(filter.due.now);
-    order = "run_at, created_at, id";
-    limit = " LIMIT ?";
-    values.push(filter.due.limit);
   }
-  return db.prepare(`SELECT data FROM tasks ${filter.due ? "INDEXED BY tasks_due" : ""} ${conditions.length ? `WHERE ${conditions.join(" AND ")}` : ""} ORDER BY ${order}${limit}`)
+  return conditions.length ? `WHERE ${conditions.join(" AND ")}` : "";
+}
+
+// `activeFirst` lists pending, running and authentication-blocked tasks before history,
+// newest first within each group; `limit` bounds the rows parsed into memory.
+export function selectTasks(db, filter = {}) {
+  if (filter.empty) return [];
+  const values = [];
+  const where = whereClause(filter, values);
+  let order = "seq";
+  if (filter.due) order = "run_at, created_at, id";
+  else if (filter.activeFirst) order = `CASE WHEN status IN ${activeStatusesSql} THEN 0 ELSE 1 END, seq DESC`;
+  const limit = filter.due ? filter.due.limit : filter.limit;
+  if (limit != null) values.push(limit);
+  return db.prepare(`SELECT data FROM tasks ${filter.due ? "INDEXED BY tasks_due" : ""} ${where} ORDER BY ${order}${limit != null ? " LIMIT ?" : ""}`)
     .all(...values).map((row) => JSON.parse(row.data));
+}
+
+export function countTasks(db, filter = {}) {
+  const values = [];
+  const where = whereClause(filter, values);
+  return db.prepare(`SELECT COUNT(*) AS total FROM tasks ${where}`).get(...values).total;
 }
 
 export function persistTaskChanges(db, before, tasks) {

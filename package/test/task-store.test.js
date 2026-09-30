@@ -9,6 +9,7 @@ process.env.HOME = homeDir;
 process.env.USERPROFILE = homeDir;
 
 const { TaskStore } = await import("../src/core/tasks/task-store.js");
+const { createCapabilityService, resolveScheduledTaskListLimit } = await import("../src/core/capabilities/capability-service.js");
 const { arisaHomeDir, tasksFile } = await import("../src/runtime/paths.js");
 
 async function resetHome() {
@@ -410,4 +411,44 @@ test("cancelAll preserves done and failed tasks and respects chat filters", asyn
     remaining.map((task) => task.id),
     ["chat-2-pending", "chat-1-done", "chat-1-failed", "chat-1-uncertain"]
   );
+});
+
+test("pages scheduled tasks in SQL with active tasks first and bounded history", async () => {
+  await resetHome();
+  const store = new TaskStore();
+  const tasks = Array.from({ length: 55 }, (_, index) => ({ id: `done-${index}`, kind: "agent_task", status: "done" }));
+  tasks[0] = { id: "pending-1", kind: "agent_task", status: "pending" };
+  tasks[1] = { id: "blocked-1", kind: "agent_task", status: "blocked_auth" };
+  await store.addMany(tasks, { payload: { chatId: "chat-1" } });
+  await store.add({ id: "other-chat", kind: "agent_task" }, { payload: { chatId: "chat-2" } });
+
+  const service = createCapabilityService({ taskStore: store, artifactStore: {}, toolRegistry: {} });
+  const result = await service.execute({
+    method: "tasks.list",
+    actorToolName: "list_scheduled_tasks",
+    chatId: "chat-1",
+    context: { selectScheduledTasks: true }
+  });
+
+  assert.equal(result.total, 55);
+  assert.equal(result.returned, 50);
+  assert.equal(result.limit, 50);
+  assert.equal(result.truncated, true);
+  assert.deepEqual(result.tasks.slice(0, 3).map((task) => task.id), ["blocked-1", "pending-1", "done-54"]);
+});
+
+test("pages scheduled tasks by explicit status and limit, newest first", async () => {
+  await resetHome();
+  const store = new TaskStore();
+  await store.addMany([
+    { id: "done-1", kind: "agent_task", status: "done" },
+    { id: "done-2", kind: "agent_task", status: "done" },
+    { id: "pending-1", kind: "agent_task", status: "pending" }
+  ], { payload: { chatId: "chat-1" } });
+
+  const page = await store.listPage({ chatId: "chat-1", status: "done" }, resolveScheduledTaskListLimit(1));
+  assert.deepEqual(page.tasks.map((task) => task.id), ["done-2"]);
+  assert.equal(page.total, 2);
+  assert.equal(resolveScheduledTaskListLimit(), 50);
+  assert.equal(resolveScheduledTaskListLimit(500), 100);
 });

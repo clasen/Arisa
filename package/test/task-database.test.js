@@ -27,7 +27,7 @@ test("task migration is atomic, retains the legacy source and does not reimport 
     { id: "old", status: "blocked_auth", kind: "agent_task", payload: { chatId: "owner", prompt: "private", telegramContext: { transportChatId: -100, messageThreadId: 87 } }, authBlock: { retryAfterSeconds: 3600 } }
   ]);
   await writeFile(storage.legacyFile, text);
-  await store.init();
+  await store.list();
   assert.equal(await readFile(storage.legacyFile, "utf8"), text);
   const task = await store.get("old");
   assert.equal(task.payload.prompt, "private");
@@ -43,7 +43,7 @@ test("bad legacy task storage fails explicitly and rolls back partial migration"
   const { storage, store } = await fixture(t);
   for (const text of ["{broken", "{}", '[{"id":"one","status":"pending"},{"id":"one","status":"pending"}]', '[{"id":"one","status":"pending"},{}]']) {
     await writeFile(storage.legacyFile, text);
-    await assert.rejects(store.init(), /Task storage operation failed/);
+    await assert.rejects(store.list(), /Task storage operation failed/);
     assert.equal(await readFile(storage.legacyFile, "utf8"), text);
     const db = new DatabaseSync(storage.databaseFile);
     try {
@@ -61,7 +61,7 @@ test("SQLite corruption and unsupported schemas do not silently fall back to JSO
   await writeFile(storage.databaseFile, "not a sqlite database");
   await assert.rejects(store.list(), /Task storage operation failed/);
   await rm(storage.databaseFile);
-  await store.init();
+  await store.list();
   const db = new DatabaseSync(storage.databaseFile);
   db.exec("PRAGMA user_version = 999");
   db.close();
@@ -86,7 +86,7 @@ test("task writes roll back together and unrelated history is not parsed on the 
 
 test("idle task polling stays within a 32 MiB heap with a large terminal history and does not rewrite it", async (t) => {
   const { storage, store } = await fixture(t);
-  await store.init();
+  await store.list();
   const db = new DatabaseSync(storage.databaseFile);
   try {
     db.exec("BEGIN");

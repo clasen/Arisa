@@ -75,28 +75,12 @@ export function resolveMediaCaption(caption) {
   return caption && !containsAbsolutePath(caption) ? caption : undefined;
 }
 
-export function selectScheduledTasks(tasks = [], { status, limit = defaultScheduledTaskListLimit } = {}) {
+export function resolveScheduledTaskListLimit(limit = defaultScheduledTaskListLimit) {
   const parsedLimit = Number(limit);
-  const resolvedLimit = Math.min(
+  return Math.min(
     Math.max(Number.isFinite(parsedLimit) ? Math.trunc(parsedLimit) : defaultScheduledTaskListLimit, 1),
     maxScheduledTaskListLimit
   );
-  const allTasks = Array.isArray(tasks) ? tasks : [];
-  const activeStatuses = new Set(["pending", "running", "blocked_auth"]);
-  const orderedTasks = status
-    ? [...allTasks].reverse()
-    : [
-        ...allTasks.filter((task) => activeStatuses.has(task.status)).reverse(),
-        ...allTasks.filter((task) => !activeStatuses.has(task.status)).reverse()
-      ];
-  const visibleTasks = orderedTasks.slice(0, resolvedLimit);
-  return {
-    tasks: visibleTasks,
-    total: allTasks.length,
-    returned: visibleTasks.length,
-    limit: resolvedLimit,
-    truncated: visibleTasks.length < allTasks.length
-  };
 }
 
 async function catalogSearch(searchCatalog, query) {
@@ -288,10 +272,11 @@ export function createCapabilityService({
 
     if (method === "tasks.list") {
       const scopedChatId = requireChatId(chatId, method);
-      const tasks = await taskStore.list({ chatId: scopedChatId, status: params.status || undefined, kind: params.kind || undefined });
-      return context.selectScheduledTasks
-        ? selectScheduledTasks(tasks, { status: params.status, limit: params.limit })
-        : tasks;
+      const filter = { chatId: scopedChatId, status: params.status || undefined, kind: params.kind || undefined };
+      if (!context.selectScheduledTasks) return taskStore.list(filter);
+      const limit = resolveScheduledTaskListLimit(params.limit);
+      const { tasks, total } = await taskStore.listPage(filter, limit);
+      return { tasks, total, returned: tasks.length, limit, truncated: tasks.length < total };
     }
 
     if (method === "tasks.cancel") {

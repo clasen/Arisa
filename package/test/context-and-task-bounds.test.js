@@ -4,17 +4,16 @@ import {
   collectText,
   ensureQueuedTelegramTyping,
   isSilentReply,
-  resolveIncomingBusyMessageMode,
-  stopQueuedTelegramTyping
+  resolveIncomingBusyMessageMode
 } from "../src/transport/telegram/bot.js";
 import {
   createChatStateStore,
   drainChatPromptQueue,
   queueChatPrompt,
   resolveTelegramBusyMessageMode,
-  routeBusyPrompt
+  routeBusyPrompt,
+  stopQueuedTelegramTyping
 } from "../src/transport/telegram/chat-queue.js";
-import { selectScheduledTasks } from "../src/core/capabilities/capability-service.js";
 
 test("queued Telegram prompts start typing immediately and share one indicator", async () => {
   let actions = 0;
@@ -387,36 +386,4 @@ test("a pending /new forces later text into the replacement queue", async () => 
   assert.equal(result.disposition, "queued");
   assert.deepEqual(steered, []);
   assert.deepEqual(chatState.pendingPrompts, ["new session confirmation", "message after new"]);
-});
-
-test("selectScheduledTasks bounds history while keeping active tasks", () => {
-  const tasks = Array.from({ length: 55 }, (_, index) => ({
-    id: `done-${index}`,
-    status: "done"
-  }));
-  tasks[0] = { id: "pending-1", status: "pending" };
-  tasks[1] = { id: "blocked-1", status: "blocked_auth" };
-
-  const result = selectScheduledTasks(tasks);
-
-  assert.equal(result.total, 55);
-  assert.equal(result.returned, 50);
-  assert.equal(result.limit, 50);
-  assert.equal(result.truncated, true);
-  assert.deepEqual(result.tasks.slice(0, 2).map((task) => task.id), ["blocked-1", "pending-1"]);
-});
-
-test("selectScheduledTasks honors an explicit status and limit", () => {
-  const tasks = [
-    { id: "done-1", status: "done" },
-    { id: "done-2", status: "done" }
-  ];
-
-  const result = selectScheduledTasks(tasks, { status: "done", limit: 1 });
-
-  assert.deepEqual(result.tasks.map((task) => task.id), ["done-2"]);
-  assert.equal(result.total, 2);
-  assert.equal(result.returned, 1);
-  assert.equal(result.limit, 1);
-  assert.equal(result.truncated, true);
 });

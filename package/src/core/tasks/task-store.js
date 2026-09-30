@@ -1,5 +1,5 @@
 import crypto from "node:crypto";
-import { withTaskDatabase, transaction, selectTasks, persistTaskChanges } from "./task-database.js";
+import { withTaskDatabase, transaction, selectTasks, countTasks, persistTaskChanges } from "./task-database.js";
 
 const DEFAULT_RETRY = Object.freeze({
   maxAttempts: 3,
@@ -156,10 +156,6 @@ function failTask(task, error) {
 export class TaskStore {
   constructor(storage = {}) {
     this.storage = storage;
-  }
-
-  async init() {
-    this.read(() => undefined);
   }
 
   read(operation) {
@@ -427,6 +423,17 @@ export class TaskStore {
 
   async list(filter = {}) {
     return this.read((db) => selectTasks(db, filter));
+  }
+
+  // Bounded listing: only `limit` rows are parsed, active tasks first, newest first.
+  async listPage(filter = {}, limit) {
+    if (!Number.isSafeInteger(limit) || limit < 0) throw new Error("Invalid task list limit");
+    const { id, chatId, status, kind } = filter;
+    const where = { id, chatId, status, kind };
+    return this.read((db) => ({
+      tasks: selectTasks(db, { ...where, activeFirst: true, limit }),
+      total: countTasks(db, where)
+    }));
   }
 
   async get(taskId) {
