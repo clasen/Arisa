@@ -31,6 +31,25 @@ test("/tools shows typing and sends the scoped usage report", async () => {
   assert.deepEqual(events[1].options, { parse_mode: "HTML" });
 });
 
+test("/tools sends long names and large counts without a report width error", async () => {
+  const replies = [];
+  const handler = createTelegramToolsCommandHandler({
+    authorize: async () => ({ ok: true }),
+    contextRoute: () => ({ scopeChatId: 1 }),
+    toolRegistry: { usage: async () => [
+      { name: "gmail-workspace", count: 6970, official: true },
+      { name: "a".repeat(28), count: 12, official: false }
+    ] },
+    withTyping: async (_ctx, work) => work(),
+    logger: null
+  });
+  await handler({ chat: { id: 1 }, reply: async (text, options) => replies.push({ text, options }) });
+  assert.equal(replies.length, 1);
+  assert.match(replies[0].text, /gmail-workspace\s+6970/);
+  assert.doesNotMatch(replies[0].text, /Tool usage report failed/);
+  assert.deepEqual(replies[0].options, { parse_mode: "HTML" });
+});
+
 test("/tools reports failures instead of disappearing", async () => {
   const replies = [];
   const handler = createTelegramToolsCommandHandler({

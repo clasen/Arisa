@@ -62,3 +62,50 @@ test("formats narrow tool usage counts with bullets and right-aligned numbers", 
   assert.deepEqual(rows.map((line) => line.length), [27, 27]);
   assert.ok(report.split("\n").every((line) => [...line].length <= 35));
 });
+
+test("caps shared column widths when a four-digit count makes the report too wide", () => {
+  const report = formatToolUsageReport([
+    { name: "gmail-workspace", count: 6970, official: true },
+    { name: "a".repeat(28), count: 1, official: false }
+  ]);
+  assert.match(report, /Official\n- gmail-workspace\s+6970/);
+  assert.ok(report.split("\n").every((line) => [...line].length <= 35));
+  const row = report.split("\n").find((line) => line.startsWith("- gmail-workspace"));
+  assert.equal(row.length, 35);
+  assert.match(report, new RegExp(`Local\\n- ${"a".repeat(27)}\\n  a\\s+1`));
+});
+
+for (const { name, count } of [
+  { name: "n".repeat(27), count: 6970 },
+  { name: "n".repeat(28), count: 6970 },
+  { name: "long-tool-".repeat(12), count: 1234567 },
+  { name: "long-tool-".repeat(12), count: Number.MAX_SAFE_INTEGER },
+  { name: "long-tool-".repeat(12), count: "9".repeat(31) },
+  { name: "long-tool-".repeat(12), count: "9".repeat(70) },
+  { name: "工具😀".repeat(20), count: 6970 }
+]) {
+  test(`preserves all name and count characters within 35 columns (${[...name].length}/${String(count).length})`, () => {
+    const report = formatToolUsageReport([{ name, count, official: true }]);
+    const lines = report.split("\n");
+    assert.ok(lines.every((line) => [...line].length <= 35));
+    const fields = lines
+      .filter((line) => (line.startsWith("- ") || line.startsWith("  ")) && line !== "  (none)")
+      .map((line) => line.slice(2).replace(/\s+/g, ""))
+      .join("");
+    assert.equal(fields, name + count);
+  });
+}
+
+test("keeps empty sections and descending usage order", () => {
+  const empty = formatToolUsageReport([]);
+  assert.match(empty, /Official\n  \(none\)\n\nLocal\n  \(none\)/);
+  const report = formatToolUsageReport([
+    { name: "z-low", count: 1, official: true },
+    { name: "z-high", count: 200, official: true },
+    { name: "a-high", count: 200, official: true }
+  ]);
+  const rows = report.split("\n").filter((line) => line.startsWith("- "));
+  assert.match(rows[0], /^- a-high\s+200$/);
+  assert.match(rows[1], /^- z-high\s+200$/);
+  assert.match(rows[2], /^- z-low\s+1$/);
+});
