@@ -21,7 +21,7 @@ import {
   listModelThinkingLevels,
   modelSupportsThinking
 } from "../src/core/agent/pi-runtime.js";
-import { clampModelSpeed, createModelSpeedController, modelSupportsSpeed, normalizeModelSpeed, speedToServiceTier } from "../src/core/agent/model-speed.js";
+import { clampModelSpeed, createModelSpeedController, listModelSpeeds, modelSupportsSpeed, normalizeModelSpeed, speedToServiceTier } from "../src/core/agent/model-speed.js";
 import { getChatPiSessionsDir } from "../src/runtime/paths.js";
 import {
   buildEffortPicker,
@@ -360,6 +360,41 @@ test("maps supported model speeds to provider service tiers", () => {
   assert.equal(clampModelSpeed(fastModel, 2), 1.5);
   assert.deepEqual(parseSpeedPickerAction("speed:2"), { type: "speed", speed: 2 });
   assert.throws(() => normalizeModelSpeed(3), /Invalid model speed/);
+});
+
+test("enables the Sol 6.1 speed picker and priority payload without widening provider support", async () => {
+  const model = { provider: "openai-codex", api: "openai-codex-responses", id: "gpt-6.1-sol" };
+  assert.equal(modelSupportsSpeed(model), true);
+  assert.deepEqual(listModelSpeeds(model), [1, 1.5]);
+  assert.equal(clampModelSpeed(model, 1), 1);
+  assert.equal(clampModelSpeed(model, 1.5), 1.5);
+  assert.equal(clampModelSpeed(model, 2), 1.5);
+  const picker = buildSpeedPicker({
+    provider: model.provider, modelId: model.id, speeds: listModelSpeeds(model), selectedSpeed: 1
+  });
+  assert.equal(picker.replyMarkup.inline_keyboard[1][0].callback_data, "speed:1.5");
+  assert.equal(modelSupportsSpeed({ ...model, provider: "openai" }), false);
+  assert.equal(modelSupportsSpeed({ ...model, api: "openai-responses" }), false);
+  assert.equal(modelSupportsSpeed({ ...model, id: "gpt-6.1-unknown" }), false);
+
+  const config = applyConfigDefaults({ pi: { provider: model.provider, model: model.id } });
+  selectChatSpeed(config, "sol-topic", 1.5);
+  assert.equal(resolveChatSpeed(config, "sol-topic"), 1.5);
+  assert.equal(resolveChatSpeed(config, "other-topic"), 1);
+
+  const calls = [];
+  const controller = createModelSpeedController((_model, _context, options) => calls.push(options), 1);
+  for (const speed of [1, 1.5, 1]) {
+    controller.setSpeed(speed);
+    controller.streamFn(model, {}, {
+      onPayload: (payload) => ({ ...payload, preserved: true, service_tier: "default" })
+    });
+    const tier = speed > 1 ? "priority" : "default";
+    assert.equal(calls.at(-1).serviceTier, tier);
+    assert.deepEqual(await calls.at(-1).onPayload({ model: model.id }, model), {
+      model: model.id, preserved: true, service_tier: tier
+    });
+  }
 });
 
 test("applies Pi speed to every provider request and updates it in place", async () => {

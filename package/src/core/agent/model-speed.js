@@ -18,6 +18,7 @@ export function modelSupportsSpeed(model) {
       || model.id === "gpt-5.6"
       || model.id.startsWith("gpt-5.6-")
       || model.id === "gpt-6-astra"
+      || model.id === "gpt-6.1-sol"
     );
 }
 
