@@ -3,8 +3,11 @@ import { Type } from "@sinclair/typebox";
 import { getCoreCodingTools } from "./core-tools.js";
 import { maxScheduledTaskListLimit } from "../capabilities/capability-service.js";
 
-function jsonResult(result, text = JSON.stringify(result, null, 2)) {
-  return { content: [{ type: "text", text }], details: result };
+// Tool results are retained in memory and persisted in the Pi session for every turn.
+// Keep a single compact copy: Arisa never reads `details` back, so duplicating the
+// result there (plus indentation) only inflates session memory and compaction pressure.
+function jsonResult(result, text = JSON.stringify(result)) {
+  return { content: [{ type: "text", text }] };
 }
 
 function nativeTools(policy) {
@@ -71,7 +74,7 @@ export function createPiCapabilityTools({ capabilityService, telegram, chatId, p
       parameters: Type.Object({ name: Type.String() }),
       execute: async (_id, params) => {
         const help = await execute("tool_help", "tools.help", params);
-        return { content: [{ type: "text", text: help }], details: { help } };
+        return { content: [{ type: "text", text: help }] };
       }
     }),
     defineTool({

@@ -1,6 +1,7 @@
 import { existsSync } from "node:fs";
 import path from "node:path";
 import { spawn } from "node:child_process";
+import { StringDecoder } from "node:string_decoder";
 import { arisaIpcSocketFile, arisaPackageDir } from "../../platform/paths.js";
 import { daemonConfigDefaults } from "../config/config-defaults.js";
 import { createToolOutputParser } from "./tool-process-output.js";
@@ -94,10 +95,12 @@ export async function runToolHelpProcess(command, args, {
   });
   let stdout = "";
   let stderr = "";
+  const stdoutDecoder = new StringDecoder("utf8");
+  const stderrDecoder = new StringDecoder("utf8");
   let outputBytes = 0;
   let outputError = null;
   let forceTimer = null;
-  const append = (current, chunk) => {
+  const append = (current, chunk, decoder) => {
     if (outputError) return current;
     outputBytes += chunk.length;
     if (outputBytes > maxOutputBytes) {
@@ -108,14 +111,14 @@ export async function runToolHelpProcess(command, args, {
       forceTimer.unref?.();
       return current;
     }
-    return current + chunk.toString("utf8");
+    return current + decoder.write(chunk);
   };
-  child.stdout.on("data", (chunk) => { stdout = append(stdout, chunk); });
-  child.stderr.on("data", (chunk) => { stderr = append(stderr, chunk); });
+  child.stdout.on("data", (chunk) => { stdout = append(stdout, chunk, stdoutDecoder); });
+  child.stderr.on("data", (chunk) => { stderr = append(stderr, chunk, stderrDecoder); });
   const code = await waitForToolProcess(child, { timeoutMs, killGraceMs, label });
   clearTimeout(forceTimer);
   if (outputError) throw outputError;
-  return { code, stdout, stderr };
+  return { code, stdout: stdout + stdoutDecoder.end(), stderr: stderr + stderrDecoder.end() };
 }
 
 export async function runToolProcess(command, args, {

@@ -1,3 +1,4 @@
+import { StringDecoder } from "node:string_decoder";
 import { DAEMON_EVENT_TYPES, DAEMON_PROTOCOL_VERSION } from "./daemon-protocol.js";
 
 export function createToolOutputParser(name, {
@@ -5,6 +6,7 @@ export function createToolOutputParser(name, {
   maxFrameBytes = 1_048_576,
   maxOutputBytes = maxFrameBytes
 } = {}) {
+  const decoder = new StringDecoder("utf8");
   let buffer = "";
   let mode = "unknown";
   let rawOutput = "";
@@ -65,9 +67,10 @@ export function createToolOutputParser(name, {
 
   return {
     async push(chunk) {
-      const text = chunk.toString("utf8");
+      // Decode incrementally: a multi-byte character may be split across pipe chunks.
+      const text = typeof chunk === "string" ? chunk : decoder.write(chunk);
       if (mode !== "ndjson") {
-        rawOutputBytes += Buffer.byteLength(text, "utf8");
+        rawOutputBytes += typeof chunk === "string" ? Buffer.byteLength(chunk, "utf8") : chunk.length;
         if (rawOutputBytes > maxOutputBytes) {
           const error = new Error(`Tool output from ${name} exceeds ${maxOutputBytes} bytes`);
           error.code = "TOOL_OUTPUT_LIMIT";
@@ -89,6 +92,11 @@ export function createToolOutputParser(name, {
       }
     },
     async finish() {
+      const rest = decoder.end();
+      if (rest) {
+        if (mode !== "ndjson") rawOutput += rest;
+        if (mode !== "legacy") buffer += rest;
+      }
       const tail = buffer.trim();
       buffer = "";
       if (tail) await consumeLine(tail);

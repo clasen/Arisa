@@ -1,6 +1,6 @@
 import os from "node:os";
 import path from "node:path";
-import { readFile } from "node:fs/promises";
+import { readFile, stat } from "node:fs/promises";
 
 const defaultSkillsDir = path.join(os.homedir(), ".agents", "skills");
 
@@ -34,9 +34,21 @@ export class SkillRegistry {
   async get(name) {
     const key = String(name || "").trim();
     if (!key) return null;
-    if (this.cache.has(key)) return this.cache.get(key);
 
+    // Revalidate by file identity so skills installed or edited after startup are seen,
+    // while unchanged skills are served without re-reading their content.
     const file = path.join(this.skillsDir, key, "SKILL.md");
+    let fingerprint;
+    try {
+      const stats = await stat(file, { bigint: true });
+      fingerprint = `${stats.ino}:${stats.size}:${stats.mtimeNs}`;
+    } catch {
+      this.cache.delete(key);
+      return null;
+    }
+    const cached = this.cache.get(key);
+    if (cached?.fingerprint === fingerprint) return cached.skill;
+
     try {
       const content = await readFile(file, "utf8");
       const metadata = parseFrontmatter(content);
@@ -46,10 +58,10 @@ export class SkillRegistry {
         path: file,
         content
       };
-      this.cache.set(key, skill);
+      this.cache.set(key, { fingerprint, skill });
       return skill;
     } catch {
-      this.cache.set(key, null);
+      this.cache.delete(key);
       return null;
     }
   }

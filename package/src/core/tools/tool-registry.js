@@ -1,4 +1,4 @@
-import { mkdir, readdir, readFile, rmdir, unlink, writeFile } from "node:fs/promises";
+import { mkdir, readdir, readFile, rmdir, stat, unlink, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { createHash, randomUUID } from "node:crypto";
 import { getToolConfigPath, getToolStateDir, getToolTmpDir, getChatToolTmpDir, toolsDir as userToolsRoot } from "../../platform/paths.js";
@@ -144,6 +144,23 @@ function formatToolDependencies(tool, tools) {
   return `Tool dependencies:\n${lines.join("\n")}`;
 }
 
+async function fileFingerprint(file) {
+  try {
+    const stats = await stat(file, { bigint: true });
+    return `${stats.ino}:${stats.size}:${stats.mtimeNs}`;
+  } catch (error) {
+    if (error?.code === "ENOENT") return "missing";
+    throw error;
+  }
+}
+
+async function toolEntryFingerprint(manifestPath, localConfigPath, globalConfigPath) {
+  const files = globalConfigPath && globalConfigPath !== localConfigPath
+    ? [manifestPath, localConfigPath, globalConfigPath]
+    : [manifestPath, localConfigPath];
+  return (await Promise.all(files.map(fileFingerprint))).join("|");
+}
+
 async function readOfficialToolNames() {
   const baselinesDir = path.join(getToolStateDir("official-tool-sync"), "baselines");
   try {
@@ -173,6 +190,8 @@ export class ToolRegistry {
     this.runTimeoutMs = positiveDuration(runTimeoutMs, defaultToolRunTimeoutMs);
     this.killGraceMs = positiveDuration(killGraceMs, defaultToolKillGraceMs);
     this.tools = new Map();
+    // Parsed entries keyed by tool directory; reused while manifest and config files are unchanged.
+    this.entryCache = new Map();
     this.skillRegistry = new SkillRegistry();
     this.usageStore = usageStore;
     this.resolveOfficialToolNames = resolveOfficialToolNames;
@@ -183,8 +202,33 @@ export class ToolRegistry {
     this.concurrentExecutions = new Map();
   }
 
+  async readToolEntry(toolDir, manifestPath, localConfigPath) {
+    const manifest = JSON.parse(await readFile(manifestPath, "utf8"));
+    const defaults = parseConfigModule(await readFile(localConfigPath, "utf8"));
+    const configPath = getToolConfigPath(manifest.name);
+    // The global config file is usually the tool's own config.js, which was just parsed as defaults.
+    const config = configPath === localConfigPath
+      ? { ...defaults }
+      : await loadToolConfig(manifest.name, defaults);
+    return {
+      ...manifest,
+      toolDependencies: normalizeToolDependencies(manifest.toolDependencies),
+      execution: normalizeToolExecution(manifest.execution),
+      category: normalizeCategory(manifest.category),
+      keywords: normalizeKeywords(manifest.keywords),
+      skillHints: this.skillRegistry.normalizeHints(manifest),
+      dir: toolDir,
+      entry: path.join(toolDir, manifest.entry || "index.js"),
+      localConfigPath,
+      configPath,
+      defaults,
+      config
+    };
+  }
+
   async buildSnapshot() {
     const snapshot = new Map();
+    const entryCache = new Map();
     let entries = [];
     try {
       entries = await readdir(userToolsRoot, { withFileTypes: true });
@@ -198,30 +242,21 @@ export class ToolRegistry {
       const manifestPath = path.join(toolDir, "tool.manifest.json");
       const configPath = path.join(toolDir, "config.js");
       try {
-        const manifest = JSON.parse(await readFile(manifestPath, "utf8"));
-        if (snapshot.has(manifest.name)) continue;
-        const configSource = await readFile(configPath, "utf8");
-        const defaults = parseConfigModule(configSource);
-        const config = await loadToolConfig(manifest.name, defaults);
-        const skillHints = this.skillRegistry.normalizeHints(manifest);
-        snapshot.set(manifest.name, {
-          ...manifest,
-          toolDependencies: normalizeToolDependencies(manifest.toolDependencies),
-          execution: normalizeToolExecution(manifest.execution),
-          category: normalizeCategory(manifest.category),
-          keywords: normalizeKeywords(manifest.keywords),
-          skillHints,
-          dir: toolDir,
-          entry: path.join(toolDir, manifest.entry || "index.js"),
-          localConfigPath: configPath,
-          configPath: getToolConfigPath(manifest.name),
-          defaults,
-          config
-        });
+        // Fingerprint before reading so a concurrent edit is picked up by the next load.
+        const cached = this.entryCache.get(toolDir);
+        const globalConfigPath = cached ? getToolConfigPath(cached.tool.name) : null;
+        const fingerprint = await toolEntryFingerprint(manifestPath, configPath, globalConfigPath);
+        const tool = cached?.fingerprint === fingerprint
+          ? cached.tool
+          : await this.readToolEntry(toolDir, manifestPath, configPath);
+        if (snapshot.has(tool.name)) continue;
+        entryCache.set(toolDir, { fingerprint, tool });
+        snapshot.set(tool.name, tool);
       } catch {
         // ignore invalid tool dirs in v1
       }
     }
+    this.entryCache = entryCache;
     return snapshot;
   }
 
@@ -363,10 +398,6 @@ export class ToolRegistry {
 
   dependencyIssues(name = null) {
     return inspectToolDependencies(this.tools, name);
-  }
-
-  executionDiagnostic() {
-    return this.executionGovernor.snapshot();
   }
 
   async usage(chatId) {

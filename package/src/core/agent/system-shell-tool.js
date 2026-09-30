@@ -56,13 +56,15 @@ function resolveNativeShell(shellPath = "") {
   };
 }
 
-function appendLimited(current, chunk, state) {
+// Keeps raw bytes and decodes once at the end, so multi-byte UTF-8 characters split
+// across pipe chunks are not corrupted.
+function appendLimited(chunks, chunk, state) {
   state.totalBytes += chunk.length;
 
   const remaining = maxOutputBytes - state.storedBytes;
   if (remaining <= 0) {
     state.truncated = true;
-    return current;
+    return;
   }
 
   const accepted = chunk.length > remaining ? chunk.subarray(0, remaining) : chunk;
@@ -70,7 +72,11 @@ function appendLimited(current, chunk, state) {
   if (accepted.length < chunk.length) {
     state.truncated = true;
   }
-  return current + accepted.toString("utf8");
+  chunks.push(accepted);
+}
+
+function decodeChunks(chunks) {
+  return Buffer.concat(chunks).toString("utf8");
 }
 
 function killProcessTree(child) {
@@ -114,8 +120,8 @@ async function runShellCommand({ command, cwd, shellPath, timeoutMs }) {
     windowsHide: true
   });
 
-  let stdout = "";
-  let stderr = "";
+  const stdoutChunks = [];
+  const stderrChunks = [];
   const outputState = {
     storedBytes: 0,
     totalBytes: 0,
@@ -130,18 +136,18 @@ async function runShellCommand({ command, cwd, shellPath, timeoutMs }) {
 
   return new Promise((resolve) => {
     child.stdout.on("data", (chunk) => {
-      stdout = appendLimited(stdout, chunk, outputState);
+      appendLimited(stdoutChunks, chunk, outputState);
     });
     child.stderr.on("data", (chunk) => {
-      stderr = appendLimited(stderr, chunk, outputState);
+      appendLimited(stderrChunks, chunk, outputState);
     });
     child.on("error", (error) => {
       clearTimeout(timer);
       resolve({
         ok: false,
         error,
-        stdout,
-        stderr,
+        stdout: decodeChunks(stdoutChunks),
+        stderr: decodeChunks(stderrChunks),
         shell: nativeShell,
         timedOut,
         truncated: outputState.truncated,
@@ -153,8 +159,8 @@ async function runShellCommand({ command, cwd, shellPath, timeoutMs }) {
       resolve({
         ok: !timedOut && exitCode === 0,
         exitCode,
-        stdout,
-        stderr,
+        stdout: decodeChunks(stdoutChunks),
+        stderr: decodeChunks(stderrChunks),
         shell: nativeShell,
         timedOut,
         truncated: outputState.truncated,

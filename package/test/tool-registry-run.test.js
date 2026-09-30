@@ -534,3 +534,61 @@ test("preserves pretty-printed single JSON tool responses", async () => {
   await parser.push(output.slice(11));
   assert.deepEqual(await parser.finish(), { mode: "legacy", output });
 });
+
+test("decodes multi-byte UTF-8 characters split across output chunks", async () => {
+  const output = JSON.stringify({ ok: true, output: { text: "canción ñandú 🎵" } });
+  const bytes = Buffer.from(output, "utf8");
+  const splitAt = bytes.indexOf(Buffer.from("ñ", "utf8")) + 1;
+
+  const legacy = createToolOutputParser("legacy-tool");
+  await legacy.push(bytes.subarray(0, splitAt));
+  await legacy.push(bytes.subarray(splitAt));
+  assert.deepEqual(await legacy.finish(), { mode: "legacy", output });
+
+  const frame = Buffer.from(`${JSON.stringify({
+    version: 1,
+    jobId: "job",
+    type: "completed",
+    sequence: 1,
+    payload: { result: { ok: true, output: { text: "🎵 canción" } } }
+  })}\n`, "utf8");
+  const emojiSplit = frame.indexOf(Buffer.from("🎵", "utf8")) + 2;
+  const ndjson = createToolOutputParser("stream-tool");
+  await ndjson.push(frame.subarray(0, emojiSplit));
+  await ndjson.push(frame.subarray(emojiSplit));
+  assert.deepEqual(await ndjson.finish(), {
+    mode: "ndjson",
+    result: { ok: true, output: { text: "🎵 canción" } }
+  });
+});
+
+test("reuses parsed tool entries until their manifest or config changes", async () => {
+  await resetHome();
+  const dir = await createFakeTool("cached-tool");
+  const registry = new ToolRegistry();
+
+  await registry.load();
+  const first = registry.get("cached-tool");
+  await registry.load();
+  assert.equal(registry.get("cached-tool"), first);
+
+  await writeFile(path.join(dir, "config.js"), "export default {\n  apiKey: \"edited-key-value\"\n};\n", "utf8");
+  await registry.load();
+  const edited = registry.get("cached-tool");
+  assert.notEqual(edited, first);
+  assert.equal(edited.config.apiKey, "edited-key-value");
+
+  await registry.setConfig("cached-tool", "apiKey", "global-key");
+  await registry.load();
+  assert.equal(registry.get("cached-tool").config.apiKey, "global-key");
+
+  const manifest = JSON.parse(await readFile(path.join(dir, "tool.manifest.json"), "utf8"));
+  await writeFile(path.join(dir, "tool.manifest.json"), JSON.stringify({ ...manifest, description: "Updated description" }), "utf8");
+  await registry.load();
+  assert.equal(registry.get("cached-tool").description, "Updated description");
+
+  await rm(dir, { recursive: true, force: true });
+  await registry.load();
+  assert.equal(registry.get("cached-tool"), null);
+  assert.equal(registry.entryCache.size, 0);
+});

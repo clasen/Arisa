@@ -1,12 +1,11 @@
 import { readFile, stat } from "node:fs/promises";
 import { createAgentSession, DefaultResourceLoader, SessionManager, SettingsManager } from "@earendil-works/pi-coding-agent";
-import { createPiRuntime, hasProviderAuth } from "./pi-runtime.js";
+import { clampModelThinkingLevel, createPiRuntime, hasProviderAuth } from "./pi-runtime.js";
 import { resolveChatModelSelection } from "./model-selection.js";
 import { appendArisaAgentsFile, arisaAgentsFile, arisaInstallDir, buildAgentRuntimeContext } from "./runtime-context.js";
 import { withTimeout } from "./prompt-timeout.js";
 import { buildPiToolPolicy } from "./core-tools.js";
 import { createSystemShellTool } from "./system-shell-tool.js";
-import { clampModelThinkingLevel } from "./pi-runtime.js";
 import { clampModelSpeed, createModelSpeedController } from "./model-speed.js";
 import { arisaHomeDir } from "../../platform/paths.js";
 import { AgentSessionLifecycle } from "./agent-session-lifecycle.js";
@@ -321,7 +320,7 @@ export class AgentManager {
       });
   }
 
-  async validatePiAgent(config = this.config) {
+  async validateAgent(config = this.config) {
     this.logger?.log("agent", "validating Pi session");
     const modelRuntime = await createPiRuntime({
       provider: config.pi.provider,
@@ -350,10 +349,6 @@ export class AgentManager {
     } finally {
       session.dispose();
     }
-  }
-
-  async validateAgent(config = this.config) {
-    return this.validatePiAgent(config);
   }
 
   async getSessionContext(chatId, telegram, { scopeChatId = chatId, accessGuard = async () => {} } = {}) {
@@ -474,12 +469,6 @@ export class AgentManager {
     this.sessions.set(sessionKey, ctx);
     if (isNewSession) this.sessionLifecycle.completeNewSession(sessionKey);
     return this.acquireSessionContext(sessionKey, ctx);
-  }
-
-  async getAvailableModels(chatId) {
-    const { listProviderModels } = await import("./pi-runtime.js");
-    const runtime = await createPiRuntime({ provider: this.config.pi.provider, apiKey: this.config.pi.apiKey });
-    return listProviderModels(this.config.pi.provider, runtime);
   }
 
   async setModelSpeed(chatId, speed) {

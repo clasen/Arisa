@@ -54,11 +54,6 @@ class ChatArtifactStore {
     };
   }
 
-  async init() {
-    await mkdir(this.rootDir, { recursive: true });
-    await withArtifactIndex(this.index, () => {});
-  }
-
   async appendToIndex(artifact) {
     return withArtifactIndex(this.index, (db) => appendArtifact(db, artifact));
   }
@@ -78,7 +73,6 @@ class ChatArtifactStore {
   }
 
   async createFileArtifact({ fileName, kind, mimeType, source, metadata = {}, writeFileContent }) {
-    await this.init();
     const artifactId = id();
     const dir = path.join(this.rootDir, artifactId);
     await mkdir(dir, { recursive: true });
