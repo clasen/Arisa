@@ -1,6 +1,6 @@
 import {test} from 'node:test';
 import { action } from '../index.js';
-import { createTrip, fresh, putItem } from '../domain.js';
+import { createTrip, fresh, putItem, noticePrompt, WEATHER_DELIVERY_INSTRUCTIONS, ARRIVAL_DELIVERY_INSTRUCTIONS } from '../domain.js';
 import config from '../config.js';
 import assert from 'node:assert/strict';
 import {bindWeather,checkWeather,pendingWeather,weatherClaimValid,analyzeWeather} from '../weather.js';
@@ -27,10 +27,23 @@ test('full simulated poll, claim, finish and no duplicate scheduling',async()=>{
     assert.match(tasks[1].task.payload.prompt,/weatherEvidence/);
     const id=out.alerts[0].id;
     const claim=await run({action:'claim',noticeId:id});assert.ok(claim.permitted);assert.ok(claim.weatherEvidence);
+    assert.equal(claim.deliveryInstructions, WEATHER_DELIVERY_INSTRUCTIONS);
+    assert.match(claim.deliveryInstructions, /do not include weather sources or links/);
+    assert.match(claim.deliveryInstructions, /older queued prompt/);
     assert.equal((await run({action:'claim',noticeId:id})).permitted,false);
     await run({action:'finish',noticeId:id,token:claim.token,outcome:'sent',evidence:'simulated-id'});
     assert.equal((await run({action:'weather-check'})).alerts.length,0);
     assert.equal(tasks.length,2);
   } finally {Date.now=originalNow;globalThis.fetch=originalFetch;}
+});
+test('notification prompts hide weather citations but retain useful arrival links and flight evidence',()=>{
+  const prompt=noticePrompt({id:'test'},{id:'notice'});
+  assert.ok(prompt.includes(WEATHER_DELIVERY_INSTRUCTIONS));
+  assert.ok(prompt.includes(ARRIVAL_DELIVERY_INSTRUCTIONS));
+  assert.doesNotMatch(prompt,/Open-Meteo source URL and consultation time/);
+  assert.match(prompt,/For kind=flight,.*source URL and consultation time/);
+  assert.match(prompt,/Google Maps address-search link/);
+  assert.match(prompt,/booking platform if documented/);
+  assert.match(prompt,/Do not infer actual arrival/);
 });
 test('already notified date-risk combinations stay silent',async()=>{const t=trip();t.weather.checks.stay={notified:['2026-09-25:heat','2026-09-26:rain','2026-09-26:wind','2026-09-26:thunderstorm']};await checkWeather(t,now,async()=>{},async()=>data());assert.equal(t.weather.checks.stay.pending,null);});
