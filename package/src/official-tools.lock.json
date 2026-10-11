@@ -1,7 +1,7 @@
 {
   "version": 1,
   "repository": "https://github.com/clasen/Arisa.git",
-  "commit": "f25c49b8bf3395f49b6ab579fd515699b7f307b7",
+  "commit": "6e98a75be8d2e81562a9f04951c433d057c79a35",
   "tools": {
     "audio-extractor": {
       "version": null,
@@ -316,8 +316,8 @@
         "oauth-device.js": "698aa9255bae47190c63527db7680aaab4f06392a108a0ff6444e32d31b7b89f",
         "oauth-watch-plan.js": "b1bbed52eeb0e2e50dd52d733897ebd70573fea3ff5f023b3c63347f92633d3e",
         "package.json": "15e02c7df79f72215e3b13af3aa8d6eba9ddd281509dc6bfeffc9ceb43bcba92",
-        "pnpm-lock.yaml": "6fe51c886694dc3807ca23757f5f12b34cd62f0229099c365fdc6215220f1c25",
-        "pnpm-workspace.yaml": "d19d09256c73ef3d803ccb94277a0ae6e858af28c461374ebbafe96563301be5",
+        "pnpm-lock.yaml": "e4a438e798e1befb990fd1ba22aed5b11d9f3269826c8815d1209e8f1965a3dc",
+        "pnpm-workspace.yaml": "e4900114b84aef4f473219c7f637ee04a89b42d66c2bd8bada23869c4aa782d9",
         "state-store.js": "a8fb63096b8efdec8de1cb386eff371f1552f3fd71d96f25036e1c724285e0af",
         "test/mcp-client.test.js": "26a7fe3ffa33ad454eced32c7fab12975ac5c0914041dea68cb7e5467e753a10",
         "tool-routing.js": "b3405c9879443cdc257a1e97d4968859a8654e62ff7cfb90ec3a7a992a62e311",
@@ -571,6 +571,25 @@
         "trash-store.test.js": "5647edba4ab5e5492764ccf8ba3e674e42b63942623d779b0bf69465c5adb53f"
       }
     },
+    "travel-companion": {
+      "version": "0.3.0",
+      "files": {
+        "README.md": "b8c8fa312fd6b74dc19c9b1e932b735d9936963992deb124d2c65ea621721ba6",
+        "config.js": "cb5e5be6dccb9ce04043f023852314817724dc72183f40c3a5bb1676dbd049ff",
+        "domain.js": "d5dd48aaf74a297fda9c30d3db40e86cf18711d4bd75023c36ed225a42478737",
+        "flights.js": "c501573b2df49bc1a394203c038a81f7003254a9031adff3cfd758ffac516361",
+        "index.js": "7ee876aa71f32afcbf848c3c7792c4f274363e0ad5f310c7f8cfbc7a4cdb303c",
+        "package.json": "2f13d333981569272e771931ee6e2b3a0277b8909a226f78d2bd015c759c6d48",
+        "store.js": "1dc326f09b379b36eceac94052acb6e9860ae0f98723544dd69a57dadff9c30c",
+        "test/actions.test.mjs": "9790c37a1c5f1a20e525b76983c8f0996b2571988dbbfab317bf8b30eec3f56b",
+        "test/domain.test.mjs": "e273d9fa333203bbc37b99933e965aa9b579bd40025bb428632aa1fdeb8d2442",
+        "test/flight-alerts.test.mjs": "af219da8ca39d3d026a0cf427ae54382a189ce0829fd1f60f634b8e31979defa",
+        "test/flights.test.mjs": "d1bcefa34321d4f27e3375d3ffca04058a0662f805270488f2ced61c902a4bad",
+        "test/weather.test.mjs": "ea8028e6b57cd7ab5c246ebb5dc9ba8290bc0fe11aa328396415e2761325d4df",
+        "tool.manifest.json": "c6cdb65284571b12356d7b10984e75f991a274971d9bae75e456e43d01e3ff74",
+        "weather.js": "2bcc59471b3b24fcb13d2b26f0254a6ec2f406290189a601b841215fe344e61d"
+      }
+    },
     "turn-server": {
       "version": null,
       "files": {
@@ -631,15 +650,22 @@
     "whatsapp-web": {
       "version": "1.3.5",
       "files": {
-        "apply-whatsapp-web-compat.js": "8216698bf6d435d516ef8d10e47ea1fa636e81794ec66cde7e52a029f1bd89a0",
+        "MEDIA-COMPATIBILITY.md": "55e3e63163e4b910d5a0164ce5aaf2c6baf0d199a999cf0a37f4f781226c1fb5",
+        "apply-whatsapp-web-compat.js": "d5f3067dad3ed2582446f2c1ed5c4bda635061193839bd7884f53971f0446aa1",
+        "audio-normalization.js": "20877ddecf7fa2d4d3abaaf3899cea65fb0b91cd393fca0cba911d019bef1013",
         "browser-cache.js": "f71c20f9ab5f04d9d46c5e2551b348d47baba89a10a07173070298098a6d5551",
         "config.js": "b0d4bed04dc87828ff61e1c9050a67ebf09a39cdc3ca52ce23be4c31476dda08",
         "incoming-wake-gate.js": "13b773f47e4e92910ac8dcb9ebb31a0cc7f244791105f45cd61c387a7f2f03cc",
-        "index.js": "5a1b6c36e7b02bc678aa0ed7194c669672945644c20a8e7452c9c206c2900ddb",
+        "index.js": "4a1030d83a9fbc527984b536ed8b81df97ff4652424af013f6dd229cceb37d48",
+        "media-compat.js": "3ed5d388f36503fec719c156327f922c3357adb6a3363012b22507bf3a153df5",
         "message-burst.js": "06b2348ea409dffff74c9ae5a6d882f3d279f4adc39206e019f73df424dc4b3b",
         "package.json": "f9c45c408616af49097746d055d1b5005ab955f642816daee7896887fc514130",
+        "pnpm-lock.yaml": "f4f8792714f2aec065ca3822ed0d1fc7c5812a09ff3fab1560947948024e689d",
+        "pnpm-workspace.yaml": "e27ba26405f43b735788a92d2a856e4af3e52a7d623f4c5fc7bd87967ae3616f",
+        "test/audio-normalization.test.mjs": "ec073192ba149d632848327a2cd58cb9791ffca1cf58f955583fc733f40d5109",
         "test/browser-cache.test.mjs": "636b91c16c9d4a67f38d625293fe371eb3d2e91818d131cacdec15e5bb255a69",
         "test/incoming-wake-gate.test.mjs": "f84f4f2e6c8d8ff2b7b63f9a266b15d7234bb017400826eac4f96a675cd7e25d",
+        "test/media-compat.test.mjs": "516ec3a3a85256d27448fc35ba686a303729c44329221d97bba6a1702c924a8b",
         "test/message-burst.test.mjs": "d994f46054c7b464d47d714e6e364df5ba96206ce0b7069fccbb555fd61ed14f",
         "test/task-ipc.test.mjs": "8f1221d05d1f97f204ea244fb77d088e538f93aa22ea45272d09bef56c762172",
         "tool.manifest.json": "5106aae4fc5ae17b7babd7658437880170842e037dd6bbebe4a72729d203b663"
