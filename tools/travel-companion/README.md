@@ -1,4 +1,4 @@
-# Travel Companion 0.3.0
+# Travel Companion 0.3.1
 
 A dependency-free Arisa tool for persistent trip organization. Installed package files contain no user data. The chat-scoped state directory comes from Arisa's runtime path helpers. Source documents remain referenced artifacts; credentials, booking PINs and ticket numbers should never be copied into notes.
 
@@ -22,6 +22,33 @@ Use `node index.js --help`, or Arisa `tool_help`. Execute through `run_tool`; Ar
 4. `show` returns shared itinerary entries. Avoid copying unrelated private conversation into group replies.
 5. Use `remind` with an explicit ISO date, offset, stable reminder ID and approved message. Item changes do not automatically retime independent reminders; cancel and recreate them explicitly.
 6. `watch confirm=true` starts proactive reviews. It is separate from one-time reminders. `pause` blocks future claims and stops its own poll; `resume` does not restart that poll until `watch` is called again.
+
+## Document coverage preflight
+
+Before answering from a guide or asking for missing details:
+
+1. Read the entire available text, including continuation pages. Preserve the extracted text as a chat artifact. If extraction is incomplete, record `partial`, not `complete`.
+2. Inventory embedded resources with short non-sensitive labels (for example `entrance`). Finding a video URL means `detected`, not `reviewed`. Inspect only media relevant to the current question; failed access means `blocked`.
+3. Use `document-review tripId=... itemId=... data={"textStatus":"complete","textEvidenceArtifactId":"<artifact UUID>","topics":["parking"],"resources":[{"id":"entrance","kind":"video","status":"detected"}]}`. The item's `sourceArtifactId` must exist. Partial/complete text requires an evidence artifact; reviewed resources require `evidenceArtifactId`. All referenced artifacts are checked in the owning chat. Full replacement, not a merge.
+4. Run `document-check` with relevant `topics` and/or `resources`. Reuse facts already in the guide. An unread/partial text, missing topic, or unreviewed requested resource yields `ready=false` with explicit gaps. Only ask about details absent from fully read text. If relevant media cannot be reviewed, disclose that limitation rather than inventing details.
+
+This is agent-reported coverage metadata, not independent verification of reading, media content, supplier status, or arbitrary outgoing replies. It does not read documents or play videos itself. Shared views and claimed reviews include the preflight instructions, including for older queued review prompts. Ordinary answers require the agent to invoke the preflight; transport does not enforce it.
+
+Store labels and artifact references only: no raw guide text, personalized URLs, Wi-Fi passwords, door codes or booking credentials in review metadata. Existing state needs no migration and defaults to unread. Source replacement invalidates coverage; status changes with the same source retain it. Private reviews are excluded from shared views and group operations.
+
+Acceptance experiment for the next five documents (no automatic schedule): count avoidable follow-up questions and user corrections about claimed reading/viewing; compare with the observed guide incident. Include partial extraction, a detected but unseen video, blocked media and replacement sources. Do not mark historical guides or videos reviewed without fresh evidence.
+
+## Mandatory activity proposal gate
+
+Activity proposals must use `recommendation-check` then `recommendation-send`, never a direct messaging call. Checks fetch fresh Open-Meteo data for the supplied place and explicit local date, even when automatic risk alerts are silent or disabled. They require shared itinerary items and existing chat-scoped logistical and coordinate evidence artifacts. Missing data, provider errors, stale coverage or incorrect units fail closed. Successful checks expire after two hours and become invalid if the item changes.
+
+Outdoor planning is blocked at rain probability >=50%, precipitation >=2 mm, gusts >=35 km/h, maximum temperature >=35 C, or thunderstorms. These conservative daily planning thresholds are not official warnings. Research an indoor alternative instead of sending an unverified conditional outdoor suggestion. Indoor plans also require weather evidence; their opening hours, age restrictions and access still need research.
+
+Outdoor checks additionally request `uv_index_max` for the exact local date (dimensionless unit). Missing, null, negative, nonnumeric or nonfinite UV values block outdoor delivery, including legacy ready checks without UV evidence. Indoor checks and automatic weather alerts retain their existing requirements. Outdoor messages always include the forecast daily maximum UV index: low <3, moderate <6, high <8, very high <11, extreme >=11. From UV 3 they include broad-spectrum SPF 30+ sunscreen, reapplication every two hours and after getting wet or sweating, clothing/hat/shade and avoiding midday sun. This is a daily maximum forecast, not a measurement at the planned activity time; UV alone does not block an outdoor plan.
+
+The send action appends the measured forecast, uses only the bound WhatsApp destination, checkpoints before sending and retains the returned receipt. A failure or ambiguous result is uncertain; sending/sent/uncertain attempts block repeats for the same item and date, including after a new check. Reconcile manually. No automatic retry is implemented. No live send is needed for unit testing.
+
+Scope: this is a hard gate inside recommendation-send, not a transport-wide firewall. Other tools can still send messages; queued-review and claim instructions explicitly prohibit bypassing this path. Artifact existence does not independently establish truthful coordinates, complete logistical research or message relevance. The gate does not claim those guarantees.
 
 ## Notification safety
 
@@ -61,6 +88,7 @@ Cadence relative to documented departure: daily beyond 72 hours, every 6 hours a
 
 The parser reads only the main dated result, never the other-days list. Flight number, carrier, route and local departure date must match. Out-of-range, missing records, schema changes, HTTP errors and identity mismatches mean **unverified**, not unchanged or cancelled. Current public coverage is approximately +/-3 days, so this provider cannot verify earlier schedule changes; a future airline/booking integration is needed for that window. Consultation time and provider freshness text are retained: a freshly fetched page is not proof that its upstream observation is fresh.
 
-Each attempt is checkpointed before the network call. Previous verified evidence survives failures. Exact scheduled time/terminal/gate changes, cancellations/diversions and estimated time drift of at least 10 minutes create a guarded agent task with old/new values and source. Small estimated shifts accumulate against the comparison anchor. First matching observations stay silent. Two failed checks within 72 hours of departure create one verification-unavailable notice per flight identity. Quiet hours defer alerts beyond 24 hours; closer to departure, actionable changes and verification failures can notify overnight. Private/cancelled items are excluded, and itinerary changes invalidate old alert claims. Original reservations are never rewritten from provider observations.
+Each attempt is checkpointed before the network call. Previous verified evidence survives failures. Scheduled time changes, gate changes, cancellations/diversions and departure time drift of at least 10 minutes create a guarded agent task with old/new values and source. Terminal changes require the same new value in two consecutive verified polls at every airport, without airport-specific exceptions. A missing value, failed check, or return to the comparison baseline resets confirmation. Gate, cancellation and diversion alerts do not wait for terminal confirmation. Raw observations are retained separately from the confirmed comparison baseline. Arrival estimates create alerts only for delays of at least 30 minutes with at least 30 minutes of movement from the comparison anchor, or recovery from that delay to at most 15 minutes late. Early/on-time arrival estimate oscillations stay silent. The first provider-labelled Actual arrival creates one alert even when the timestamp matches the estimate; subsequent actual-time corrections require 30 minutes. Small estimated shifts accumulate against the comparison anchor. These thresholds control notification noise, not airline status or guarantees. First matching observations stay silent. Two failed checks within 72 hours of departure create one verification-unavailable notice per flight identity. Quiet hours defer alerts beyond 24 hours; closer to departure, actionable changes and verification failures can notify overnight. Private/cancelled items are excluded, and itinerary changes invalidate old alert claims. Original reservations are never rewritten from provider observations.
 
 Alerts use the existing claim/finish protocol and exact bound destination. The agent evaluates implications for car/hotel/transfers from shared state only. A successful/recovered send is not retried. A scheduling timeout or interrupted claimed send requires reconciliation rather than automatic duplicate delivery. Evidence is retained in chat-scoped trip state and surfaced through normal tool result artifacts.
+

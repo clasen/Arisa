@@ -56,6 +56,19 @@ export async function fetchFlight(query) {
   for await(const chunk of response.body) {size+=chunk.length;if(size>2000000)throw Error('Provider response too large');chunks.push(chunk);}
   return parseFlight(Buffer.concat(chunks).toString('utf8'),query);
 }
+function usefulArrivalChange(baseline, current, old) {
+  const actual = x => /^actual$/i.test(x?.arrivalTimeType || '');
+  // Notify the first recorded arrival even when its timestamp matches the estimate.
+  if (actual(current) && !actual(baseline)) return true;
+  const delta = Math.abs(Date.parse(current.estimatedArrival) - Date.parse(old));
+  if (actual(baseline)) return actual(current) && delta >= 30 * 60000;
+  const scheduled = Date.parse(current.scheduledArrival);
+  const delay = Date.parse(current.estimatedArrival) - scheduled;
+  const oldDelay = Date.parse(old) - scheduled;
+  // Early/on-time estimate oscillations do not require repeated transfer advice.
+  return (delay >= 30 * 60000 && delta >= 30 * 60000)
+    || (oldDelay >= 30 * 60000 && delay <= 15 * 60000);
+}
 export function changes(item, before, current) {
   const diff=[];
   const baseline=before || {scheduledDeparture:item.startAt,scheduledArrival:item.endAt};
@@ -64,7 +77,10 @@ export function changes(item, before, current) {
   }
   for(const [field,scheduled] of [['estimatedDeparture','scheduledDeparture'],['estimatedArrival','scheduledArrival']]) {
     const old=baseline[field] || baseline[scheduled];
-    if(current[field] && old && Math.abs(Date.parse(current[field])-Date.parse(old))>=10*60000)diff.push({field,before:old,after:current[field]});
+    const useful = field === 'estimatedArrival'
+      ? usefulArrivalChange(baseline,current,old)
+      : Math.abs(Date.parse(current[field])-Date.parse(old))>=10*60000;
+    if(current[field] && old && useful)diff.push({field,before:old,after:current[field],...(field === 'estimatedArrival' ? {beforeTimeType:baseline.arrivalTimeType || 'Scheduled',afterTimeType:current.arrivalTimeType || 'Estimated'} : {})});
   }
   const abnormal = x => ['C','D','DN','NO','U'].includes(x?.status) || /cancel|divert|delay/i.test(x?.description || '');
   if((abnormal(current)||abnormal(before)) && (current.status!==before?.status || abnormal(current)!==abnormal(before)))diff.push({field:'status',before:before?.status || 'document-only',after:current.status,description:current.description});
@@ -73,6 +89,25 @@ export function changes(item, before, current) {
 export function eligible(item) { return item.kind==='flight' && item.visibility==='shared' && item.status==='confirmed'; }
 export function flightStateView(trip) {
  return {enabled:!!trip.flightMonitoring?.enabled, provider:'FlightStats / Cirium', flights:Object.entries(trip.flightChecks || {}).filter(([id])=>eligible(trip.items[id] || {})).map(([id,s])=>({itemId:id,lastAttempt:s.lastAttempt,nextCheckAt:s.nextCheckAt,lastResult:s.lastResult,lastVerified:s.lastVerified,pendingAlert:!!s.pending,failures:s.failures}))};
+}
+function confirmedTerminals(state, baseline, current) {
+ const confirmed={...current};
+ state.terminalCandidates ||= {};
+ for(const field of ['departureTerminal','arrivalTerminal']) {
+   const value=current[field];
+   if(!baseline || value===baseline[field] || !value) {
+     delete state.terminalCandidates[field];
+     if(baseline && !value) confirmed[field]=baseline[field];
+     continue;
+   }
+   if(state.terminalCandidates[field]===value) {
+     delete state.terminalCandidates[field];
+   } else {
+     state.terminalCandidates[field]=value;
+     confirmed[field]=baseline[field];
+   }
+ }
+ return confirmed;
 }
 export async function checkFlights(trip,now,checkpoint,fetcher=fetchFlight) {
  if(!trip.active || !trip.flightMonitoring?.enabled || !trip.watch?.enabled) return [];
@@ -96,14 +131,17 @@ export async function checkFlights(trip,now,checkpoint,fetcher=fetchFlight) {
    result={...result,sourceUrl:query?.url || null,observedAt:new Date(now).toISOString(),flightNumber:item.flightNumber,departureDate:query?.date};
    s.lastResult=result;
    if(result.verified) {
-     const diff=changes(item,s.comparisonBaseline || s.lastVerified,result);
+     const baseline=s.comparisonBaseline || s.lastVerified;
+     const confirmed=confirmedTerminals(s,baseline,result);
+     const diff=changes(item,baseline,confirmed);
      s.failures=0;
      // Preserve a comparison anchor so small successive delays accumulate.
-     if(!s.comparisonBaseline || diff.length) s.comparisonBaseline=result;
+     if(!s.comparisonBaseline || diff.length) s.comparisonBaseline=confirmed;
      s.lastVerified=result;
      if(diff.length) s.pending={type:'change',changes:diff,evidence:result};
      else if(s.pending?.type==='unavailable')delete s.pending;
    } else {
+     s.terminalCandidates={};
      s.failures++;
      if(Date.parse(item.startAt)-now<=72*HOUR && s.failures>=2 && !s.unavailableNotified && !s.pending) s.pending={type:'unavailable',evidence:result};
    }

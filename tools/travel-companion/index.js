@@ -5,11 +5,13 @@ import crypto from 'node:crypto';
 import defaults from './config.js';
 import { transact } from './store.js';
 import * as d from './domain.js';
+import { normalizeReview, reviewArtifacts, checkDocument } from './coverage.js';
 import { checkFlights, pendingAlerts, flightStateView } from './flights.js';
+import { checkRecommendation, sendRecommendation } from './recommendations.js';
 
 import { bindWeather, weatherView, checkWeather, pendingWeather } from './weather.js';
 const NAME = 'travel-companion';
-const help = `travel-companion v0.3.0
+const help = `travel-companion v0.3.1
 Usage:
   node index.js --help
   node index.js run --request-file <json>
@@ -28,6 +30,9 @@ Actions:
        kind=flight|stay|car|plan|task|provision|place; status=proposed|confirmed|pending|done|cancelled.
        Read source documents first. Unknown payment status must omit paid. All timestamps require explicit offsets.
   put-many: tripId, data=[items]; atomic batch of up to 50 items with the same put schema.
+  document-review: tripId, itemId, data={textStatus:unread|partial|complete,textEvidenceArtifactId?,topics:[short-label],resources:[{id:short-label,kind:video|image|document|link,status:detected|reviewed|blocked,evidenceArtifactId?}]}
+       Full replacement of agent-reported review metadata. Read all available text; inventory embedded resources. Partial/complete text and reviewed resources require existing evidence artifacts. No text, URLs or secrets.
+  document-check: tripId, itemId, data={topics:[short-label],resources:[short-label]}; read-only preflight before answering or asking for missing details. Detected links never count as viewed media.
   set-status: tripId, itemId, status (reminders are independent; cancel them separately)
   flight-observation: tripId, data={itemId,status,observedAt,sourceUrl}; manual evidence.
   flights-enable: tripId, confirm=true; enable automatic FlightStats checks on the existing watch (or start it).
@@ -38,6 +43,8 @@ Actions:
   weather-disable: tripId; blocks queued weather alerts.
   weather-status: tripId; forecast evidence and invalidated bindings.
   weather-check: tripId; due checks only. 12-hour cadence, 7-day horizon, useful risks within 3 local calendar days. Not an official warning service.
+  recommendation-check: tripId, data={itemId,label,latitude,longitude,timezone,date,exposure:outdoor|indoor,logisticsArtifactId,coordinatesArtifactId}. Fetches fresh Open-Meteo evidence. Fails closed; outdoor proposals blocked at rain probability >=50%, rain >=2mm, gusts >=35km/h, heat >=35C or thunderstorms. These are conservative planning thresholds, not official warnings. Outdoor checks require a verified daily maximum UV index; missing UV blocks sending. Outdoor messages include UV and recommend SPF 30+ sunscreen and sun protection from UV 3 (high UV starts at 6). Ready checks expire after 2 hours. Evidence artifacts are agent-supplied, not independent logistics verification.
+  recommendation-send: tripId, checkId, message. Sends only after a ready check, appends measured forecast and uses the bound WhatsApp route. At-most-once attempt; uncertain sends require reconciliation, never automatic retries. Use this for activity proposals, not direct whatsapp-web sends.
   maps: address; returns an address-search link, not verified coordinates or travel time.
   remind: tripId, data={id,runAt,message}; schedules one guarded agent task for the bound channel.
   cancel-notice: tripId, noticeId; prevents later claims. A claimed/in-flight send cannot be recalled.
@@ -194,11 +201,32 @@ export async function action(request, state, checkpoint, client, config) {
       }
       return entries.map(item => { const result = d.putItem(trip, item); return { id: result.id, title: result.title }; });
     }
+    case 'document-review':
+    case 'document-check': {
+      const item = trip.items[d.key(a.itemId)];
+      if (!item || (request.resourceId && item.visibility === 'private')) throw new Error('Item not found');
+      const data = d.object(a.data);
+      if (a.action === 'document-check') return checkDocument(trip, item, data);
+      const review = normalizeReview(data, item.sourceArtifactId);
+      for (const artifactId of reviewArtifacts(review)) {
+        const artifact = await client.artifacts.get({ artifactId });
+        if (!artifact || artifact.ok === false) throw new Error('Review evidence artifact not found');
+      }
+      const previous = trip.documentReviews?.[item.id];
+      if (JSON.stringify(previous) !== JSON.stringify(review)) {
+        trip.documentReviews ||= {};
+        trip.documentReviews[item.id] = review;
+        trip.revision++;
+      }
+      return { itemId: item.id, ...review, evidenceType: 'agent-reported' };
+    }
     case 'set-status': {
       const item = trip.items[d.key(a.itemId)];
       if (!item || (request.resourceId && item.visibility === 'private')) throw new Error('Item not found');
       return d.putItem(trip, { ...item, status: a.status });
     }
+    case 'recommendation-check': return checkRecommendation(trip, d.object(a.data), now, client);
+    case 'recommendation-send': return sendRecommendation(trip, a, now, client, checkpoint);
     case 'weather-status': return weatherView(trip);
     case 'weather-enable': {
       if (a.confirm !== 'true' || !trip.active) throw new Error('Active trip and confirm=true required');

@@ -28,7 +28,7 @@ export function weatherView(trip) {
 }
 export function weatherUrl(b) {
   const u = new URL('https://api.open-meteo.com/v1/forecast');
-  for (const [k,v] of Object.entries({latitude:b.latitude,longitude:b.longitude,timezone:b.timezone,forecast_days:7,daily:'temperature_2m_max,precipitation_probability_max,precipitation_sum,wind_gusts_10m_max,weather_code',wind_speed_unit:'kmh',temperature_unit:'celsius',precipitation_unit:'mm'})) u.searchParams.set(k,v);
+  for (const [k,v] of Object.entries({latitude:b.latitude,longitude:b.longitude,timezone:b.timezone,forecast_days:7,daily:'temperature_2m_max,precipitation_probability_max,precipitation_sum,wind_gusts_10m_max,weather_code'+(b.requireUv?',uv_index_max':''),wind_speed_unit:'kmh',temperature_unit:'celsius',precipitation_unit:'mm'})) u.searchParams.set(k,v);
   return u.href;
 }
 export async function fetchWeather(b) {
@@ -52,6 +52,11 @@ export function analyzeWeather(b, data, now) {
     const values={};
     for(const k of ['temperature_2m_max','precipitation_probability_max','precipitation_sum','wind_gusts_10m_max','weather_code']) {
       const v=d[k]?.[n]; if(typeof v!=='number' || !Number.isFinite(v)) throw new Error('Incomplete forecast'); values[k]=v;
+    }
+    if (b.requireUv) {
+      const uv = d.uv_index_max?.[n];
+      if (units?.uv_index_max !== '' || typeof uv !== 'number' || !Number.isFinite(uv) || uv < 0) throw new Error('Missing or invalid UV forecast');
+      values.uv_index_max = uv;
     }
     const risks=[];
     if(values.temperature_2m_max>=35) risks.push('heat');

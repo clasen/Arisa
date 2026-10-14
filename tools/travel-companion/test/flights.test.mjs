@@ -12,6 +12,26 @@ function fixture(patch={}) {
 }
 const good=()=>parseFlight(fixture(),query);
 function trip(){return {active:true,timezone:'UTC',quietStart:22,quietEnd:8,watch:{enabled:true,generation:'g'},flightMonitoring:{enabled:true},items:{f:{...item}},notices:{}};}
+test('terminal confirmation rejects oscillations and confirms stable changes at any airport',async()=>{
+ for(const destination of ['MAD','JFK','LHR']) {
+  const t=trip();t.items.f.destination=destination;
+  let tick=now;
+  const poll=async patch=>{await checkFlights(t,tick,async()=>{},async()=>({...good(),...patch}));tick+=2*H;};
+  await poll({});
+  await poll({arrivalTerminal:'4',departureGate:'12'});
+  assert.deepEqual(t.flightChecks.f.pending.changes.map(x=>x.field),['departureGate']);
+  delete t.flightChecks.f.pending;
+  await poll({arrivalTerminal:'4S',departureGate:'12'});
+  assert.equal(t.flightChecks.f.pending,undefined);
+  await poll({arrivalTerminal:'4',departureGate:'12'});
+  assert.equal(t.flightChecks.f.pending,undefined);
+  await poll({arrivalTerminal:'4',departureGate:'12'});
+  assert.deepEqual(t.flightChecks.f.pending.changes.map(x=>x.field),['arrivalTerminal']);
+  delete t.flightChecks.f.pending;
+  await poll({arrivalTerminal:'4',departureGate:'12'});
+  assert.equal(t.flightChecks.f.pending,undefined);
+ }
+});
 test('query uses origin local date, not UTC arrival day',()=>{assert.equal(query.date,'2026-09-30');assert.match(query.url,/month=09&date=30/);assert.throws(()=>flightQuery({...item,startTimezone:null}));});
 test('parser confirms exact identity and UTC fields',()=>{assert.equal(good().verified,true);assert.equal(good().scheduledArrival,item.endAt);});
 test('different flight number/date/route rejected, no other-day fallback',()=>{
@@ -30,7 +50,8 @@ test('first matching observation silent; changes in time and cancellation detect
  assert.ok(changes(item,good(),{...good(),status:'C',description:'Cancelled'}).some(x=>x.field==='status'));
 });
 test('terminal/gate updates and delay recovery detected',()=>{
- assert.ok(changes(item,good(),{...good(),arrivalTerminal:'4',departureGate:'12'}).some(x=>x.field==='arrivalTerminal'));
+ assert.ok(changes(item,good(),{...good(),arrivalTerminal:'4',departureGate:'12'}).some(x=>x.field==='departureGate'));
+ assert.ok(changes(item,good(),{...good(),arrivalTerminal:'4'}).some(x=>x.field==='arrivalTerminal'));
  const late={...good(),estimatedArrival:'2026-10-01T13:35:00Z'};
  assert.ok(changes(item,late,{...good(),estimatedArrival:item.endAt}).some(x=>x.field==='estimatedArrival'));
 });
@@ -61,10 +82,11 @@ test('change checks queue evidence and repeated matching result does not repeat'
  assert.equal(pendingAlerts(t,now+2*H).length,1);delete t.flightChecks.f.pending;
  await checkFlights(t,now+4*H,async()=>{},async()=>later);assert.equal(t.flightChecks.f.pending,undefined);
 });
-test('small delay drift accumulates to threshold',async()=>{
+test('small arrival delay drift accumulates to meaningful threshold',async()=>{
  const t=trip();await checkFlights(t,now,async()=>{},async()=>good());
  await checkFlights(t,now+2*H,async()=>{},async()=>({...good(),estimatedArrival:'2026-10-01T12:41:00Z'}));assert.equal(t.flightChecks.f.pending,undefined);
- await checkFlights(t,now+4*H,async()=>{},async()=>({...good(),estimatedArrival:'2026-10-01T12:47:00Z'}));assert.equal(t.flightChecks.f.pending.type,'change');
+ await checkFlights(t,now+4*H,async()=>{},async()=>({...good(),estimatedArrival:'2026-10-01T12:47:00Z'}));assert.equal(t.flightChecks.f.pending,undefined);
+ await checkFlights(t,now+6*H,async()=>{},async()=>({...good(),estimatedArrival:'2026-10-01T13:05:00Z'}));assert.equal(t.flightChecks.f.pending.type,'change');
 });
 test('old flight alert cannot claim after identity changes or disable',()=>{
  for(const mutate of [t=>t.items.f.visibility='private',t=>t.items.f.startAt='2026-10-02T00:45:00Z',t=>t.flightMonitoring.enabled=false]) {
