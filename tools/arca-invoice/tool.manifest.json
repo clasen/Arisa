@@ -1,0 +1,20 @@
+{
+  "name": "arca-invoice",
+  "version": "0.2.0",
+  "description": "Issue explicitly approved ARS C professional-services invoices for unidentified consumers under the verified threshold, with durable no-retry issuance, reconciliation and PDF/QR receipts; also provides read-only WSAA/WSFE checks.",
+  "entry": "index.js",
+  "input": ["application/json", "text/plain"],
+  "output": ["application/json", "application/pdf"],
+  "category": "finance",
+  "keywords": ["arca", "afip", "wsfe", "invoice", "monotributo", "certificate"],
+  "configSchema": {
+    "ISSUER_NAME": {"type":"string", "required":false, "prompt":"Issuer legal name for PDF."},
+    "ISSUER_ADDRESS": {"type":"string", "required":false, "prompt":"Issuer fiscal address for PDF."},
+    "ISSUER_IIBB": {"type":"string", "required":false, "prompt":"Issuer gross-receipts registration or exempt status."},
+    "ISSUER_START": {"type":"string", "required":false, "prompt":"Issuer activity start date for PDF."},
+    "COMPLIANCE_REVIEW_DATE": {"type":"string", "required":false, "prompt":"YYYYMMDD date of reviewed official identification threshold. Must match issue date."},
+    "CUIT": {"type":"string", "required":false, "prompt":"Taxpayer CUIT, eleven digits."},
+    "POINT_OF_SALE": {"type":"number", "required":false, "prompt":"Web services point of sale."},
+    "ENVIRONMENT": {"type":"string", "required":false, "prompt":"homologation or production. Defaults to homologation."}
+  }
+}

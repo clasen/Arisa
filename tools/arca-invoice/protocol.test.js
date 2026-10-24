@@ -1,0 +1,16 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import {escapeXml,parseXml,validateIdentity,wsfeEnvelope,endpoints,tlsOptions,postXml} from './protocol.js';
+test('XML escapes credential data',()=>assert.equal(escapeXml('<&"\''),'&lt;&amp;&quot;&apos;'));
+test('Parses namespaced response without converting fiscal numbers',()=>assert.equal(parseXml('<s:Envelope xmlns:s="x"><s:Body><number>00003</number></s:Body></s:Envelope>').Envelope.Body.number,'00003'));
+test('Rejects entity declarations',()=>assert.throws(()=>parseXml('<!DOCTYPE x><x/>')));
+test('Rejects malformed XML',()=>assert.throws(()=>parseXml('<x>')));
+test('Blocks CAE requests',()=>assert.throws(()=>wsfeEnvelope('FECAESolicitar')));
+test('Allows only explicit reads',()=>assert.match(wsfeEnvelope('FEDummy'),/FEDummy/));
+test('Rejects injected CUIT',()=>assert.throws(()=>validateIdentity({CUIT:'1</Cuit>',POINT_OF_SALE:3,ENVIRONMENT:'production'})));
+test('Rejects unknown environment',()=>assert.throws(()=>validateIdentity({CUIT:'20123456789',POINT_OF_SALE:3,ENVIRONMENT:'other'})));
+test('Rejects invalid point of sale',()=>assert.throws(()=>validateIdentity({CUIT:'20123456789',POINT_OF_SALE:0,ENVIRONMENT:'production'})));
+test('Accepts well formed identity',()=>assert.doesNotThrow(()=>validateIdentity({CUIT:'20123456789',POINT_OF_SALE:3,ENVIRONMENT:'production'})));
+test('TLS keeps verification and modern ECDHE ciphers',()=>{assert.equal(tlsOptions.rejectUnauthorized,true);assert.equal(tlsOptions.minVersion,'TLSv1.2');assert.equal(tlsOptions.ciphers,'ECDHE+AESGCM:ECDHE+CHACHA20');});
+test('Rejects arbitrary endpoint before sending',async()=>assert.rejects(postXml('https://example.com','', ''),/allowlisted/));
+test('Endpoints are fixed HTTPS',()=>{for(const env of Object.values(endpoints))for(const url of Object.values(env))assert.match(url,/^https:\/\//);});

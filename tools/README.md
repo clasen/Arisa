@@ -6,6 +6,18 @@ This is the official Arisa tool catalog. Each subdirectory is a self-contained t
 
 Each entry describes one tool on its own terms. Category and tags come directly from the tool's `tool.manifest.json` metadata.
 
+### [`arca-invoice`](./arca-invoice/)
+
+Issue explicitly approved Argentine Factura C invoices for professional services in ARS, with durable submission tracking, uncertain-outcome reconciliation, and original-only PDF/QR exports in classic or modern layouts. Supports unidentified consumers only below the reviewed identification threshold.
+
+- **Category:** `finance`
+- **Tags:** `arca` · `afip` · `wsfe` · `invoice` · `monotributo` · `certificate`
+- **Accepts:** `text/plain`, `application/json`
+- **Produces:** `application/json`, `application/pdf`
+- **Setup:** OpenSSL, taxpayer-owned certificate/private key, WSFE authorization, web-services point of sale, issuer data and current regulatory review; homologation recommended before production
+- **Install footprint:** **Medium**, XML/PDF/QR dependencies and fiscal credential setup; no daemon
+- **Safety:** Explicit draft approval required; no automatic issuance retries or scheduled invoices. Credentials and fiscal records stay in private chat state.
+
 ### [`audio-extractor`](./audio-extractor/)
 
 Extract and normalize audio from video or audio media with ffmpeg.

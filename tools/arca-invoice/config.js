@@ -1,0 +1,1 @@
+export default { CUIT: '', POINT_OF_SALE: 0, ENVIRONMENT: 'homologation', ISSUER_NAME: '', ISSUER_ADDRESS: '', ISSUER_IIBB: '', ISSUER_START: '', COMPLIANCE_REVIEW_DATE: '' };
