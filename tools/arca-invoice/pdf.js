@@ -36,7 +36,7 @@ function renderPage(doc,config,d,receipt,qrImage,style,copy){
  footer(doc,receipt,qrImage);
 }
 export async function exportPdf({dir,draft:d},config,options={}){
- const style=options.style??'classic';if(!['classic','modern'].includes(style))throw new Error('PDF style must be classic or modern');
+ const style=options.style??'modern';if(!['classic','modern'].includes(style))throw new Error('PDF style must be classic or modern');
  const copies=options.copies??'original';if(!['original','all'].includes(copies))throw new Error('PDF copies must be original or all');
  const receipt=JSON.parse(await fs.readFile(path.join(dir,'issuance.json')));
  if(receipt.status!=='authorized'||!/^\d{14}$/.test(receipt.cae??''))throw new Error('No verified authorization exists');

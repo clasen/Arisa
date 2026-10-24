@@ -1,6 +1,6 @@
 # arca-invoice
 
-Version 0.2.0 supports a deliberately narrow fiscal flow: one Factura C for professional services, in ARS, consumer final without identification, below ARS 10,000,000. Other recipient types, currencies, notes and tax treatments are not implemented.
+Version 0.2.1 supports a deliberately narrow fiscal flow: one Factura C for professional services, in ARS, consumer final without identification, below ARS 10,000,000. Other recipient types, currencies, notes and tax treatments are not implemented.
 
 ## Actions
 
@@ -12,7 +12,7 @@ Run `node index.js --help` or `node index.js run --request-file <json>` with ARI
 - prepare: args.draft JSON containing amount (fixed two decimals), date/from/to/due (YYYYMMDD), description `Servicios profesionales`, saleCondition `Contado`. Returns a content-addressed draftId. It does not issue.
 - issue: args.draftId and args.approval must match the explicitly approved draft hash. Requires current Argentina date, same-day compliance review and printable issuer config. Validates point-of-sale status and recipient VAT condition before submission.
 - reconcile: args.draftId. Queries FECompConsultar and matches sequence, dates, recipient, concept, amounts, currency and authorization. Never resubmits; also independently verifies an already authorized invoice.
-- export-pdf: args.draftId, optional args.style=classic|modern, args.copies=original|all. Defaults to one original page in the classic design. The all option adds duplicate and triplicate. Re-rendering an authorized invoice changes presentation only; it never requests another CAE. Registry materializes the PDF with QR as an artifact.
+- export-pdf: args.draftId, optional args.style=classic|modern, args.copies=original|all. Defaults to one original page in the modern design. Chat-scoped PDF_STYLE and PDF_COPIES override those defaults; invocation args override chat preferences. The all option adds duplicate and triplicate. Re-rendering an authorized invoice changes presentation only; it never requests another CAE. Registry materializes the PDF with QR as an artifact.
 
 ## Safety
 

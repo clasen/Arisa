@@ -1,1 +1,1 @@
-{"name":"arca-invoice","version":"0.2.0","private":true,"type":"module","scripts":{"test":"node --test"},"dependencies":{"fast-xml-parser":"5.11.2","pdfkit":"0.17.2","qrcode":"1.5.4"}}
+{"name":"arca-invoice","version":"0.2.1","private":true,"type":"module","scripts":{"test":"node --test"},"dependencies":{"fast-xml-parser":"5.11.2","pdfkit":"0.17.2","qrcode":"1.5.4"}}

@@ -1,6 +1,6 @@
 {
   "name": "arca-invoice",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "description": "Issue explicitly approved ARS C professional-services invoices for unidentified consumers under the verified threshold, with durable no-retry issuance, reconciliation and PDF/QR receipts; also provides read-only WSAA/WSFE checks.",
   "entry": "index.js",
   "input": ["application/json", "text/plain"],
@@ -8,6 +8,8 @@
   "category": "finance",
   "keywords": ["arca", "afip", "wsfe", "invoice", "monotributo", "certificate"],
   "configSchema": {
+    "PDF_STYLE": {"type":"string", "required":false, "prompt":"Default PDF style: classic or modern. Invocation args override this preference."},
+    "PDF_COPIES": {"type":"string", "required":false, "prompt":"Default PDF copies: original or all."},
     "ISSUER_NAME": {"type":"string", "required":false, "prompt":"Issuer legal name for PDF."},
     "ISSUER_ADDRESS": {"type":"string", "required":false, "prompt":"Issuer fiscal address for PDF."},
     "ISSUER_IIBB": {"type":"string", "required":false, "prompt":"Issuer gross-receipts registration or exempt status."},
