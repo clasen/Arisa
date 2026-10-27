@@ -17,6 +17,28 @@ The tool continues calling the public `Message.downloadMedia()` API. The backpor
 
 After this change, both previously failing real voice messages downloaded and transcribed successfully through the running managed worker. A fresh incoming voice message on 2026-09-27 at 21:27:37 UTC also arrived automatically with an audio artifact and a correct transcript, verifying the incoming normalization path.
 
+## Outgoing attachment fix (2026-10-26)
+
+WhatsApp's media models now expose internal enumerable fields including `__x_id`.
+Spreading the model into outgoing message attributes overwrote the generated
+message identity during model initialization. Attachments failed with
+`Data passed to getter must include an id property ... got undefined`, while text
+messages still worked.
+
+`send-media-compat.js` serializes public media JSON plus explicitly retained
+upload/caption fields, without copying model internals. The postinstall hook
+applies this exact, idempotent patch and fails closed on unfamiliar source.
+Plain sticker objects and empty text-media options retain their existing path.
+
+Validation: all 28 catalog tests passed; the installed tool's broader 35-test
+suite also passed. A synthetic DOCX sent through `run_tool` to
+the bot's own account succeeded; its retrieved bytes matched the original SHA-256.
+No contract was resent and no test was sent to a group. Other media types have
+unit coverage only, not new live-delivery verification. The same function was
+applied to the already-running page without logging out or starting a second
+browser; future starts load the patched dependency. These are local tool changes,
+not a change to the upstream whatsapp-web.js release.
+
 ## Failure handling
 
 The media adapter owns bounded download retries. Audio normalization calls it once, without redundant history scans or an outer download retry loop. Transcription retries reuse the downloaded artifact. The inbox records completion/failure and the transcript. Exhausted failures are explicit, not fabricated transcripts. External outages, deleted media, unavailable media, and recognition errors remain possible.
