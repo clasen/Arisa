@@ -1,8 +1,26 @@
 {
   "version": 1,
   "repository": "https://github.com/clasen/Arisa.git",
-  "commit": "6e98a75be8d2e81562a9f04951c433d057c79a35",
+  "commit": "9e590cf73b34c223fb3ea3c9b8c948be16acddb9",
   "tools": {
+    "arca-invoice": {
+      "version": "0.2.1",
+      "files": {
+        ".gitignore": "9023adb374416d32cf4c32737677af5ff8333c10995cc028c9663794cb1bd99b",
+        "README.md": "47a6f39d5beccba65b96430ff0caa1e4cc426fe68b1ed85cd5aba8a146818624",
+        "config.js": "f26704ff37896990f0323bcd58735dc63b8cbfcc27b78ef0355fc22ca005c696",
+        "index.js": "ec1b23ed156719fc936f41e7730234a614cfde01bd6f9258c4d3b42cd420ceca",
+        "invoice.js": "6949b26ca65df4c3b91f85f2c46ae5fb13c987cdaff22bfb30521189977eedd0",
+        "invoice.test.js": "8af8a5a61c05ec261820f4e0de8d96487b58d1553244b4814d19a2c16b329ac5",
+        "package.json": "66932fa1bb7cfa333cfd08d2007475290d0bc767b25e43734140b76ec1bf503f",
+        "pdf.js": "61dee6e9d666a18bb26851c7889165f755e3241d5f17e0f4995e44b452c1ad9b",
+        "pdf.test.js": "e20028f49a357c66766cb928c91561df26664bbe49dfa2aa3b2a400658ce8378",
+        "pnpm-lock.yaml": "9d9cf2ab7313acb99d89e3f1271547005a3d9009624f151da9c7f8829338c916",
+        "protocol.js": "0edfb43eec7be97335beaefaec50e88f24295916119229ba2a5ff74267f424a4",
+        "protocol.test.js": "ca313a7da2a92e93a5912acc01283b5708a452166f6b51e6dc1de1a391ffd07c",
+        "tool.manifest.json": "1dbeae6c4a8765798133a48991fae00e802ab1c2cff39cfb6756fa2130ed974d"
+      }
+    },
     "audio-extractor": {
       "version": null,
       "files": {
@@ -178,15 +196,15 @@
       }
     },
     "image-transform": {
-      "version": "0.2.0",
+      "version": "0.2.1",
       "files": {
         "config.js": "450f0af4f4c1ecc4c7180f2e364c8a59bfed69dd350fb6b47bce8641c2a37786",
         "index.js": "bf8b491874fda637f2954a08ffde979e2d22719cfdfeb9ee7ef0d2dada60070e",
         "operations.js": "b28c99ff2c452529deea49a8c2c3b543ac962b95b439b467cb4097e3dbbe3b14",
-        "package.json": "50211f5e6169a6a8e1a480050e3c686effeac6a2128fbd888884ec5a3f84a4eb",
+        "package.json": "8aa5fb6bb33209dfb8508ad46494a9d46699eb180e0a73aea58fa87a0b3d0cd6",
         "sharp-runner.js": "2a98e5785f8657ffa5467c105d24f9d98755b3ffc1e99d2b3f7860617ef868f1",
         "test/operations.test.js": "e12edf4ae8ce5a421560d16fd5dbc90e97d924f3ad1a185c92fe0a930c61d97e",
-        "tool.manifest.json": "e44f75443084d79df1846f19980af823a171f49a470196237ce802791328adc2"
+        "tool.manifest.json": "b9c669410cb5577caa016cad5b1b218239708318511f99f1e416b7888801fad6"
       }
     },
     "lightpanda-browser": {
@@ -315,9 +333,9 @@
         "network-security.js": "60a020d4e3c7a4784a5a4e7b7246ee34e63ac73ee2316e09a09d10668dc8a7bc",
         "oauth-device.js": "698aa9255bae47190c63527db7680aaab4f06392a108a0ff6444e32d31b7b89f",
         "oauth-watch-plan.js": "b1bbed52eeb0e2e50dd52d733897ebd70573fea3ff5f023b3c63347f92633d3e",
-        "package.json": "15e02c7df79f72215e3b13af3aa8d6eba9ddd281509dc6bfeffc9ceb43bcba92",
-        "pnpm-lock.yaml": "e4a438e798e1befb990fd1ba22aed5b11d9f3269826c8815d1209e8f1965a3dc",
-        "pnpm-workspace.yaml": "e4900114b84aef4f473219c7f637ee04a89b42d66c2bd8bada23869c4aa782d9",
+        "package.json": "3dda46564007101fdbca733f6023a4d61c5c04c0148a5bbbdc42ab36f3cbecc3",
+        "pnpm-lock.yaml": "81f4c683842beb12e8283695ffe6f1161a785909241ee9cfe5979426e8aba6d1",
+        "pnpm-workspace.yaml": "ab14893333c411d9eb864afe81d5e0f7922b75257a626e5abcf64300f8aa57a1",
         "state-store.js": "a8fb63096b8efdec8de1cb386eff371f1552f3fd71d96f25036e1c724285e0af",
         "test/mcp-client.test.js": "26a7fe3ffa33ad454eced32c7fab12975ac5c0914041dea68cb7e5467e753a10",
         "tool-routing.js": "b3405c9879443cdc257a1e97d4968859a8654e62ff7cfb90ec3a7a992a62e311",
@@ -572,22 +590,27 @@
       }
     },
     "travel-companion": {
-      "version": "0.3.0",
+      "version": "0.3.1",
       "files": {
-        "README.md": "b8c8fa312fd6b74dc19c9b1e932b735d9936963992deb124d2c65ea621721ba6",
+        "README.md": "2a6b4cbf772785074b1d261fc5fe25ad7719d0bea32d9605dae7404872126175",
         "config.js": "cb5e5be6dccb9ce04043f023852314817724dc72183f40c3a5bb1676dbd049ff",
-        "domain.js": "d5dd48aaf74a297fda9c30d3db40e86cf18711d4bd75023c36ed225a42478737",
-        "flights.js": "c501573b2df49bc1a394203c038a81f7003254a9031adff3cfd758ffac516361",
-        "index.js": "7ee876aa71f32afcbf848c3c7792c4f274363e0ad5f310c7f8cfbc7a4cdb303c",
-        "package.json": "2f13d333981569272e771931ee6e2b3a0277b8909a226f78d2bd015c759c6d48",
+        "coverage.js": "d174c5733f8a3ec7ec240a7f55cd7f3e517c711b76293831972f0c7deed26110",
+        "domain.js": "6ad561f8ac449f0bd47a70956ae8ce182dca0750685adb7409813b3c38fcf83a",
+        "flights.js": "18af7b849456711d815e27ae38c9b490297ac33da77267d4e8a6e60db3f23680",
+        "index.js": "280fb0f987a3230276cca7174c1dfc2dd4a8b2221231a6dc642207aa2ab7ec98",
+        "package.json": "6100ddc63707535ab3b940a6dc0119ac6224d3f05f9d28eff8eb8f35173f91b0",
+        "recommendations.js": "ec807c302b1cf329ad062ed3cbaa45f8277e3f62d0029ce61815f2ff3ac58540",
         "store.js": "1dc326f09b379b36eceac94052acb6e9860ae0f98723544dd69a57dadff9c30c",
         "test/actions.test.mjs": "9790c37a1c5f1a20e525b76983c8f0996b2571988dbbfab317bf8b30eec3f56b",
+        "test/coverage.test.mjs": "acce86d45ede806cba9738543097f833334fb73b6405580b2afde261a713e248",
         "test/domain.test.mjs": "e273d9fa333203bbc37b99933e965aa9b579bd40025bb428632aa1fdeb8d2442",
         "test/flight-alerts.test.mjs": "af219da8ca39d3d026a0cf427ae54382a189ce0829fd1f60f634b8e31979defa",
-        "test/flights.test.mjs": "d1bcefa34321d4f27e3375d3ffca04058a0662f805270488f2ced61c902a4bad",
+        "test/flight-noise.test.mjs": "bf1bdb1ea16fc455cc8b245765d5a0885e0a4f4a76ce020c37f94259b07063f7",
+        "test/flights.test.mjs": "25e8fef33f502cb4a4fbad690384f8e28f8674439bfc4a746764e5e02113cc34",
+        "test/recommendations.test.mjs": "5e9c956e39b170926fb1e447962592cad9f41084068fb98f88194a35ecc22ead",
         "test/weather.test.mjs": "ea8028e6b57cd7ab5c246ebb5dc9ba8290bc0fe11aa328396415e2761325d4df",
-        "tool.manifest.json": "c6cdb65284571b12356d7b10984e75f991a274971d9bae75e456e43d01e3ff74",
-        "weather.js": "2bcc59471b3b24fcb13d2b26f0254a6ec2f406290189a601b841215fe344e61d"
+        "tool.manifest.json": "6ce316a61ee2c9627d6201f923d91f378106938de633b625c10e49f3f5c5aff1",
+        "weather.js": "4a51e66d1c12efc72b6a2818258eebef07a3822d62e40ef6456eceeb5525d836"
       }
     },
     "turn-server": {
@@ -648,10 +671,10 @@
       }
     },
     "whatsapp-web": {
-      "version": "1.3.5",
+      "version": "1.3.6",
       "files": {
-        "MEDIA-COMPATIBILITY.md": "55e3e63163e4b910d5a0164ce5aaf2c6baf0d199a999cf0a37f4f781226c1fb5",
-        "apply-whatsapp-web-compat.js": "d5f3067dad3ed2582446f2c1ed5c4bda635061193839bd7884f53971f0446aa1",
+        "MEDIA-COMPATIBILITY.md": "1b1593875f26156dd461f93ba68e8b32f521c2a51d00b14a2bbe8dea4affa161",
+        "apply-whatsapp-web-compat.js": "1409c7cfd37350a84ff35e398c245c4f3ac582a878b6e35ad0cc84141790bf46",
         "audio-normalization.js": "20877ddecf7fa2d4d3abaaf3899cea65fb0b91cd393fca0cba911d019bef1013",
         "browser-cache.js": "f71c20f9ab5f04d9d46c5e2551b348d47baba89a10a07173070298098a6d5551",
         "config.js": "b0d4bed04dc87828ff61e1c9050a67ebf09a39cdc3ca52ce23be4c31476dda08",
@@ -659,16 +682,18 @@
         "index.js": "4a1030d83a9fbc527984b536ed8b81df97ff4652424af013f6dd229cceb37d48",
         "media-compat.js": "3ed5d388f36503fec719c156327f922c3357adb6a3363012b22507bf3a153df5",
         "message-burst.js": "06b2348ea409dffff74c9ae5a6d882f3d279f4adc39206e019f73df424dc4b3b",
-        "package.json": "f9c45c408616af49097746d055d1b5005ab955f642816daee7896887fc514130",
-        "pnpm-lock.yaml": "f4f8792714f2aec065ca3822ed0d1fc7c5812a09ff3fab1560947948024e689d",
-        "pnpm-workspace.yaml": "e27ba26405f43b735788a92d2a856e4af3e52a7d623f4c5fc7bd87967ae3616f",
+        "package.json": "1438e18111fcd4fd403e075d93bf8671ca47caa3b5c2382d974d202c2190cb91",
+        "pnpm-lock.yaml": "7366d030b1cf34d4b1ce3d0b85aa436c5f5efb65216ef9aa081e0b4ca60b27a9",
+        "pnpm-workspace.yaml": "3310e1e1719dbdb2c4aa4eccafb50f54ccf6a90e2053318598cc7ca0f029361b",
+        "send-media-compat.js": "ed233dbbaee2a4a24feeff47bf7049384f4df6e5f532259a7a4333ace9ddf819",
         "test/audio-normalization.test.mjs": "ec073192ba149d632848327a2cd58cb9791ffca1cf58f955583fc733f40d5109",
         "test/browser-cache.test.mjs": "636b91c16c9d4a67f38d625293fe371eb3d2e91818d131cacdec15e5bb255a69",
         "test/incoming-wake-gate.test.mjs": "f84f4f2e6c8d8ff2b7b63f9a266b15d7234bb017400826eac4f96a675cd7e25d",
         "test/media-compat.test.mjs": "516ec3a3a85256d27448fc35ba686a303729c44329221d97bba6a1702c924a8b",
         "test/message-burst.test.mjs": "d994f46054c7b464d47d714e6e364df5ba96206ce0b7069fccbb555fd61ed14f",
+        "test/send-media-compat.test.mjs": "daca067cf8e2a57b8e6a270d1dc0a97cf418e99af9d2ef32d8d8a0c17dee2d3b",
         "test/task-ipc.test.mjs": "8f1221d05d1f97f204ea244fb77d088e538f93aa22ea45272d09bef56c762172",
-        "tool.manifest.json": "5106aae4fc5ae17b7babd7658437880170842e037dd6bbebe4a72729d203b663"
+        "tool.manifest.json": "0e69781581603eb5b8d948436c2a7b81df33962b8d7ae8362e1fe557a63a248e"
       }
     },
     "whispermix-transcribe": {
