@@ -1,6 +1,6 @@
 {
   "name": "image-transform",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "description": "Build powerful artifact-scoped image pipelines from safe Sharp API method calls, with broad transforms, effects, metadata controls, format conversion, and legacy operation compatibility.",
   "entry": "index.js",
   "input": ["image/jpeg", "image/png", "image/webp", "image/avif", "image/gif", "image/heif", "image/tiff"],
