@@ -19,7 +19,7 @@ test("bootstrap facade preserves the shared config builder", () => {
     authorizedChatIds: [123],
     chatMeta: { 123: { languageCode: "es" } },
     provider: "openai-codex",
-    model: "gpt-5.5",
+    model: "gpt-6.1-sol",
     piApiKey: "pi-key"
   });
 
@@ -27,7 +27,7 @@ test("bootstrap facade preserves the shared config builder", () => {
   assert.equal(config.telegram.maxChatIds, 2);
   assert.deepEqual(config.telegram.authorizedChatIds, [123]);
   assert.equal(config.pi.provider, "openai-codex");
-  assert.equal(config.pi.model, "gpt-5.5");
+  assert.equal(config.pi.model, "gpt-6.1-sol");
   assert.equal(config.pi.apiKey, "pi-key");
 });
 
@@ -43,10 +43,10 @@ test("shared bootstrap policy keeps provider and model ordering stable", () => {
   );
   assert.deepEqual(providers.map((item) => item.provider), ["anthropic", "openai-codex", "google"]);
 
-  const models = [{ id: "older" }, { id: "gpt-5.5" }, { id: "newer" }];
+  const models = [{ id: "older" }, { id: "gpt-6.1-sol" }, { id: "newer" }];
   assert.deepEqual(
     sortBootstrapModels("openai-codex", models).map((item) => item.id),
-    ["gpt-5.5", "newer", "older"]
+    ["gpt-6.1-sol", "newer", "older"]
   );
   assert.equal(selectByIndex(models, "99"), models[2]);
 });

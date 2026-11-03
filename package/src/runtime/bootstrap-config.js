@@ -41,7 +41,7 @@ export function sortBootstrapProviders(providers) {
 
 export function sortBootstrapModels(provider, models) {
   const preferred = {
-    "openai-codex": ["gpt-5.5"]
+    "openai-codex": ["gpt-6.1-sol"]
   };
   const priority = preferred[provider] || [];
   const positions = new Map(models.map((model, index) => [model.id, index]));

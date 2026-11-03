@@ -107,11 +107,22 @@ export const piConfigDefaults = Object.freeze({
   })
 });
 
+// Models Pi no longer offers, mapped to their replacement for the same provider.
+const retiredModels = Object.freeze({
+  "openai-codex": Object.freeze({ "gpt-5.5": "gpt-6.1-sol" })
+});
+
+function currentModel(provider, model) {
+  return retiredModels[provider]?.[model] ?? model;
+}
+
 function cloneChatModels(chatModels) {
   if (!chatModels || typeof chatModels !== "object") return chatModels;
   return Object.fromEntries(Object.entries(chatModels).map(([chatId, selection]) => [
     chatId,
-    selection && typeof selection === "object" ? { ...selection } : selection
+    selection && typeof selection === "object"
+      ? { ...selection, ...(selection.model !== undefined ? { model: currentModel(selection.provider, selection.model) } : {}) }
+      : selection
   ]));
 }
 
@@ -150,6 +161,7 @@ export function applyConfigDefaults(config) {
     pi: {
       ...piConfigDefaults,
       ...configuredPi,
+      ...(configuredPi.model !== undefined ? { model: currentModel(configuredPi.provider, configuredPi.model) } : {}),
       sessionCache: {
         ...piConfigDefaults.sessionCache,
         ...(configuredPi.sessionCache || {})

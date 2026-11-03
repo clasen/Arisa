@@ -1,6 +1,6 @@
 {
   "name": "arisa",
-  "version": "5.2.30",
+  "version": "5.3.0",
   "description": "Telegram + Pi Agent modular assistant",
   "type": "module",
   "main": "src/index.js",
@@ -46,7 +46,7 @@
   "homepage": "https://arisa.sh",
   "packageManager": "pnpm@12.11.2",
   "dependencies": {
-    "@earendil-works/pi-coding-agent": "1.1.0",
+    "@earendil-works/pi-coding-agent": "1.5.0",
     "@sinclair/typebox": "^0.34.41",
     "grammy": "^1.42.0"
   }

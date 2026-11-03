@@ -425,3 +425,25 @@ test("applies Pi speed to every provider request and updates it in place", async
     service_tier: "priority"
   });
 });
+
+test("loads configs on Codex models Pi retired with their replacement", () => {
+  const config = applyConfigDefaults({
+    pi: {
+      provider: "openai-codex",
+      model: "gpt-5.5",
+      chatModels: {
+        1: { provider: "openai-codex", model: "gpt-5.5", sessionRevision: 2 },
+        2: { provider: "openai-codex", model: "gpt-5.6-luna", sessionRevision: 1 },
+        3: { provider: "openai", model: "gpt-5.5", sessionRevision: 1 }
+      }
+    }
+  });
+
+  assert.equal(config.pi.model, "gpt-6.1-sol");
+  assert.deepEqual(config.pi.chatModels, {
+    1: { provider: "openai-codex", model: "gpt-6.1-sol", sessionRevision: 2 },
+    2: { provider: "openai-codex", model: "gpt-5.6-luna", sessionRevision: 1 },
+    3: { provider: "openai", model: "gpt-5.5", sessionRevision: 1 }
+  });
+  assert.equal(applyConfigDefaults({ pi: { provider: "openai", model: "gpt-5.5" } }).pi.model, "gpt-5.5");
+});
