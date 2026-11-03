@@ -2,10 +2,22 @@
   "name": "github-ops",
   "description": "Operate on GitHub repositories using a chat-scoped token, without exposing the token in output.",
   "entry": "index.js",
-  "input": ["text/plain", "application/json"],
-  "output": ["application/json", "text/plain"],
+  "input": [
+    "text/plain",
+    "application/json"
+  ],
+  "output": [
+    "application/json",
+    "text/plain"
+  ],
   "category": "developer",
-  "keywords": ["github", "git", "repo", "deployment", "source"],
+  "keywords": [
+    "github",
+    "git",
+    "repo",
+    "deployment",
+    "source"
+  ],
   "configSchema": {
     "GITHUB_TOKEN": {
       "type": "string",
@@ -18,5 +30,6 @@
       "required": false,
       "prompt": "Default GitHub repository URL or owner/name."
     }
-  }
+  },
+  "version": "1.1.0"
 }

@@ -1,10 +1,10 @@
 {
   "name": "campaign-draft-runner",
-  "version": "0.8.1",
+  "version": "0.9.0",
   "toolDependencies": {
     "pr-campaign": "^0.1.0",
     "gmail-workspace": "^0.1.0",
-    "lightpanda-browser": "^0.10.0"
+    "lightpanda-browser": "^0.11.0"
   },
   "description": "Build and score an evidence-backed outreach prospect pool, run a measured three-variant pitch experiment, generate approved-fact reviewer guides, audit eligibility, and create Gmail drafts only; never sends mail.",
   "entry": "index.js",
@@ -65,7 +65,7 @@
     "UNCHANGED_BATCH_SKIP_ENABLED": {
       "type": "boolean",
       "required": false,
-      "prompt": "Skip expensive live batches when the campaign fingerprint is unchanged after a clean empty review."
+      "prompt": "Skip expensive enrichment, qualification, and eligibility work when the complete campaign fingerprint is unchanged after a clean empty review."
     },
     "UNCHANGED_BATCH_FORCE_MS": {
       "type": "number",

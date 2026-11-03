@@ -30,6 +30,22 @@ const explorationMetricDefinitions = [
     direction: "neutral",
     description: "Campaign cycles grouped by bounded exploration strategy, including unchanged-state skips",
     dimensions: ["campaign", "strategy", "outcome"]
+  },
+  {
+    metric: "campaign.batch.calls_avoided",
+    kind: "counter",
+    unit: "call",
+    direction: "higher",
+    description: "Estimated expensive campaign operations omitted by an unchanged enrichment and qualification gate",
+    dimensions: ["campaign", "status"]
+  },
+  {
+    metric: "campaign.batch.forced_reviews",
+    kind: "counter",
+    unit: "review",
+    direction: "neutral",
+    description: "Campaign reviews forced by an explicit request or the bounded periodic review interval",
+    dimensions: ["campaign", "reason"]
   }
 ];
 
@@ -94,6 +110,22 @@ export function buildCampaignTelemetryRecords({ request, output, elapsedMs, stat
         unit: "batch",
         source: "campaign-draft-runner",
         dimensions: { campaign, status }
+      },
+      {
+        metric: "campaign.batch.calls_avoided",
+        kind: "counter",
+        value: Math.max(0, Number(output.callsAvoided || 0)),
+        unit: "call",
+        source: "campaign-draft-runner",
+        dimensions: { campaign, status }
+      },
+      {
+        metric: "campaign.batch.forced_reviews",
+        kind: "counter",
+        value: ["forced", "periodic-review"].includes(output.batchSkip?.reason) ? 1 : 0,
+        unit: "review",
+        source: "campaign-draft-runner",
+        dimensions: { campaign, reason: output.batchSkip?.reason || "none" }
       }
     );
     const dimensions = { campaign, strategy, outcome };

@@ -4,6 +4,7 @@ import { pathToFileURL } from "node:url";
 import { chromium } from "playwright";
 import { refreshSessionOnBrowserClose } from "./session-store.js";
 import { resolveStoredSession } from "./session-selection.js";
+import { mergeGoogleSessionCookies, chromeWebStoreTargetValidated } from "./google-session-policy.js";
 
 function playwrightSameSite(value) {
   if (value === "strict") return "Strict";
@@ -55,31 +56,18 @@ async function readStoredSession(stateDir, resourceId) {
 }
 
 async function chromeWebStoreCookies(stateDir, session, deviceId) {
-  const cookies = new Map(session.cookies.map((cookie) => [`${cookie.domain}\n${cookie.path || "/"}\n${cookie.name}`, cookie]));
+  const related = [];
   for (const accountResource of ["accounts.google.com", "myaccount.google.com"]) {
     try {
       const accountSession = deviceId
         ? (await selectedStoredSession(stateDir, accountResource, deviceId)).session
         : await readStoredSession(stateDir, accountResource);
-      for (const cookie of accountSession.cookies || []) {
-        cookies.set(`${cookie.domain}\n${cookie.path || "/"}\n${cookie.name}`, cookie);
-      }
+      related.push(accountSession);
     } catch (error) {
       if (!new RegExp(`ENOENT|No ${accountResource.replaceAll(".", "\\.")} session is stored`).test(String(error?.message || error))) throw error;
     }
   }
-  return [...cookies.values()];
-}
-
-function chromeWebStoreTargetValidated(context) {
-  return context.pages().some((page) => {
-    try {
-      const url = new URL(page.url());
-      return url.protocol === "https:" && url.hostname === "chrome.google.com" && url.pathname.startsWith("/webstore/devconsole/");
-    } catch {
-      return false;
-    }
-  });
+  return mergeGoogleSessionCookies(session, related);
 }
 
 async function authenticatedContext(stateDir, resourceId, deviceId, browser) {
@@ -98,6 +86,34 @@ async function authenticatedContext(stateDir, resourceId, deviceId, browser) {
     shouldPersist: () => chromeWebStoreTargetValidated(context)
   });
   return context;
+}
+
+export async function probeChromeWebStoreSession({ stateDir, deviceId, targetUrl }) {
+  const url = validateDashboardUrl(targetUrl);
+  const { session } = await selectedStoredSession(stateDir, "chrome.google.com", deviceId);
+  const variants = [
+    { mode: "store-only", cookies: session.cookies },
+    { mode: "merged", cookies: await chromeWebStoreCookies(stateDir, session, deviceId) }
+  ];
+  const results = [];
+  for (const variant of variants) {
+    const browser = await chromium.launch({ headless: true });
+    try {
+      const context = await browser.newContext();
+      await context.addCookies(variant.cookies.map(toPlaywrightCookie));
+      const page = await context.newPage();
+      await page.goto(url.href, { waitUntil: "domcontentloaded", timeout: 60000 });
+      await page.waitForTimeout(5000);
+      const authenticated = await chromeWebStoreTargetValidated(context);
+      const text = await page.locator("body").innerText();
+      const destination = new URL(page.url());
+      results.push({ mode: variant.mode, cookieCount: variant.cookies.length, authenticated,
+        destination: destination.origin + destination.pathname,
+        loginRequired: /Signed out|Choose an account|Sign in/i.test(text),
+        persisted: false });
+    } finally { await browser.close(); }
+  }
+  return { capturedAt: session.capturedAt, refreshedAt: session.refreshedAt || null, results };
 }
 
 async function selectPackage(page, zipPath) {
@@ -334,7 +350,7 @@ export async function fillChromeWebStoreDistribution({ stateDir, resourceId = "c
   }
 }
 
-export async function inspectChromeWebStoreDraft({ stateDir, resourceId = "chrome.google.com", deviceId, draftUrl }) {
+export async function inspectChromeWebStoreDraft({ stateDir, resourceId = "chrome.google.com", deviceId, draftUrl, openMenu = false }) {
   const url = validateDashboardUrl(draftUrl);
   const browser = await chromium.launch({ headless: true });
   try {
@@ -342,6 +358,11 @@ export async function inspectChromeWebStoreDraft({ stateDir, resourceId = "chrom
     const page = await context.newPage();
     await page.goto(url.href, { waitUntil: "domcontentloaded", timeout: 60000 });
     await page.waitForTimeout(2500);
+    if (openMenu) {
+      await page.getByLabel("View more menu options", { exact: true }).click();
+      await page.waitForTimeout(500);
+      return { url: page.url(), visibleText: await page.locator("body").innerText() };
+    }
     const controls = await page.locator("input, textarea, select, button, [role=combobox], [role=option]").evaluateAll((elements) => elements.map((element, index) => ({
       index,
       tag: element.tagName.toLowerCase(),
@@ -359,7 +380,7 @@ export async function inspectChromeWebStoreDraft({ stateDir, resourceId = "chrom
       .map((element) => ({ text: element.textContent?.trim().replace(/\s+/g, " ").slice(0, 120), href: element.href }))
       .filter((item) => item.href.startsWith("https://chrome.google.com/webstore/devconsole") || /Access|Test instructions|Privacy|Distribution|Store listing|Settings/i.test(item.text || ""))
       .slice(0, 100));
-    return { url: page.url(), title: await page.title(), controls, links };
+    return { url: page.url(), title: await page.title(), controls, links, visibleText: (await page.locator("body").innerText()).slice(0, 18000) };
   } finally {
     await browser.close();
   }
@@ -398,7 +419,20 @@ export async function replaceChromeWebStorePackage({ stateDir, resourceId = "chr
     await page.waitForTimeout(2500);
     if (page.url().includes("accounts.google.com")) throw new Error("Chrome Web Store session is not authenticated");
     const before = await page.locator("body").innerText();
-    if (!/Status:\s*Draft/i.test(before)) throw new Error("Chrome Web Store item must be a draft before replacing its package");
+    if (!/Status:\s*Draft/i.test(before)) {
+      if (!/\/edit\/package\/?$/.test(url.pathname) || !/Package\s+Draft\s+Version/i.test(before)) {
+        throw new Error("Chrome Web Store item must have an editable draft before replacing its package");
+      }
+      const statusUrl = new URL(url.href);
+      statusUrl.pathname = statusUrl.pathname.replace(/\/package\/?$/, "/status");
+      await page.goto(statusUrl.href, { waitUntil: "domcontentloaded", timeout: 60000 });
+      await page.waitForTimeout(2500);
+      if (!(await page.locator("body").innerText()).includes("This draft is unpublished.")) {
+        throw new Error("Chrome Web Store update draft is not confirmed unpublished");
+      }
+      await page.goto(url.href, { waitUntil: "domcontentloaded", timeout: 60000 });
+      await page.waitForTimeout(2500);
+    }
     await selectPackage(page, zipPath);
     await page.waitForTimeout(6000);
     const body = await page.locator("body").innerText();
@@ -407,6 +441,80 @@ export async function replaceChromeWebStorePackage({ stateDir, resourceId = "chr
   } finally {
     await browser.close();
   }
+}
+
+export async function saveChromeWebStoreAlarms({ stateDir, deviceId, privacyUrl, justification }) {
+  const url = validateDashboardUrl(privacyUrl);
+  if (!String(justification || "").trim()) throw new Error("An alarms justification is required");
+  const browser = await chromium.launch({ headless: true });
+  try {
+    const context = await authenticatedContext(stateDir, "chrome.google.com", deviceId, browser);
+    const page = await context.newPage();
+    await page.goto(url.href, { waitUntil: "domcontentloaded", timeout: 60000 });
+    await page.waitForTimeout(2500);
+    try { await page.locator("textarea:visible").first().waitFor({ timeout: 30000 }); }
+    catch { return { saved: false, submittedForReview: false, visibleText: (await page.locator("body").innerText()).slice(0, 5000) }; }
+    const body = await page.locator("body").innerText();
+    if (!/activeTab justification[\s\S]*cookies justification[\s\S]*storage justification[\s\S]*alarms justification[\s\S]*Are you using remote code/.test(body) || await page.locator("textarea:visible").count() !== 6) throw new Error(`Expected permission justification layout not found: textareas=${await page.locator("textarea:visible").count()}, title=${await page.title()}, alarms=${body.includes("alarms justification")}`);
+    const field = page.locator("textarea:visible").nth(4);
+    await field.fill(justification);
+    await page.getByRole("button", { name: "Save draft", exact: true }).click();
+    await page.waitForTimeout(2500);
+    await page.reload({ waitUntil: "domcontentloaded" });
+    await page.waitForTimeout(1500);
+    await field.waitFor({ timeout: 45000 });
+    if (await field.inputValue() !== justification) throw new Error("Alarms justification persistence is unconfirmed");
+    return { saved: true, submittedForReview: false };
+  } finally { await browser.close(); }
+}
+
+export async function prepareChromeWebStoreReview({ stateDir, deviceId, itemUrl }) {
+  const url = validateDashboardUrl(itemUrl);
+  const browser = await chromium.launch({ headless: true });
+  try {
+    const context = await authenticatedContext(stateDir, "chrome.google.com", deviceId, browser);
+    const page = await context.newPage();
+    await page.goto(url.href, { waitUntil: "domcontentloaded", timeout: 60000 });
+    await page.waitForTimeout(2500);
+    if (page.url().includes("accounts.google.com")) throw new Error("Chrome Web Store session is not authenticated");
+    const submit = page.getByRole("button", { name: "Submit for review", exact: true });
+    if (await submit.isEnabled().catch(() => false)) {
+      await submit.click();
+    } else {
+      await page.getByRole("button", { name: /Why can't I submit/i }).click();
+    }
+    await page.waitForTimeout(1500);
+    return { submittedForReview: false, visibleText: (await page.locator("body").innerText()).slice(0, 18000) };
+  } finally {
+    await browser.close();
+  }
+}
+
+export async function submitChromeWebStoreReview({ stateDir, deviceId, itemUrl, confirm }) {
+  if (confirm !== "submit-review-only") throw new Error("Explicit review-only confirmation is required");
+  const url = validateDashboardUrl(itemUrl);
+  const browser = await chromium.launch({ headless: true });
+  try {
+    const context = await authenticatedContext(stateDir, "chrome.google.com", deviceId, browser);
+    const page = await context.newPage();
+    await page.goto(url.href, { waitUntil: "domcontentloaded", timeout: 60000 });
+    const submit = page.getByRole("button", { name: "Submit for review", exact: true });
+    await submit.waitFor({ timeout: 30000 });
+    await submit.click();
+    const dialog = page.getByRole("dialog").last();
+    await dialog.waitFor({ timeout: 15000 });
+    const automatic = dialog.getByRole("checkbox", { name: /automatically after it has passed review/i });
+    await automatic.uncheck();
+    if (await automatic.isChecked()) throw new Error("Automatic publication must be disabled");
+    await dialog.getByRole("button", { name: /^Submit For Review$/i }).click();
+    await page.waitForTimeout(4000);
+    const statusUrl = new URL(url.href);
+    statusUrl.pathname = statusUrl.pathname.replace(/\/edit(?:\/.*)?$/, "/edit/status");
+    await page.goto(statusUrl.href, { waitUntil: "domcontentloaded", timeout: 60000 });
+    await page.waitForTimeout(4000);
+    const text = await page.locator("body").innerText();
+    return { submittedForReview: /pending review|in review/i.test(text) ? true : null, automaticPublication: false, visibleText: text.slice(0, 10000) };
+  } finally { await browser.close(); }
 }
 
 export async function withdrawChromeWebStoreReview({ stateDir, resourceId = "chrome.google.com", deviceId, itemUrl }) {

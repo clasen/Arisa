@@ -1,6 +1,6 @@
 {
   "name": "browser-session-bridge",
-  "version": "0.2.6",
+  "version": "0.2.7",
   "description": "Connect browser profiles and receive explicitly shared, domain-scoped sessions while keeping profile connection, session sharing, and target validation as separate states.",
   "entry": "index.js",
   "toolDependencies": {
@@ -11,10 +11,27 @@
     "autoStart": true,
     "health": "internal"
   },
-  "input": ["text/plain", "application/json", "application/zip"],
-  "output": ["application/json", "application/zip"],
+  "input": [
+    "text/plain",
+    "application/json",
+    "application/zip"
+  ],
+  "output": [
+    "application/json",
+    "application/zip"
+  ],
   "category": "web",
-  "keywords": ["browser", "chrome", "brave", "cookies", "extension", "session", "playwright", "lightpanda", "authentication"],
+  "keywords": [
+    "browser",
+    "chrome",
+    "brave",
+    "cookies",
+    "extension",
+    "session",
+    "playwright",
+    "lightpanda",
+    "authentication"
+  ],
   "configSchema": {
     "PUBLIC_BASE_URL": {
       "type": "string",

@@ -1,0 +1,11 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import {makeDraft,detailXml,validateReceipt,validateReconciliation} from './invoice.js';
+const config={CUIT:'20123456789',POINT_OF_SALE:7,ENVIRONMENT:'homologation'};
+const base={amount:'1234.56',date:'20250115',from:'20250101',to:'20250115',due:'20250115'};
+const prefix='2012345678';const weights=[5,4,3,2,7,6,5,4,3,2];const cuit=prefix+((11-weights.reduce((s,w,i)=>s+w*Number(prefix[i]),0)%11)%11);
+const identified=()=>makeDraft({...base,recipientCuit:cuit,recipientName:'SYNTHETIC TEST RECIPIENT'},config);
+test('Identified consumer XML uses CUIT and retains VAT condition',()=>{const d=identified();assert.match(detailXml(d,1),new RegExp(`<DocTipo>80</DocTipo><DocNro>${cuit}</DocNro>`));assert.match(detailXml(d,1),/<CondicionIVAReceptorId>5/);});
+test('Invalid check digit, absent name and orphan name rejected',()=>{assert.throws(()=>makeDraft({...base,recipientCuit:prefix+'9',recipientName:'TEST'},config));assert.throws(()=>makeDraft({...base,recipientCuit:cuit},config));assert.throws(()=>makeDraft({...base,recipientName:'TEST'},config));});
+test('Authorization cannot substitute unidentified recipient',()=>{const d=identified();const r={FeCabResp:{Resultado:'A',PtoVta:7,CbteTipo:11},FeDetResp:{FECAEDetResponse:{Resultado:'A',Concepto:2,DocTipo:80,DocNro:cuit,CbteDesde:1,CbteHasta:1,CbteFch:base.date,CAE:'12345678901234',CAEFchVto:'20250125'}}};assert.equal(validateReceipt(d,1,r).number,1);r.FeDetResp.FECAEDetResponse.DocNro=0;assert.throws(()=>validateReceipt(d,1,r));});
+test('Reconciliation matches identified CUIT',()=>{const d=identified();const r={Resultado:'A',EmisionTipo:'CAE',CodAutorizacion:'12345678901234',FchVto:'20250125',PtoVta:7,CbteTipo:11,CbteDesde:1,CbteHasta:1,CbteFch:base.date,Concepto:2,DocTipo:80,DocNro:cuit,ImpTotal:base.amount,ImpNeto:base.amount,ImpIVA:0,ImpTrib:0,ImpTotConc:0,ImpOpEx:0,MonId:'PES',MonCotiz:1,FchServDesde:base.from,FchServHasta:base.to,FchVtoPago:base.due};assert.equal(validateReconciliation(d,1,{ResultGet:r}).number,1);assert.throws(()=>validateReconciliation(d,1,{ResultGet:{...r,DocTipo:99}}));});

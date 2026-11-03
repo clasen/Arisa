@@ -12,7 +12,7 @@ const { toolError, toolNeedsConfig, toolOk } = await importCore("core/tools/tool
 const { getToolConfigPath, getChatToolConfigPath } = await importCore("runtime/paths.js");
 
 function usage() {
-  return `github-ops\n\nUsage:\n  node index.js --help\n  node index.js run --request-file <json>\n\nActions via args.action:\n  status    Verify the configured token and optional repo access without printing secrets.\n  star      Star a repository as the configured GitHub user.\n\nArgs:\n  repo      Optional repo URL or owner/name. Defaults to config DEFAULT_REPO.\n\nConfig:\n  GITHUB_TOKEN   Required chat-scoped GitHub token.\n  DEFAULT_REPO   Optional default repo URL or owner/name.\n`;
+  return `github-ops\n\nUsage:\n  node index.js --help\n  node index.js run --request-file <json>\n\nActions via args.action:\n  status    Verify the configured token and optional repo access without printing secrets.\n  star      Star a repository as the configured GitHub user.\n  invitation Find an exact repo invitation; confirm=true accepts only that invitation.\n  checkout  Clone an exact repository into chat-scoped state; refuses existing paths.\n  sync      Authenticated fetch and fast-forward of a clean checkout; exact repo and branch required.\n\nArgs:\n  repo      Optional repo URL or owner/name. Defaults to config DEFAULT_REPO.\n\nConfig:\n  GITHUB_TOKEN   Required chat-scoped GitHub token.\n  DEFAULT_REPO   Optional default repo URL or owner/name.\n`;
 }
 
 function printResult(result) {
@@ -124,6 +124,69 @@ async function star({ config, args, chatId }) {
   });
 }
 
+async function sync({ config, args, chatId }) {
+  if (!chatId) return toolError("A chatId is required.");
+  const token = String(config.GITHUB_TOKEN || "").trim();
+  if (!token) return missingToken(chatId);
+  const repo = normalizeRepo(args.repo);
+  const branch = String(args.branch || "");
+  if (!/^[A-Za-z0-9_-]+\/[A-Za-z0-9_.-]+$/.test(repo) || !/^[A-Za-z0-9_-]+$/.test(branch)) return toolError("Exact repository and simple branch required.");
+  const { getChatToolStateDir } = await importCore("runtime/paths.js");
+  const { execFile } = await import("node:child_process");
+  const { promisify } = await import("node:util");
+  const execute = promisify(execFile);
+  const cwd = path.join(getChatToolStateDir(chatId, TOOL_NAME), "checkouts", repo.replace("/", "--"));
+  const git = async (...a) => (await execute("git", a, { cwd, timeout: 120000 })).stdout.trim();
+  if (await git("remote", "get-url", "origin") !== `https://github.com/${repo}.git`) return toolError("Origin mismatch");
+  if (await git("status", "--porcelain") || await git("branch", "--show-current") !== branch) return toolError("Dirty checkout or branch mismatch");
+  const env = { ...process.env, GIT_TERMINAL_PROMPT: "0", GIT_CONFIG_COUNT: "1", GIT_CONFIG_KEY_0: "http.https://github.com/.extraheader", GIT_CONFIG_VALUE_0: `AUTHORIZATION: basic ${Buffer.from(`x-access-token:${token}`).toString("base64")}` };
+  try { await execute("git", ["fetch", "origin", branch], {cwd, env, timeout: 120000}); } catch { return toolError("Authenticated fetch failed"); }
+  await git("merge", "--ff-only", `origin/${branch}`);
+  return toolOk({ text: "Checkout synchronized without discarding changes.", json: { path: cwd, revision: await git("rev-parse", "HEAD") } });
+}
+
+async function checkout({ config, args, chatId }) {
+  if (!chatId) return toolError("A chatId is required.");
+  const token = String(config.GITHUB_TOKEN || "").trim();
+  if (!token) return missingToken(chatId);
+  const repo = normalizeRepo(args.repo);
+  if (!/^[A-Za-z0-9_-]+\/[A-Za-z0-9_.-]+$/.test(repo)) return toolError("Invalid exact repository.");
+  const { getChatToolStateDir } = await importCore("runtime/paths.js");
+  const { execFile } = await import("node:child_process");
+  const { promisify } = await import("node:util");
+  const run = promisify(execFile);
+  const root = path.join(getChatToolStateDir(chatId, TOOL_NAME), "checkouts");
+  await fs.mkdir(root, { recursive: true });
+  const destination = path.join(root, repo.replace("/", "--"));
+  try { await fs.access(destination); return toolError("Checkout already exists; preserve it and inspect locally."); } catch {}
+  const env = { ...process.env, GIT_TERMINAL_PROMPT: "0", GIT_CONFIG_COUNT: "1", GIT_CONFIG_KEY_0: "http.https://github.com/.extraheader", GIT_CONFIG_VALUE_0: `AUTHORIZATION: basic ${Buffer.from(`x-access-token:${token}`).toString("base64")}` };
+  try { await run("git", ["clone", "--depth", "1", "--", `https://github.com/${repo}.git`, destination], { env, timeout: 120000, maxBuffer: 1000000 }); }
+  catch { return toolError("Authenticated clone failed; inspect checkout before retry."); }
+  const { stdout } = await run("git", ["-C", destination, "rev-parse", "HEAD"]);
+  return toolOk({ text: "Repository cloned into chat-scoped state.", json: { repo, path: destination, revision: stdout.trim() } });
+}
+
+async function invitation({ config, args, chatId }) {
+  if (!chatId) return toolError("A chatId is required.");
+  const token = String(config.GITHUB_TOKEN || "").trim();
+  if (!token) return missingToken(chatId);
+  const repo = normalizeRepo(args.repo);
+  if (!/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(repo)) return toolError("An exact owner/name is required.");
+  let found = null;
+  for (let page = 1; page <= 10; page++) {
+    const result = await githubGet(token, `/user/repository_invitations?per_page=100&page=${page}`);
+    if (!result.ok || !Array.isArray(result.json)) return toolError(`Invitation lookup failed with HTTP ${result.status}.`);
+    found = result.json.find(item => item.repository?.full_name?.toLowerCase() === repo.toLowerCase());
+    if (found || result.json.length < 100) break;
+  }
+  if (!found) return toolOk({ text: `No pending invitation found for ${repo}.`, json: { repo, found: false } });
+  if (args.confirm !== "true") return toolOk({ text: `Pending invitation found for ${repo}. Use confirm=true to accept.`, json: { repo, found: true } });
+  if (!Number.isSafeInteger(found.id)) return toolError("Invalid invitation identifier.");
+  const result = await githubRequest(token, `/user/repository_invitations/${found.id}`, { method: "PATCH" });
+  if (result.status !== 204) return toolError(`Invitation acceptance returned HTTP ${result.status}; verify status before retrying.`);
+  return toolOk({ text: `Accepted invitation for ${repo}.`, json: { repo, accepted: true } });
+}
+
 async function main() {
   if (process.argv.includes("--help") || process.argv.length <= 2) {
     process.stdout.write(usage());
@@ -144,6 +207,9 @@ async function main() {
 
   if (action === "status") return printResult(await status({ config, args, chatId: request.chatId }));
   if (action === "star") return printResult(await star({ config, args, chatId: request.chatId }));
+  if (action === "sync") return printResult(await sync({ config, args, chatId: request.chatId }));
+  if (action === "checkout") return printResult(await checkout({ config, args, chatId: request.chatId }));
+  if (action === "invitation") return printResult(await invitation({ config, args, chatId: request.chatId }));
   fail(`Unsupported action: ${action}`);
 }
 

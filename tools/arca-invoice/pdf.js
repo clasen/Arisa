@@ -7,7 +7,7 @@ const money=s=>new Intl.NumberFormat('es-AR',{minimumFractionDigits:2,maximumFra
 function line(doc,y){doc.strokeColor('#D9DEE5').lineWidth(0.6).moveTo(45,y).lineTo(550,y).stroke();}
 function text(doc,value,x,y,size=10,color='#20262E',options={}){doc.fillColor(color).font('Helvetica').fontSize(size).text(value,x,y,{width:505,...options});}
 function issuer(doc,config,y){text(doc,config.ISSUER_NAME,45,y,13);text(doc,config.ISSUER_ADDRESS,45,y+24,10);text(doc,`CUIT: ${config.CUIT}  |  Responsable Monotributo`,45,y+44);text(doc,`Ingresos Brutos: ${config.ISSUER_IIBB}  |  Inicio de actividades: ${config.ISSUER_START}`,45,y+63,9);}
-function recipient(doc,d,y){text(doc,'A CONSUMIDOR FINAL',45,y,11);text(doc,'Documento: no identificado',45,y+20);text(doc,`Condición de venta: ${d.saleCondition}`,45,y+38);}
+function recipient(doc,d,y){text(doc,'A CONSUMIDOR FINAL',45,y,11);text(doc,d.docType===80?`CUIT: ${d.docNumber} — ${d.recipientName}`:'Documento: no identificado',45,y+20);text(doc,`Condición de venta: ${d.saleCondition}`,45,y+38);}
 function dates(doc,d,y){text(doc,`Período facturado: ${date(d.from)} al ${date(d.to)}`,45,y);text(doc,`Vencimiento para el pago: ${date(d.due)}`,45,y+19);}
 function items(doc,d,y,modern){
  doc.rect(45,y,505,27).fill(modern?'#EDF2F7':'#F3F3F3');
@@ -41,7 +41,7 @@ export async function exportPdf({dir,draft:d},config,options={}){
  const receipt=JSON.parse(await fs.readFile(path.join(dir,'issuance.json')));
  if(receipt.status!=='authorized'||!/^\d{14}$/.test(receipt.cae??''))throw new Error('No verified authorization exists');
  if(!config.ISSUER_NAME||!config.ISSUER_ADDRESS||!config.ISSUER_IIBB||!config.ISSUER_START)throw new Error('Issuer printable fiscal data is incomplete');
- const qr={ver:1,fecha:d.date.replace(/^(\d{4})(\d{2})(\d{2})$/,'$1-$2-$3'),cuit:Number(d.cuit),ptoVta:d.point,tipoCmp:11,nroCmp:receipt.number,importe:Number(d.amount),moneda:'PES',ctz:1,tipoDocRec:99,nroDocRec:0,tipoCodAut:'E',codAut:Number(receipt.cae)};
+ const qr={ver:1,fecha:d.date.replace(/^(\d{4})(\d{2})(\d{2})$/,'$1-$2-$3'),cuit:Number(d.cuit),ptoVta:d.point,tipoCmp:11,nroCmp:receipt.number,importe:Number(d.amount),moneda:'PES',ctz:1,tipoDocRec:d.docType,nroDocRec:d.docNumber,tipoCodAut:'E',codAut:Number(receipt.cae)};
  const qrUrl='https://www.arca.gob.ar/fe/qr/?p='+Buffer.from(JSON.stringify(qr),'utf8').toString('base64');const qrImage=await QRCode.toBuffer(qrUrl,{width:190,margin:1});
  const doc=new PDFDocument({size:'A4',margin:35,info:{Title:'Factura C',Author:config.ISSUER_NAME}});const chunks=[];const completed=new Promise((resolve,reject)=>{doc.on('data',c=>chunks.push(c));doc.on('end',()=>resolve(Buffer.concat(chunks)));doc.on('error',reject);});
  const labels=copies==='all'?['ORIGINAL','DUPLICADO','TRIPLICADO']:['ORIGINAL'];for(const [i,copy] of labels.entries()){if(i)doc.addPage();renderPage(doc,config,d,receipt,qrImage,style,copy);}

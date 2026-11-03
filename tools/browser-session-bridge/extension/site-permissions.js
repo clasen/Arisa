@@ -1,4 +1,4 @@
-const SHARED_COOKIE_DOMAINS = ["google.com", "instagram.com"];
+const SHARED_COOKIE_DOMAINS = ["google.com", "instagram.com", "youtube.com"];
 
 export function relatedCookieUrls(url) {
   const googleProduct = url.hostname === "google.com" || url.hostname.endsWith(".google.com");
@@ -6,10 +6,12 @@ export function relatedCookieUrls(url) {
 }
 
 export function temporarySiteOrigins(url) {
-  const origins = [`${url.protocol}//${url.hostname}/*`];
+  // Chromium checks non-Secure cookies against HTTP host permissions even
+  // when getAll() targets an HTTPS page. Keep both grants temporary.
+  const origins = [`http://${url.hostname}/*`, `https://${url.hostname}/*`];
   for (const domain of SHARED_COOKIE_DOMAINS) {
     if (url.hostname === domain || url.hostname.endsWith(`.${domain}`)) {
-      origins.push(`${url.protocol}//*.${domain}/*`);
+      origins.push(`http://*.${domain}/*`, `https://*.${domain}/*`);
       break;
     }
   }

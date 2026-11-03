@@ -1,7 +1,7 @@
 import os from "node:os";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
-import { mkdir, readFile } from "node:fs/promises";
+import { mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
 import { chromium } from "playwright";
 import defaults from "./config.js";
 import { exactReferenceMatch, referenceTitles } from "./reference-match.js";
@@ -58,6 +58,46 @@ function asBoolean(value, fallback = false) {
 function boundedInteger(value, fallback, min, max) {
   const parsed = Number.parseInt(String(value ?? ""), 10);
   return Number.isFinite(parsed) ? Math.min(max, Math.max(min, parsed)) : fallback;
+}
+
+function authBlockPath(request) {
+  return path.join(getChatToolStateDir(String(request.chatId), toolName), "auth-block.json");
+}
+
+async function hasAuthBlock(request) {
+  try {
+    await readFile(authBlockPath(request), "utf8");
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+async function writeAuthBlock(request) {
+  const destination = authBlockPath(request);
+  await mkdir(path.dirname(destination), { recursive: true, mode: 0o700 });
+  const temporary = `${destination}.${process.pid}.tmp`;
+  await writeFile(temporary, `${JSON.stringify({ blockedAt: new Date().toISOString() })}\n`, { encoding: "utf8", mode: 0o600 });
+  await rename(temporary, destination);
+}
+
+async function clearAuthBlock(request) {
+  await rm(authBlockPath(request), { force: true });
+}
+
+function isAuthRequiredError(error) {
+  return /CreatorScout authentication is required/i.test(error?.message || String(error));
+}
+
+function authBlockedResult(request) {
+  return toolError("CreatorScout authentication is required.", {
+    status: "blocked_auth",
+    resolution: {
+      type: "reauthentication_required",
+      retryAfterSeconds: 3600,
+      probeArgs: { action: "status", engine: requestedEngine(request) }
+    }
+  });
 }
 
 async function openContext(chatId, config) {
@@ -443,27 +483,72 @@ async function chromiumStatus(request, config) {
   }
 }
 
+async function authenticationStatus(request, config, engine) {
+  return engine === "chromium" ? chromiumStatus(request, config) : pandaStatus(request, config);
+}
+
+async function authenticate(request, config, engine) {
+  const result = engine === "chromium" ? await authenticateChromium(request, config) : await authenticatePanda(request, config);
+  if (result.authenticated) await clearAuthBlock(request);
+  return result;
+}
+
+async function recoverAuthentication(request, config, engine) {
+  const status = await authenticationStatus(request, config, engine);
+  if (status.authenticated) {
+    await clearAuthBlock(request);
+    return { authenticated: true, reused: true };
+  }
+  return authenticate(request, config, engine);
+}
+
+async function executeProtectedAction(action, request, config, engine) {
+  if (action === "checkout-quote") return checkoutQuote(request, config);
+  if (action === "subscription-status") return subscriptionStatus(request, config);
+  if (action === "search") return engine === "chromium" ? searchChromium(request, config) : searchPanda(request, config);
+  throw new Error(`Unsupported action: ${action}`);
+}
+
 async function handle(request) {
   const config = await loadToolConfig(toolName, defaults, request.chatId);
   const action = String(request.args?.action || "status");
   const engine = requestedEngine(request);
-  if (action === "authenticate") return engine === "chromium" ? authenticateChromium(request, config) : authenticatePanda(request, config);
-  if (action === "checkout-quote") return checkoutQuote(request, config);
-  if (action === "subscription-status") return subscriptionStatus(request, config);
-  if (action === "search") return engine === "chromium" ? searchChromium(request, config) : searchPanda(request, config);
-  if (action === "status") return engine === "chromium" ? chromiumStatus(request, config) : pandaStatus(request, config);
-  throw new Error(`Unsupported action: ${action}`);
+  if (action === "authenticate") return authenticate(request, config, engine);
+  if (action === "status") {
+    const result = await authenticationStatus(request, config, engine);
+    if (!result.authenticated) {
+      await writeAuthBlock(request);
+      throw new Error("CreatorScout authentication is required. Run action=authenticate.");
+    }
+    await clearAuthBlock(request);
+    return result;
+  }
+
+  if (await hasAuthBlock(request)) await recoverAuthentication(request, config, engine);
+  try {
+    return await executeProtectedAction(action, request, config, engine);
+  } catch (error) {
+    if (!isAuthRequiredError(error)) throw error;
+    await recoverAuthentication(request, config, engine);
+    return executeProtectedAction(action, request, config, engine);
+  }
 }
 
 async function main() {
   const [, , command, flag, requestFile] = process.argv;
   if (process.argv.includes("--help") || !command) return printHelp();
   if (command !== "run" || flag !== "--request-file" || !requestFile) return console.log(JSON.stringify(toolError("Invalid usage. Run node index.js --help.")));
+  let request;
   try {
-    const request = JSON.parse(await readFile(requestFile, "utf8"));
+    request = JSON.parse(await readFile(requestFile, "utf8"));
     const output = await handle(request);
     console.log(JSON.stringify(toolOk({ text: JSON.stringify(output, null, 2), json: output, mimeType: "application/json" })));
   } catch (error) {
+    if (request && isAuthRequiredError(error)) {
+      await writeAuthBlock(request);
+      console.log(JSON.stringify(authBlockedResult(request)));
+      return;
+    }
     console.log(JSON.stringify(toolError(error?.message || String(error))));
   }
 }

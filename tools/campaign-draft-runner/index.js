@@ -11,12 +11,14 @@ import {
 import { assessSearchQuality, recordSearchQuality } from "./search-quality.js";
 import { getFactSheetStatus, updateApprovedFacts } from "./product-facts.js";
 import { checkExhaustedSources, recordExhaustedSources } from "./source-exhaustion.js";
-import { classifyToolTimeout, toolOutcomeError } from "./operation-timeout.js";
+import { classifyBlockedPrerequisite, classifyToolTimeout, toolOutcomeError } from "./operation-timeout.js";
 import { campaignOperationArgs, executeDiscoveryOperations } from "./discovery-operations.js";
 import { recordCampaignTelemetry } from "./telemetry.js";
-import { listProspects, saveProspect, summarizeProspects, updateProspect } from "./prospect-pool.js";
+import { compactProspect, listProspects, saveProspect, summarizeProspects, updateProspect } from "./prospect-pool.js";
+import { promoteProspectTransaction, promotedProspectDrift } from "./promotion-workflow.js";
 import { pitchExperimentSummary, recordPitchAssignment, recordPitchOutcome, selectPitchVariant } from "./pitch-experiment.js";
 import { writeReviewerGuide } from "./reviewer-kit.js";
+import { draftLimit, coverageHostAllowed } from "./draft-policy.js";
 
 const toolName = "campaign-draft-runner";
 const DEFAULT_WEB_TOOL = "lightpanda-browser";
@@ -35,19 +37,21 @@ Usage:
   node index.js run --request-file <json>
 
 Actions via args.action:
+  draft-one   Reconcile Sent and create at most one eligible draft, using the profile's selection and verification rules. No discovery when disabled by the profile. args: profile?, targetEmail?, dryRun?
   run-batch   Reconcile Gmail Sent, skip unchanged empty batches, periodically expand creative discovery, verify contacts, and create Gmail drafts only. args: profile?, limit?, dryRun?, forceReview?, untilDrafted?, retryDelaySeconds?, maxAttempts?, maxRuntimeSeconds?
   reconcile-sent Reconcile manually sent Gmail messages into campaign state. args: profile?
   discovery-ops Prevalidate and execute up to 50 idempotent discovery reads/checks/saves with an individual result per item. args: profile?, operations=[{id,action,...}]
   assess-search-quality Score the first search tranche and persist a five-cycle measurement window. args: profile?, searches=[{query,text}]
   sources-check Return which coverage/contact URLs remain exhausted within their 30-day window. args: profile?, urls=<JSON array>
-  sources-record Record reviewed URLs as exhausted for up to 30 days. args: profile?, sources=[{url,reason}], ttlDays?
+  sources-record Record reviewed URLs as exhausted for up to 30 days. Authentication blocks are prerequisites, never source exhaustion. args: profile?, sources=[{url,reason}], ttlDays?
   sources-status Return a bounded summary of the active exhausted-source ledger. args: profile?, limit?
   facts-status Return approved product facts and unresolved questions. args: profile?
   facts-update Store owner-approved product facts. args: profile?, facts=<JSON object>, approvedBy
-  eligibility-audit Explain every candidate's eligibility, review state, score signals, and blocking reasons without mutating campaign state. args: profile?
+  eligibility-audit Explain every candidate's eligibility and report promoted prospects missing from campaign contacts without mutating state. Compact output is the default; pass compact=false for score signals. args: profile?, compact?
   prospects-save Add one evidence-backed candidate to the discovery pool without requiring an email. args: profile?, prospect={sourceUrl,name,outlet,segment,platform,evidence,contactUrl?,publicEmail?,scoreSignals}
-  prospects-list List scored candidates from the pool. args: profile?, status?, segment?, minimumScore?, limit?
+  prospects-list List scored candidates from the pool; defaults to 25 results and supports a compact view. args: profile?, status?, segment?, minimumScore?, limit?, compact?
   prospects-update Update score, contact details, evidence, or status discovered|qualified|dismissed|promoted. args: profile?, prospect={sourceUrl,...}
+  prospects-promote Add and verify a campaign contact, confirm persistence, then mark its prospect promoted. args: profile?, sourceUrl, contact=<JSON object>
   prospects-summary Show progress toward the profile's prospect target by status and segment. args: profile?
   experiment-summary Show assignment and outcome counts for the three pitch variants. args: profile?
   experiment-outcome Record an owner-reviewed outcome. args: profile?, email, outcome=drafted|approved|sent|response|coverage|no-response|rejected, note?
@@ -133,9 +137,12 @@ function eligibilityReasons(contact, profile) {
   const agentDecidesEligibility = profile.selection?.agentDecidesEligibility === true;
   const reasons = [];
   if (!storedContactEmailIsUsable(contact.email)) reasons.push("invalid-or-disallowed-email");
+  if (!coverageHostAllowed(coverageSourceUrl(contact), profile.selection?.allowedCoverageHosts)) reasons.push("coverage-host-not-allowed");
   if (profile.selection?.requireCoverageSourceProvenance === true && !coverageSourceUrl(contact)) reasons.push("missing-coverage-source");
   if (profile.selection?.requireContactSourceProvenance === true && !contactSourceUrl(contact)) reasons.push("missing-contact-source");
   if (profile.selection?.requireGroundedOpening === true && !clean(contact.groundedOpening)) reasons.push("missing-grounded-opening");
+  if (profile.draftValidation?.requireReferenceGame === true && !clean(contact.referenceGame)) reasons.push("missing-reference-game");
+  if (profile.draftValidation?.requirePersonalNote === true && !clean(contact.personalNote)) reasons.push("missing-personal-note");
   const approvedCrossDomainEmails = (profile.selection?.approvedCrossDomainEmails || []).map(normalizedEmail);
   if (
     profile.selection?.requireSourceProvenance !== false
@@ -589,6 +596,7 @@ async function discoverContacts(arisa, chatId, profile, allContacts, draftRecipi
       results = rawResults.filter((result) => discoveryResultAllowed(result, settings));
       stats.results += results.length;
     } catch (error) {
+      rethrowBlockedPrerequisite(error);
       stats.errors += 1;
       errors += 1;
       stats.lastError = clean(error?.message || error).slice(0, 300);
@@ -617,6 +625,7 @@ async function discoverContacts(arisa, chatId, profile, allContacts, draftRecipi
         pagesOpened += 1;
         seenUrls[result.url] = new Date().toISOString();
       } catch (error) {
+        rethrowBlockedPrerequisite(error);
         stats.errors += 1;
         errors += 1;
         continue;
@@ -633,7 +642,8 @@ async function discoverContacts(arisa, chatId, profile, allContacts, draftRecipi
             pagesOpened += 1;
             seenUrls[contactUrl] = new Date().toISOString();
             pageText += `\n${contactPage.text || ""}`;
-          } catch {
+          } catch (error) {
+            rethrowBlockedPrerequisite(error);
             stats.errors += 1;
             errors += 1;
             seenUrls[contactUrl] = new Date().toISOString();
@@ -656,7 +666,8 @@ async function discoverContacts(arisa, chatId, profile, allContacts, draftRecipi
           }
           prospect = { email, outlet, sourceUrl: result.url, query, verification: verification.check };
           break;
-        } catch {
+        } catch (error) {
+          rethrowBlockedPrerequisite(error);
           rejectedEmails += 1;
           stats.errors += 1;
           errors += 1;
@@ -678,6 +689,7 @@ async function discoverContacts(arisa, chatId, profile, allContacts, draftRecipi
             verify: "true"
           });
         } catch (error) {
+          rethrowBlockedPrerequisite(error);
           stats.errors += 1;
           errors += 1;
           continue;
@@ -756,7 +768,8 @@ async function researchContact(arisa, profile, contact) {
     const output = await runTool(arisa, webTool, args, Number(settings.timeoutMs || 120_000), personalizationQuery(contact, settings));
     const result = parseSearchResults(output.text).find((item) => isUsableResearchResult(item, contact));
     return result || null;
-  } catch {
+  } catch (error) {
+    rethrowBlockedPrerequisite(error);
     return null;
   }
 }
@@ -838,6 +851,24 @@ function isTransientMissingTool(error, name) {
   return String(error?.message || error).includes(`Tool not found: ${name}`);
 }
 
+function rethrowBlockedPrerequisite(error) {
+  if (error?.toolResult?.status === "blocked_prerequisite") throw error;
+}
+
+function classifySourcePrerequisite(sources = []) {
+  const reason = sources.map((source) => clean(source?.reason).toLowerCase())
+    .find((value) => ["blocked-auth", "blocked-prerequisite", "blocked-ver"].includes(value));
+  if (!reason) return null;
+  return {
+    ok: false,
+    status: "blocked_prerequisite",
+    disposition: "blocked-prerequisite",
+    error: "Source review is blocked by an external prerequisite. No exhausted-source record was written.",
+    prerequisite: { type: reason === "blocked-ver" ? "verification" : "authentication" },
+    resolution: { type: "restore_prerequisite" }
+  };
+}
+
 async function runTool(arisa, name, args, timeoutMs = 120_000, text = "") {
   const request = { name, args };
   if (text) request.text = text;
@@ -853,7 +884,11 @@ async function runTool(arisa, name, args, timeoutMs = 120_000, text = "") {
       await wait(attempt * 100);
     }
   }
-  if (!result.ok) throw new Error(result.error || `${name} failed`);
+  if (!result.ok) {
+    const blocked = classifyBlockedPrerequisite(result, name, args?.action);
+    if (blocked) throw toolOutcomeError(blocked);
+    throw new Error(result.error || `${name} failed`);
+  }
   if (result.output?.json !== undefined) return result.output.json;
   const outputText = result.output?.text || "";
   try {
@@ -935,7 +970,9 @@ function auditEligibility(allContacts, candidateContacts, draftRecipients, profi
       provenance: {
         coverage: Boolean(coverageSourceUrl(contact)),
         contact: Boolean(contactSourceUrl(contact)),
-        groundedOpening: Boolean(clean(contact.groundedOpening))
+        groundedOpening: Boolean(clean(contact.groundedOpening)),
+        referenceGame: Boolean(clean(contact.referenceGame)),
+        personalNote: Boolean(clean(contact.personalNote))
       }
     };
   });
@@ -1112,23 +1149,64 @@ async function runSequential(operations) {
   return results;
 }
 
+function ttlBand(value) {
+  const match = String(value || "").match(/(?:(\d+)h)?\s*(\d+)m/i);
+  if (!match) return "unknown";
+  const minutes = (Number(match[1] || 0) * 60) + Number(match[2] || 0);
+  if (minutes <= 0) return "expired";
+  if (minutes <= 15) return "critical";
+  if (minutes <= 60) return "short";
+  if (minutes <= 360) return "medium";
+  if (minutes <= 1_440) return "day";
+  return "durable";
+}
+
+function stableGmailAuthState(auth = {}) {
+  const token = auth.tokenStatus || {};
+  return {
+    probe: auth.gmailProbe?.ok === true,
+    exists: token.exists === true,
+    hasRefreshToken: token.hasRefreshToken === true,
+    durable: token.durable === true,
+    accessTokenTtl: ttlBand(token.accessTokenTtl),
+    refreshTokenTtl: ttlBand(token.refreshTokenTtl)
+  };
+}
+
 async function captureBatchState(arisa, chatId, profile) {
   const stateDir = getChatToolStateDir(chatId, toolName);
-  const [campaign, draftRecipients, discoveryState, factStatus] = await runSequential([
-    () => runTool(arisa, profile.campaignTool || defaults.CAMPAIGN_TOOL, { action: "status" }),
+  const campaignTool = profile.campaignTool || defaults.CAMPAIGN_TOOL;
+  const [campaign, gmailAuth, draftRecipients, discoveryState, factStatus, prospects, allContacts, candidateContacts, sourceExhaustion] = await runSequential([
+    () => runTool(arisa, campaignTool, { action: "status" }),
+    () => runTool(arisa, profile.gmailTool || defaults.GMAIL_TOOL, { action: "auth-status" }),
     () => gmailDraftRecipients(arisa, profile),
     () => readDiscoveryState(chatId).then((result) => result.data),
-    () => profile.factSheet ? getFactSheetStatus(stateDir, profile) : null
+    () => profile.factSheet ? getFactSheetStatus(stateDir, profile) : null,
+    () => listProspects(stateDir, profile.name, { limit: 500 }),
+    () => listAllContacts(arisa, profile),
+    () => listContacts(arisa, profile),
+    () => checkExhaustedSources(stateDir, profile.name, [])
   ]);
+  const eligibility = auditEligibility(allContacts, candidateContacts, draftRecipients, profile);
   return {
     fingerprint: campaignStateFingerprint({
       profile,
       campaign,
       draftRecipients,
       discovery: discoveryState,
-      factStatus
+      factStatus,
+      prospects,
+      contacts: { all: allContacts, candidates: candidateContacts },
+      eligibility,
+      gmailAuth: stableGmailAuthState(gmailAuth),
+      sourceExhaustion: sourceExhaustion.records
     }),
-    draftRecipients
+    draftRecipients,
+    factStatus,
+    prospects,
+    allContacts,
+    candidateContacts,
+    eligibility
   };
 }
 
@@ -1222,12 +1300,42 @@ async function handleRun(request) {
   }
 
   if (args.action === "eligibility-audit") {
-    const [allContacts, candidateContacts, draftRecipients] = await runSequential([
+    const stateDir = getChatToolStateDir(request.chatId, toolName);
+    const [allContacts, candidateContacts, draftRecipients, prospects] = await runSequential([
       () => listAllContacts(arisa, profile),
       () => listContacts(arisa, profile),
-      () => gmailDraftRecipients(arisa, profile)
+      () => gmailDraftRecipients(arisa, profile),
+      () => listProspects(stateDir, profile.name, { limit: 500 })
     ]);
-    return { action: "eligibility-audit", profile: profile.name, ...auditEligibility(allContacts, candidateContacts, draftRecipients, profile) };
+    const audit = auditEligibility(allContacts, candidateContacts, draftRecipients, profile);
+    const compact = args.compact !== false && String(args.compact || "true").toLowerCase() !== "false";
+    return {
+      action: "eligibility-audit",
+      profile: profile.name,
+      ...audit,
+      contacts: compact ? audit.contacts.map(({ scoreSignals, ...contact }) => contact) : audit.contacts,
+      compact,
+      promotedProspectDrift: promotedProspectDrift(prospects, allContacts)
+    };
+  }
+
+  if (args.action === "prospects-promote") {
+    const stateDir = getChatToolStateDir(request.chatId, toolName);
+    const campaignTool = profile.campaignTool || defaults.CAMPAIGN_TOOL;
+    const contact = typeof args.contact === "string" ? JSON.parse(args.contact) : args.contact;
+    if (!contact || typeof contact !== "object") throw new Error("contact must be a JSON object");
+    return {
+      action: args.action,
+      profile: profile.name,
+      ...(await promoteProspectTransaction({
+        stateDir,
+        profileName: profile.name,
+        sourceUrl: args.sourceUrl,
+        contact,
+        addContact: (input) => runTool(arisa, campaignTool, input),
+        listContacts: () => runTool(arisa, campaignTool, { action: "list-contacts", limit: "5000" })
+      }))
+    };
   }
 
   if (["prospects-save", "prospects-list", "prospects-update", "prospects-summary"].includes(args.action)) {
@@ -1237,7 +1345,13 @@ async function handleRun(request) {
     if (args.action === "prospects-save") return { action: args.action, profile: profile.name, ...(await saveProspect(stateDir, profile.name, prospectInput)) };
     if (args.action === "prospects-update") return { action: args.action, profile: profile.name, ...(await updateProspect(stateDir, profile.name, prospectInput)) };
     const prospects = await listProspects(stateDir, profile.name, args.action === "prospects-list" ? args : { limit: 500 });
-    if (args.action === "prospects-list") return { action: args.action, profile: profile.name, prospects };
+    if (args.action === "prospects-list") return {
+      action: args.action,
+      profile: profile.name,
+      prospects: truthy(args.compact) ? prospects.map(compactProspect) : prospects,
+      compact: truthy(args.compact),
+      returned: prospects.length
+    };
     return {
       action: args.action,
       profile: profile.name,
@@ -1288,6 +1402,8 @@ async function handleRun(request) {
   if (args.action === "sources-record") {
     const sources = typeof args.sources === "string" ? JSON.parse(args.sources) : args.sources;
     if (!Array.isArray(sources)) throw new Error("sources must be a JSON array of {url,reason} objects");
+    const blocked = classifySourcePrerequisite(sources);
+    if (blocked) throw toolOutcomeError(blocked);
     return {
       action: "sources-record",
       profile: profile.name,
@@ -1373,7 +1489,7 @@ async function handleRun(request) {
 
   const lock = await acquireRunLock(request.chatId);
   try {
-    const limit = Math.max(1, Math.min(10, Number(args.limit || profile.limit || config.DEFAULT_LIMIT || 1)));
+    const limit = draftLimit(args, profile, config);
     const dryRun = truthy(args.dryRun);
     const excludedEmails = new Set((args._excludedEmails || []).map(normalizedEmail));
     const sentReconciliation = dryRun
@@ -1402,7 +1518,9 @@ async function handleRun(request) {
             dryRun: false,
             skippedUnchanged: true,
             stopCycle: true,
-            instruction: "Stop this campaign cycle because upstream state is unchanged. Do not run manual discovery, web searches, or contact lookups.",
+            callsAvoided: 6,
+            gateCoverage: ["prospects", "qualification", "eligibility", "gmail", "authentication", "source-ttl"],
+            instruction: "Stop this campaign cycle because enrichment and qualification state are unchanged. Do not run manual audits, discovery, web searches, verification, or contact lookups.",
             batchSkip,
             sentReconciliation,
             candidates: Number(summary.candidates || 0),
@@ -1419,11 +1537,12 @@ async function handleRun(request) {
           };
         }
       } catch (error) {
+        rethrowBlockedPrerequisite(error);
         batchSkip = { enabled: true, skip: false, reason: "preflight-unavailable", error: clean(error?.message || error).slice(0, 300) };
       }
     }
-    let allContacts = await listAllContacts(arisa, profile);
-    let candidateContacts = await listContacts(arisa, profile);
+    let allContacts = batchSnapshot?.allContacts || await listAllContacts(arisa, profile);
+    let candidateContacts = batchSnapshot?.candidateContacts || await listContacts(arisa, profile);
     const draftRecipients = batchSnapshot?.draftRecipients || await gmailDraftRecipients(arisa, profile);
     const poolTarget = Math.max(limit, Number(profile.discovery?.minEligiblePool || limit));
     const candidatesPerDraft = Math.max(1, Number(profile.candidatesPerDraft || 6));
@@ -1439,7 +1558,7 @@ async function handleRun(request) {
     }
 
     let creativeDiscovery = null;
-    if (eligiblePool.length === 0 && profile.discovery?.creativeDiscovery?.enabled === true) {
+    if (eligiblePool.length === 0 && profile.discovery?.enabled === true && profile.discovery?.creativeDiscovery?.enabled === true) {
       creativeDiscovery = await discoverContacts(
         arisa, request.chatId, profile, allContacts, draftRecipients,
         poolTarget, { dryRun, mode: "creative" }
@@ -1450,10 +1569,14 @@ async function handleRun(request) {
         eligiblePool = chooseContacts(allContacts, candidateContacts, draftRecipients, profile, poolTarget, excludedEmails);
       }
     }
-    const selected = eligiblePool.slice(0, Math.min(eligiblePool.length, limit * candidatesPerDraft));
-    const factStatus = profile.factSheet
+    const targetEmail = normalizedEmail(args.targetEmail);
+    const targetPool = targetEmail
+      ? chooseContacts(allContacts, candidateContacts.filter((contact) => normalizedEmail(contact.email) === targetEmail), draftRecipients, profile, 1, excludedEmails)
+      : eligiblePool;
+    const selected = targetPool.slice(0, Math.min(targetPool.length, limit * candidatesPerDraft));
+    const factStatus = batchSnapshot?.factStatus ?? (profile.factSheet
       ? await getFactSheetStatus(getChatToolStateDir(request.chatId, toolName), profile)
-      : null;
+      : null);
     const verified = [];
     const drafted = [];
     const skipped = [];
@@ -1485,6 +1608,7 @@ async function handleRun(request) {
           }
         }
       } catch (error) {
+        rethrowBlockedPrerequisite(error);
         skipped.push({ email: contact.email, reason: error?.message || String(error) });
       }
     }
@@ -1525,6 +1649,7 @@ async function handleRun(request) {
           forceReviewAfterMs: skipSettings.forceReviewAfterMs
         };
       } catch (error) {
+        rethrowBlockedPrerequisite(error);
         output.batchSkip = { enabled: true, skip: false, reason: "state-record-failed", error: clean(error?.message || error).slice(0, 300) };
       }
     }
@@ -1598,7 +1723,7 @@ async function main() {
         request,
         output: null,
         elapsedMs: Date.now() - startedAt,
-        status: "failed",
+        status: error?.toolResult?.status || "failed",
         enabled: truthy(telemetryConfig.TELEMETRY_ENABLED),
         telemetryTool: telemetryConfig.TELEMETRY_TOOL
       });
@@ -1610,4 +1735,4 @@ async function main() {
 const isDirectRun = process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url);
 if (isDirectRun) main();
 
-export { DEFAULT_WEB_TOOL, activeQueries, assessSearchQuality, auditEligibility, batchSkipSettings, buildApprovedFactsBody, checkExhaustedSources, discoverContacts, draftingLanguage, eligibilityReasons, getFactSheetStatus, isSelectable, normalizeCanonicalUrls, recordExhaustedSources, runSequential, runTool, selectPitchVariant, updateApprovedFacts, validateDraftContent };
+export { DEFAULT_WEB_TOOL, activeQueries, assessSearchQuality, auditEligibility, batchSkipSettings, buildApprovedFactsBody, checkExhaustedSources, classifySourcePrerequisite, discoverContacts, draftingLanguage, eligibilityReasons, getFactSheetStatus, isSelectable, normalizeCanonicalUrls, recordExhaustedSources, runSequential, runTool, selectPitchVariant, updateApprovedFacts, validateDraftContent };

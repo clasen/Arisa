@@ -48,6 +48,27 @@ test("semantic warmup serves as background work and flushes queued mutations", a
   assert.equal(semantic.snapshot().pending, 0);
 });
 
+test("disabled semantic warmup avoids model initialization and mutation queues", async () => {
+  let initialized = false;
+  const semantic = new SemanticWarmup({
+    enabled: false,
+    initialize: async () => { initialized = true; return {}; },
+    listRecords: async () => [],
+    indexRecord: async () => true,
+    deleteRecord: async () => true,
+    clear: async () => {},
+    dispose: async () => {}
+  }).start();
+
+  await semantic.promise;
+
+  assert.equal(initialized, false);
+  assert.equal(semantic.status, "disabled");
+  assert.deepEqual(await semantic.upsert("later", { id: "later" }), { applied: false, deferred: false });
+  assert.deepEqual(await semantic.delete("later"), { applied: false, deferred: false });
+  assert.equal(semantic.snapshot().pending, 0);
+});
+
 test("failed semantic warmup degrades without rejecting lexical startup", async () => {
   const semantic = new SemanticWarmup({
     initialize: async () => { throw new Error("model unavailable"); },

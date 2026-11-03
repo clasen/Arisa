@@ -67,6 +67,22 @@ function truthy(value) {
   return value === true || String(value).toLowerCase() === "true";
 }
 
+function isTerminalAuthError(error) {
+  return /invalid_grant|token (?:has been )?(?:expired|revoked)|authentication (?:is )?required|unauthorized_client/i
+    .test(error?.message || String(error));
+}
+
+function authBlockedResult() {
+  return toolError("Gmail authentication expired or was revoked.", {
+    status: "blocked_auth",
+    resolution: {
+      type: "reauthentication_required",
+      retryAfterSeconds: 3600,
+      probeArgs: { action: "auth-status" }
+    }
+  });
+}
+
 function b64url(input) {
   return Buffer.from(input, "utf8").toString("base64").replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/g, "");
 }
@@ -359,6 +375,7 @@ async function handle(request, config) {
       const probe = await gwsJson(["gmail", "users", "messages", "list", "--params", JSON.stringify({ userId: uid, maxResults: 1 })], config);
       gmailProbe = { ok: true, resultSizeEstimate: probe.resultSizeEstimate ?? null };
     } catch (error) {
+      if (isTerminalAuthError(error)) throw error;
       gmailProbe = { ok: false, error: error.message || String(error) };
     }
     const lines = [
@@ -786,7 +803,9 @@ async function run(requestFile) {
     if (result.asyncTasks) extra.asyncTasks = result.asyncTasks;
     console.log(JSON.stringify(toolOk({ text: result.text, json: result.json }, extra)));
   } catch (error) {
-    console.log(JSON.stringify(toolError(error.message || String(error))));
+    console.log(JSON.stringify(isTerminalAuthError(error)
+      ? authBlockedResult()
+      : toolError(error.message || String(error))));
   }
 }
 

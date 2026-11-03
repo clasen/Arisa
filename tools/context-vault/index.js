@@ -121,6 +121,7 @@ async function createContext(chatId, config) {
   await mkdir(modelDir, { recursive: true });
   const context = { chatId: String(chatId), config, db, modelDir, stateDir, semantic: null };
   context.semantic = new SemanticWarmup({
+    enabled: truthy(config.SEMANTIC_ENABLED),
     initialize: () => createSemanticResources(context),
     listRecords: () => allMemories(db),
     indexRecord: (resources, id, memory) => indexMemory(resources.store, id, memory),

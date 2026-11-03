@@ -9,9 +9,15 @@
     "health": "internal"
   },
   "input": [
+    "application/xml",
     "text/html",
     "text/plain",
-    "application/json"
+    "application/json",
+    "application/octet-stream",
+    "image/jpeg",
+    "image/png",
+    "image/webp",
+    "image/gif"
   ],
   "output": [
     "application/json"
@@ -47,7 +53,10 @@
     "hosting",
     "https",
     "publish",
+    "asset",
+    "image",
     "roster",
     "site"
-  ]
+  ],
+  "version": "1.1.0"
 }

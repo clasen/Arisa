@@ -8,6 +8,12 @@ function canonicalize(value) {
   return Object.fromEntries(Object.keys(value).sort().map((key) => [key, canonicalize(value[key])]));
 }
 
+function stableRecords(values) {
+  return [...(values || [])]
+    .map(canonicalize)
+    .sort((left, right) => JSON.stringify(left).localeCompare(JSON.stringify(right)));
+}
+
 function safeProfileName(value) {
   return String(value || "default").replace(/[^a-zA-Z0-9._-]/g, "-");
 }
@@ -33,13 +39,32 @@ async function writeGateState(stateDir, profileName, state) {
   await rename(temporary, file);
 }
 
-export function campaignStateFingerprint({ profile, campaign, draftRecipients, discovery, factStatus }) {
+export function campaignStateFingerprint({
+  profile,
+  campaign,
+  draftRecipients,
+  discovery,
+  factStatus,
+  prospects,
+  contacts,
+  eligibility,
+  gmailAuth,
+  sourceExhaustion
+}) {
   const material = canonicalize({
     profile,
     campaign,
     draftRecipients: [...(draftRecipients || [])].map(String).sort(),
     discovery: discovery || null,
-    facts: factStatus || null
+    facts: factStatus || null,
+    prospects: stableRecords(prospects),
+    contacts: {
+      all: stableRecords(contacts?.all),
+      candidates: stableRecords(contacts?.candidates)
+    },
+    eligibility: eligibility ? { ...eligibility, contacts: stableRecords(eligibility.contacts) } : null,
+    gmailAuth: gmailAuth || null,
+    sourceExhaustion: stableRecords(sourceExhaustion)
   });
   return crypto.createHash("sha256").update(JSON.stringify(material)).digest("hex");
 }

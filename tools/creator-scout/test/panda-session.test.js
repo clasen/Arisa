@@ -15,6 +15,30 @@ test("authenticated status is checked in one bounded session batch", async () =>
   assert.deepEqual(calls[0].steps.map((step) => step.tool), ["goto", "tree"]);
 });
 
+test("auth verification waits past a signed-out loading shell", async () => {
+  let calls = 0;
+  const session = { async batch() {
+    calls += 1;
+    if (calls === 1) return [{}, { text: "link 'Sign in' Loading your saved list..." }];
+    if (calls === 2) return [{ text: "link 'Sign in' Loading..." }];
+    return [{ text: "button 'Sign out'" }];
+  } };
+  assert.equal(await pandaSignedIn(session, { pause: async () => {} }), true);
+  assert.equal(calls, 3);
+});
+
+test("unresolved page hydration is not reported as missing authentication", async () => {
+  let calls = 0;
+  const session = { async batch() { calls += 1; return [{ text: "Loading..." }, { text: "Loading..." }]; } };
+  await assert.rejects(pandaSignedIn(session, { pause: async () => {} }), /inconclusive/);
+  assert.equal(calls, 11);
+});
+
+test("a fully rendered login requirement remains an auth block", async () => {
+  const session = { async batch() { return [{}, { text: "heading 'Sign in to view saved creators'" }]; } };
+  assert.equal(await pandaSignedIn(session), false);
+});
+
 test("search submission, polling, and result extraction share one daemon job", async () => {
   const calls = [];
   const session = {

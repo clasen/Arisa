@@ -32,6 +32,24 @@ export function classifyToolTimeout(error, tool, action) {
   };
 }
 
+export function classifyBlockedPrerequisite(result, tool, action) {
+  if (!result || !["blocked_auth", "blocked_prerequisite"].includes(result.status)) return null;
+  const normalizedAction = String(action || "unknown").toLowerCase();
+  return {
+    ok: false,
+    status: "blocked_prerequisite",
+    disposition: "blocked-prerequisite",
+    error: `${tool} ${normalizedAction} is blocked by an authentication prerequisite. No campaign changes were made after this result.`,
+    operation: { tool, action: normalizedAction, mutating: false },
+    prerequisite: { type: "authentication", tool },
+    resolution: {
+      type: "restore_prerequisite",
+      tool,
+      action: normalizedAction
+    }
+  };
+}
+
 export function toolOutcomeError(outcome) {
   const error = new Error(outcome.error);
   error.toolResult = outcome;

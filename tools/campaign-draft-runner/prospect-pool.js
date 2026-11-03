@@ -156,13 +156,28 @@ async function listProspects(stateDir, profileName, filters = {}) {
   const status = clean(filters.status).toLowerCase();
   const segment = clean(filters.segment).toLowerCase();
   const minimumScore = Math.max(0, Number(filters.minimumScore || 0));
-  const limit = Math.max(1, Math.min(500, Number(filters.limit || 100)));
+  const limit = Math.max(1, Math.min(500, Number(filters.limit || 25)));
   return pool.prospects
     .filter((item) => !status || item.status === status)
     .filter((item) => !segment || item.segment.toLowerCase() === segment)
     .filter((item) => item.score >= minimumScore)
     .sort((left, right) => right.score - left.score || right.updatedAt.localeCompare(left.updatedAt))
     .slice(0, limit);
+}
+
+function compactProspect(prospect) {
+  return {
+    sourceUrl: prospect.sourceUrl,
+    name: prospect.name,
+    outlet: prospect.outlet,
+    segment: prospect.segment,
+    platform: prospect.platform,
+    status: prospect.status,
+    score: prospect.score,
+    hasContactUrl: Boolean(prospect.contactUrl),
+    hasPublicEmail: Boolean(prospect.publicEmail),
+    updatedAt: prospect.updatedAt
+  };
 }
 
 function summarizeProspects(prospects, target = 40, qualificationScore = 65) {
@@ -183,4 +198,4 @@ function summarizeProspects(prospects, target = 40, qualificationScore = 65) {
   };
 }
 
-export { SCORE_LIMITS, canonicalEvidenceUrl, listProspects, prospectScore, saveProspect, summarizeProspects, updateProspect };
+export { SCORE_LIMITS, canonicalEvidenceUrl, compactProspect, listProspects, prospectScore, saveProspect, summarizeProspects, updateProspect };

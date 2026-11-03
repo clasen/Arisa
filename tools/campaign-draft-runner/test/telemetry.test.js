@@ -15,6 +15,8 @@ test("builds generic latency and confirmed draft telemetry", () => {
     ["campaign.batch.drafts_created", 2],
     ["gmail.drafts.created", 2],
     ["campaign.batch.skipped_unchanged", 0],
+    ["campaign.batch.calls_avoided", 0],
+    ["campaign.batch.forced_reviews", 0],
     ["campaign.exploration.cycles", 1],
     ["campaign.exploration.review_yield", 2],
     ["campaign.exploration.candidates_found", 0],
@@ -26,11 +28,12 @@ test("builds generic latency and confirmed draft telemetry", () => {
 test("counts unchanged batches separately from full zero-draft runs", () => {
   const records = buildCampaignTelemetryRecords({
     request: { args: { action: "run-batch", profile: "castle-bravo" } },
-    output: { action: "run-batch", profile: "castle-bravo", dryRun: false, drafted: 0, skippedUnchanged: true },
+    output: { action: "run-batch", profile: "castle-bravo", dryRun: false, drafted: 0, skippedUnchanged: true, callsAvoided: 6 },
     elapsedMs: 80,
     status: "ok"
   });
   assert.equal(records.find((record) => record.metric === "campaign.batch.skipped_unchanged").value, 1);
+  assert.equal(records.find((record) => record.metric === "campaign.batch.calls_avoided").value, 6);
   const exploration = records.filter((record) => record.metric.startsWith("campaign.exploration."));
   assert.deepEqual(exploration.map((record) => record.metric), ["campaign.exploration.cycles"]);
   assert.deepEqual(exploration[0].dimensions, {

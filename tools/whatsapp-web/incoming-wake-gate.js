@@ -25,6 +25,9 @@ function invokesName(text, names) {
 export function classifyIncomingWake(items, { bypassNames = [] } = {}) {
   for (const item of items || []) {
     const message = item.message || {};
+    if (message.quotedMessage?.status === "available" && message.quotedMessage.fromMe) {
+      return { wake: true, reason: "reply-to-self" };
+    }
     const text = String(item.transcript || message.body || "").trim();
     if (invokesName(text, bypassNames)) return { wake: true, reason: "explicit-invocation" };
     if (text.includes("?") || text.includes("¿")) return { wake: true, reason: "question" };

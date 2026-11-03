@@ -2,6 +2,12 @@
 
 Runs recurring, profile-driven outreach research and creates Gmail drafts. It never sends email.
 
+## Draft-first orchestration
+
+Use `action=draft-one` to create at most one draft, after Sent reconciliation, eligibility, DNS and live Gmail deduplication. Optional `targetEmail` selects exactly that recipient without bypassing any checks. A profile's `maxDraftsPerRun` is a hard ceiling, including when invocation args request more. `selection.allowedCoverageHosts` restricts coverage evidence to exact HTTPS hostnames; it does not replace manual creator identity or content verification.
+
+For a candidate-first workflow, set `discovery.enabled=false` and orchestrate discovery and verification outside the drafting action. This also disables creative fallback discovery. Prioritize existing eligible contacts, then repairable prospects with explicit public contact evidence. Promote and draft in the same execution instead of scheduling independent stage queues. Preserve the one-draft ceiling, evidence requirements and no-send policy. Measure confirmed unique draft IDs and conversion within the same candidate cohort, not raw pool growth.
+
 The tool can:
 
 - reconcile manually sent Gmail messages with `pr-campaign` before each live cycle;
@@ -121,15 +127,15 @@ Minimal profile structure:
 
 Use `action: "status"` to reconcile Gmail Sent, then inspect campaign and Gmail draft counts. The first reconciliation scans the configured sent-mail query. Later runs use the newest Gmail timestamp and persist message IDs in chat-scoped state. This records drafts sent manually as contacted without reopening them or changing terminal statuses such as bounced, opted-out, wrong-fit, and successful publication.
 
-When `TELEMETRY_ENABLED` is true and `telemetry-ledger` is installed, each run records business-operation latency, confirmed non-dry-run draft counts, and whether an unchanged batch was skipped. Full reviews also record drafts per review and candidates found under one of four bounded strategies: `existing-pool`, `standard-discovery`, `creative-discovery`, or `unchanged-skip`. The last strategy is excluded from full-review yield so cheap skips cannot improve it artificially. Outcomes are bounded to `drafted`, `candidate-only`, or `zero-result`. Compare at least two complete windows before reallocating the fixed exploration budget; do not reduce run frequency from sparse samples. Telemetry is optional and fail-open: recording failures never change the campaign result. It never records addresses, queries, copy, or source content.
+When `TELEMETRY_ENABLED` is true and `telemetry-ledger` is installed, each run records business-operation latency, confirmed non-dry-run draft counts, unchanged skips, estimated expensive calls avoided, and forced reviews. Full reviews also record drafts per review and candidates found under one of four bounded strategies: `existing-pool`, `standard-discovery`, `creative-discovery`, or `unchanged-skip`. The last strategy is excluded from full-review yield so cheap skips cannot improve it artificially. Outcomes are bounded to `drafted`, `candidate-only`, or `zero-result`. Compare at least two complete windows before reallocating the fixed exploration budget; do not reduce run frequency from sparse samples. Telemetry is optional and fail-open: recording failures never change the campaign result. It never records addresses, queries, copy, or source content.
 
 ## Unchanged batch skipping
 
-After a clean full run finds no eligible contacts, creates no drafts, and reports no discovery errors, the runner stores a SHA-256 fingerprint of the profile, campaign counters, Gmail draft recipients, discovery state, and approved fact state. A later live `run-batch` still performs incremental Sent reconciliation, then skips contact loading, web discovery, verification, research, and draft work when that fingerprint is unchanged.
+After a clean full run finds no eligible contacts, creates no drafts, and reports no discovery errors, the runner stores a SHA-256 fingerprint covering the profile, campaign state, Gmail drafts and stable authentication/TTL bands, discovery state, source-expiration state, approved facts, prospect enrichment, contact qualification, and eligibility decisions. A later live `run-batch` still performs incremental Sent reconciliation and a bounded state capture, then skips repeated audits, web discovery, verification, research, and draft work when that fingerprint is unchanged. Captured contact and fact data are reused when a full run is required instead of loading them twice.
 
 Skipped output sets `stopCycle=true` and includes an explicit instruction not to continue with manual discovery, so agent-orchestrated schedules stop as well as direct tool callers.
 
-State changes invalidate the fingerprint immediately. The default forced-review interval is six hours, bounded between 15 minutes and seven days, so external pages and same-count contact edits are eventually reconsidered. Set `UNCHANGED_BATCH_FORCE_MS` per chat, disable the feature with `UNCHANGED_BATCH_SKIP_ENABLED=false`, or use `forceReview=true` for one invocation. A profile may override the interval with `batchSkip.forceReviewAfterMinutes` or disable it with `batchSkip.enabled=false`.
+State changes invalidate the fingerprint immediately. The default forced-review interval is 24 hours, bounded between 15 minutes and seven days, so external pages and unrepresented changes are reconsidered daily. Set `UNCHANGED_BATCH_FORCE_MS` per chat, disable the feature with `UNCHANGED_BATCH_SKIP_ENABLED=false`, or use `forceReview=true` for one invocation. A profile may override the interval with `batchSkip.forceReviewAfterMinutes` or disable it with `batchSkip.enabled=false`.
 
 Profiles with creative discovery may set `batchSkip.explorationReviewAfterSkips` to trigger a full review after a bounded streak of unchanged skips, before the time-based review is due. The full review resets the streak. This increases creative exploration without repeating it on every scheduler tick. `CREATIVE_REVIEW_AFTER_SKIPS` provides an optional chat-level default; zero leaves the threshold disabled.
 
@@ -159,7 +165,7 @@ For reviewer-first workflows, store separate `coverageSourceUrl` and `contactSou
 
 Profiles can enforce these fields with `selection.requireCoverageSourceProvenance`, `selection.requireContactSourceProvenance`, and `selection.requireGroundedOpening`. A `draftValidation` block can independently require both sources, coverage-title metadata, and the grounded opening before Gmail draft creation. The title may be paraphrased in the draft; the grounded opening must still be rendered. `draftValidation.canonicalUrls` normalizes campaign links before the preflight. Failed preflights are reported as skipped contacts and do not create a draft.
 
-Nested read-only calls that time out return `timed_out` with a retry-safe resolution. Mutating calls return `outcome_uncertain` and require a status check instead of an automatic retry.
+Nested read-only calls that time out return `timed_out` with a retry-safe resolution. Mutating calls return `outcome_uncertain` and require a status check instead of an automatic retry. A nested `blocked_auth` result propagates as `blocked_prerequisite` with disposition `blocked-prerequisite`; the batch stops instead of treating the dependency failure as an empty review. Authentication failures must not be written to the exhausted-source ledger.
 
 ## Batched discovery operations
 

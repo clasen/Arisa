@@ -87,14 +87,15 @@ Safety boundaries:
 - native MCP runs with telemetry disabled and a minimal environment;
 - anonymous sessions and authenticated web storage exist only in daemon memory; authenticated cookie refresh is returned atomically to the bridge on close;
 - authenticated scratch is mode 0700/0600 and removed on close; a newer bridge import is never overwritten by an older Lightpanda session;
-- daemon infrastructure uses Arisa's chat-scoped shared daemon runtime and internal health contract.
+- daemon infrastructure uses Arisa's chat-scoped shared daemon runtime and internal health contract;
+- the daemon starts on demand (`autoStart: false`) and stops after `IDLE_TIMEOUT_MS`; the supervisor does not restart it merely because it became idle. Public search and one-shot browsing do not require a permanently warm daemon.
 
 ## Install the browser
 
 The installer downloads the matching Linux nightly release into Arisa's global tool state directory, verifies the SHA-256 digest published by GitHub, installs atomically, and records a non-secret receipt.
 
 ```bash
-ARISA_PACKAGE_DIR=/path/to/arisa/package pnpm run install-browser
+ARISA_PACKAGE_DIR=/path/to/arisa/package npm run install-browser
 ```
 
 ## CLI
@@ -104,7 +105,7 @@ node index.js --help
 node index.js run --request-file request.json
 ```
 
-Run tests with `pnpm test`. Run the bounded compatibility and resource probe with `ARISA_PACKAGE_DIR=/path/to/arisa/package pnpm run limit-suite`. See `COMPATIBILITY-MIGRATION.md` for the evidence-based Chromium replacement matrix.
+Run tests with `npm test`. Run the bounded compatibility and resource probe with `ARISA_PACKAGE_DIR=/path/to/arisa/package npm run limit-suite`. See `COMPATIBILITY-MIGRATION.md` for the evidence-based Chromium replacement matrix.
 
 ## Engine switching
 
@@ -118,9 +119,9 @@ Run tests with `pnpm test`. Run the bounded compatibility and resource probe wit
 Run the fixed three-page, one-repetition benchmark with:
 
 ```bash
-ARISA_PACKAGE_DIR=/path/to/arisa/package pnpm run benchmark
+ARISA_PACKAGE_DIR=/path/to/arisa/package npm run benchmark
 # Exceptional opt-in only; never part of routine checks:
-INCLUDE_CHROMIUM=true ARISA_PACKAGE_DIR=/path/to/arisa/package pnpm run benchmark
+INCLUDE_CHROMIUM=true ARISA_PACKAGE_DIR=/path/to/arisa/package npm run benchmark
 ```
 
 The original 2026-08-28 directional run measured a median 21.3 MiB RSS and 1492.9 ms for Lightpanda, but its success rule only checked for non-empty output. Version 0.4 corrects that flaw: every fixture now requires specific semantic content, and the JavaScript fixture waits for network idle. Historical results remain host-specific observations and must not be treated as current semantic pass rates until the benchmark is rerun. See `BENCHMARK.md` and `benchmark-latest.json`.

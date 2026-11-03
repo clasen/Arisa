@@ -1,1 +1,8 @@
-{"type":"module","scripts":{"test":"node --test test/*.test.js"},"dependencies":{}}
+{
+  "type": "module",
+  "scripts": {
+    "test": "node --test test/*.test.js"
+  },
+  "dependencies": {},
+  "version": "0.9.0"
+}

@@ -115,12 +115,23 @@ export async function clickNamedControl(session, name, permission = {}) {
   return session.call("click", { backendNodeId: control.backendNodeId }, permission);
 }
 
-export async function pandaSignedIn(session) {
+export async function pandaSignedIn(session, { pause = (ms) => new Promise((resolve) => setTimeout(resolve, ms)) } = {}) {
   const outputs = await session.batch([
     { tool: "goto", arguments: { url: "https://www.creatorscout.dev/saved" }, includeOutput: false },
     { tool: "tree", arguments: {}, maxOutputBytes: 64 * 1024 }
   ]);
-  return /button 'Sign out'/.test(String(outputs[1]?.text || ""));
+  let tree = String(outputs[1]?.text || "");
+  // The server-rendered shell shows Sign in even for a valid session. Wait
+  // for client-side auth hydration; a loading page is not an auth rejection.
+  for (let attempt = 0; attempt <= 10; attempt += 1) {
+    if (/button 'Sign out'/.test(tree)) return true;
+    if (!/loading/i.test(tree) && /sign in to|log in to|heading 'Sign in'/i.test(tree)) return false;
+    if (attempt === 10) break;
+    await pause(500);
+    const refreshed = await session.batch([{ tool: "tree", arguments: {}, maxOutputBytes: 64 * 1024 }]);
+    tree = String(refreshed[0]?.text || "");
+  }
+  throw new Error("CreatorScout session verification remained inconclusive after waiting for page hydration");
 }
 
 export async function gotoAndInteractive(session, url, attempts = 3) {

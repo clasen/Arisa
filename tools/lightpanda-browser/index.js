@@ -36,7 +36,7 @@ function chatDaemonRuntime(createDaemonRuntime, chatId) {
     entryPath: fileURLToPath(import.meta.url),
     scope: { type: "chat", chatId: normalizedChatId },
     startupContext: { chatId: normalizedChatId },
-    autoStart: true
+    autoStart: false
   });
 }
 

@@ -16,16 +16,38 @@ test("campaign fingerprints are stable across key and recipient order", () => {
     campaign: { contacts: 10, sent: 4 },
     draftRecipients: new Set(["b@example.com", "a@example.com"]),
     discovery: { cursor: 2 },
-    factStatus: { approvedFacts: { availability: "public" } }
+    factStatus: { approvedFacts: { availability: "public" } },
+    prospects: [{ sourceUrl: "b", status: "blocked" }, { sourceUrl: "a", status: "qualified" }],
+    contacts: { all: [{ email: "b@example.com" }, { email: "a@example.com" }], candidates: [] },
+    eligibility: { eligible: 0, contacts: [{ email: "b@example.com", decision: "ineligible" }] },
+    gmailAuth: { probe: true, refreshTokenTtl: "day" },
+    sourceExhaustion: [{ url: "b", expiresAt: "2026-09-01" }, { url: "a", expiresAt: "2026-09-02" }]
   });
   const second = campaignStateFingerprint({
     factStatus: { approvedFacts: { availability: "public" } },
     discovery: { cursor: 2 },
     draftRecipients: new Set(["a@example.com", "b@example.com"]),
     campaign: { sent: 4, contacts: 10 },
-    profile: { selection: { a: 1, b: 2 }, name: "example" }
+    profile: { selection: { a: 1, b: 2 }, name: "example" },
+    prospects: [{ status: "qualified", sourceUrl: "a" }, { status: "blocked", sourceUrl: "b" }],
+    contacts: { all: [{ email: "a@example.com" }, { email: "b@example.com" }], candidates: [] },
+    eligibility: { contacts: [{ decision: "ineligible", email: "b@example.com" }], eligible: 0 },
+    gmailAuth: { refreshTokenTtl: "day", probe: true },
+    sourceExhaustion: [{ expiresAt: "2026-09-02", url: "a" }, { expiresAt: "2026-09-01", url: "b" }]
   });
   assert.equal(first, second);
+  assert.notEqual(first, campaignStateFingerprint({
+    profile: { name: "example", selection: { a: 1, b: 2 } },
+    campaign: { contacts: 10, sent: 4 },
+    draftRecipients: new Set(["a@example.com", "b@example.com"]),
+    discovery: { cursor: 2 },
+    factStatus: { approvedFacts: { availability: "public" } },
+    prospects: [{ sourceUrl: "a", status: "qualified" }],
+    contacts: { all: [{ email: "a@example.com" }], candidates: [] },
+    eligibility: { eligible: 1, contacts: [] },
+    gmailAuth: { probe: true, refreshTokenTtl: "day" },
+    sourceExhaustion: []
+  }));
 });
 
 test("unchanged batches skip until the forced review deadline", async () => {

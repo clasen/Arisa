@@ -1,12 +1,13 @@
 export class SemanticWarmup {
-  constructor({ initialize, listRecords, indexRecord, deleteRecord, clear, dispose }) {
+  constructor({ initialize, listRecords, indexRecord, deleteRecord, clear, dispose, enabled = true }) {
     this.initialize = initialize;
     this.listRecords = listRecords;
     this.indexRecord = indexRecord;
     this.deleteRecord = deleteRecord;
     this.clear = clear;
     this.dispose = dispose;
-    this.status = "warming";
+    this.enabled = enabled;
+    this.status = enabled ? "warming" : "disabled";
     this.error = null;
     this.resources = null;
     this.pending = new Map();
@@ -18,6 +19,10 @@ export class SemanticWarmup {
   }
 
   start() {
+    if (!this.enabled) {
+      this.promise ||= Promise.resolve();
+      return this;
+    }
     if (!this.promise) this.promise = this.warm();
     return this;
   }
@@ -70,6 +75,7 @@ export class SemanticWarmup {
   }
 
   async upsert(id, record) {
+    if (!this.enabled) return { applied: false, deferred: false };
     if (this.status === "ready") {
       return { applied: await this.indexRecord(this.resources, id, record), deferred: false };
     }
@@ -78,6 +84,7 @@ export class SemanticWarmup {
   }
 
   async delete(id) {
+    if (!this.enabled) return { applied: false, deferred: false };
     if (this.status === "ready") {
       return { applied: await this.deleteRecord(this.resources, id), deferred: false };
     }
@@ -86,6 +93,7 @@ export class SemanticWarmup {
   }
 
   async reindex() {
+    if (!this.enabled) return { deferred: false, indexed: 0 };
     if (this.status !== "ready") {
       this.rebuildRequested = true;
       return { deferred: true, indexed: 0 };

@@ -3,6 +3,7 @@ export default {
   SEMANTIC_CANDIDATES: 5,
   MIN_SIMILARITY: 0.55,
   SEMANTIC_SEARCH_TIMEOUT_MS: 10000,
+  SEMANTIC_ENABLED: true,
   MODEL: "Xenova/multilingual-e5-large",
   DTYPE: "q8",
   IDLE_TIMEOUT_MS: 1800000,

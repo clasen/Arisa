@@ -5,7 +5,7 @@ import os from "node:os";
 import path from "node:path";
 import defaults from "./config.js";
 import { createDevice, createPairing, createReviewerAccess, listDevices, probeBridge, revokeDevice, revokeReviewerAccess, startBridgeServer } from "./bridge-server.js";
-import { createChromeWebStoreAssets, fillChromeWebStoreDistribution, fillChromeWebStoreListing, fillChromeWebStorePrivacy, fillChromeWebStorePublisherContact, fillChromeWebStoreTestInstructions, inspectChromeWebStoreDraft, replaceChromeWebStorePackage, uploadChromeWebStoreDraft, withdrawChromeWebStoreReview } from "./chrome-web-store.js";
+import { createChromeWebStoreAssets, fillChromeWebStoreDistribution, fillChromeWebStoreListing, fillChromeWebStorePrivacy, fillChromeWebStorePublisherContact, fillChromeWebStoreTestInstructions, inspectChromeWebStoreDraft, probeChromeWebStoreSession, submitChromeWebStoreReview, saveChromeWebStoreAlarms, prepareChromeWebStoreReview, replaceChromeWebStorePackage, uploadChromeWebStoreDraft, withdrawChromeWebStoreReview } from "./chrome-web-store.js";
 import { openWithLightpanda } from "./lightpanda-session.js";
 import { openWithSession } from "./session-browser.js";
 import { redactStoredCookieValues } from "./session-redaction.js";
@@ -53,7 +53,7 @@ Actions via args.action:
   reviewer-revoke Revoke the Chrome Web Store reviewer setup URL.
   pair           Create a legacy encrypted one-time pairing code.
   list           List stored browser sessions without exposing cookie values.
-  open                     Open one same-site URL with a stored profile session. args: resourceId, deviceId?, url, maxChars?, engine=lightpanda|chromium (default lightpanda).
+  open                     Open one same-site URL with a stored profile session. args: resourceId, deviceId?, url, maxChars?, engine=lightpanda|chromium (default lightpanda). Optional transcript=true with Chromium extracts the YouTube transcript.
   chrome-web-store-inspect      Inspect non-secret controls in one existing draft. args: draftUrl, deviceId?.
   chrome-web-store-fill-listing Complete and save the listing fields without submitting. args: draftUrl, description, category, language, homepageUrl, supportUrl.
   chrome-web-store-fill-privacy Complete and save accurate privacy disclosures without submitting. args: privacyUrl, privacyPolicyUrl.
@@ -62,6 +62,10 @@ Actions via args.action:
   chrome-web-store-upload       Upload an extension ZIP as a new draft without submitting it. ZIP artifact required; args: dashboardUrl, deviceId?.
   chrome-web-store-replace-package Replace a draft item's ZIP package. ZIP artifact required; args: packageUrl, deviceId?.
   chrome-web-store-test-instructions Save durable reviewer instructions without submitting. args: testInstructionsUrl, instructions.
+  chrome-web-store-session-probe Compare store-only and merged cookies in isolated browsers without persisting sessions. args: targetUrl, deviceId?.
+  chrome-web-store-submit-review Submit for review with automatic publication disabled. args: itemUrl, deviceId?, confirm=submit-review-only. Requires explicit user authorization.
+  chrome-web-store-alarms Save only the alarms permission justification. args: privacyUrl, justification, deviceId?.
+  chrome-web-store-prepare-review Inspect review prerequisites and confirmation without confirming submission. args: itemUrl, deviceId?.
   chrome-web-store-withdraw     Withdraw one pending review back to Draft. args: itemUrl.
   delete                   Delete one session. args: resourceId, deviceId?.
 
@@ -174,6 +178,7 @@ async function handleRequest(request) {
       resourceId: selected.resourceId,
       deviceId: selected.deviceId,
       url: request.args?.url,
+      transcript: request.args?.transcript === true || request.args?.transcript === 'true',
       maxChars: positiveInteger(request.args?.maxChars, 30000, 1000, 100000)
     };
     const opened = engine === "lightpanda"
@@ -239,7 +244,8 @@ async function handleRequest(request) {
     const inspected = await inspectChromeWebStoreDraft({
       stateDir: getChatToolStateDir(chatId, toolName),
       deviceId: request.args?.deviceId,
-      draftUrl: request.args?.draftUrl
+      draftUrl: request.args?.draftUrl,
+      openMenu: request.args?.openMenu === "true"
     });
     return toolOk({ text: "Chrome Web Store draft controls inspected", json: inspected, mimeType: "application/json" });
   }
@@ -261,6 +267,22 @@ async function handleRequest(request) {
       zipPath: request.artifact.path
     });
     return toolOk({ text: "Chrome Web Store draft package replaced. The extension was not submitted for review.", json: replaced, mimeType: "application/json" });
+  }
+  if (action === "chrome-web-store-session-probe") {
+    const result = await probeChromeWebStoreSession({ stateDir: getChatToolStateDir(chatId, toolName), deviceId: request.args?.deviceId, targetUrl: request.args?.targetUrl });
+    return toolOk({ text: "Read-only Chrome Web Store session comparison completed; no session state persisted", json: result, mimeType: "application/json" });
+  }
+  if (action === "chrome-web-store-submit-review") {
+    const result = await submitChromeWebStoreReview({ stateDir: getChatToolStateDir(chatId, toolName), deviceId: request.args?.deviceId, itemUrl: request.args?.itemUrl, confirm: request.args?.confirm });
+    return toolOk({ text: result.submittedForReview ? "Chrome Web Store review submission confirmed; automatic publication disabled" : "Chrome Web Store submission outcome uncertain; inspect status before retrying", json: result, mimeType: "application/json" });
+  }
+  if (action === "chrome-web-store-alarms") {
+    const result = await saveChromeWebStoreAlarms({ stateDir: getChatToolStateDir(chatId, toolName), deviceId: request.args?.deviceId, privacyUrl: request.args?.privacyUrl, justification: request.args?.justification });
+    return toolOk({ text: result.saved ? "Chrome Web Store alarms justification saved" : "Chrome Web Store alarms justification was not saved; target access must be restored", json: result, mimeType: "application/json" });
+  }
+  if (action === "chrome-web-store-prepare-review") {
+    const result = await prepareChromeWebStoreReview({ stateDir: getChatToolStateDir(chatId, toolName), deviceId: request.args?.deviceId, itemUrl: request.args?.itemUrl });
+    return toolOk({ text: "Chrome Web Store review prerequisites inspected", json: result, mimeType: "application/json" });
   }
   if (action === "chrome-web-store-withdraw") {
     const withdrawn = await withdrawChromeWebStoreReview({

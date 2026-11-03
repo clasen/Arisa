@@ -3,8 +3,8 @@ import assert from "node:assert/strict";
 import { mkdtemp, rm } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
-import { activeQueries, assessSearchQuality, auditEligibility, batchSkipSettings, buildApprovedFactsBody, checkExhaustedSources, discoverContacts, draftingLanguage, getFactSheetStatus, isSelectable, normalizeCanonicalUrls, recordExhaustedSources, runTool, updateApprovedFacts, validateDraftContent } from "../index.js";
-import { classifyToolTimeout } from "../operation-timeout.js";
+import { activeQueries, assessSearchQuality, auditEligibility, batchSkipSettings, buildApprovedFactsBody, checkExhaustedSources, classifySourcePrerequisite, discoverContacts, draftingLanguage, getFactSheetStatus, isSelectable, normalizeCanonicalUrls, recordExhaustedSources, runTool, updateApprovedFacts, validateDraftContent } from "../index.js";
+import { classifyBlockedPrerequisite, classifyToolTimeout } from "../operation-timeout.js";
 
 const contact = {
   email: "actu@example.fr",
@@ -72,6 +72,18 @@ test("exhausted sources are canonicalized, skipped for 30 days, and then revalid
   }
 });
 
+test("temporary prerequisite reasons never enter the exhausted-source ledger", () => {
+  const blocked = classifySourcePrerequisite([
+    { url: "https://example.com/contact", reason: "blocked-ver" }
+  ]);
+  assert.equal(blocked.status, "blocked_prerequisite");
+  assert.equal(blocked.disposition, "blocked-prerequisite");
+  assert.match(blocked.error, /No exhausted-source record was written/);
+  assert.equal(classifySourcePrerequisite([
+    { url: "https://example.com/contact", reason: "blocked-verification" }
+  ]), null);
+});
+
 test("search quality switches from noisy discovery to source-directed fallback", () => {
   const poor = assessSearchQuality([{ query: "ambiguous", text: `Search: ambiguous\n\n1. The - Wikipedia\nURL: https://en.wikipedia.org/wiki/The\nSnippet: A dictionary-style result\n2. Microsoft\nURL: https://microsoft.com/\nSnippet: Unrelated software` }]);
   assert.equal(poor.quality, "poor");
@@ -105,6 +117,50 @@ test("tool calls retry a transient registry miss without retrying other failures
   };
   await assert.rejects(runTool(arisa, "pr-campaign", { action: "status" }), /failed preflight/);
   assert.equal(attempts, 1);
+});
+
+test("tool auth blocks propagate as a structured prerequisite instead of a generic failure", async () => {
+  const upstream = {
+    ok: false,
+    status: "blocked_auth",
+    error: "authentication required",
+    resolution: { type: "reauthentication_required" }
+  };
+  const classified = classifyBlockedPrerequisite(upstream, "gmail-workspace", "list-drafts");
+  assert.equal(classified.status, "blocked_prerequisite");
+  assert.equal(classified.disposition, "blocked-prerequisite");
+  assert.deepEqual(classified.prerequisite, { type: "authentication", tool: "gmail-workspace" });
+
+  const arisa = { tools: { async run() { return upstream; } } };
+  await assert.rejects(
+    runTool(arisa, "gmail-workspace", { action: "list-drafts" }),
+    (error) => error.toolResult?.status === "blocked_prerequisite"
+      && error.toolResult?.disposition === "blocked-prerequisite"
+  );
+});
+
+test("discovery does not swallow a blocked prerequisite as an empty result", async () => {
+  const arisa = {
+    tools: {
+      async run() {
+        return { ok: false, status: "blocked_auth", error: "authentication required" };
+      }
+    }
+  };
+  const blockedProfile = {
+    name: "blocked-test",
+    selection: {},
+    discovery: {
+      enabled: true,
+      webTool: "blocked-browser",
+      queries: ["exact title review"],
+      queryBudgetPerRun: 1
+    }
+  };
+  await assert.rejects(
+    discoverContacts(arisa, "test-chat", blockedProfile, [], new Set(), 1),
+    (error) => error.toolResult?.status === "blocked_prerequisite"
+  );
 });
 
 test("tool timeouts distinguish uncertain mutations from retry-safe reads", () => {
@@ -219,6 +275,24 @@ test("strict provenance requires separate coverage, contact, and opening evidenc
     contactSourceUrl: "https://example.fr/contact",
     groundedOpening: "Votre test exact a motivé ce message."
   }, strictProfile), true);
+});
+
+test("selection mirrors first-touch reference and personal note requirements", () => {
+  const firstTouchProfile = profile(true);
+  firstTouchProfile.draftValidation = {
+    requireReferenceGame: true,
+    requirePersonalNote: true
+  };
+  assert.equal(isSelectable(contact, firstTouchProfile), false);
+  assert.equal(isSelectable({
+    ...contact,
+    referenceGame: "Erica",
+    personalNote: "The channel published a full Erica walkthrough."
+  }, firstTouchProfile), true);
+  const report = auditEligibility([], [contact], new Set(), firstTouchProfile);
+  assert.deepEqual(report.contacts[0].reasons, ["missing-reference-game", "missing-personal-note"]);
+  assert.equal(report.contacts[0].provenance.referenceGame, false);
+  assert.equal(report.contacts[0].provenance.personalNote, false);
 });
 
 test("draft preflight rejects missing grounded evidence", () => {

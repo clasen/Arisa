@@ -11,6 +11,7 @@ import QRCode from "qrcode";
 import pkg from "whatsapp-web.js";
 import defaults from "./config.js";
 import { normalizeAudio } from "./audio-normalization.js";
+import { captureQuotedMessage, quotedMessageLines } from "./quoted-message.js";
 import { cacheBudgetBytes, chromiumCacheArgs, chromiumCacheUsage, pruneChromiumCaches } from "./browser-cache.js";
 import { burstBypassNames, createMessageBurstCoordinator } from "./message-burst.js";
 import {
@@ -93,6 +94,7 @@ Modes:
   status     Show this chat's WhatsApp session status.
   send       Send one WhatsApp message from this chat's WhatsApp session. Enables watch by default. Supports humanized delay/typing.
   set-profile-picture Set the current WhatsApp account profile picture from an image artifact.
+  set-group-picture Set an exact WhatsApp group's picture from an image artifact; args.to must be its @g.us id.
   broadcast  Send one message to multiple recipients from this chat's session. Enables watch by default. Supports humanized delay/typing.
   inbox      Read/process received WhatsApp replies from this chat's local inbox.
   transcribe Recover and transcribe media using args.messageId (exact serialized ID) and optional args.remote.
@@ -407,7 +409,8 @@ function formatInboxMessages(messages) {
     item.location?.mapsUrl ? `Location: ${item.location.mapsUrl}` : null,
     item.location?.description ? `Description: ${item.location.description}` : null,
     formatReactions(item.reactions) ? `Reactions: ${formatReactions(item.reactions)}` : null,
-    displayTextForInboxItem(item) ? `Text: ${displayTextForInboxItem(item)}` : null
+    displayTextForInboxItem(item) ? `Text: ${displayTextForInboxItem(item)}` : null,
+    ...quotedMessageLines(item.quotedMessage)
   ].filter(Boolean).join("\n")).join("\n\n");
 }
 
@@ -557,6 +560,7 @@ function incomingMessageLines(message, artifact, transcript = "") {
     message.location?.description ? `locationDescription: ${message.location.description}` : null,
     formatReactions(message.reactions) ? `reactions: ${formatReactions(message.reactions)}` : null,
     `text: ${transcript || message.body || "[non-text message]"}`,
+    ...quotedMessageLines(message.quotedMessage),
     transcript ? `transcript: ${transcript}` : null,
     artifact ? `artifactId: ${artifact.id}` : null,
     artifact ? `mimeType: ${artifact.mimeType}` : null,
@@ -963,6 +967,7 @@ async function captureIncomingMessage(ownerChatId, message) {
   const location = locationFromMessage(message);
   const reactions = await reactionsFromMessage(message);
   const serializedId = serializedWhatsAppId(message.id);
+  const quotedMessage = await captureQuotedMessage(message);
   const inboxMessage = {
     id: serializedId || `${message.from}-${message.timestamp}-${Date.now()}`,
     whatsappMessageId: serializedId,
@@ -975,6 +980,7 @@ async function captureIncomingMessage(ownerChatId, message) {
     fromPhone: String(senderId || chatId || "").replace(/@(c|g)\.us$/, ""),
     fromName: compact(contact?.pushname || contact?.name || contact?.number || ""),
     body: messageBodyForInbox(message),
+    quotedMessage,
     type: message.type || "unknown",
     location,
     reactions,
@@ -1271,6 +1277,21 @@ class SessionManager {
     return { synced, chats: ids.length };
   }
 
+  async setGroupPicture(chatId, job) {
+    if (!/^\d+(?:-\d+)?@g\.us$/.test(String(job.to || ''))) throw new Error('An exact WhatsApp group id is required');
+    if (!job.mediaPath) throw new Error('An image artifact is required');
+    const record = await this.ensureClient(chatId);
+    await this.waitReady(chatId, number(job.readyTimeoutMs, 120000));
+    const group = await record.client.getChatById(job.to);
+    if (!group?.isGroup || group.id?._serialized !== job.to) throw new Error('Group identity verification failed');
+    const media = MessageMedia.fromFilePath(job.mediaPath);
+    if (!media.mimetype?.startsWith('image/')) throw new Error('An image is required');
+    const updated = await withOperationTimeout(() => group.setPicture(media), number(job.operationTimeoutMs, 45000), 'WhatsApp group picture update');
+    if (!updated) throw new Error('WhatsApp did not confirm the group picture update; check group permissions');
+    record.lastActivity = Date.now();
+    return { sessionChatId: normalizeChatId(chatId), groupId: job.to, updated: true };
+  }
+
   async setProfilePicture(chatId, job) {
     const record = await this.ensureClient(chatId);
     await this.waitReady(chatId, number(job.readyTimeoutMs, number(config.READY_TIMEOUT_MS, 120000)));
@@ -1465,6 +1486,9 @@ async function processJob(manager, job) {
   }
   if (job.payload.type === "send") {
     return manager.send(chatId, job.payload);
+  }
+  if (job.payload.type === "setGroupPicture") {
+    return manager.setGroupPicture(chatId, job.payload);
   }
   if (job.payload.type === "setProfilePicture") {
     return manager.setProfilePicture(chatId, job.payload);
@@ -1794,6 +1818,18 @@ async function run(requestFile) {
       const result = await sendOne(chatId, request.args?.to || request.args?.recipient, message, request.artifact, request.args);
       const watchNote = autoWatch ? " Watch is enabled for this chat; use wait-reply when you need the immediate answer." : " Watch is disabled by request; run watch or wait-reply to process replies.";
       console.log(JSON.stringify(toolOk({ text: `Message sent to ${result.chatId}.${watchNote}`, json: { ...result, watchEnabled: autoWatch } })));
+      return;
+    }
+
+    if (mode === "set-group-picture") {
+      const to = String(request.args?.to || '');
+      if (!/^\d+(?:-\d+)?@g\.us$/.test(to)) throw new Error('An exact WhatsApp group id is required');
+      if (request.resourceId && request.resourceId !== to) throw new Error('Group does not match resourceId');
+      if (!request.artifact?.path) throw new Error('An image artifact is required');
+      const result = await submitChatJob(chatId, { type: 'setGroupPicture', to, mediaPath: request.artifact.path,
+        readyTimeoutMs: number(config.READY_TIMEOUT_MS, 120000), operationTimeoutMs: number(request.args?.timeoutMs, 45000)
+      }, { timeoutMs: number(config.JOB_TIMEOUT_MS, 120000) });
+      console.log(JSON.stringify(toolOk({ text: 'WhatsApp group picture updated.', json: result })));
       return;
     }
 

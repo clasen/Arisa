@@ -1,7 +1,7 @@
 {
   "name": "process-retrospective",
-  "version": "1.2.0",
-  "description": "Run general evidence-based process retrospectives, compare telemetry windows when available, use rotating lenses without narrowing scope, and propose one or more improvements without applying them automatically.",
+  "version": "1.3.0",
+  "description": "Run gated evidence-based process retrospectives, compare telemetry windows when available, force a daily full review, and avoid unchanged reasoning turns.",
   "entry": "index.js",
   "input": [
     "text/plain",
@@ -36,6 +36,21 @@
       "type": "number",
       "required": false,
       "prompt": "Maximum improvement proposals per retrospective."
+    },
+    "GATE_ENABLED": {
+      "type": "boolean",
+      "required": false,
+      "prompt": "Skip agent reasoning when bounded correction, failure, authentication-block, and regression signals are unchanged."
+    },
+    "FORCE_REVIEW_SECONDS": {
+      "type": "number",
+      "required": false,
+      "prompt": "Maximum seconds between full reasoned retrospectives even when no signal changes."
+    },
+    "SIGNAL_LOOKBACK_LIMIT": {
+      "type": "number",
+      "required": false,
+      "prompt": "Maximum recent artifacts and task outcomes inspected by the lightweight gate."
     }
   },
   "category": "operations",
