@@ -1,0 +1,18 @@
+{
+  "name": "git-deploy-watch",
+  "version": "0.1.0",
+  "description": "Watch an explicitly approved public Git branch and queue one guarded agent-driven deployment per new revision. Checks are read-only; the agent builds, deploys, verifies and acknowledges the configured workflow.",
+  "entry": "index.js",
+  "requirements": ["Git", "flock (util-linux; Linux or compatible environment)"],
+  "input": ["text/plain", "application/json"],
+  "output": ["application/json", "text/plain"],
+  "category": "deployment",
+  "keywords": ["git", "master", "watch", "polling", "automatic", "deploy", "static", "github"],
+  "configSchema": {
+    "REPO_URL": {"type": "string", "required": true, "prompt": "Public HTTPS Git repository URL, without credentials."},
+    "BRANCH": {"type": "string", "required": false, "prompt": "Exact branch to watch. Defaults to master."},
+    "DOMAIN": {"type": "string", "required": true, "prompt": "Exact domain authorized for deployment."},
+    "WORKFLOW": {"type": "string", "required": true, "prompt": "Owner-approved deployment steps, validation gates and rollback policy. Never include credentials."},
+    "CHECK_SECONDS": {"type": "number", "required": false, "prompt": "Read-only polling interval, 60-86400 seconds. Defaults to 300."}
+  }
+}

@@ -97,6 +97,17 @@ Return an existing local file as a document artifact.
 - **Setup:** none
 - **Install footprint:** **Low**, no npm dependencies
 
+### [`git-deploy-watch`](./git-deploy-watch/)
+
+Watch an owner-approved public Git branch and queue guarded, agent-driven deployments. The checker only reads revisions; the approved workflow owns build, verification and rollback.
+
+- **Category:** `deployment`
+- **Tags:** `git` · `watch` · `polling` · `deploy` · `static` · `github`
+- **Accepts:** `text/plain`, `application/json`
+- **Produces:** `application/json`, `text/plain`
+- **Setup:** public repository URL, branch, domain, owner-approved workflow and verified deployed revision; Git and `flock` must be available (Linux or compatible environment)
+- **Install footprint:** **Low**, no npm dependencies or daemon; project build and deployment requirements are separate
+
 ### [`github-ops`](./github-ops/)
 
 Check GitHub token and repository access or star a repository through the GitHub API without exposing credentials.
@@ -321,6 +332,17 @@ Move files and directories into chat-scoped recoverable trash, restore mistakes,
 - **Produces:** `application/json`, `text/plain`
 - **Setup:** none
 - **Install footprint:** **Low**, no npm dependencies
+
+### [`travel-companion`](./travel-companion/)
+
+Organize chat-scoped trips, source-backed itineraries and guarded reminders. Optional public flight and weather checks support bounded proactive reviews; the tool never books or pays.
+
+- **Category:** `travel`
+- **Tags:** `trip` · `itinerary` · `flight` · `reminder` · `weather` · `document` · `whatsapp` · `telegram`
+- **Accepts:** `text/plain`, `application/json`
+- **Produces:** `application/json`, `text/plain`
+- **Setup:** explicit trip timezone and exact delivery destination; WhatsApp delivery requires a separately configured `whatsapp-web` tool
+- **Install footprint:** **Low**, no npm dependencies or daemon; optional WhatsApp setup is separate
 
 ### [`turn-server`](./turn-server/)
 
