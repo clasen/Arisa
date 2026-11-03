@@ -1,7 +1,7 @@
 import { mkdir, readdir, readFile, rmdir, stat, unlink, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { createHash, randomUUID } from "node:crypto";
-import { getToolConfigPath, getToolStateDir, getToolTmpDir, getChatToolTmpDir, toolsDir as userToolsRoot } from "../../platform/paths.js";
+import { getOfficialToolBaselinesDir, getToolConfigPath, getToolTmpDir, getChatToolTmpDir, toolsDir as userToolsRoot } from "../../platform/paths.js";
 import { loadToolConfig, parseConfigModule, writeToolConfig } from "./tool-config.js";
 import { normalizeToolResult } from "./tool-result.js";
 import { readDaemonDiagnostic } from "./daemon-processes.js";
@@ -162,7 +162,7 @@ async function toolEntryFingerprint(manifestPath, localConfigPath, globalConfigP
 }
 
 async function readOfficialToolNames() {
-  const baselinesDir = path.join(getToolStateDir("official-tool-sync"), "baselines");
+  const baselinesDir = getOfficialToolBaselinesDir();
   try {
     const entries = await readdir(baselinesDir, { withFileTypes: true });
     return new Set(entries

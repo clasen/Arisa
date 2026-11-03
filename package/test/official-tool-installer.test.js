@@ -123,6 +123,7 @@ test("installs a verified staged tree without overwriting an existing tool", asy
     toolName: "master-slave",
     lock: lock(files),
     destination,
+    baselinesDir: path.join(root, "baselines"),
     checkout,
     installDependencies: async () => { lifecycle.push("dependencies"); },
     validate: async () => { lifecycle.push("validate"); }
@@ -134,6 +135,55 @@ test("installs a verified staged tree without overwriting an existing tool", asy
     () => installLockedOfficialTool({ toolName: "master-slave", lock: lock(files), destination, scratchRoot: root, checkout }),
     /Refusing to overwrite/
   );
+});
+
+test("records an official-tool-sync baseline for the installed snapshot", async (t) => {
+  const { root, source, files } = await fixture(t);
+  await writeFile(path.join(source, "config.js"), "export default {};\n");
+  await chmod(path.join(source, "index.js"), 0o755);
+  await chmod(path.join(source, "lib", "helper.js"), 0o644);
+  await chmod(path.join(source, "tool.manifest.json"), 0o644);
+  files["config.js"] = await digest(path.join(source, "config.js"));
+  const baselinesDir = path.join(root, "baselines");
+  await installLockedOfficialTool({
+    toolName: "master-slave",
+    lock: lock(files),
+    destination: path.join(root, "installed", "master-slave"),
+    baselinesDir,
+    checkout: async ({ checkoutDir }) => {
+      await mkdir(path.join(checkoutDir, "tools"), { recursive: true });
+      await cp(source, path.join(checkoutDir, "tools", "master-slave"), { recursive: true });
+    },
+    installDependencies: async () => {},
+    validate: async () => {}
+  });
+  const baseline = JSON.parse(await readFile(path.join(baselinesDir, "master-slave.json"), "utf8"));
+  assert.equal(baseline.tool, "master-slave");
+  assert.equal(baseline.repo, "https://github.com/clasen/Arisa.git");
+  assert.equal(baseline.commit, "a".repeat(40));
+  assert.deepEqual(baseline.files, {
+    "index.js": { type: "file", hash: files["index.js"], mode: 0o755 },
+    "lib/helper.js": { type: "file", hash: files["lib/helper.js"], mode: 0o644 },
+    "tool.manifest.json": { type: "file", hash: files["tool.manifest.json"], mode: 0o644 }
+  });
+});
+
+test("does not record a baseline when validation fails", async (t) => {
+  const { root, source, files } = await fixture(t);
+  const baselinesDir = path.join(root, "baselines");
+  await assert.rejects(() => installLockedOfficialTool({
+    toolName: "master-slave",
+    lock: lock(files),
+    destination: path.join(root, "installed", "master-slave"),
+    baselinesDir,
+    checkout: async ({ checkoutDir }) => {
+      await mkdir(path.join(checkoutDir, "tools"), { recursive: true });
+      await cp(source, path.join(checkoutDir, "tools", "master-slave"), { recursive: true });
+    },
+    installDependencies: async () => {},
+    validate: async () => { throw new Error("invalid entry"); }
+  }), /invalid entry/);
+  await assert.rejects(() => readFile(path.join(baselinesDir, "master-slave.json")), { code: "ENOENT" });
 });
 
 for (const exitCode of [0, 1]) {
@@ -161,6 +211,7 @@ for (const exitCode of [0, 1]) {
       toolName: "master-slave",
       lock: lock(files),
       destination: path.join(root, "installed", "master-slave"),
+      baselinesDir: path.join(root, "baselines"),
       checkout: async ({ checkoutDir }) => {
         await mkdir(path.join(checkoutDir, "tools"), { recursive: true });
         await cp(source, path.join(checkoutDir, "tools", "master-slave"), { recursive: true });

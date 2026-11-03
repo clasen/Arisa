@@ -9,10 +9,11 @@ import {
   readFile,
   readdir,
   rename,
-  rm
+  rm,
+  writeFile
 } from "node:fs/promises";
 import path from "node:path";
-import { getToolDir } from "../../platform/paths.js";
+import { getOfficialToolBaselinesDir, getToolConfigPath, getToolDir } from "../../platform/paths.js";
 import { normalizeToolDependencies, resolveToolDependencyPlan, satisfiesToolVersion } from "./tool-dependencies.js";
 
 const bundledLockFile = new URL("../../official-tools.lock.json", import.meta.url);
@@ -178,11 +179,33 @@ async function validateEntrypoint(toolDir, toolName, locked) {
   await runCommand(process.execPath, [entry, "--help"], { cwd: toolDir, timeoutMs: 30_000 });
 }
 
+// Records the installed snapshot in the official-tool-sync baseline format so the
+// tool counts as official and later syncs can tell upstream changes from local edits.
+async function writeOfficialToolBaseline({ baselinesDir, toolName, sourceDir, locked }) {
+  const configFile = path.relative(getToolDir(toolName), getToolConfigPath(toolName));
+  const files = {};
+  for (const file of Object.keys(locked.files).sort()) {
+    if (file === configFile) continue;
+    const { mode } = await lstat(path.join(sourceDir, ...file.split("/")));
+    files[file] = { type: "file", hash: locked.files[file], mode: mode & 0o777 };
+  }
+  const baseline = {
+    tool: toolName,
+    repo: locked.repository,
+    commit: locked.commit,
+    recordedAt: new Date().toISOString(),
+    files
+  };
+  await mkdir(baselinesDir, { recursive: true });
+  await writeFile(path.join(baselinesDir, `${toolName}.json`), `${JSON.stringify(baseline, null, 2)}\n`, "utf8");
+}
+
 export async function installLockedOfficialTool({
   toolName,
   lock,
   destination,
   scratchRoot,
+  baselinesDir = getOfficialToolBaselinesDir(),
   checkout = checkoutRepository,
   installDependencies = installPackageDependencies,
   validate = validateEntrypoint
@@ -205,6 +228,7 @@ export async function installLockedOfficialTool({
     await validate(stageDir, toolName, locked);
     await mkdir(path.dirname(destination), { recursive: true });
     await rename(stageDir, destination);
+    await writeOfficialToolBaseline({ baselinesDir, toolName, sourceDir, locked });
     return { toolName, destination, commit: locked.commit, files: Object.keys(locked.files).length };
   } finally {
     await rm(scratch, { recursive: true, force: true }).catch(() => {});

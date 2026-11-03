@@ -143,6 +143,10 @@ export function getToolStateDir(toolName) {
   return path.join(toolStateDir, requireToolName(toolName));
 }
 
+export function getOfficialToolBaselinesDir() {
+  return path.join(getToolStateDir("official-tool-sync"), "baselines");
+}
+
 export function getToolTmpDir(toolName) {
   return path.join(getToolStateDir(toolName), "tmp");
 }
