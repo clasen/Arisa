@@ -1,24 +1,25 @@
 {
   "version": 1,
   "repository": "https://github.com/clasen/Arisa.git",
-  "commit": "9e590cf73b34c223fb3ea3c9b8c948be16acddb9",
+  "commit": "73ebb0c0caf157dc2c16f3ee715d0f289c9d04b6",
   "tools": {
     "arca-invoice": {
-      "version": "0.2.1",
+      "version": "0.3.0",
       "files": {
         ".gitignore": "9023adb374416d32cf4c32737677af5ff8333c10995cc028c9663794cb1bd99b",
-        "README.md": "47a6f39d5beccba65b96430ff0caa1e4cc426fe68b1ed85cd5aba8a146818624",
+        "README.md": "d366b045d8797f0a3c87c538cee08926d6ada13783bbc80563757a1164702c9a",
         "config.js": "f26704ff37896990f0323bcd58735dc63b8cbfcc27b78ef0355fc22ca005c696",
-        "index.js": "ec1b23ed156719fc936f41e7730234a614cfde01bd6f9258c4d3b42cd420ceca",
-        "invoice.js": "6949b26ca65df4c3b91f85f2c46ae5fb13c987cdaff22bfb30521189977eedd0",
+        "index.js": "98958db9998991614e8733436e1d0bbef859df3991162fde6fe62c55f288bcbb",
+        "invoice.js": "f1033cea15eb94f7552a3547e57b7ad3771236a61ab4a7ec76c99fb02b47b87f",
         "invoice.test.js": "8af8a5a61c05ec261820f4e0de8d96487b58d1553244b4814d19a2c16b329ac5",
-        "package.json": "66932fa1bb7cfa333cfd08d2007475290d0bc767b25e43734140b76ec1bf503f",
-        "pdf.js": "61dee6e9d666a18bb26851c7889165f755e3241d5f17e0f4995e44b452c1ad9b",
+        "package.json": "ced0544ff3a8360e0888e4ac3131b8939cbf94fb1a6df1d8806357d9e239e690",
+        "pdf.js": "628f84e9f1a10434de9d6607a1351d7e5736a82c09bf0566464e4f9411408a22",
         "pdf.test.js": "e20028f49a357c66766cb928c91561df26664bbe49dfa2aa3b2a400658ce8378",
         "pnpm-lock.yaml": "9d9cf2ab7313acb99d89e3f1271547005a3d9009624f151da9c7f8829338c916",
         "protocol.js": "0edfb43eec7be97335beaefaec50e88f24295916119229ba2a5ff74267f424a4",
         "protocol.test.js": "ca313a7da2a92e93a5912acc01283b5708a452166f6b51e6dc1de1a391ffd07c",
-        "tool.manifest.json": "1dbeae6c4a8765798133a48991fae00e802ab1c2cff39cfb6756fa2130ed974d"
+        "recipient.test.js": "c1f23302381d5a52868d4ef260be6c48f54854f07d81ec87bf1546e3e5159178",
+        "tool.manifest.json": "9d62845915d63b6607f60e43039ae0d0645b50d1483b0ea248ad279c83a7fde0"
       }
     },
     "audio-extractor": {
@@ -31,11 +32,11 @@
       }
     },
     "browser-session-bridge": {
-      "version": "0.2.6",
+      "version": "0.2.7",
       "files": {
-        "README.md": "f650843cf4a9b3cb41c3a9a0fafa9c90af5dc607eb142dbc0a215203862b408d",
-        "bridge-server.js": "e5181ef56555a018ba729272409661f4da1b3ac29d2ac5d7e6a5d8e25e93a861",
-        "chrome-web-store.js": "4b588d1288dee754c5d8afd609b8c1f67f73d23de7dda247b7a2ff8b68f7ef60",
+        "README.md": "06b2f411a2e46665b5df029e4526be329e2501a9a0d78d1cf923842dfbf8ea14",
+        "bridge-server.js": "1503a35488568a05e9c71be27bcb033d0b3c9fc69b7bda61abc5ffd0f885be53",
+        "chrome-web-store.js": "3892127b3e2bd5092c4e7092de454fe3ea4d323b5fcde6b6d6309a0cb869603f",
         "config.js": "45c8e9e9a159b9125d6ea3458c616926c2ba2b5327fdfd750aa05316d3ce5af8",
         "extension/background-workflow.js": "5ea3afccdfcbfaf9ee41f3baa910f75177a863aeed96d924c9c253e4d23720ea",
         "extension/background.js": "7a7e7217a9e952739cb5f6cf06ad1002424cb047a045fb29d6642b2b30449bee",
@@ -44,25 +45,27 @@
         "extension/icons/icon-16.png": "a4aedb49e2227222a68dc56455812a9e17938fd197b1f30268f02d6c9f7bf95e",
         "extension/icons/icon-32.png": "2dfc9e6e7ec6b4e9feb9c1326d65116cda8e53306c65c84074c818c9e7f6a2a2",
         "extension/icons/icon-48.png": "2f316f1f2fbc72227e7e1f14cf1ff1553a12fc9aab139799f1ee2970c0303deb",
-        "extension/manifest.json": "abbc939749585fefffac51e6c2d6b0c0511771d43008a1ce9048a89e02879fa7",
+        "extension/manifest.json": "59185a695bafc0d8c2367ac16335514d0613559d68456fa2cd92a9183e0fab47",
         "extension/onboarding-state.js": "c4c716ac6bb3c942f6ac8fb029693de96db7d5c8e84c886bd026106fb74206c3",
         "extension/popup.css": "8044a298f91790d38c8e84823d10951baffcf823bee5c330f3f297db125a5726",
         "extension/popup.html": "8b24f47f092943f954f3a403af209809b5d935b20de6c291ce3d576bd23f8b6c",
         "extension/popup.js": "d762108f2071424f702ab845254d86fc48c0dc0461143cb1a384820147a08c4e",
         "extension/session-send-state.js": "ec574454825679d8d3eb1fc5692d9a9fcbf133f3d9ac3621648ad09e76ff4abc",
-        "extension/site-permissions.js": "83f9aa4d0295318fc730bd561c2db9d1aacf36152319090e99d12f62deea11ad",
+        "extension/site-permissions.js": "4f94db699e044daa64191ed6dadac0dd1c121934aa5b1756d968e8f120ef3b9d",
+        "google-session-policy.js": "cd0dbbe86f80d0cf00d5e0587b4c704445d5f6954c5f72c149094a7c54ca0229",
         "import-receipts.js": "3f8fb5f3604a73f7b56d7bc9d32cf7b638e7d86065952155fbb4ffb70134d478",
-        "index.js": "351af3e57a90096833b64c33169118ce4b75b81e8aa572090a45422a214646b6",
+        "index.js": "8d025659fd968a786a15f4759890e0705c425d17008d9655e700a1fab269ca9e",
         "lightpanda-session.js": "57c713dafac531617d7285122b2098c1e0b2f334e43144632f2b1fc79405f789",
-        "package.json": "c6fba5540eef5953ca1e836388c82d006be803d69ebf3d246b8ab9adbea85ad1",
+        "package.json": "418a0c383adda113879c955d3a98b11ddf3b1e065b2f0a8a815f339af793a759",
         "pnpm-lock.yaml": "7af346d8eb7cfaa293cdb329fdc0b3597da5aa8f22b5001e3d8e8c464ab2e9a7",
-        "session-browser.js": "7af716a1c0d6793b82ebbaaf64ec3e8f73dfc52b3c9aceef2179d2d859e32a9c",
+        "session-browser.js": "affcc1f5a63f91d794104b2126795a1fa29f37dc80601acc3e3146512cb687c2",
         "session-redaction.js": "c2393023c1d3b7634432606ad82a96d79c1f093d9b0a6440d955d0ae419c8393",
         "session-selection.js": "da5a4f55ccc8ba22791840943288e7aecacd730425c03f05c2bc10fd6a14341f",
         "session-store.js": "ee85e5b9696e542bb535a996743ddbbd2093fc66e18873a2f1c7a27707a83994",
         "test/background-recovery.test.js": "77d28d9a1aa0bcb91b45b5a1e9be0c030ee6f831cc4b1ad698ccb23dfdbce3be",
         "test/background-workflow.test.js": "9f8bb38d713b01c1b88af41c3ba082f3b0e438b79116c6cd9bd4413cc4c9be16",
         "test/device-enrollment.test.js": "f8c5cb944b4416537702173656239a9d2f535fef67c14fefa9c75e6118ab1776",
+        "test/google-session-policy.test.js": "2a3b6609292b7e3399c37cce33112fd2d94ad85e081618b3496b2e98a4d2ad51",
         "test/import-receipts.test.js": "29232c3e4a84f2548cfedc689e26010769cdaad2695437cbdd278fbbc1df360a",
         "test/lightpanda-session.test.js": "1fa6c1693a5008c173ec6c5c97effe001b68c535c7a3d4530500c0c4b691c532",
         "test/onboarding-state.test.js": "889f7746bbdb51320e68447560459d2a5d812e4b135de08a7b6e94ef5a142250",
@@ -71,46 +74,51 @@
         "test/session-refresh.test.js": "ffa688433185c08696761f189df244ed9ac212731b012a3eb9a91da05b43dd56",
         "test/session-selection.test.js": "ee1a15d42b156403d46d789a3ecf0a9c8f0019a00ab908276297d031243a89f5",
         "test/session-send-state.test.js": "c8ccbdf0863c5de85f784e7e32436591fe2db16a2ef4c554f671c6352736d5b6",
-        "test/site-permissions.test.js": "27c297475c38ee1cbe7c7df210c767c157e03ecd379cde99a1b502268bda56ab",
-        "tool.manifest.json": "c62e085045cd8b922b8aa97b676f5ff263aac3a6861500bd17fb3a237a6e425e",
+        "test/site-permissions.test.js": "c50a7d8dff1a69dd2868a3687ad542303a972dbdc9533cb67060039dde8eccc1",
+        "tool.manifest.json": "ffb135e8bf3a7ef857aa9b76fc616bb3c92bd74a7276d8b0b2172f4ff69d3202",
         "web-store/listing.md": "ee3ac9efa32cfe7ca67f995cab057d1db40f40eb237f014e4f699885a022a318",
-        "web-store/privacy-policy.md": "245cd64e0e7687b0c66ebb4cd0e0ee55856a1713c51d4831f22a332db242b168"
+        "web-store/privacy-policy.md": "458fdbf5c78c6ab5429b0c49e85ba273e8a0003ddc922da2b4b6531526475691",
+        "youtube-transcript.js": "e74efa5a59d91a57c74a0bf1365e36b0b96204f35252e99f01444e5d301c591c"
       },
       "toolDependencies": {
         "lightpanda-browser": "^0.11.5"
       }
     },
     "campaign-draft-runner": {
-      "version": "0.8.1",
+      "version": "0.9.0",
       "files": {
-        "README.md": "9d8c9d87edc66375b5f059bd5abb06a8b8ee743e979d77ffc4f5312f3ec7b57f",
-        "batch-skip.js": "ad428464b739e7355e00ac7cf399247ce611fcef0470d97a73893701e5b07627",
+        "README.md": "92e472debd6e2e83493e09c6a166220603130a402a3b90a71116465ee7ae4059",
+        "batch-skip.js": "3683b7fc7d7f9d003ef1fff96507b7cadd47b51d1300011d9929353f2675e78d",
         "config.js": "9b9c2d9686cebf17c3ba2630088c7028281883608f61054e733283aeb8d383cb",
         "discovery-operations.js": "a5e9f046358938a07ffba039085c5c48f829c6a2e05362d0d0230a37a3c47f60",
-        "index.js": "3ee8ab5f2cc041ddcbeeeda7225f744b13a1ce843c25aabe693c0269a1aa681e",
-        "operation-timeout.js": "9b1ced30ec9ed710bb9118b91f6f3feded5111a08e1e21abf163e4cfb91d7ad2",
-        "package.json": "a25b7ed1dd2c30cd68c3c10feb8ee1752cac8cd55cd4344690ffad649e231ec1",
+        "draft-policy.js": "360f21a9d49cfe8dc27f0cd6c4d61f7f0f148d42fcd7c86892dbbf75a7a4146e",
+        "index.js": "66f11a6d7f528a40b90c426b9bd888a96de33dd46183f8188c24bd0559ab5067",
+        "operation-timeout.js": "950837effd851fa12969c2236d974345fef2b2a667eba3bea5354ff030a53ea5",
+        "package.json": "0be6a3698ce06177ea3f3f2356ef64d39dd58903a5ec86b8bc1a8875cb8630bf",
         "pitch-experiment.js": "3da9350dc862cab36a630f628d3b3c06974375facd999b8bdbeed8ebf15e63a3",
         "product-facts.js": "69339e20e7b70a6b9833878d72b10b70ea4ede4aa448097975d0961b6aaced59",
-        "prospect-pool.js": "1fda433c585d2dddf66ad7407d95bd8c9a669fd6f05d8bd407d02e98df970997",
+        "promotion-workflow.js": "7cc7ab0873e0be05bcc0d53b8f91b725d785af0585a4e18fdb91240ddbc94e26",
+        "prospect-pool.js": "3ab3b8e08b5693019888e19af65fd24d97c5229dfd112ab8e6cda69a3b11836a",
         "reviewer-kit.js": "01a63f2f65ae0899ec9ab96ad7408d3f1f7d23f214dec381043164686a58f88b",
         "search-quality.js": "ab5412d45d5144e976cccef52992e634c11aca0e21b73fd53f9dc2d489c56dd7",
         "source-exhaustion.js": "407f940f5205eb01715a797672d0dad8bd0b0b897024b5fcb87052a062ecd054",
-        "telemetry.js": "b3ededa1277d5028f7a8299926e16bb4dc06d70c470d3b97352c29080cfc0974",
-        "test/batch-skip.test.js": "638d185dc0b38900afe6ee9058e733ae36583d0762a0ff0347fdf245df064abc",
+        "telemetry.js": "1a1df97da2f80ae310efab1e41c71da645aaa8265cf10fcd8d3dc0efec514f8c",
+        "test/batch-skip.test.js": "8d81601310ba1b6746ee57fa214b97ad27a86d956cae7365cf20e86562c82475",
         "test/discovery-operations.test.js": "bc3e7c877911278bf87ef2a5844990721570a4957b78478e2e916be869bc2159",
+        "test/draft-policy.test.js": "838013424eafa4bd455e042b743779d529e05b27634770ff4d9fa9900f3231c1",
         "test/orchestrator-fanout.test.js": "e882f2c22418d4d3bdc66223c8bf37ed2ca0fbb94ae99f0d828c9257ca551f6b",
         "test/pitch-experiment.test.js": "5c43901a9986b666f1094a7dc298adf2072dcb167ea023bb24fb5c9f13c152b0",
+        "test/promotion-workflow.test.js": "9f53f2b5ca21ae9dd24c527362a302ace14e02e4f79085979adf265f6c6d2ce4",
         "test/prospect-pool.test.js": "d0a81f21899b0055c210747008db2ed12afe11b3a57d3e80d1aae797732982d3",
-        "test/selection-policy.test.js": "33967a965b47c50febb3533ab8cc7080b378f8e4dbed363f6c0304eb90da4277",
-        "test/telemetry.test.js": "8e52a43fa9eb08fa0f3be124b72b7cd39258666cb88311b1df6978037372c257",
+        "test/selection-policy.test.js": "62fa2eefa653be5e729b2a77871cd71614e002c058c229e38c0e0463973ee1a8",
+        "test/telemetry.test.js": "e4eb857677b50f684111b16558ca478e49ba90b679e9d269fcbef8baa4beca00",
         "test/web-tool-default.test.js": "bafd71c48fc922d449b40b2603900c08a45ba3701ffa9a48e3e533219f1bd1a5",
-        "tool.manifest.json": "acd3a902aa0e52e4ea9429def5bc76808d0a33ead4fd3c670b8a737a2afb2c7b"
+        "tool.manifest.json": "bb0c171118e4b82b7c05990a40dab3f7dcb7d5b91ec53e1239f5ae70360cf488"
       },
       "toolDependencies": {
         "pr-campaign": "^0.1.0",
         "gmail-workspace": "^0.1.0",
-        "lightpanda-browser": "^0.10.0"
+        "lightpanda-browser": "^0.11.0"
       }
     },
     "change-plan-runner": {
@@ -127,41 +135,41 @@
       }
     },
     "context-vault": {
-      "version": "1.2.2",
+      "version": "1.2.3",
       "files": {
-        "config.js": "8fb41f3c2957ac798749518d2c605671a343f6eb22bb041bcfd65d59007c73cf",
-        "index.js": "c26c8cacf4f47243592dcbcf2e9239f016c127d361bdb4f2586deed913384258",
+        "config.js": "14fd5f6796a861dd4fc5068b4c785ab341664b2c439fee9836963bbbc84473fb",
+        "index.js": "359dba7f41e9c22a72ca8cefdb2ddf95eb86ee1d85ed1ae9a7768d8a9f3f575a",
         "operation-timeout.js": "534f88ed01461cfba050663c58364b1639ad2c7eaf5dfe6796730fda67bd1329",
-        "package.json": "67cb550b0d833db46086a687828c98e12193a0ec72ee7109424c880607ca9d25",
+        "package.json": "94c9825c5c423dc950cb8f3516bb3e6c2e0d3214233c10182c4f0c76c7daf620",
         "semantic-search.js": "c3d5024ddfba956322841dda6ed98080f3626c04e605805a768d82f5e825592a",
-        "semantic-warmup.js": "043e113c4934ff48a3636658161d7450c617b33f023c127d8f3335cf30dbe2f9",
+        "semantic-warmup.js": "87004630d06e7b506b89e36b3b0db1a02ad329aabb12ba5df3928a47217ca64a",
         "test/operation-timeout.test.js": "8c669e9f3e0044273840d7fa347e70c671410b3938f10a7c70e3ea6e18396ea8",
         "test/semantic-search.test.js": "b961256eaaa38ac0694e99cc965c9010115e752dd94b330da690696f190b6666",
-        "test/semantic-warmup.test.js": "14574ffa5ca80dc4c85241aa2561920c832f880ae8c40b7dde508dccb7bca67a",
-        "tool.manifest.json": "fa20cbda581e986bb16adc60155a61196b1bbf7c48ea866cf263d03db1f960f9"
+        "test/semantic-warmup.test.js": "2b5831e3c396f19dec12941b2472d69b0ace249e8d8857b86da317a35dc62312",
+        "tool.manifest.json": "c617e0b25d65582ec0bec02658e988b8ce3f2a45577774bbdbb8fa3638660293"
       }
     },
     "creator-scout": {
-      "version": "1.4.0",
+      "version": "1.4.1",
       "files": {
         "README.md": "6895b2c0cc3a230ddf3f59f1c4670b12070464f8e742bfdf40a04120a7fefaea",
         "config.js": "bab728665650b986c0eaef8e1be1c259ec42b1f83df4217c9780f5468d3c7666",
-        "index.js": "a544e5dbac9cb92e996c2b07690a18481a20b8b10c13c397412581ec9ac6bb04",
+        "index.js": "c23ccdcec0138671e185f50dcaeb8901d0cb8bcbb8a4211cc7f2898ee3a5a678",
         "outcome-contract.js": "5685bd8fbe4fcb608ee43a0148201206283013c1a60855c974a928c1d312480a",
-        "package.json": "593c9afd3d151f8107c611724e7218ed3970eb7643273994ce6006d2af20abcf",
+        "package.json": "f12bb87819a6da144366cd9d4122aa6931c5d13e61a86f64b0487f768b6dd3c8",
         "panda-results.js": "24a31263b4a03e2c2719d9c54be7b5c022b17fb7dcb249eed33b93882518145b",
-        "panda-session.js": "69878ff01bfbf26afe4db0e2e6489b211e3aca100ba5353befefaea009636bb5",
+        "panda-session.js": "d7ac006f059d6aa45add6cc12dca97b943e38ff2f15047ba351d0fcf6df7953a",
         "pnpm-lock.yaml": "7af346d8eb7cfaa293cdb329fdc0b3597da5aa8f22b5001e3d8e8c464ab2e9a7",
         "reference-match.js": "5ceb71bfe57763258d89c60936bb7e5b3166b6aa7127f9d2f8da49f01298f46b",
         "test/outcome-contract.test.js": "dda85d1f56880b30d7fad3e8a27aacbb0808d91fc0addac6e0c38f9f0c4849bf",
         "test/panda-results.test.js": "b918d6341251822292fe3e375ab66694a0f71f3c7a24e91be263ee36e5f3e92c",
-        "test/panda-session.test.js": "6cfa4e0543fab77c502c1103c60d8cb7d16040770e7aa5c034a47e0292de8521",
+        "test/panda-session.test.js": "f94f70f03bfcc0003d2b80c1df9c025684545e278c67ae580c0b6f53e376c879",
         "test/reference-match.test.js": "38572ee3756f4ff0b0c61942dda0a19c9d06697826051cf0924dd3c47fc99b67",
-        "tool.manifest.json": "5368082b6808dc9b5966a46afcc6042cc82aabef0cd55ed65b4e783a4cb2579e"
+        "tool.manifest.json": "dbaac7e7e1387a4a80a9812c6594cb8baffc63a8ba4dddc75cf29bd528023064"
       },
       "toolDependencies": {
         "lightpanda-browser": "^0.11.4",
-        "browser-session-bridge": "^0.1.3"
+        "browser-session-bridge": "^0.2.0"
       }
     },
     "file-document": {
@@ -173,26 +181,41 @@
         "tool.manifest.json": "01e54396ff406091271880876369ece9b8a98c7fbd55fe73f4eed39dba64cc1b"
       }
     },
+    "git-deploy-watch": {
+      "version": "0.1.0",
+      "files": {
+        "README.md": "e6b75d33639f6468ccec9baf5ce89eadd633dbf5e3685d3b6691918f76597d62",
+        "config.js": "fc581d990112712a5d6a571a170e8c8680d514ba5c65998c01dcb3ca0cfbc8fc",
+        "index.js": "862e2ea33fef928345d01284687b6540513ac5ca6eca16eecd44ef912b8e2917",
+        "lock.js": "b049455b3f17f86a3d8a1e8250dcd59edfc8649a8213f498bac9e4461798771a",
+        "model.js": "9f2648f829c7d4bdead0d1f3bdc291a2ef6a5824844624b4ec5ec4b768025bd4",
+        "package.json": "bbeece2f1be42ff7a1d4aadcea927e0ccfac5855d5210c6a17297405837152f1",
+        "store.js": "57179947493aada2892cd68b5f898c90763389dfc12fa729abf73dad90895763",
+        "test/lock.test.js": "8b40188129de5c9f55acc28d8263a4b23843cf1aa1b9f129e882d7e55001b889",
+        "test/watch.test.js": "c10808936f980a46b93785c80ff215df4d4f3ad6373e45d173f2c8a466a75266",
+        "tool.manifest.json": "d8dab3cb199c9f082f4854d414821740b244ec9db546038cacb525255fe493f9"
+      }
+    },
     "github-ops": {
-      "version": null,
+      "version": "1.1.0",
       "files": {
         "config.js": "94cec7d027cac09d90b390657809d505277bce1db905fd008625a7ed07727a17",
-        "index.js": "8c349ca49ffa8fa263bf3a192e1fd0f98a1132b2bfe59ec746c2b2c26036b842",
-        "package.json": "c276e9aad3801fdf2e35e85870759eb13f699ea58143d4f0e67dc88d2932c0b6",
-        "tool.manifest.json": "28eb83636c508882ae86b684baa0c7d639c9113a72a615d6a2bd30cfef32f579"
+        "index.js": "f5ca38daf3f48bb21249a65ca27f0628dc838b2dcde6c589e43716a1c3c05f40",
+        "package.json": "7e78bef2c2e108bab52d969b8e1cdc74ec2f6704025d4716355fe595a8f82efc",
+        "tool.manifest.json": "5b5c4df6a51238e615d76e88acb799b1cf331306b170a88b5c0983c6cd5027e8"
       }
     },
     "gmail-workspace": {
-      "version": "0.1.2",
+      "version": "0.1.3",
       "files": {
         "arguments.js": "b4089006818020cc1cd4e5a4cc6e22242939b45a4b42d216fba2269b8cb99e64",
         "config.js": "6ad295ec4cedbc936835d8f86c7528e0939ef09d5792c003308d2ee85dc5eea4",
-        "index.js": "729f345fbd82d8e9525d46412b96efac0a30387477385208a4bb1c83fd794992",
-        "package.json": "991b2a5c03a049faa9363444ff5fd7517fd3556228dd8bad3d0f554cd3e2dd73",
+        "index.js": "eefaf9fdafc6eb8fdf87646e77c56213d9c6d6940886be338b193dba3d97361b",
+        "package.json": "1d1fbaed396e3042a26f0e8a58ef944441b96a5eac844f86b20095ba801ae65c",
         "secretary-state.js": "afc27732670420bccf1ce56ce715676dd2266de9f2d36a92015a93842755094a",
         "test/arguments.test.mjs": "dde82737924d75747490f5535bee2420c71838b3e758925132c825ee8c869bad",
         "test/secretary-state.test.mjs": "3aea05524a4ad5ebcb79c6aa1db94fcd009ac8ae69414c8f950b32a32af94370",
-        "tool.manifest.json": "1f9316a957b3a7167e41ece7c2b83f90e69fb390d6dd8c7f99789c538b7a4800"
+        "tool.manifest.json": "b94ac51f4229514c5d067f3b94d5f61b481e228039562f15647fe80da3f8b0c6"
       }
     },
     "image-transform": {
@@ -208,12 +231,12 @@
       }
     },
     "lightpanda-browser": {
-      "version": "0.11.5",
+      "version": "0.11.6",
       "files": {
         "BENCHMARK.md": "9c732c65f6d8bceb4e73c1a03d298d5140d919f50269f982bd0ec6c1b21fa8b6",
         "COMPATIBILITY-MIGRATION.md": "230e12e8ddac837b7772519693e530c43d2158b69c671036bf246fb3a9e35561",
         "LIMITS.md": "6c0ec9624c76de8ddf09b82a4da1dba1b89a48a1f0e71a083ffbcf7a3d5401fb",
-        "README.md": "6cd4b4b6443d8b568537f9481de23c60e037deb138215f5b5393cc1f49020c1f",
+        "README.md": "9a8cc7b5a5e1ca78a853d58003bc4bf2ee11af06253f683eb37f8669e8783a43",
         "action-policy.js": "66c6ad39f65378ccf8ed54177f5a3665e23ef82818c30fb05d28cd58cba9b2ab",
         "authenticated-profile.js": "2bbb96c4d25a108c44256514c1c9b4e61e1f125e470ab35c5e02515216cd1b33",
         "benchmark-latest.json": "c5524e6d42479578579fd7db0e50857ff0831ca219e611b821ad1e0a4fade303",
@@ -223,12 +246,12 @@
         "capture.js": "b68b198d494c762822c6da079a556dd3463e681557f2abef1387d9cd41abaf4c",
         "config.js": "d08eb436df15540a53b02cf72e117c7fc8ead80195dbd53764a17598c9e565c5",
         "daemon-service.js": "10e70ed64f1fe8c7660044f6ce24e78d01da75a50322bfc08f42248c14ad5226",
-        "index.js": "5fc54aec13fb27c6b55e20aed132853b79c44041f45ea4b0f4b47b00c205da16",
+        "index.js": "924a66e6bd3b0fc319159827eaf902668bb16c639fdade143f22b7e22c3aa922",
         "limit-suite-latest.json": "3d30f958d2d6c1e9dfcaf53e40a401ae288bf264a97ba6c3b64a25a08031feb0",
         "limit-suite-policy.js": "61440ee2e7f557ab2f3c74f8ef4ec2ec85fd2fb7fc53a4121e1f0d066670ea17",
         "mcp-session.js": "cd4a1e6d3c9d80c399fda8f313d69e38fa22a9b24789d7919832a56df7dc90c2",
         "output-bounds.js": "08ab730d0d8722c5e0e761911a509653dd23d8eb4d8c2abf2d9c5e8432870bdd",
-        "package.json": "54bf5020ac3ec8a682491dcfcf877b50dc239b6aee72afad039ce473fbc794c2",
+        "package.json": "f57da13d2fb30c26bdc79a83301b37bb68347afa2d6c2ed36c38d50305cfa8a3",
         "pnpm-lock.yaml": "17c814b167307942d3609c7b9d916ceddb85839573ab39baa114e30edb132a1a",
         "process-metrics.js": "e39d2980abb581ca0b917d0d33a1d71922ce49b679a7e96cf16a6a66b81d879a",
         "recipe-store.js": "358ac391ae86e0bfb82fc5b55bd08cfe3fd4fa56ac12a5ad4ad5abfa43c9a6c6",
@@ -241,14 +264,14 @@
         "test/benchmark-policy.test.js": "02dbd3e7619aaa28f63df1de7ec3af5f206d8cf3d0f74afa8f14b69a0b084716",
         "test/browser-operation.test.js": "283f074ef7ec499f70ba5db3450b792aacebdc2ef72b14727e7b3992cd6f173f",
         "test/capture.test.js": "b4551640d008b73575919e33e5565f7eed2c766a154f8fbe6703ef826f4b9f76",
-        "test/daemon-contract.test.js": "8b50c7de83f87324f2b5f94e69ae6b4398b889ee3ab73c1f5b07e95fe9d986fb",
+        "test/daemon-contract.test.js": "6c0e177431661e8c61cda09b8564a492e212bfeae5035c981119c9ad8b05023a",
         "test/limit-suite-policy.test.js": "3bc29952084d0febf617f22ffefeeec15ede245e778e7f00fa86fd4c8140cbd6",
         "test/mcp-session.test.js": "cf2484ae14b647eaf66a17286383ff0c143c276b5b2c92b3bba4cf6643f5bc5f",
         "test/recipe-store.test.js": "f249b33aa42bebc4f6e61150400f6bca7647feea13b0770e72016485e8d13b46",
         "test/safety.test.js": "2842a7c2b05c1d3d340050deee969a1a8b7d2999262f2c636e5a5bae6a751899",
         "test/session-manager.test.js": "bc1e2986d2e659066a770277ed4736b2fc3d250d16d4b987012f6adab0fad66e",
         "test/web-search.test.js": "b6b42f82bb3cae516cf8ad40b55f467ab637d72cf4b04da3eb9e77391386397f",
-        "tool.manifest.json": "81428513d8677449046c204fa43ba074f4453afc7b929680fcf1737a71c05331",
+        "tool.manifest.json": "55eec1722e11ef1d82f2b3b95fe124fde2b62606426de0452dc4f12ab70fdcfa",
         "url-security.js": "e1f370b3d9b9a74c7ae435d073a8a069a1bc8adbf4e0caa65c817099a48a1c22",
         "web-search.js": "18c1b9980b1724668e0aec9d354dcac236e0aa43fa58cbe652b1bcd3770d8d0e"
       }
@@ -334,8 +357,8 @@
         "oauth-device.js": "698aa9255bae47190c63527db7680aaab4f06392a108a0ff6444e32d31b7b89f",
         "oauth-watch-plan.js": "b1bbed52eeb0e2e50dd52d733897ebd70573fea3ff5f023b3c63347f92633d3e",
         "package.json": "3dda46564007101fdbca733f6023a4d61c5c04c0148a5bbbdc42ab36f3cbecc3",
-        "pnpm-lock.yaml": "81f4c683842beb12e8283695ffe6f1161a785909241ee9cfe5979426e8aba6d1",
-        "pnpm-workspace.yaml": "ab14893333c411d9eb864afe81d5e0f7922b75257a626e5abcf64300f8aa57a1",
+        "pnpm-lock.yaml": "09bccc750f68a66e660e006c6682320b5148fb10b729ce989c8f1ad81c378916",
+        "pnpm-workspace.yaml": "592f5fbd5992ad11b16b5e7bed527a5048944650ecb3d66141d5ecef8ce1b987",
         "state-store.js": "a8fb63096b8efdec8de1cb386eff371f1552f3fd71d96f25036e1c724285e0af",
         "test/mcp-client.test.js": "26a7fe3ffa33ad454eced32c7fab12975ac5c0914041dea68cb7e5467e753a10",
         "tool-routing.js": "b3405c9879443cdc257a1e97d4968859a8654e62ff7cfb90ec3a7a992a62e311",
@@ -390,34 +413,50 @@
       }
     },
     "process-retrospective": {
-      "version": "1.2.0",
+      "version": "1.3.0",
       "files": {
-        "README.md": "574f68f41120a33e6b976dbb4a5f2b25fe39072927984541afc4516517f10319",
-        "config.js": "30703e809f0a2c4b85ffb1e1f9cd7ee599224e9bc62c3bc19e71e271cbc72b5d",
-        "index.js": "9bd1ae078293211387ee3035b4c4dc7cc5852d08503cd55cf5fb3187cf1ace34",
-        "package.json": "dbd8d1792d6c6e63a6f273ece7118f8275204c5e04584843ec088f2bdd2e11ff",
+        "README.md": "47bf2e7a0abdd313437c3c3d1ff1dfca15d72af8671f21aefe010ed2f2f7a2d2",
+        "config.js": "41d3b99e8c3aeba7108fb02b1e9966cc695474bd3d5369d12b58edd46ca63fc8",
+        "index.js": "a1944a20831cd437c4a0e9645f187f54cdf023d896aadd8f4ba011e8893cd7ef",
+        "package.json": "f156ca35850df5641d2473c10129584de6749e3acb4ebca58d538aa4be628ce6",
         "reflection-plan.js": "6ec0338c8c29c1888f0d530e80f63668681fb89362089b8296bd4f3bd7b52130",
+        "review-gate.js": "b0ba609ad3b3487309cd37b17d12f6d54610fa7b973571e54280374fbc850294",
         "state-store.js": "6d0d39bff7e5e16558123c088eb8946bf3758596ae974598936b94424618c7cf",
         "test/reflection-plan.test.js": "c6c784a1de5dbcc5cfa50512bbaa2ec0747faa75842ced98b5581242b3ba1c02",
-        "tool.manifest.json": "250e4f57ed637755650386e0c41224a47928f0326d9b234848c0b1e6b39d5415"
+        "test/review-gate.test.js": "e5e55a5ac8be970fb0723b824a9bb5ef5a812af74a79a23ba24cdfe0ab121169",
+        "tool.manifest.json": "1282430e2534a21397b9f5a792fb5537ac6189622ac01251dfabc3dbabf6402d"
       }
     },
     "roster-sites": {
-      "version": null,
+      "version": "1.1.0",
       "files": {
+        "audio-deploy.js": "dd5da9e68cbd85053314d88623a6f4cedf2a63a9f73eff31054a80df81d56997",
+        "audio-route.js": "031d7291671a8effb0b8cfbb8a5b3ffe07f1cca6d6c4dbadf33d257693d69b01",
         "config.js": "3b717a6f97f1fad9594cfb18168eed8f87d672be10a8fc0fe19c39b44f87fe8b",
-        "index.js": "7f6e3d1cd4093033ea0a7d90fb70a6c00a979dbf55ded2937caef900a738c862",
-        "package.json": "4073ff273e9d1f0b061edb45a7a332b15c3f81543ff9eeea2f9fb7ac99a4f91f",
-        "tool.manifest.json": "f3e21d87dbbdda872f7f40ab785eec285d8cdf7cf4504425392eaf425eca3058"
+        "index.js": "800bef1d04ce63eae32b807913c88929db9407e281a630cbc759b4d9401806f2",
+        "package.json": "9b24cf9ee5c3911f2a1024efde2e0101211892c70c8b5c6219bd0f8567e35638",
+        "root-text.js": "cfc28fdd2dd145e21093e92b7a09ce90783aebd5a7698e40fb053036fe9d6b60",
+        "site-registration.js": "bd72de147a6ed1dbc6e3d6806173eb9baf80849989283eab63fd85a77913f132",
+        "static-deploy.js": "2c18622e4eeef77233d6d3dd86ef780e2604083a2e18fd474a8f7673adeffd5e",
+        "static-handler.js": "6eee96d7d2bfee49e8f7d24200410dc943959d82b052362c2f1888c3df40bb50",
+        "story-index.js": "1735fbb59a016e3448b371657aceeaeac455c699b848f8381491a07c399a63b4",
+        "story-pair.js": "de1b4317248ac3fc820d260a277c6172f5ab5e23118e313a80b8acc3ed6c7fdc",
+        "test/audio.test.js": "a6902a3b9f5ff429351738e53278c4f6960d2665fcecfe3237678d616188093e",
+        "test/root-text.test.js": "0b02a9ddfa33c1e9b00d6085eeb581d558b61c06e3c294f785c0898d7301a19a",
+        "test/site-registration.test.js": "ca3c4af302eec6bda8a3f72090437f9b6eecb3c8862e96f8d4baa411ec9db7b2",
+        "test/static-deploy.test.js": "3927c40dc5ffda4288b12bdc0c8288660b2b1cf5aa4560a7de95e68ce51d763c",
+        "tool.manifest.json": "613d110828580b9ece599bf221efb6c6d152d71f7e0dde5dc9e1c03c9aaaf9f1"
       }
     },
     "schedule-agent-task": {
-      "version": null,
+      "version": "1.1.0",
       "files": {
+        "appointments.js": "747154c3fb64d3dc36c93e489dc24bb517b94b44160f6ae8bf9450a603da5e9c",
+        "appointments.test.js": "861380fd16e448ba9085d2b4ae7200055f9f2735dfdad2882e2f74b8da8893c2",
         "config.js": "450f0af4f4c1ecc4c7180f2e364c8a59bfed69dd350fb6b47bce8641c2a37786",
-        "index.js": "0b0f571211eb9874e402b4e53d116c763afafcce8c957b8acec5ae16da86d394",
-        "package.json": "c126eff0ef70f9b4046c57df8167541655e396b2303c5c0777e30915c9532211",
-        "tool.manifest.json": "f703fb2e855340fd84f448eb63b91eec680226bb6d1767809b5f739f21f02569"
+        "index.js": "72bfcdf4a41ab60e764881a65f90fac67528a15df2d64f202049e9fef445fb14",
+        "package.json": "5218b90866c969b442015efcdfd41e4edc553ca597cc7fcec74054507f6bca36",
+        "tool.manifest.json": "e98e8e9241e3823dea9b0b54d62e6257a590f2cf3835eaa9e2e49fdb713d8d43"
       }
     },
     "signaling-server": {
@@ -671,29 +710,31 @@
       }
     },
     "whatsapp-web": {
-      "version": "1.3.6",
+      "version": "1.4.0",
       "files": {
         "MEDIA-COMPATIBILITY.md": "1b1593875f26156dd461f93ba68e8b32f521c2a51d00b14a2bbe8dea4affa161",
         "apply-whatsapp-web-compat.js": "1409c7cfd37350a84ff35e398c245c4f3ac582a878b6e35ad0cc84141790bf46",
         "audio-normalization.js": "20877ddecf7fa2d4d3abaaf3899cea65fb0b91cd393fca0cba911d019bef1013",
         "browser-cache.js": "f71c20f9ab5f04d9d46c5e2551b348d47baba89a10a07173070298098a6d5551",
         "config.js": "b0d4bed04dc87828ff61e1c9050a67ebf09a39cdc3ca52ce23be4c31476dda08",
-        "incoming-wake-gate.js": "13b773f47e4e92910ac8dcb9ebb31a0cc7f244791105f45cd61c387a7f2f03cc",
-        "index.js": "4a1030d83a9fbc527984b536ed8b81df97ff4652424af013f6dd229cceb37d48",
+        "incoming-wake-gate.js": "402f49f8c5fc2d9b8a6e7a72aa049b1917d3f61df6291d9fcbff7a153a0dcdf1",
+        "index.js": "7a9e959052b84bce48eb7295599f61178f6fadbc71bbadf2bb9e8b3206546bb1",
         "media-compat.js": "3ed5d388f36503fec719c156327f922c3357adb6a3363012b22507bf3a153df5",
         "message-burst.js": "06b2348ea409dffff74c9ae5a6d882f3d279f4adc39206e019f73df424dc4b3b",
-        "package.json": "1438e18111fcd4fd403e075d93bf8671ca47caa3b5c2382d974d202c2190cb91",
+        "package.json": "b855f3161144ebbd8d0105d7b59651fd93a0a71e7de847e6e65e25d4ff58ec15",
         "pnpm-lock.yaml": "7366d030b1cf34d4b1ce3d0b85aa436c5f5efb65216ef9aa081e0b4ca60b27a9",
         "pnpm-workspace.yaml": "3310e1e1719dbdb2c4aa4eccafb50f54ccf6a90e2053318598cc7ca0f029361b",
+        "quoted-message.js": "fa285cc76792713c2dbce9fd8253a36e46a698d2def5fa90be94d422ce81cbce",
         "send-media-compat.js": "ed233dbbaee2a4a24feeff47bf7049384f4df6e5f532259a7a4333ace9ddf819",
         "test/audio-normalization.test.mjs": "ec073192ba149d632848327a2cd58cb9791ffca1cf58f955583fc733f40d5109",
         "test/browser-cache.test.mjs": "636b91c16c9d4a67f38d625293fe371eb3d2e91818d131cacdec15e5bb255a69",
         "test/incoming-wake-gate.test.mjs": "f84f4f2e6c8d8ff2b7b63f9a266b15d7234bb017400826eac4f96a675cd7e25d",
         "test/media-compat.test.mjs": "516ec3a3a85256d27448fc35ba686a303729c44329221d97bba6a1702c924a8b",
         "test/message-burst.test.mjs": "d994f46054c7b464d47d714e6e364df5ba96206ce0b7069fccbb555fd61ed14f",
+        "test/quoted-message.test.mjs": "f62344376828ce42517b22f1dfff4a154bbeb1a0bb1695fc5ac86f04c6a46881",
         "test/send-media-compat.test.mjs": "daca067cf8e2a57b8e6a270d1dc0a97cf418e99af9d2ef32d8d8a0c17dee2d3b",
         "test/task-ipc.test.mjs": "8f1221d05d1f97f204ea244fb77d088e538f93aa22ea45272d09bef56c762172",
-        "tool.manifest.json": "0e69781581603eb5b8d948436c2a7b81df33962b8d7ae8362e1fe557a63a248e"
+        "tool.manifest.json": "a620c13c48e9b9d73e58c69819b8524146cd3fa8ebd1a74ae6b910e6956821a4"
       }
     },
     "whispermix-transcribe": {
@@ -746,18 +787,18 @@
       }
     },
     "x-session-reader": {
-      "version": "1.2.0",
+      "version": "1.2.1",
       "files": {
         "browser-cache.js": "f71c20f9ab5f04d9d46c5e2551b348d47baba89a10a07173070298098a6d5551",
         "config.js": "b0929c48bcf9ecf1408f246703fde3a6eb14e73bc4b8e71084910a96e641a7cb",
         "index.js": "c390dd9b89bd234103c88888981ea3882e955c3d1f4f5bb4642f8e48ef12d5bc",
-        "package.json": "968775d30b71fff684ec3541c781198db693bba5c46e723d51cbbab3f267b693",
+        "package.json": "8901c0b02a5bee4b8c1949cf03b292706a7610ea58e13e1e0629006c59f4cd39",
         "target-validation.js": "e085cffe5b44fab100d0456ad37554c71085ae2c04c368d6469c69b2e1fdf5b1",
         "test/target-validation.test.js": "ee26b8e4f8d8db600e65eb8a189fbb05ba2623c581cd874bde5d8d41f043d491",
-        "tool.manifest.json": "d5a1affbc6f5abb17d186cdfe1068c359e08ecdc2380c695610193da0ce5c72d"
+        "tool.manifest.json": "a16d8c31ec1398302fe8bc62e477488215adaf26639265a5d8159643cd9f161b"
       },
       "toolDependencies": {
-        "browser-session-bridge": "^0.1.0"
+        "browser-session-bridge": "^0.2.0"
       }
     },
     "youtube-transcript": {
