@@ -9,7 +9,7 @@ export function validateDraft(d){
  const cents=BigInt(d.amount.replace('.',''));if(cents<=0n||cents>=1000000000n)throw new Error('This flow only supports unidentified consumers below ARS 10,000,000');
  for(const field of ['date','from','to','due']){if(!/^\d{8}$/.test(d[field]))throw new Error('Dates must be YYYYMMDD');const iso=d[field].replace(/^(\d{4})(\d{2})(\d{2})$/,'$1-$2-$3');if(!Number.isFinite(Date.parse(iso))||new Date(iso).toISOString().slice(0,10)!==iso)throw new Error('Invalid date');}
  if(d.from>d.to||d.due<d.date)throw new Error('Invalid service period or due date');
- if(d.description!=='Servicios profesionales'||d.saleCondition!=='Contado')throw new Error('Only professional services paid cash/on delivery are supported');
+ if(d.description!=='Servicios profesionales'||!['Contado','Transferencia'].includes(d.saleCondition))throw new Error('Only professional services with Contado or Transferencia sale condition are supported');
  if(d.type!==11||d.concept!==2||!((d.docType===99&&d.docNumber===0&&!d.recipientName)||(d.docType===80&&Number.isSafeInteger(d.docNumber)&&validCuit(d.docNumber)&&typeof d.recipientName==='string'&&d.recipientName.trim().length>0&&d.recipientName.length<=100&&!/[\x00-\x1f\x7f]/.test(d.recipientName)))||d.vatCondition!==5||d.currency!=='PES')throw new Error('Unsupported fiscal draft');
  if(!/^\d{11}$/.test(d.cuit)||!Number.isInteger(d.point)||d.point<1||d.point>99999||!['production','homologation'].includes(d.environment))throw new Error('Invalid fiscal identity');
  return d;
