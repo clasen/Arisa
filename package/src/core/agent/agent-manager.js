@@ -131,8 +131,15 @@ async function assertDirectory(dir, label) {
   }
 }
 
-export function createPiSettingsManager(config) {
-  return SettingsManager.inMemory({ compaction: { ...config.pi.compaction } });
+// Pi compacts once context exceeds contextWindow - reserveTokens; widen the reserve so
+// large-window models compact at compactAtContextTokens instead of near their limit.
+export function createPiSettingsManager(config, model) {
+  const { compactAtContextTokens, ...compaction } = config.pi.compaction;
+  if (!Number.isSafeInteger(compactAtContextTokens) || compactAtContextTokens <= 0) {
+    throw new Error(`Invalid pi.compaction.compactAtContextTokens: ${String(compactAtContextTokens)}`);
+  }
+  const reserveTokens = Math.max(compaction.reserveTokens, (model?.contextWindow || 0) - compactAtContextTokens);
+  return SettingsManager.inMemory({ compaction: { ...compaction, reserveTokens } });
 }
 
 async function createArisaResourceLoader({ cwd, agentDir, settingsManager }) {
@@ -334,7 +341,7 @@ export class AgentManager {
       throw new Error(`No auth found for ${config.pi.provider}. Provide a Pi API key in bootstrap, or authenticate with Pi login for this provider during bootstrap.`);
     }
 
-    const settingsManager = createPiSettingsManager(config);
+    const settingsManager = createPiSettingsManager(config, model);
     const { session } = await createAgentSession({
       modelRuntime,
       model,
@@ -425,7 +432,7 @@ export class AgentManager {
         cancelRestart: (receiptId) => telegramProxy.cancelRestartReceipt(receiptId)
       })
     ], assertAccess);
-    const settingsManager = createPiSettingsManager(this.config);
+    const settingsManager = createPiSettingsManager(this.config, model);
     const resourceLoader = await createArisaResourceLoader({
       cwd: policy.workspaceDir,
       agentDir: arisaHomeDir,

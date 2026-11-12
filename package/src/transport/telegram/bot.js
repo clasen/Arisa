@@ -34,9 +34,9 @@ export {
   buildPrompt,
   buildReactionPrompt,
   collectText,
-  isScheduledTaskPrompt,
+  isAutomationPrompt,
   isSilentReply,
-  scheduledPromptSpeedOptions,
+  automationPromptSpeedOptions,
   shouldIncludeArtifactReference,
   withPromptSpeed
 } from "./prompt-builders.js";

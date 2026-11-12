@@ -137,7 +137,7 @@ export async function createArisaTuiRuntime({ config, client, logger } = {}) {
   const arisaAgentsContent = await readFile(arisaAgentsFile, "utf8");
   const customTools = createTuiCapabilityTools(client);
   const createRuntime = async ({ cwd, sessionManager, sessionStartEvent }) => {
-    const settingsManager = createPiSettingsManager(config);
+    const settingsManager = createPiSettingsManager(config, model);
     const services = await createAgentSessionServices({
       cwd,
       agentDir: arisaHomeDir,

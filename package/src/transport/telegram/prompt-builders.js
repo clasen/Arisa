@@ -171,14 +171,17 @@ export function buildStartupMessage(chatMeta = {}) {
   return "Arisa is back online.";
 }
 
-export function isScheduledTaskPrompt(prompt) {
-  return String(prompt || "").startsWith("Scheduled task fired.\n");
+const automationPromptPrefixes = ["Scheduled task fired.\n", "External event arrived.\n"];
+
+export function isAutomationPrompt(prompt) {
+  const text = String(prompt || "");
+  return automationPromptPrefixes.some((prefix) => text.startsWith(prefix));
 }
 
-export function scheduledPromptSpeedOptions({ prompt, session, speedController, configuredSpeed }) {
+export function automationPromptSpeedOptions({ prompt, session, speedController, configuredSpeed }) {
   return {
     speedController,
-    speed: isScheduledTaskPrompt(prompt) ? 1 : undefined,
+    speed: isAutomationPrompt(prompt) ? 1 : undefined,
     restoreSpeed: () => clampModelSpeed(session.model, configuredSpeed)
   };
 }

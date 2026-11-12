@@ -1,17 +1,23 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { buildPrompt, buildReactionPrompt, isScheduledTaskPrompt, scheduledPromptSpeedOptions, shouldIncludeArtifactReference, withPromptSpeed } from "../src/transport/telegram/bot.js";
+import { buildPrompt, buildReactionPrompt, isAutomationPrompt, automationPromptSpeedOptions, shouldIncludeArtifactReference, withPromptSpeed } from "../src/transport/telegram/bot.js";
 import { captureIncomingArtifact } from "../src/transport/telegram/media.js";
+import { buildAsyncEventPrompt } from "../src/transport/telegram/prompt-builders.js";
 
-test("scheduled agent prompts use normal speed for one turn and restore chat speed", async () => {
+test("automation prompts use normal speed for one turn and restore chat speed", async () => {
   let speed = 1.5;
   const speedController = {
     setSpeed(value) { speed = value; }
   };
-  assert.equal(isScheduledTaskPrompt("Scheduled task fired.\ntaskId: one"), true);
-  assert.equal(isScheduledTaskPrompt("Incoming Telegram message."), false);
+  assert.equal(isAutomationPrompt("Scheduled task fired.\ntaskId: one"), true);
+  assert.equal(isAutomationPrompt(await buildAsyncEventPrompt({
+    id: "event-1",
+    payload: { chatId: 1, prompt: "Incoming WhatsApp message." },
+    source: {}
+  })), true);
+  assert.equal(isAutomationPrompt("Incoming Telegram message."), false);
 
-  const speedOptions = scheduledPromptSpeedOptions({
+  const speedOptions = automationPromptSpeedOptions({
     prompt: "Scheduled task fired.\ntaskId: one",
     session: {
       model: { provider: "openai-codex", api: "openai-codex-responses", id: "gpt-5.5" }

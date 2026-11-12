@@ -13,7 +13,7 @@ import {
   collectText,
   normalizeIncomingArtifact,
   sanitizeSessionHandoff,
-  scheduledPromptSpeedOptions,
+  automationPromptSpeedOptions,
   withPromptSpeed
 } from "./prompt-builders.js";
 import {
@@ -103,7 +103,7 @@ export function createTelegramPromptController({
       chatState.activeSession = session;
       chatState.activeRoute = route;
       try {
-        text = await withPromptSpeed(scheduledPromptSpeedOptions({
+        text = await withPromptSpeed(automationPromptSpeedOptions({
           prompt,
           session,
           speedController,

@@ -103,7 +103,8 @@ export const piConfigDefaults = Object.freeze({
   compaction: Object.freeze({
     enabled: true,
     reserveTokens: 120_000,
-    keepRecentTokens: 20_000
+    keepRecentTokens: 20_000,
+    compactAtContextTokens: 80_000
   })
 });
 
