@@ -5,7 +5,7 @@ const authInvalidatedPatterns = [
   /authentication token has been invalidated/i,
   /token (?:has been )?invalidated/i,
   /try signing in again/i,
-  /auth(?:entication)? token (?:is |has been )?(?:expired|revoked|invalid)/i
+  /auth(?:entication)? token (?:is |has (?:been )?)?(?:expired|revoked|invalid)/i
 ];
 
 const missingAuthPatterns = [

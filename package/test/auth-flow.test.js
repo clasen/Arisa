@@ -14,7 +14,8 @@ test("classifies invalidated Pi authentication tokens", () => {
     new Error("Token invalidated by provider"),
     new Error("Please try signing in again"),
     new Error("auth token expired"),
-    new Error("Provided authentication token is expired.")
+    new Error("Provided authentication token is expired."),
+    new Error("Your authentication token has expired. Please try refreshing it.")
   ]) {
     assert.deepEqual(getPiAuthIssue(error), {
       kind: "invalidated-token",
