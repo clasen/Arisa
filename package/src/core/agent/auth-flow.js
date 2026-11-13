@@ -33,10 +33,15 @@ export function getPiAuthIssue(error) {
   return null;
 }
 
+const quotaLimitPattern = /usage limit|quota|rate[ _-]?limit|too many requests|insufficient[_ ]credits|credits? (?:exhausted|depleted)/i;
+
+export function isPiQuotaLimitError(error) {
+  return quotaLimitPattern.test(getErrorMessage(error));
+}
+
 export function buildPiRequestFailureMessage(error) {
   const message = getErrorMessage(error);
-  const limited = /usage limit|quota|rate[ _-]?limit|too many requests|insufficient[_ ]credits|credits? (?:exhausted|depleted)/i.test(message);
-  const title = limited
+  const title = isPiQuotaLimitError(error)
     ? "The provider's usage quota or request limit was reached. Retry when capacity is available; signing in again does not restore quota."
     : "Pi request could not be completed. This does not establish an authentication failure.";
   return `${title}\nDetails: ${message}`;

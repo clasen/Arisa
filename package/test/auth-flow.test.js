@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { buildPiAuthTelegramMessage, getErrorMessage, getPiAuthIssue } from "../src/core/agent/auth-flow.js";
+import { buildPiAuthTelegramMessage, getErrorMessage, getPiAuthIssue, isPiQuotaLimitError } from "../src/core/agent/auth-flow.js";
 
 test("extracts messages from Error instances and other thrown values", () => {
   assert.equal(getErrorMessage(new Error("boom")), "boom");
@@ -36,6 +36,18 @@ test("classifies missing Pi authentication", () => {
       message: error.message
     });
   }
+});
+
+test("classifies provider usage limits as quota errors, not auth issues", () => {
+  for (const error of [
+    new Error("Codex error: The usage limit has been reached"),
+    new Error("You’ve hit your usage limit. Upgrade to Pro"),
+    new Error("429 Too Many Requests")
+  ]) {
+    assert.equal(isPiQuotaLimitError(error), true);
+    assert.equal(getPiAuthIssue(error), null);
+  }
+  assert.equal(isPiQuotaLimitError(new Error("Model not found: openai-codex/gpt-x")), false);
 });
 
 test("ignores unrelated Pi errors", () => {

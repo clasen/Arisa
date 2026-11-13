@@ -4,7 +4,7 @@ import { ToolRegistry } from "../core/tools/tool-registry.js";
 import { TaskStore } from "../core/tasks/task-store.js";
 import { AgentManager } from "../core/agent/agent-manager.js";
 import { createCapabilityService } from "../core/capabilities/capability-service.js";
-import { getErrorMessage, getPiAuthIssue } from "../core/agent/auth-flow.js";
+import { getErrorMessage, getPiAuthIssue, isPiQuotaLimitError } from "../core/agent/auth-flow.js";
 import { createTelegramBot } from "../transport/telegram/bot.js";
 import { createToolProcessSupervisor } from "./tool-process-supervisor.js";
 import { createArisaCapabilities } from "./arisa-capabilities.js";
@@ -171,12 +171,15 @@ export async function createApp({ logger, runtimeOverrides, requestRestart } = {
         await agentManager.validateAgent();
       } catch (error) {
         const issue = getPiAuthIssue(error);
-        if (!issue) {
+        if (issue) {
+          skipAgentStartupPrompts = true;
+          logger?.error("app", `Pi auth validation failed; starting Telegram in auth recovery mode: ${getErrorMessage(error)}`);
+          await bot.notifyPiAuthIssue?.(error);
+        } else if (isPiQuotaLimitError(error)) {
+          logger?.error("app", `Pi validation hit the provider usage limit; starting Telegram until capacity returns: ${getErrorMessage(error)}`);
+        } else {
           throw error;
         }
-        skipAgentStartupPrompts = true;
-        logger?.error("app", `Pi auth validation failed; starting Telegram in auth recovery mode: ${getErrorMessage(error)}`);
-        await bot.notifyPiAuthIssue?.(error);
       }
       let ipcStarted = false;
       let supervisorStarted = false;
