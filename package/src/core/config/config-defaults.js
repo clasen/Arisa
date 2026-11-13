@@ -32,6 +32,7 @@ export const toolExecutionConfigDefaults = Object.freeze({
   toolHeapPercent: 65,
   toolMemoryHighPercent: 85,
   toolSwapMaxMb: 128,
+  toolMemoryPollIntervalMs: 500,
   capacities: Object.freeze({ browser: 1, orchestrator: 1 })
 });
 

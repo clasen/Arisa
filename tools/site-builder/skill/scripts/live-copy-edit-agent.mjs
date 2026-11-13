@@ -134,6 +134,20 @@ export async function runCopyEditBatchAgent(batch, opts = {}) {
   throw new Error('AI copy-edit batch did not return a valid completion payload. ' + tail.trim());
 }
 
+// Bun has no --check flag and would execute the file, so it parses in-process instead.
+function checkJavaScriptSyntax(file, content, cwd) {
+  if (process.versions.bun) {
+    try {
+      new Bun.Transpiler({ loader: 'js' }).transformSync(content);
+      return null;
+    } catch (err) {
+      return String(err?.message || err).trim();
+    }
+  }
+  const check = spawnSync(process.execPath, ['--check', file], { cwd, encoding: 'utf-8' });
+  return check.status === 0 ? null : (check.stderr || check.stdout || '').trim();
+}
+
 export function runCopyEditPostApplyChecks({ cwd = process.cwd(), files = [] } = {}) {
   const failures = [];
   const warnings = [];
@@ -166,14 +180,8 @@ export function runCopyEditPostApplyChecks({ cwd = process.cwd(), files = [] } =
     if (syntaxCheck?.failure) failures.push(syntaxCheck.failure);
     if (syntaxCheck?.warning) warnings.push(syntaxCheck.warning);
     if (/\.(mjs|cjs|js)$/.test(relativeFile)) {
-      const check = spawnSync(process.execPath, ['--check', file], { cwd, encoding: 'utf-8' });
-      if (check.status !== 0) {
-        failures.push({
-          file: relativeFile,
-          reason: 'invalid_js',
-          message: (check.stderr || check.stdout || '').trim(),
-        });
-      }
+      const message = checkJavaScriptSyntax(file, content, cwd);
+      if (message !== null) failures.push({ file: relativeFile, reason: 'invalid_js', message });
     }
   }
   const validation = runManualEditValidationScript(cwd);

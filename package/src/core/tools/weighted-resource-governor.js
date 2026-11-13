@@ -12,6 +12,7 @@ const defaultCoreReserveMb = 384;
 const defaultToolHeapPercent = 65;
 const defaultToolMemoryHighPercent = 85;
 const defaultToolSwapMaxMb = 128;
+const defaultToolMemoryPollIntervalMs = 500;
 const defaultMaxToolHeapMb = 4096;
 const defaultMaxToolMemoryMb = 16_384;
 const defaultMaxToolOutputBytes = 1_048_576;
@@ -76,6 +77,7 @@ export function normalizeToolExecutionPolicy(policy = {}) {
     toolHeapPercent: boundedInteger(policy?.toolHeapPercent, defaultToolHeapPercent, 25, 90),
     toolMemoryHighPercent: boundedInteger(policy?.toolMemoryHighPercent, defaultToolMemoryHighPercent, 50, 95),
     toolSwapMaxMb: boundedInteger(policy?.toolSwapMaxMb, defaultToolSwapMaxMb, 0, 4096),
+    toolMemoryPollIntervalMs: boundedInteger(policy?.toolMemoryPollIntervalMs, defaultToolMemoryPollIntervalMs, 50, 60_000),
     capacities
   };
 }

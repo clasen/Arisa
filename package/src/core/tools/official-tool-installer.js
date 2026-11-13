@@ -175,7 +175,6 @@ async function validateEntrypoint(toolDir, toolName, locked) {
   const entry = manifest.entry || "index.js";
   const entryPath = path.join(toolDir, entry);
   if (!(await exists(entryPath))) throw new Error(`Official tool entry does not exist: ${entry}`);
-  await runCommand(process.execPath, ["--check", entry], { cwd: toolDir, timeoutMs: 30_000 });
   await runCommand(process.execPath, [entry, "--help"], { cwd: toolDir, timeoutMs: 30_000 });
 }
 

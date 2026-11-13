@@ -193,7 +193,7 @@ export async function augmentEventWithAcceptHandling(event, base, token) {
 
   try {
     const out = execFileSync(
-      'node',
+      process.execPath,
       [acceptScript, ...scriptArgs],
       { encoding: 'utf-8', cwd: process.cwd(), timeout: 30_000 },
     );

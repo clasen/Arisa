@@ -10,7 +10,7 @@ import { daemonConfigDefaults } from "../config/config-defaults.js";
 import { SkillRegistry } from "../skills/skill-registry.js";
 import { ToolUsageStore } from "./tool-usage-store.js";
 import { inspectToolDependencies, normalizeToolDependencies } from "./tool-dependencies.js";
-import { normalizeToolExecution, WeightedResourceGovernor } from "./weighted-resource-governor.js";
+import { normalizeToolExecution, normalizeToolExecutionPolicy, WeightedResourceGovernor } from "./weighted-resource-governor.js";
 import {
   isolatedToolProcessInvocation,
   runToolHelpProcess,
@@ -199,6 +199,7 @@ export class ToolRegistry {
       policy: executionPolicy,
       logger
     });
+    this.memoryPollIntervalMs = normalizeToolExecutionPolicy(executionPolicy).toolMemoryPollIntervalMs;
     this.concurrentExecutions = new Map();
   }
 
@@ -335,6 +336,8 @@ export class ToolRegistry {
         timeoutMs: this.helpTimeoutMs,
         killGraceMs: this.killGraceMs,
         maxOutputBytes: execution?.maxOutputBytes || daemonConfigDefaults.ipcFrameBytes,
+        maxRssMb: invocation.isolated ? null : execution?.maxMemoryMb,
+        memoryPollIntervalMs: this.memoryPollIntervalMs,
         label: `Tool help for ${name}`
       });
       const help = result.stdout || result.stderr;
@@ -498,6 +501,8 @@ export class ToolRegistry {
           maxOutputBytes: tool.execution?.maxOutputBytes || daemonConfigDefaults.ipcFrameBytes,
           timeoutMs: this.runTimeoutMs,
           killGraceMs: this.killGraceMs,
+          maxRssMb: processInvocation.isolated ? null : execution?.maxMemoryMb,
+          memoryPollIntervalMs: this.memoryPollIntervalMs,
           label: `Tool run for ${name}`
         });
         if (processResult.stderr.trim()) {
@@ -538,7 +543,7 @@ export class ToolRegistry {
           }
         });
       }
-      if (["TOOL_PROCESS_TIMEOUT", "TOOL_OUTPUT_LIMIT", "TOOL_PROCESS_MEMORY_LIMIT", "TOOL_PROCESS_EXIT"].includes(error?.code)) {
+      if (["TOOL_PROCESS_TIMEOUT", "TOOL_OUTPUT_LIMIT", "TOOL_PROCESS_MEMORY_LIMIT", "TOOL_PROCESS_MEMORY_WATCH", "TOOL_PROCESS_EXIT"].includes(error?.code)) {
         return normalizeToolResult(name, {
           ok: false,
           status: "outcome_uncertain",

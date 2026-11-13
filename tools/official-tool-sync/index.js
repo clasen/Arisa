@@ -202,7 +202,6 @@ async function validateStage(stageDir, expectedName, config) {
   const entry = manifest.entry || "index.js";
   if (!(await exists(path.join(stageDir, entry)))) throw new Error(`Staged entry does not exist: ${entry}`);
   const timeoutMs = parsePositive(config.commandTimeoutMs, 180000);
-  await runCommand(process.execPath, ["--check", entry], { cwd: stageDir, timeoutMs });
   await runCommand(process.execPath, [entry, "--help"], {
     cwd: stageDir,
     timeoutMs,

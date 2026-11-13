@@ -106,7 +106,6 @@ async function validateTool(toolDir, expectedName) {
   if (manifest.name !== expectedName) throw new Error(`Bootstrap manifest mismatch for ${expectedName}`);
   const entry = manifest.entry || "index.js";
   const env = { ...process.env, ARISA_PACKAGE_DIR: arisaPackageDir };
-  await runCommand(process.execPath, ["--check", entry], { cwd: toolDir, timeoutMs: 30_000, env });
   await runCommand(process.execPath, [entry, "--help"], { cwd: toolDir, timeoutMs: 30_000, env });
 }
 

@@ -117,7 +117,7 @@ test("wraps declared Linux tool processes in a memory-limited cgroup", () => {
       "-p", "MemoryHigh=326M",
       "-p", "MemoryMax=384M",
       "-p", "MemorySwapMax=128M",
-      "--", "choom", "-n", "500", "--", "node", "--max-old-space-size=192", "/tool/index.js", "run"
+      "--", "choom", "-n", "500", "--", process.execPath, "--max-old-space-size=192", "/tool/index.js", "run"
     ],
     isolated: true
   });
@@ -479,6 +479,33 @@ while (true) retained.push(new Array(1_000_000).fill("heap-pressure"));
   assert.equal(failed.status, "outcome_uncertain");
 
   const healthy = await registry.run({ name: "healthy-after-oom", chatId: "chat-1", request: { args: {} } });
+  assert.equal(healthy.ok, true);
+});
+
+test("stops a tool whose RSS exceeds its memory limit outside the JS heap", async () => {
+  await resetHome();
+  const dir = await createFakeTool("native-memory-tool", {
+    execution: { resourceClass: "browser", weight: 1, maxHeapMb: 512, maxMemoryMb: 128 }
+  });
+  await writeFile(path.join(dir, "index.js"), `
+const retained = [];
+setInterval(() => retained.push(Buffer.alloc(16 * 1024 * 1024, 1)), 20);
+`, "utf8");
+  await createFakeTool("healthy-after-rss-limit");
+  const registry = new ToolRegistry({
+    runTimeoutMs: 30_000,
+    executionPolicy: { maxWorkerRssMb: 4096, maxSwapUsedPercent: 100, toolMemoryPollIntervalMs: 50 }
+  });
+  await registry.load();
+
+  const startedAt = Date.now();
+  const failed = await registry.run({ name: "native-memory-tool", chatId: "chat-1", request: { args: {} } });
+  assert.equal(failed.ok, false);
+  assert.equal(failed.status, "outcome_uncertain");
+  assert.match(failed.error, /exceeded its 128 MiB memory limit/);
+  assert.ok(Date.now() - startedAt < 15_000);
+
+  const healthy = await registry.run({ name: "healthy-after-rss-limit", chatId: "chat-1", request: { args: {} } });
   assert.equal(healthy.ok, true);
 });
 
