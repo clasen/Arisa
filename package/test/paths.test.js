@@ -14,6 +14,7 @@ import {
   getChatTelegramWorkspacesFile,
   getChatToolConfigPath,
   getChatToolUsageFile,
+  getChatModelUsageFile,
   getChatToolStateDir,
   getToolStateDir,
   stateDir
@@ -46,6 +47,13 @@ test("keeps tool usage scoped below the chat state directory", () => {
   assert.equal(
     getChatToolUsageFile("chat-1"),
     path.join(chatsDir, "chat-1", "state", "tool-usage.json")
+  );
+});
+
+test("keeps model usage scoped below the chat state directory", () => {
+  assert.equal(
+    getChatModelUsageFile("chat-1"),
+    path.join(chatsDir, "chat-1", "state", "model-usage.json")
   );
 });
 

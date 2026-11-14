@@ -15,6 +15,7 @@ import { createTelegramModelCallbackHandler } from "./model-callback.js";
 import { createTelegramTaskDispatcher } from "./task-dispatcher.js";
 import { createTelegramSessionBridgeController } from "./telegram-session-bridge.js";
 import { createTelegramToolsCommandHandler } from "./telegram-tools-command.js";
+import { createTelegramUsageCommandHandler } from "./telegram-usage-command.js";
 import { createTelegramWorkspaceController } from "./telegram-workspace-controller.js";
 import { resolveTelegramWorkspaceRoute } from "./workspace-group.js";
 import { migrateLegacyReplyTopics, WorkspaceTopicStore } from "./workspace-topic-store.js";
@@ -75,6 +76,7 @@ export const telegramCommands = Object.freeze([
   { command: "doctor", description: "Check runtime health" },
   { command: "update", description: "Check and apply updates" },
   { command: "tools", description: "Tool usage counts" },
+  { command: "usage", description: "Where tokens went" },
   { command: "model", description: "Choose chat model" },
   { command: "effort", description: "Choose reasoning effort" },
   { command: "speed", description: "Choose model speed" },
@@ -457,6 +459,14 @@ export async function createTelegramBot({ config, artifactStore, toolRegistry, t
     contextRoute,
     toolRegistry,
     withTyping,
+    logger
+  }));
+
+  bot.command("usage", createTelegramUsageCommandHandler({
+    authorize: authorizeContext,
+    contextRoute,
+    agentManager,
+    config,
     logger
   }));
 

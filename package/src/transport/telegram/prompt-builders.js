@@ -178,6 +178,28 @@ export function isAutomationPrompt(prompt) {
   return automationPromptPrefixes.some((prefix) => text.startsWith(prefix));
 }
 
+function promptField(lines, names) {
+  for (const name of names) {
+    const line = lines.find((candidate) => candidate.startsWith(`${name}: `));
+    if (line) return line.slice(name.length + 2).trim();
+  }
+  return "";
+}
+
+// Names what started an agent run, from the prompt formats built in this module, for the usage report.
+export function describePromptTrigger(prompt) {
+  const lines = String(prompt || "").split("\n");
+  const headline = lines[0].trim();
+  if (headline === "Incoming Telegram message.") {
+    return { kind: "message", detail: promptField(lines, ["text", "transcriptText", "kind"]) };
+  }
+  if (headline === "Incoming Telegram reaction.") return { kind: "reaction", detail: promptField(lines, ["addedReactions", "removedReactions"]) };
+  if (headline === "Scheduled task fired.") return { kind: "task", detail: promptField(lines, ["text", "taskId"]) };
+  if (headline === "External event arrived.") return { kind: "event", detail: promptField(lines, ["event", "taskId"]) };
+  if (headline === "System event: /new requested.") return { kind: "new", detail: "" };
+  return { kind: "other", detail: headline };
+}
+
 // Records in the chat session what an isolated automation told the user, without its working context.
 export function buildAutomationParentNote({ prompt, text, maxChars }) {
   const origin = String(prompt).split("\n").slice(0, 2).join(" ").trim();

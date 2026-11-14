@@ -113,6 +113,10 @@ export const piConfigDefaults = Object.freeze({
     maxModelCalls: 80,
     timeoutMs: 15 * 60_000,
     parentNoteMaxChars: 1_500
+  }),
+  usage: Object.freeze({
+    windowMs: 24 * 60 * 60_000,
+    reportRows: 12
   })
 });
 
@@ -198,6 +202,10 @@ export function applyConfigDefaults(config) {
       subagents: {
         ...piConfigDefaults.subagents,
         ...(configuredPi.subagents || {})
+      },
+      usage: {
+        ...piConfigDefaults.usage,
+        ...(configuredPi.usage || {})
       },
       chatModels: cloneChatModels(configuredPi.chatModels)
     },

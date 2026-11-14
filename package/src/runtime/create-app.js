@@ -6,6 +6,7 @@ import { AgentManager } from "../core/agent/agent-manager.js";
 import { createCapabilityService } from "../core/capabilities/capability-service.js";
 import { getErrorMessage, getPiAuthIssue, isPiQuotaLimitError } from "../core/agent/auth-flow.js";
 import { createTelegramBot } from "../transport/telegram/bot.js";
+import { describePromptTrigger } from "../transport/telegram/prompt-builders.js";
 import { createToolProcessSupervisor } from "./tool-process-supervisor.js";
 import { createArisaCapabilities } from "./arisa-capabilities.js";
 import { createIpcServer } from "./ipc/ipc-server.js";
@@ -120,7 +121,7 @@ export async function createApp({ logger, runtimeOverrides, requestRestart } = {
   await toolRegistry.load();
   logger?.log("app", `loaded ${toolRegistry.list().length} tools`);
 
-  const agentManager = new AgentManager({ config, artifactStore, toolRegistry, taskStore, logger });
+  const agentManager = new AgentManager({ config, artifactStore, toolRegistry, taskStore, logger, describePrompt: describePromptTrigger });
   const capabilityService = createCapabilityService({
     artifactStore,
     taskStore,

@@ -23,6 +23,7 @@ import { WorkerHeapCircuitBreaker } from "./worker-heap-circuit-breaker.js";
 import { WorkerToolFanoutController } from "./worker-tool-fanout.js";
 import { compactionRotationRequest, normalizeSessionRotationPolicy } from "./session-rotation.js";
 import { AgentTurnCoordinator } from "./agent-turn-coordinator.js";
+import { describePromptByFirstLine, ModelUsageStore, trackModelUsage } from "./model-usage.js";
 
 const piValidationTimeoutMs = 60_000;
 const arisaToolNames = [
@@ -162,8 +163,9 @@ async function createArisaResourceLoader({ cwd, agentDir, settingsManager }) {
 }
 
 export class AgentManager {
-  constructor({ config, artifactStore, toolRegistry, taskStore, logger }) {
+  constructor({ config, artifactStore, toolRegistry, taskStore, logger, describePrompt = describePromptByFirstLine }) {
     this.config = config;
+    this.describePrompt = describePrompt;
     this.artifactStore = artifactStore;
     this.toolRegistry = toolRegistry;
     this.taskStore = taskStore;
@@ -190,6 +192,7 @@ export class AgentManager {
       config: config.pi.turnCoordinator
     });
     this.subagents = new SubagentRunner({ config: config.pi.subagents, logger });
+    this.modelUsage = new ModelUsageStore({ config: config.pi.usage });
     this.sessions = this.sessionLifecycle.sessions;
     this.pendingNewSessions = this.sessionLifecycle.pendingNewSessions;
     this.pendingSessionHandoffs = this.sessionLifecycle.pendingSessionHandoffs;
@@ -228,6 +231,7 @@ export class AgentManager {
     this.toolFanout.setConfig(config.pi.toolFanout);
     this.turnCoordinator.setConfig(config.pi.turnCoordinator);
     this.subagents.setConfig(config.pi.subagents);
+    this.modelUsage.setConfig(config.pi.usage);
     this.config = config;
   }
 
@@ -371,7 +375,7 @@ export class AgentManager {
 
   // Builds a Pi session with the Arisa tool surface. `delegation` adds delegate_task, which is
   // withheld from subagent sessions so a subagent can never spawn another one.
-  async openPiSession({ sessionKey, modelSelection, telegram, scopeChatId, accessGuard, delegation, createSessionManager, speed = modelSelection.speed }) {
+  async openPiSession({ sessionKey, modelSelection, telegram, scopeChatId, accessGuard, delegation, createSessionManager, usageTrigger, speed = modelSelection.speed }) {
     const effectiveModelId = modelSelection.model;
     const modelRuntime = await createPiRuntime({
       provider: this.config.pi.provider,
@@ -450,6 +454,14 @@ export class AgentManager {
     const speedController = createModelSpeedController(session.agent.streamFunction, effectiveSpeed);
     session.agent.streamFunction = speedController.streamFn;
     speedTarget.current = speedController;
+    trackModelUsage(session, {
+      store: this.modelUsage,
+      chatId: scopeChatId,
+      getSpeed: () => speedController.speed,
+      describePrompt: this.describePrompt,
+      trigger: usageTrigger,
+      logger: this.logger
+    });
 
     if (!hasExistingSession) {
       this.logger?.log("agent", `created new session for chat ${sessionKey}`);
@@ -476,6 +488,7 @@ export class AgentManager {
           scopeChatId,
           accessGuard,
           delegation: false,
+          usageTrigger: kind === "delegate" ? { kind, detail: label } : undefined,
           speed,
           createSessionManager: (policy) => {
             const sessionManager = SessionManager.inMemory(policy.workspaceDir);
