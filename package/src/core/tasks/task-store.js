@@ -428,8 +428,8 @@ export class TaskStore {
   // Bounded listing: only `limit` rows are parsed, active tasks first, newest first.
   async listPage(filter = {}, limit) {
     if (!Number.isSafeInteger(limit) || limit < 0) throw new Error("Invalid task list limit");
-    const { id, chatId, status, kind } = filter;
-    const where = { id, chatId, status, kind };
+    const { id, chatId, status, kind, activeOnly } = filter;
+    const where = { id, chatId, status, kind, activeOnly };
     return this.read((db) => ({
       tasks: selectTasks(db, { ...where, activeFirst: true, limit }),
       total: countTasks(db, where)

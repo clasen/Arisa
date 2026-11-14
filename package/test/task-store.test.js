@@ -413,7 +413,7 @@ test("cancelAll preserves done and failed tasks and respects chat filters", asyn
   );
 });
 
-test("pages scheduled tasks in SQL with active tasks first and bounded history", async () => {
+test("lists only active scheduled tasks unless a status is requested", async () => {
   await resetHome();
   const store = new TaskStore();
   const tasks = Array.from({ length: 55 }, (_, index) => ({ id: `done-${index}`, kind: "agent_task", status: "done" }));
@@ -430,11 +430,22 @@ test("pages scheduled tasks in SQL with active tasks first and bounded history",
     context: { selectScheduledTasks: true }
   });
 
-  assert.equal(result.total, 55);
-  assert.equal(result.returned, 50);
+  assert.equal(result.total, 2);
   assert.equal(result.limit, 50);
-  assert.equal(result.truncated, true);
-  assert.deepEqual(result.tasks.slice(0, 3).map((task) => task.id), ["blocked-1", "pending-1", "done-54"]);
+  assert.equal(result.truncated, false);
+  assert.deepEqual(result.tasks.map((task) => task.id), ["blocked-1", "pending-1"]);
+
+  const history = await service.execute({
+    method: "tasks.list",
+    actorToolName: "list_scheduled_tasks",
+    chatId: "chat-1",
+    params: { status: "done" },
+    context: { selectScheduledTasks: true }
+  });
+  assert.equal(history.total, 53);
+  assert.equal(history.returned, 50);
+  assert.equal(history.truncated, true);
+  assert.equal(history.tasks[0].id, "done-54");
 });
 
 test("pages scheduled tasks by explicit status and limit, newest first", async () => {

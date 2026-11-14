@@ -99,6 +99,7 @@ function whereClause(filter, values) {
       values.push(String(filter[key]));
     }
   }
+  if (filter.activeOnly) conditions.push(`status IN ${activeStatusesSql}`);
   if (filter.due) {
     conditions.push("status IN ('pending', 'blocked_auth')", "run_at <= ?");
     values.push(filter.due.now);

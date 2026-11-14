@@ -8,7 +8,14 @@ import { buildPiToolPolicy } from "./core-tools.js";
 import { createSystemShellTool } from "./system-shell-tool.js";
 import { clampModelSpeed, createModelSpeedController } from "./model-speed.js";
 import { arisaHomeDir } from "../../platform/paths.js";
-import { AgentSessionLifecycle } from "./agent-session-lifecycle.js";
+import { AgentSessionLifecycle, formatSessionStartOperationalNotes, loadSessionStartOperationalNotes } from "./agent-session-lifecycle.js";
+import {
+  SubagentRunner,
+  buildDelegatedTaskPrompt,
+  createDelegateTaskTool,
+  delegateTaskToolName,
+  promptForFinalText
+} from "./subagent-runner.js";
 import { createPiCapabilityTools } from "./pi-capability-tools.js";
 import { ToolResourceNoteStore } from "../tools/tool-resource-note-store.js";
 import { materializeToolOutput } from "../tools/tool-output-materializer.js";
@@ -182,6 +189,7 @@ export class AgentManager {
       logger,
       config: config.pi.turnCoordinator
     });
+    this.subagents = new SubagentRunner({ config: config.pi.subagents, logger });
     this.sessions = this.sessionLifecycle.sessions;
     this.pendingNewSessions = this.sessionLifecycle.pendingNewSessions;
     this.pendingSessionHandoffs = this.sessionLifecycle.pendingSessionHandoffs;
@@ -219,6 +227,7 @@ export class AgentManager {
     this.heapCircuitBreaker.setConfig(config.pi.heapCircuitBreaker);
     this.toolFanout.setConfig(config.pi.toolFanout);
     this.turnCoordinator.setConfig(config.pi.turnCoordinator);
+    this.subagents.setConfig(config.pi.subagents);
     this.config = config;
   }
 
@@ -234,6 +243,7 @@ export class AgentManager {
     const sessionKey = String(chatId);
     const context = this.sessions.get(sessionKey);
     try {
+      await this.subagents.abort(sessionKey);
       await context?.session?.abort?.();
     } finally {
       await this.sessionLifecycle.closeCached(sessionKey);
@@ -246,7 +256,8 @@ export class AgentManager {
       ...diagnostic,
       heapCircuitBreaker: this.heapCircuitBreaker.getDiagnostic(),
       toolFanout: this.toolFanout.getDiagnostic(),
-      turnCoordinator: this.turnCoordinator.diagnostic()
+      turnCoordinator: this.turnCoordinator.diagnostic(),
+      subagents: this.subagents.diagnostic()
     };
   }
 
@@ -358,6 +369,144 @@ export class AgentManager {
     }
   }
 
+  // Builds a Pi session with the Arisa tool surface. `delegation` adds delegate_task, which is
+  // withheld from subagent sessions so a subagent can never spawn another one.
+  async openPiSession({ sessionKey, modelSelection, telegram, scopeChatId, accessGuard, delegation, createSessionManager, speed = modelSelection.speed }) {
+    const effectiveModelId = modelSelection.model;
+    const modelRuntime = await createPiRuntime({
+      provider: this.config.pi.provider,
+      apiKey: this.config.pi.apiKey
+    });
+    const model = modelRuntime.getModel(this.config.pi.provider, effectiveModelId);
+    if (!model) throw new Error(`Model not found: ${this.config.pi.provider}/${effectiveModelId}`);
+    if (requiresProviderAuth(model) && !this.config.pi.apiKey && !hasProviderAuth(this.config.pi.provider, modelRuntime)) {
+      throw new Error(`No auth found for ${this.config.pi.provider}. Re-run bootstrap and complete login for this provider before Telegram starts.`);
+    }
+    const thinkingLevel = clampModelThinkingLevel(model, modelSelection.thinkingLevel);
+    const effectiveSpeed = clampModelSpeed(model, speed);
+
+    const policy = buildPiToolPolicy({
+      config: this.config,
+      customToolNames: [...arisaToolNames, "system_shell", ...(delegation ? [delegateTaskToolName] : [])]
+    });
+    await assertDirectory(policy.workspaceDir, "pi.workspaceDir");
+    const { sessionManager, isNewSession } = createSessionManager(policy);
+    const hasExistingSession = sessionManager.buildSessionContext().messages.length > 0;
+    this.logger?.log("agent", `${hasExistingSession ? "resuming" : "creating"} session for chat ${sessionKey} with model ${effectiveModelId} effort ${thinkingLevel} speed ${effectiveSpeed}x`);
+    const telegramTarget = { current: telegram };
+    const accessGuardTarget = { current: accessGuard };
+    const telegramProxy = {
+      sendMedia: (...args) => telegramTarget.current.sendMedia(...args),
+      createForumTopic: (...args) => telegramTarget.current.createForumTopic(...args),
+      initializeForumTopic: (...args) => telegramTarget.current.initializeForumTopic(...args),
+      prepareRestartReceipt: (...args) => telegramTarget.current.prepareRestartReceipt(...args),
+      cancelRestartReceipt: (...args) => telegramTarget.current.cancelRestartReceipt(...args),
+      getTaskContext: (...args) => telegramTarget.current.getTaskContext?.(...args) || null,
+      getAgentTaskExecution: (...args) => telegramTarget.current.getAgentTaskExecution?.(...args) || null
+    };
+    const assertAccess = () => accessGuardTarget.current();
+    const speedTarget = { current: null };
+    const customTools = guardTools([
+      ...this.createTools(telegramProxy, scopeChatId, policy),
+      createSystemShellTool({
+        workspaceDir: policy.workspaceDir,
+        shell: policy.shell,
+        beforeRestart: (summary) => telegramProxy.prepareRestartReceipt(summary),
+        cancelRestart: (receiptId) => telegramProxy.cancelRestartReceipt(receiptId)
+      }),
+      ...(delegation ? [createDelegateTaskTool({
+        run: ({ task, label }) => this.runSubagent({
+          parentKey: sessionKey,
+          kind: "delegate",
+          label,
+          modelSelection,
+          telegram: telegramProxy,
+          scopeChatId,
+          accessGuard: assertAccess,
+          speed: speedTarget.current.speed,
+          execute: (session) => promptForFinalText(session, buildDelegatedTaskPrompt(task))
+        })
+      })] : [])
+    ], assertAccess);
+    const settingsManager = createPiSettingsManager(this.config, model);
+    const resourceLoader = await createArisaResourceLoader({
+      cwd: policy.workspaceDir,
+      agentDir: arisaHomeDir,
+      settingsManager
+    });
+    const { session } = await createAgentSession({
+      cwd: policy.workspaceDir,
+      agentDir: arisaHomeDir,
+      resourceLoader,
+      modelRuntime,
+      model,
+      thinkingLevel,
+      tools: policy.tools,
+      excludeTools: policy.excludeTools,
+      customTools,
+      settingsManager,
+      sessionManager
+    });
+    const speedController = createModelSpeedController(session.agent.streamFunction, effectiveSpeed);
+    session.agent.streamFunction = speedController.streamFn;
+    speedTarget.current = speedController;
+
+    if (!hasExistingSession) {
+      this.logger?.log("agent", `created new session for chat ${sessionKey}`);
+      this.logger?.log("agent", `runtime context for chat ${sessionKey}:\n${buildAgentRuntimeContext({
+        workspaceDir: policy.workspaceDir,
+        coreTools: policy.coreTools
+      })}`);
+    }
+    return { session, speedController, telegramTarget, accessGuardTarget, isNewSession };
+  }
+
+  // Runs one task in an ephemeral in-memory session that starts without the chat history.
+  async runSubagent({ parentKey, kind, label, modelSelection, telegram, scopeChatId, accessGuard, speed, execute }) {
+    return this.subagents.run({
+      parentKey,
+      kind,
+      label,
+      execute,
+      openSession: async (runId) => {
+        const { session } = await this.openPiSession({
+          sessionKey: `${parentKey}#${runId}`,
+          modelSelection,
+          telegram,
+          scopeChatId,
+          accessGuard,
+          delegation: false,
+          speed,
+          createSessionManager: (policy) => {
+            const sessionManager = SessionManager.inMemory(policy.workspaceDir);
+            const operationalNotes = formatSessionStartOperationalNotes(loadSessionStartOperationalNotes());
+            if (operationalNotes) {
+              sessionManager.appendCustomMessageEntry("arisa-operational-notes", operationalNotes, false, { source: "session-start" });
+            }
+            return { sessionManager, isNewSession: false };
+          }
+        });
+        return session;
+      }
+    });
+  }
+
+  // Scheduled tasks and external events run isolated so they neither pay for nor pollute the chat context.
+  async runIsolatedAutomation({ sessionKey, label, telegram, scopeChatId, accessGuard, execute }) {
+    await this.heapCircuitBreaker.admit();
+    return this.runSubagent({
+      parentKey: String(sessionKey),
+      kind: "automation",
+      label,
+      modelSelection: resolveChatModelSelection(this.config, String(sessionKey)),
+      telegram,
+      scopeChatId,
+      accessGuard,
+      speed: 1,
+      execute
+    });
+  }
+
   async getSessionContext(chatId, telegram, { scopeChatId = chatId, accessGuard = async () => {} } = {}) {
     await this.heapCircuitBreaker.admit();
     const sessionKey = String(chatId);
@@ -387,80 +536,15 @@ export class AgentManager {
       this.pendingNewSessions.add(sessionKey);
     }
 
-    const modelRuntime = await createPiRuntime({
-      provider: this.config.pi.provider,
-      apiKey: this.config.pi.apiKey
-    });
-    const model = modelRuntime.getModel(this.config.pi.provider, effectiveModelId);
-    if (!model) throw new Error(`Model not found: ${this.config.pi.provider}/${effectiveModelId}`);
-    if (requiresProviderAuth(model) && !this.config.pi.apiKey && !hasProviderAuth(this.config.pi.provider, modelRuntime)) {
-      throw new Error(`No auth found for ${this.config.pi.provider}. Re-run bootstrap and complete login for this provider before Telegram starts.`);
-    }
-    const thinkingLevel = clampModelThinkingLevel(model, modelSelection.thinkingLevel);
-    const speed = clampModelSpeed(model, modelSelection.speed);
-
-    const policy = buildPiToolPolicy({
-      config: this.config,
-      customToolNames: [...arisaToolNames, "system_shell"]
-    });
-    await assertDirectory(policy.workspaceDir, "pi.workspaceDir");
-    const { sessionManager, isNewSession } = this.createSessionManager(
+    const { session, speedController, telegramTarget, accessGuardTarget, isNewSession } = await this.openPiSession({
       sessionKey,
-      policy.workspaceDir,
-      modelSelection.sessionRevision
-    );
-    const hasExistingSession = sessionManager.buildSessionContext().messages.length > 0;
-    this.logger?.log("agent", `${hasExistingSession ? "resuming" : "creating"} session for chat ${sessionKey} with model ${effectiveModelId} effort ${thinkingLevel} speed ${speed}x`);
-    const telegramTarget = { current: telegram };
-    const accessGuardTarget = { current: accessGuard };
-    const telegramProxy = {
-      sendMedia: (...args) => telegramTarget.current.sendMedia(...args),
-      createForumTopic: (...args) => telegramTarget.current.createForumTopic(...args),
-      initializeForumTopic: (...args) => telegramTarget.current.initializeForumTopic(...args),
-      prepareRestartReceipt: (...args) => telegramTarget.current.prepareRestartReceipt(...args),
-      cancelRestartReceipt: (...args) => telegramTarget.current.cancelRestartReceipt(...args),
-      getTaskContext: (...args) => telegramTarget.current.getTaskContext?.(...args) || null,
-      getAgentTaskExecution: (...args) => telegramTarget.current.getAgentTaskExecution?.(...args) || null
-    };
-    const assertAccess = () => accessGuardTarget.current();
-    const customTools = guardTools([
-      ...this.createTools(telegramProxy, scopeChatId, policy),
-      createSystemShellTool({
-        workspaceDir: policy.workspaceDir,
-        shell: policy.shell,
-        beforeRestart: (summary) => telegramProxy.prepareRestartReceipt(summary),
-        cancelRestart: (receiptId) => telegramProxy.cancelRestartReceipt(receiptId)
-      })
-    ], assertAccess);
-    const settingsManager = createPiSettingsManager(this.config, model);
-    const resourceLoader = await createArisaResourceLoader({
-      cwd: policy.workspaceDir,
-      agentDir: arisaHomeDir,
-      settingsManager
+      modelSelection,
+      telegram,
+      scopeChatId,
+      accessGuard,
+      delegation: this.config.pi.subagents.enabled,
+      createSessionManager: (policy) => this.createSessionManager(sessionKey, policy.workspaceDir, modelSelection.sessionRevision)
     });
-    const { session } = await createAgentSession({
-      cwd: policy.workspaceDir,
-      agentDir: arisaHomeDir,
-      resourceLoader,
-      modelRuntime,
-      model,
-      thinkingLevel,
-      tools: policy.tools,
-      excludeTools: policy.excludeTools,
-      customTools,
-      settingsManager,
-      sessionManager
-    });
-    const speedController = createModelSpeedController(session.agent.streamFunction, speed);
-    session.agent.streamFunction = speedController.streamFn;
-
-    if (!hasExistingSession) {
-      this.logger?.log("agent", `created new session for chat ${sessionKey}`);
-      this.logger?.log("agent", `runtime context for chat ${sessionKey}:\n${buildAgentRuntimeContext({
-        workspaceDir: policy.workspaceDir,
-        coreTools: policy.coreTools
-      })}`);
-    }
 
     const ctx = {
       session,
@@ -488,6 +572,7 @@ export class AgentManager {
 
   async close() {
     this.turnCoordinator.close();
+    await this.subagents.abortAll();
     await this.sessionLifecycle.closeAll();
   }
 

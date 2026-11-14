@@ -275,7 +275,8 @@ export function createCapabilityService({
       const filter = { chatId: scopedChatId, status: params.status || undefined, kind: params.kind || undefined };
       if (!context.selectScheduledTasks) return taskStore.list(filter);
       const limit = resolveScheduledTaskListLimit(params.limit);
-      const { tasks, total } = await taskStore.listPage(filter, limit);
+      // History rows dominate the listing and stay in the agent context; return them only on request.
+      const { tasks, total } = await taskStore.listPage({ ...filter, activeOnly: !filter.status }, limit);
       return { tasks, total, returned: tasks.length, limit, truncated: tasks.length < total };
     }
 

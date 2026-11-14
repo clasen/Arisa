@@ -106,6 +106,13 @@ export const piConfigDefaults = Object.freeze({
     reserveTokens: 120_000,
     keepRecentTokens: 20_000,
     compactAtContextTokens: 80_000
+  }),
+  subagents: Object.freeze({
+    enabled: true,
+    isolateAutomations: true,
+    maxModelCalls: 80,
+    timeoutMs: 15 * 60_000,
+    parentNoteMaxChars: 1_500
   })
 });
 
@@ -187,6 +194,10 @@ export function applyConfigDefaults(config) {
       compaction: {
         ...piConfigDefaults.compaction,
         ...(configuredPi.compaction || {})
+      },
+      subagents: {
+        ...piConfigDefaults.subagents,
+        ...(configuredPi.subagents || {})
       },
       chatModels: cloneChatModels(configuredPi.chatModels)
     },

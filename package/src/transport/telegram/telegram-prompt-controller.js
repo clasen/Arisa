@@ -14,6 +14,8 @@ import {
   normalizeIncomingArtifact,
   sanitizeSessionHandoff,
   automationPromptSpeedOptions,
+  buildAutomationParentNote,
+  isAutomationPrompt,
   withPromptSpeed
 } from "./prompt-builders.js";
 import {
@@ -77,6 +79,53 @@ export function createTelegramPromptController({
     return appendGeneralReplyRoutingInstruction(prompt, topics, recentProposals);
   }
 
+  // Runs a scheduled task or external event in a subagent session, then leaves the chat session
+  // a short note of what was sent so follow-up messages from the user keep their referent.
+  async function runIsolatedAutomation({ sessionId, route, bridge, prompt, label }) {
+    const accessGuard = createWorkspaceAccessGuard(route);
+    let result;
+    try {
+      result = await agentManager.runIsolatedAutomation({
+        sessionKey: sessionId,
+        label: label || "automation",
+        telegram: bridge,
+        scopeChatId: route.scopeChatId,
+        accessGuard,
+        execute: (session) => collectText(session, prompt, { logger, chatId: sessionId })
+      });
+      if (result.status !== "completed") {
+        throw new Error(`Automation subagent stopped before finishing: ${result.stopReason}`);
+      }
+    } catch (error) {
+      if (error && typeof error === "object") {
+        error.retryable = false;
+        error.outcomeUncertain = true;
+      }
+      throw error;
+    }
+    if (!result.report) return "";
+    // The automation already ran: a failed note must not turn its outcome into a task failure.
+    try {
+      const sessionContext = await agentManager.getSessionContext(sessionId, bridge, {
+        scopeChatId: route.scopeChatId,
+        accessGuard
+      });
+      try {
+        await sessionContext.session.sendCustomMessage({
+          customType: "arisa-automation-report",
+          content: buildAutomationParentNote({ prompt, text: result.report, maxChars: config.pi.subagents.parentNoteMaxChars }),
+          display: false,
+          details: { subagentId: result.subagentId }
+        });
+      } finally {
+        await sessionContext.release?.();
+      }
+    } catch (error) {
+      logger?.error("telegram", `automation report note failed for chat ${sessionId}: ${getErrorMessage(error)}`);
+    }
+    return result.report;
+  }
+
   async function processPromptForChat({ chatId, prompt, ctx = null, executionReceipt = null }) {
     const route = ctx ? contextRoute(ctx) : directChatRoute(chatId);
     const sessionId = route.sessionId;
@@ -92,6 +141,12 @@ export function createTelegramPromptController({
           agentManager.resetSession(sessionId, { handoff });
           await agentManager.waitForSessionClose(sessionId);
         }
+      }
+      if (config.pi.subagents.isolateAutomations && isAutomationPrompt(prompt)) {
+        const text = await runIsolatedAutomation({ sessionId, route, bridge, prompt, label: executionReceipt?.label });
+        executionReceipt?.resolve({ status: "executed" });
+        if (text) await deliverReply(text);
+        return;
       }
       const sessionContext = await agentManager.getSessionContext(sessionId, bridge, {
         scopeChatId: route.scopeChatId,
@@ -130,7 +185,10 @@ export function createTelegramPromptController({
         await sessionContext.release?.();
       }
       executionReceipt?.resolve({ status: "executed" });
-      if (!text) return;
+      if (text) await deliverReply(text);
+    };
+
+    async function deliverReply(text) {
       const topics = route.workspace && route.ownerChatId
         ? await workspaceTopics.listTopics(route.ownerChatId, route.transportChatId)
         : [];
@@ -155,7 +213,7 @@ export function createTelegramPromptController({
         artifactChatId: deliveryRoute.scopeChatId,
         text: routedReply.text
       });
-    };
+    }
 
     return agentManager.runTurn({
       priority: executionReceipt?.priority || "interactive",

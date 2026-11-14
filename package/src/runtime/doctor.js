@@ -184,6 +184,13 @@ function addContextAttention(report) {
   }
 }
 
+function formatSubagents({ active, recent }) {
+  const last = recent[0];
+  if (!last) return `${active.length} active`;
+  const inputTokens = Math.round((last.tokens.input + last.tokens.cacheRead) / 1000);
+  return `${active.length} active / last ${last.kind} ${last.status}: ${last.modelCalls} calls, ${inputTokens}k tokens`;
+}
+
 export function formatDoctorReport(report) {
   const status = report.attention.length
     ? "attention needed"
@@ -197,6 +204,7 @@ export function formatDoctorReport(report) {
   lines.push(...reportRow("Runtime", "Pi"));
   lines.push(...reportRow("Sessions", `${report.runtime.sessions} active / ${report.runtime.closingSessions} closing`));
   lines.push(...reportRow("Contexts", `${report.contexts.length} active / ${measured.length} measured`));
+  lines.push(...reportRow("Subagents", formatSubagents(report.runtime.subagents)));
   lines.push(...reportRow("Large", large));
   lines.push(...reportRow("Ineff.", inefficient));
   if (measured.length) lines.push(...reportRow("Max", `${Math.max(...measured.map((context) => context.percent)).toFixed(1)}%`));

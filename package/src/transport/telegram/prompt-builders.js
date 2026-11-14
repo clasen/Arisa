@@ -178,6 +178,17 @@ export function isAutomationPrompt(prompt) {
   return automationPromptPrefixes.some((prefix) => text.startsWith(prefix));
 }
 
+// Records in the chat session what an isolated automation told the user, without its working context.
+export function buildAutomationParentNote({ prompt, text, maxChars }) {
+  const origin = String(prompt).split("\n").slice(0, 2).join(" ").trim();
+  const reply = String(text).trim();
+  const body = reply.length > maxChars ? `${reply.slice(0, maxChars).trimEnd()}…` : reply;
+  return [
+    `An automation ran in an isolated subagent session (${origin}) and this reply was delivered to the chat:`,
+    body
+  ].join("\n");
+}
+
 export function automationPromptSpeedOptions({ prompt, session, speedController, configuredSpeed }) {
   return {
     speedController,

@@ -22,6 +22,10 @@ function runtime(overrides = {}) {
     sessions: 1,
     closingSessions: 0,
     contexts: [],
+    subagents: {
+      active: [],
+      recent: [{ kind: "automation", status: "completed", modelCalls: 6, tokens: { input: 4_000, cacheRead: 58_000, output: 300 } }]
+    },
     ...overrides
   };
 }
@@ -78,6 +82,7 @@ test("reports Pi context size and retained-content inefficiency", async () => {
   assert.match(report.attention.join("\n"), /tool results occupy 70\.0%/);
   const formatted = formatDoctorReport(report);
   assert.match(formatted, /Core\n  Runtime    Pi/);
+  assert.match(formatted, /Subagents\s+0 active \/ last\s+automation completed:\s+6 calls, 62k tokens/);
   assert.match(formatted, /CPU        4 cores/);
   assert.match(formatted, /Load       0\.25 \/ 0\.50 \/ 0\.75/);
   assert.match(formatted, /Memory     62\.5% \/ 3\.0 GB free/);

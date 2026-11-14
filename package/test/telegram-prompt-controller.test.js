@@ -80,3 +80,83 @@ test("a busy prompt for another topic queues instead of steering the active sess
   assert.deepEqual(calls.steered, []);
   assert.deepEqual(state.pendingPrompts, ["different destination"]);
 });
+
+function automationHarness({ result, isolateAutomations = true }) {
+  const events = { isolated: [], notes: [], replies: [], chatPrompts: 0 };
+  const parentSession = {
+    messages: [],
+    model: { provider: "test", id: "test" },
+    subscribe: () => () => {},
+    prompt: async () => { events.chatPrompts += 1; },
+    sendCustomMessage: async (message) => events.notes.push(message)
+  };
+  const { controller } = createController({
+    config: {
+      pi: { speed: 1, chatModels: {}, subagents: { isolateAutomations, parentNoteMaxChars: 40 } },
+      telegram: {}
+    },
+    agentManager: {
+      resetSession: () => {},
+      runTurn: async (_options, work) => work(),
+      runIsolatedAutomation: async (options) => {
+        events.isolated.push(options);
+        return result;
+      },
+      getSessionContext: async () => ({ session: parentSession, speedController: { setSpeed() {} }, release: async () => {} })
+    },
+    sendTextReply: async ({ text }) => events.replies.push(text)
+  });
+  return { controller, events };
+}
+
+test("runs automation prompts in an isolated subagent and leaves the chat session a bounded note", async () => {
+  const report = "Deploy de trunks terminado sin errores, 3 archivos actualizados.";
+  const { controller, events } = automationHarness({
+    result: { subagentId: "abc12345", status: "completed", report, modelCalls: 4 }
+  });
+
+  await controller.processPromptForChat({ chatId: "42", prompt: "Scheduled task fired.\ntaskId: t-1\ntext: deploy" });
+
+  assert.equal(events.isolated.length, 1);
+  assert.equal(events.isolated[0].sessionKey, "42");
+  assert.equal(events.chatPrompts, 0);
+  assert.deepEqual(events.replies, [report]);
+  assert.equal(events.notes.length, 1);
+  assert.equal(events.notes[0].customType, "arisa-automation-report");
+  assert.match(events.notes[0].content, /Scheduled task fired\. taskId: t-1/);
+  assert.match(events.notes[0].content, /\nDeploy de trunks terminado sin errores,…$/);
+});
+
+test("a silent isolated automation delivers nothing and leaves no note", async () => {
+  const { controller, events } = automationHarness({
+    result: { subagentId: "abc12345", status: "completed", report: "", modelCalls: 1 }
+  });
+
+  await controller.processPromptForChat({ chatId: "42", prompt: "External event arrived.\ntaskId: e-1" });
+
+  assert.deepEqual(events.replies, []);
+  assert.deepEqual(events.notes, []);
+});
+
+test("an automation subagent stopped by its limits fails the task as outcome-uncertain", async () => {
+  const { controller } = automationHarness({
+    result: { subagentId: "abc12345", status: "stopped", stopReason: "max_model_calls", report: "", modelCalls: 80 }
+  });
+
+  await assert.rejects(
+    controller.processPromptForChat({ chatId: "42", prompt: "Scheduled task fired.\ntaskId: t-1" }),
+    (error) => /max_model_calls/.test(error.message) && error.outcomeUncertain === true && error.retryable === false
+  );
+});
+
+test("user messages and disabled isolation keep using the chat session", async () => {
+  const user = automationHarness({ result: null });
+  await user.controller.processPromptForChat({ chatId: "42", prompt: "Incoming Telegram message.\nhola" });
+  assert.equal(user.events.isolated.length, 0);
+  assert.equal(user.events.chatPrompts, 1);
+
+  const disabled = automationHarness({ result: null, isolateAutomations: false });
+  await disabled.controller.processPromptForChat({ chatId: "42", prompt: "Scheduled task fired.\ntaskId: t-1" });
+  assert.equal(disabled.events.isolated.length, 0);
+  assert.equal(disabled.events.chatPrompts, 1);
+});
