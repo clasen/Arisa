@@ -136,10 +136,10 @@ test("the store keeps runs per chat and drops those older than the window", asyn
   assert.throws(() => new ModelUsageStore({ config: { windowMs: 0 } }), /pi\.usage\.windowMs/);
 });
 
-test("the report totals per model and lists the costliest runs within the report width", () => {
+test("the report groups runs by model and speed and lists the costliest ones within the report width", () => {
   const report = formatModelUsageReport({
     runs: [
-      run({ at: "2026-11-14T11:57:00.000Z", kind: "task", detail: "SEO de arisa-site", speed: 1, modelCalls: 10, input: 50_000, cacheRead: 540_000, output: 10_000 }),
+      run({ at: "2026-11-14T11:57:00.000Z", kind: "delegate", detail: "SEO de arisa-site con revisión completa de metadatos y enlaces internos", speed: 1, modelCalls: 10, input: 50_000, cacheRead: 540_000, output: 10_000 }),
       run(),
       run({ at: "2026-11-14T13:48:00.000Z", detail: "x".repeat(80), model: "gpt-5.6-sol", modelCalls: 1, input: 300, cacheRead: 0, output: 20 })
     ],
@@ -150,15 +150,22 @@ test("the report totals per model and lists the costliest runs within the report
 
   assert.ok(lines.every((line) => [...line].length <= reportWidth));
   assert.equal(lines[0], "Token usage (last 24h)");
-  assert.match(lines[2], /^Total · 35 calls +1\.8M$/);
-  assert.match(lines[3], /^ {2}gpt-6-astra +1\.8M$/);
-  assert.match(lines[4], /^ {2}gpt-5\.6-sol +320$/);
-  assert.equal(lines[6], "Top runs (2 of 3)");
-  assert.match(lines[7], /^\d\d:\d\d msg crear flightmode-d… +1\.2M$/);
-  assert.equal(lines[8], "  gpt-6-astra x2 · 24 calls");
-  assert.match(lines[9], /^\d\d:\d\d task SEO de arisa-site +600k$/);
-  assert.equal(lines[10], "  gpt-6-astra x1 · 10 calls");
-  assert.match(lines[11], /^1 more +320$/);
+  assert.match(lines[2], /^Total +1\.8M$/);
+  assert.equal(lines[3], "  3 runs · 35 calls");
+
+  assert.match(lines[5], /^gpt-6-astra · 2x +1\.2M · 67%$/);
+  assert.equal(lines[6], "  1 run · 24 calls");
+  assert.match(lines[8], /^\d\d:\d\d message · 24 calls +1\.2M$/);
+  assert.equal(lines[9], "  crear flightmode-deploy-watch");
+
+  assert.match(lines[11], /^gpt-6-astra · 1x +600k · 33%$/);
+  assert.match(lines[14], /^\d\d:\d\d subagent · 10 calls +600k$/);
+  assert.equal(lines[15], "  SEO de arisa-site con revisión");
+  assert.match(lines[16], /^ {2}completa de metadatos y enlaces…$/);
+
+  assert.match(lines[18], /^gpt-5\.6-sol · 2x +320 · 0%$/);
+  assert.match(lines[21], /^\+1 more run +320$/);
+  assert.equal(lines.length, 22);
 });
 
 test("the report says when nothing ran in the window", () => {
@@ -177,6 +184,6 @@ test("/usage replies with the report of the scoped chat", async () => {
 
   await handler({ chat: { id: -100 }, reply: async (text, options) => replies.push({ text, options }) });
 
-  assert.match(replies[0].text, /gpt-6-astra x2 · 24 calls/);
+  assert.match(replies[0].text, /gpt-6-astra · 2x/);
   assert.deepEqual(replies[0].options, { parse_mode: "HTML" });
 });
