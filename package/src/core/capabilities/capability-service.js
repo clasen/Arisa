@@ -316,7 +316,11 @@ export function createCapabilityService({
 
     if (method === "telegram.createTopic") {
       if (typeof context.telegram?.createForumTopic !== "function") return { ok: false, error: "Telegram topic creation is unavailable in this chat." };
-      return context.telegram.createForumTopic(requireString(params.name, "name").trim(), requireString(params.context, "context").trim());
+      return context.telegram.createForumTopic(
+        requireString(params.name, "name").trim(),
+        requireString(params.context, "context").trim(),
+        typeof params.emoji === "string" ? params.emoji.trim() : ""
+      );
     }
 
     if (method === "telegram.initializeTopic") {
@@ -334,6 +338,20 @@ export function createCapabilityService({
         ...(params.messageThreadId === undefined ? {} : { messageThreadId: params.messageThreadId }),
         name: requireString(params.name, "name").trim()
       });
+    }
+
+    if (method === "telegram.setTopicIcon") {
+      if (typeof context.telegram?.setForumTopicIcon !== "function") return { ok: false, error: "Telegram topic icons are unavailable in this chat." };
+      if (typeof params.emoji !== "string") throw new Error("emoji must be a string");
+      return context.telegram.setForumTopicIcon({
+        ...(params.messageThreadId === undefined ? {} : { messageThreadId: params.messageThreadId }),
+        emoji: params.emoji.trim()
+      });
+    }
+
+    if (method === "telegram.deleteTopic") {
+      if (typeof context.telegram?.deleteForumTopic !== "function") return { ok: false, error: "Telegram topic deletion is unavailable in this chat." };
+      return context.telegram.deleteForumTopic({ messageThreadId: params.messageThreadId });
     }
 
     if (method === "paths.getChatToolStateDir") return getChatToolStateDir(requireChatId(chatId, method), actor);

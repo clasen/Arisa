@@ -116,10 +116,17 @@ test("renaming from General requires an explicit topic and tasks keep their topi
   });
 });
 
+test("draft previews show only finished paragraphs and code blocks", () => {
+  assert.equal(draftPreview("First paragraph still being wri"), "");
+  assert.equal(draftPreview("First paragraph.\n\nSecond one in prog"), "First paragraph.");
+  assert.equal(draftPreview("Intro.\n\n```js\nconst a = 1;\n\nconst b"), "Intro.");
+  assert.equal(draftPreview("Intro.\n\n```js\nconst a = 1;\n\nconst b = 2;\n```\nTrailing te"), "Intro.\n\n```js\nconst a = 1;\n\nconst b = 2;\n```");
+});
+
 test("draft previews hide routing markers and possible silent replies", () => {
-  assert.equal(draftPreview("Working on it\n[[ARISA_REPLY_TOP"), "Working on it");
-  assert.equal(draftPreview("NO_REP"), "");
-  assert.equal(draftPreview("x".repeat(4000)).length, 3501);
+  assert.equal(draftPreview("Working on it.\n\nDone.\n[[ARISA_REPLY_TOP"), "Working on it.");
+  assert.equal(draftPreview("NO_REPLY\n\n"), "");
+  assert.equal(draftPreview(`${"x".repeat(4000)}\n\nnext`).length, 3501);
 });
 
 test("a draft stream sends changes inside the topic and closes after an API failure", async () => {
@@ -141,7 +148,7 @@ test("a draft stream sends changes inside the topic and closes after an API fail
   });
   try {
     await stream.started;
-    stream.update("**Hello**");
+    stream.update("**Hello**\n\nSecond paragraph in prog");
     await stream.flush();
     await stream.flush();
     assert.equal(sent.length, 2);
@@ -150,10 +157,10 @@ test("a draft stream sends changes inside the topic and closes after an API fail
     assert.deepEqual(sent[1].slice(2), ["<b>Hello</b>", { message_thread_id: 7, parse_mode: "HTML", can_stop: true }]);
 
     fail = true;
-    stream.update("Hello again");
+    stream.update("Hello again.\n\nMore");
     await stream.flush();
     fail = false;
-    stream.update("Hello once more");
+    stream.update("Hello once more.\n\nMore");
     await stream.flush();
     assert.equal(sent.length, 2);
     assert.equal(errors.length, 1);
@@ -217,4 +224,64 @@ test("stopping a draft aborts the turn and delivers the partial reply without re
   assert.deepEqual(events.aborted, [route.sessionId]);
   assert.deepEqual(events.reset, []);
   assert.deepEqual(events.replies, ["Partial answer"]);
+});
+
+test("topic icons resolve a plain emoji against Telegram's icon set", async () => {
+  const calls = [];
+  const { createSessionBridge } = createTelegramSessionBridgeController({
+    config,
+    api: {
+      getForumTopicIconStickers: async () => [
+        { emoji: "\u2708\uFE0F", custom_emoji_id: "plane-id" },
+        { emoji: "\uD83D\uDCB0", custom_emoji_id: "money-id" }
+      ],
+      editForumTopic: async (...args) => calls.push(["edit", ...args]),
+      createForumTopic: async (...args) => {
+        calls.push(["create", ...args]);
+        return { message_thread_id: 9, name: args[1] };
+      }
+    },
+    agentManager: { resetSession: () => {}, waitForSessionClose: async () => {} },
+    sessionSeeds: { set: async () => {} },
+    workspaceTopics: { upsertTopic: async () => ({}) },
+    buildTopicInitializationHandoff: () => "handoff"
+  });
+  const bridge = createSessionBridge({ workspace: true, privateTopics: true, ownerChatId: 42, transportChatId: 42, threadId: 7, topicThreadId: 7, generalTopicId: null });
+
+  await bridge.setForumTopicIcon({ emoji: "\u2708" });
+  await bridge.setForumTopicIcon({ emoji: "" });
+  await bridge.createForumTopic("Budget", "Track spending", "\uD83D\uDCB0");
+  assert.deepEqual(calls, [
+    ["edit", 42, 7, { icon_custom_emoji_id: "plane-id" }],
+    ["edit", 42, 7, { icon_custom_emoji_id: "" }],
+    ["create", 42, "Budget", { icon_custom_emoji_id: "money-id" }]
+  ]);
+  await assert.rejects(bridge.setForumTopicIcon({ emoji: "\uD83E\uDD84" }), /Available icons: /);
+});
+
+test("deleting a topic removes its registry entry and session, but never the current topic", async () => {
+  const { store, cleanup } = await topicStore();
+  try {
+    const events = { deleted: [], cleared: [], reset: [] };
+    await store.upsertTopic(42, 42, { threadId: 9, name: "Old trip" });
+    const { createSessionBridge } = createTelegramSessionBridgeController({
+      config,
+      api: { deleteForumTopic: async (...args) => events.deleted.push(args) },
+      agentManager: { resetSession: (sessionId) => events.reset.push(sessionId) },
+      sessionSeeds: { clear: async (sessionId) => events.cleared.push(sessionId) },
+      workspaceTopics: store
+    });
+    const bridge = createSessionBridge({ workspace: true, privateTopics: true, ownerChatId: 42, transportChatId: 42, threadId: 7, topicThreadId: 7, generalTopicId: null });
+
+    await assert.rejects(bridge.deleteForumTopic({ messageThreadId: 7 }), /from inside it/);
+    assert.deepEqual(events.deleted, []);
+
+    await bridge.deleteForumTopic({ messageThreadId: 9 });
+    assert.deepEqual(events.deleted, [[42, 9]]);
+    assert.equal(await store.getTopic(42, 42, 9), null);
+    assert.deepEqual(events.cleared, ["42--telegram-private-topic-9"]);
+    assert.deepEqual(events.reset, ["42--telegram-private-topic-9"]);
+  } finally {
+    await cleanup();
+  }
 });

@@ -158,6 +158,21 @@ export class WorkspaceTopicStore {
     });
   }
 
+  async removeTopic(ownerChatId, groupChatId, threadId) {
+    const scopedOwner = integer(ownerChatId, "ownerChatId");
+    const scopedGroup = integer(groupChatId, "groupChatId");
+    const scopedThread = integer(threadId, "threadId");
+    return this.withOwnerLock(scopedOwner, async () => {
+      const file = this.resolveFile(scopedOwner);
+      const state = await readState(file);
+      const topics = state.groups[String(scopedGroup)]?.topics;
+      if (!topics?.[String(scopedThread)]) return false;
+      delete topics[String(scopedThread)];
+      await writeState(file, state);
+      return true;
+    });
+  }
+
   async setTopicStatus(ownerChatId, groupChatId, threadId, status) {
     const scopedOwner = integer(ownerChatId, "ownerChatId");
     const scopedGroup = integer(groupChatId, "groupChatId");

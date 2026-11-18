@@ -39,6 +39,20 @@ export function createTelegramSessionBridgeController({
     return sentReplyRoutes.get(sentReplyKey(transportChatId, messageId)) || null;
   }
 
+  let topicIconStickers = null;
+
+  function comparableEmoji(emoji) {
+    return String(emoji || "").replace(/\uFE0F/g, "").trim();
+  }
+
+  async function topicIconId(emoji) {
+    topicIconStickers ||= await api.getForumTopicIconStickers();
+    const sticker = topicIconStickers.find((item) => comparableEmoji(item.emoji) === comparableEmoji(emoji));
+    if (sticker) return sticker.custom_emoji_id;
+    const available = [...new Set(topicIconStickers.map((item) => item.emoji))].join(" ");
+    throw new Error(`Telegram has no topic icon for ${emoji}. Available icons: ${available}`);
+  }
+
   function createWorkspaceAccessGuard(route) {
     return async () => {
       if (!route.workspace || route.privateTopics) return;
@@ -96,10 +110,14 @@ export function createTelegramSessionBridgeController({
         if (method === "video") return api.sendVideo(route.transportChatId, input, options);
         return api.sendAudio(route.transportChatId, input, options);
       },
-      createForumTopic: async (name, context) => {
+      createForumTopic: async (name, context, emoji = "") => {
         if (!route.workspace) throw new Error("Telegram topic creation is only available in a chat with topics.");
         await createWorkspaceAccessGuard(route)();
-        const topic = await api.createForumTopic(route.transportChatId, name);
+        const topic = await api.createForumTopic(
+          route.transportChatId,
+          name,
+          emoji ? { icon_custom_emoji_id: await topicIconId(emoji) } : undefined
+        );
         return initializeForumTopic({
           messageThreadId: topic.message_thread_id,
           name: topic.name,
@@ -120,6 +138,30 @@ export function createTelegramSessionBridgeController({
           source: "arisa-renamed"
         });
         return { ok: true, chatId: route.transportChatId, messageThreadId, name: topic.name };
+      },
+      setForumTopicIcon: async ({ messageThreadId = route.threadId, emoji }) => {
+        if (!route.workspace) throw new Error("Telegram topic icons are only available in a chat with topics.");
+        if (!Number.isSafeInteger(messageThreadId)) {
+          throw new Error("Pass messageThreadId to change a topic icon from outside it.");
+        }
+        await createWorkspaceAccessGuard(route)();
+        await api.editForumTopic(route.transportChatId, messageThreadId, {
+          icon_custom_emoji_id: emoji ? await topicIconId(emoji) : ""
+        });
+        return { ok: true, chatId: route.transportChatId, messageThreadId, emoji };
+      },
+      deleteForumTopic: async ({ messageThreadId }) => {
+        if (!route.workspace) throw new Error("Telegram topic deletion is only available in a chat with topics.");
+        if (messageThreadId === route.threadId) {
+          throw new Error("A topic cannot be deleted from inside it. Ask the user to request it from General or another topic.");
+        }
+        await createWorkspaceAccessGuard(route)();
+        await api.deleteForumTopic(route.transportChatId, messageThreadId);
+        await workspaceTopics.removeTopic(route.ownerChatId, route.transportChatId, messageThreadId);
+        const deletedSessionId = workspaceTopicSessionId(route, messageThreadId);
+        await sessionSeeds.clear(deletedSessionId);
+        agentManager.resetSession(deletedSessionId);
+        return { ok: true, chatId: route.transportChatId, messageThreadId, deleted: true };
       },
       prepareRestartReceipt: (summary) => prepareRestartReceipt({
         transportChatId: route.transportChatId,

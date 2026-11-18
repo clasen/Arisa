@@ -39,6 +39,8 @@ const arisaToolNames = [
   "create_telegram_topic",
   "initialize_telegram_topic",
   "rename_telegram_topic",
+  "set_telegram_topic_icon",
+  "delete_telegram_topic",
   "send_artifact"
 ];
 
@@ -405,6 +407,8 @@ export class AgentManager {
       createForumTopic: (...args) => telegramTarget.current.createForumTopic(...args),
       initializeForumTopic: (...args) => telegramTarget.current.initializeForumTopic(...args),
       renameForumTopic: (...args) => telegramTarget.current.renameForumTopic(...args),
+      setForumTopicIcon: (...args) => telegramTarget.current.setForumTopicIcon(...args),
+      deleteForumTopic: (...args) => telegramTarget.current.deleteForumTopic(...args),
       prepareRestartReceipt: (...args) => telegramTarget.current.prepareRestartReceipt(...args),
       cancelRestartReceipt: (...args) => telegramTarget.current.cancelRestartReceipt(...args),
       getTaskContext: (...args) => telegramTarget.current.getTaskContext?.(...args) || null,

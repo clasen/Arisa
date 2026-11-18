@@ -40,7 +40,7 @@ export const telegramConfigDefaults = Object.freeze({
   modelPickerPageSize: 8,
   busyMessageMode: "steer",
   streamReplies: true,
-  replyDraftIntervalMs: 1_000,
+  replyDraftIntervalMs: 6_000,
   replyDraftKeepAliveMs: 20_000,
   ownerWorkspaceGroups: Object.freeze({})
 });

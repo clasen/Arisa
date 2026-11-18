@@ -152,7 +152,8 @@ export function createPiCapabilityTools({ capabilityService, telegram, chatId, p
       description: "Create and initialize a new topic in the current Telegram chat with topics (private chat or owner-only forum). Topic names are dynamic, and context seeds the isolated session without copying unrelated history.",
       parameters: Type.Object({
         name: Type.String({ minLength: 1, maxLength: 128 }),
-        context: Type.String({ minLength: 1, maxLength: 4000 })
+        context: Type.String({ minLength: 1, maxLength: 4000 }),
+        emoji: Type.Optional(Type.String({ minLength: 1, maxLength: 16, description: "Topic icon as a plain emoji from Telegram's topic icon set." }))
       }),
       execute: async (_id, params) => jsonResult(await execute("create_telegram_topic", "telegram.createTopic", params))
     }),
@@ -176,6 +177,25 @@ export function createPiCapabilityTools({ capabilityService, telegram, chatId, p
         name: Type.String({ minLength: 1, maxLength: 128 })
       }),
       execute: async (_id, params) => jsonResult(await execute("rename_telegram_topic", "telegram.renameTopic", params))
+    }),
+    defineTool({
+      name: "set_telegram_topic_icon",
+      label: "Set Telegram topic icon",
+      description: "Set or remove the icon of a topic in the current Telegram chat with topics. Pass a plain emoji from Telegram's topic icon set, or an empty string to remove the icon. Omit messageThreadId to target the topic this conversation is in. An unsupported emoji returns the list of available icons.",
+      parameters: Type.Object({
+        messageThreadId: Type.Optional(Type.Integer({ minimum: 2 })),
+        emoji: Type.String({ maxLength: 16 })
+      }),
+      execute: async (_id, params) => jsonResult(await execute("set_telegram_topic_icon", "telegram.setTopicIcon", params))
+    }),
+    defineTool({
+      name: "delete_telegram_topic",
+      label: "Delete Telegram topic",
+      description: "Permanently delete a topic, all its messages, and its isolated session from the current Telegram chat with topics. Irreversible: call it only after the user explicitly confirmed deleting that exact topic. The topic this conversation is in cannot be deleted from inside it.",
+      parameters: Type.Object({
+        messageThreadId: Type.Integer({ minimum: 2 })
+      }),
+      execute: async (_id, params) => jsonResult(await execute("delete_telegram_topic", "telegram.deleteTopic", params))
     }),
     defineTool({
       name: "send_artifact",

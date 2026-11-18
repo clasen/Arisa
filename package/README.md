@@ -67,7 +67,8 @@ The result is a toolset shaped by how you actually use the assistant, not by def
 - reply classification never runs outside General, or in private chats whose bot has topics disabled
 - each chat with topics keeps a dynamic, chat-scoped topic registry; Arisa learns topic creation, rename, close, and reopen events, and records the context of topics it creates or initializes
 - a topic the user opens by just typing gets an automatic name, and Arisa renames it once the subject is clear
-- in private chats the reply streams as a draft while it is generated, with a stop button that keeps the partial answer; set `telegram.streamReplies` to `false` to disable it
+- Arisa can also set or remove a topic icon and, after explicit confirmation, delete a topic with its messages and session
+- in private chats the finished paragraphs and code blocks of the reply stream as a draft every `telegram.replyDraftIntervalMs`, with a stop button that keeps the partial answer; set `telegram.streamReplies` to `false` to disable it
 - when a substantial theme recurs in General without a matching topic, Arisa may occasionally propose a new one; creation still requires explicit user confirmation
 - legacy `replyTopics` configuration is imported once into the dynamic registry and then removed
 

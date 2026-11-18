@@ -9,8 +9,18 @@ function errorMessage(error) {
   return error instanceof Error ? error.message : String(error);
 }
 
+// Keeps the text up to the last finished paragraph or code block, so a draft never shows a block
+// that is still being written.
+function closedBlocks(text) {
+  const fences = [...text.matchAll(/```/g)].map((match) => match.index);
+  if (fences.length % 2 === 1) return text.slice(0, fences.at(-1));
+  const lastFenceEnd = fences.length ? fences.at(-1) + 3 : 0;
+  const lastBreak = [...text.matchAll(/\n[ \t]*\n/g)].at(-1)?.index ?? 0;
+  return text.slice(0, Math.max(lastFenceEnd, lastBreak));
+}
+
 export function draftPreview(text) {
-  const visible = stripTrailingRoutingMarker(text).trim();
+  const visible = closedBlocks(stripTrailingRoutingMarker(text)).trim();
   if (!visible || couldBecomeSilentReply(visible)) return "";
   return visible.length > maxDraftSourceLength ? `…${visible.slice(-maxDraftSourceLength)}` : visible;
 }
