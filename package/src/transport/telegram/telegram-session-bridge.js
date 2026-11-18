@@ -3,7 +3,7 @@ import { InputFile } from "grammy";
 import { cancelRestartReceipt, prepareRestartReceipt } from "../../runtime/restart-receipt.js";
 import { isSilentReply } from "./prompt-builders.js";
 import { renderTelegramHtml } from "./text-format.js";
-import { resolveTelegramWorkspaceRoute, topicSessionId } from "./workspace-group.js";
+import { resolveTelegramWorkspaceRoute, workspaceTopicSessionId } from "./workspace-group.js";
 
 function deliveryMethod(artifact, method) {
   if (method) return method;
@@ -29,9 +29,19 @@ export function createTelegramSessionBridgeController({
   buildTopicInitializationHandoff,
   logger
 }) {
+  const sentReplyRoutes = new Map();
+
+  function sentReplyKey(transportChatId, messageId) {
+    return `${transportChatId}:${messageId}`;
+  }
+
+  function sentReplyRoute(transportChatId, messageId) {
+    return sentReplyRoutes.get(sentReplyKey(transportChatId, messageId)) || null;
+  }
+
   function createWorkspaceAccessGuard(route) {
     return async () => {
-      if (!route.workspace) return;
+      if (!route.workspace || route.privateTopics) return;
       const current = await resolveTelegramWorkspaceRoute({
         config,
         api,
@@ -50,14 +60,9 @@ export function createTelegramSessionBridgeController({
       ? { ...extra, message_thread_id: route.threadId }
       : extra;
     const initializeForumTopic = async ({ messageThreadId, name, context }) => {
-      if (!route.workspace) throw new Error("Telegram topic initialization is only available from the owner workspace forum.");
+      if (!route.workspace) throw new Error("Telegram topic initialization is only available in a chat with topics.");
       await createWorkspaceAccessGuard(route)();
-      const initializedSessionId = topicSessionId({
-        ownerChatId: route.ownerChatId,
-        groupChatId: route.transportChatId,
-        threadId: messageThreadId,
-        generalTopicId: route.generalTopicId
-      });
+      const initializedSessionId = workspaceTopicSessionId(route, messageThreadId);
       if (initializedSessionId === String(route.ownerChatId)) {
         throw new Error("The General topic already uses the owner's private session and cannot be reinitialized here.");
       }
@@ -92,7 +97,7 @@ export function createTelegramSessionBridgeController({
         return api.sendAudio(route.transportChatId, input, options);
       },
       createForumTopic: async (name, context) => {
-        if (!route.workspace) throw new Error("Telegram topic creation is only available from the owner workspace forum.");
+        if (!route.workspace) throw new Error("Telegram topic creation is only available in a chat with topics.");
         await createWorkspaceAccessGuard(route)();
         const topic = await api.createForumTopic(route.transportChatId, name);
         return initializeForumTopic({
@@ -102,12 +107,26 @@ export function createTelegramSessionBridgeController({
         });
       },
       initializeForumTopic,
+      renameForumTopic: async ({ messageThreadId = route.threadId, name }) => {
+        if (!route.workspace) throw new Error("Telegram topic renaming is only available in a chat with topics.");
+        if (!Number.isSafeInteger(messageThreadId)) {
+          throw new Error("Pass messageThreadId to rename a topic from outside it.");
+        }
+        await createWorkspaceAccessGuard(route)();
+        await api.editForumTopic(route.transportChatId, messageThreadId, { name });
+        const topic = await workspaceTopics.upsertTopic(route.ownerChatId, route.transportChatId, {
+          threadId: messageThreadId,
+          name,
+          source: "arisa-renamed"
+        });
+        return { ok: true, chatId: route.transportChatId, messageThreadId, name: topic.name };
+      },
       prepareRestartReceipt: (summary) => prepareRestartReceipt({
         transportChatId: route.transportChatId,
         threadId: route.threadId
       }, { reason: String(summary || "Agent-requested restart").trim() }),
       cancelRestartReceipt,
-      getTaskContext: () => route.workspace ? {
+      getTaskContext: () => route.workspace && (!route.privateTopics || route.threadId) ? {
         transport: "telegram",
         destination: {
           chatId: route.transportChatId,
@@ -118,7 +137,7 @@ export function createTelegramSessionBridgeController({
     };
   }
 
-  async function sendTextReply({ sendText, sendDocument, chatId, artifactChatId = chatId, text }) {
+  async function sendTextReply({ sendText, sendDocument, chatId, route = null, artifactChatId = chatId, text }) {
     const maxInlineReplyLength = 3500;
     if (isSilentReply(text)) {
       logger?.log("telegram", `suppressing silent reply for chat ${chatId}`);
@@ -148,6 +167,10 @@ export function createTelegramSessionBridgeController({
       const messages = getChatState(chatId).assistantMessages;
       messages.set(sent.message_id, text);
       while (messages.size > 50) messages.delete(messages.keys().next().value);
+      if (route?.workspace) {
+        sentReplyRoutes.set(sentReplyKey(route.transportChatId, sent.message_id), route);
+        while (sentReplyRoutes.size > 200) sentReplyRoutes.delete(sentReplyRoutes.keys().next().value);
+      }
     }
   }
 
@@ -173,6 +196,7 @@ export function createTelegramSessionBridgeController({
     createSessionBridge,
     createWorkspaceAccessGuard,
     installArtifactDeliveryHandler,
-    sendTextReply
+    sendTextReply,
+    sentReplyRoute
   };
 }

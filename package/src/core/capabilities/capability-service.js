@@ -328,6 +328,14 @@ export function createCapabilityService({
       });
     }
 
+    if (method === "telegram.renameTopic") {
+      if (typeof context.telegram?.renameForumTopic !== "function") return { ok: false, error: "Telegram topic renaming is unavailable in this chat." };
+      return context.telegram.renameForumTopic({
+        ...(params.messageThreadId === undefined ? {} : { messageThreadId: params.messageThreadId }),
+        name: requireString(params.name, "name").trim()
+      });
+    }
+
     if (method === "paths.getChatToolStateDir") return getChatToolStateDir(requireChatId(chatId, method), actor);
     if (method === "paths.getToolStateDir") return getToolStateDir(actor);
     if (method === "paths.getChatToolTmpDir") return getChatToolTmpDir(requireChatId(chatId, method), actor);

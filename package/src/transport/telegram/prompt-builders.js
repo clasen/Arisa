@@ -339,7 +339,7 @@ function sessionEventLogMessage(event) {
   return "";
 }
 
-export async function collectText(session, prompt, { logger, chatId, onSlowPrompt } = {}) {
+export async function collectText(session, prompt, { logger, chatId, onSlowPrompt, onTextUpdate } = {}) {
   const assistantMessages = [];
   let assistantMessage = "";
   let assistantErrorMessage = "";
@@ -357,6 +357,7 @@ export async function collectText(session, prompt, { logger, chatId, onSlowPromp
     }
     if (event.type === "message_update" && event.assistantMessageEvent.type === "text_delta") {
       assistantMessage += event.assistantMessageEvent.delta;
+      onTextUpdate?.([...assistantMessages, assistantMessage].join("\n\n"));
     }
     if (event.type === "message_end" && event.message?.role === "assistant") {
       if (event.message.stopReason === "error") {
@@ -395,8 +396,17 @@ export async function collectText(session, prompt, { logger, chatId, onSlowPromp
   return assistantMessages.join("\n\n").trim();
 }
 
+const silentReplyTokens = ["NO_REPLY", "SILENT_REPLY", "No reply needed.", "No action needed."];
+const silentReplyTokenPattern = silentReplyTokens.map((token) => token.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")).join("|");
+const silentReplyPattern = new RegExp(`^(?:${silentReplyTokenPattern})(?:\\s+(?:${silentReplyTokenPattern}))*$`);
+
 export function isSilentReply(text) {
-  return /^(?:NO_REPLY|SILENT_REPLY|No reply needed\.|No action needed\.)(?:\s+(?:NO_REPLY|SILENT_REPLY|No reply needed\.|No action needed\.))*$/.test(String(text || "").trim());
+  return silentReplyPattern.test(String(text || "").trim());
+}
+
+export function couldBecomeSilentReply(text) {
+  const candidate = String(text || "").trim();
+  return isSilentReply(candidate) || silentReplyTokens.some((token) => token.startsWith(candidate));
 }
 
 export function buildSessionHandoffPrompt() {

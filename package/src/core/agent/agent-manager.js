@@ -38,6 +38,7 @@ const arisaToolNames = [
   "cancel_all_scheduled_tasks",
   "create_telegram_topic",
   "initialize_telegram_topic",
+  "rename_telegram_topic",
   "send_artifact"
 ];
 
@@ -403,6 +404,7 @@ export class AgentManager {
       sendMedia: (...args) => telegramTarget.current.sendMedia(...args),
       createForumTopic: (...args) => telegramTarget.current.createForumTopic(...args),
       initializeForumTopic: (...args) => telegramTarget.current.initializeForumTopic(...args),
+      renameForumTopic: (...args) => telegramTarget.current.renameForumTopic(...args),
       prepareRestartReceipt: (...args) => telegramTarget.current.prepareRestartReceipt(...args),
       cancelRestartReceipt: (...args) => telegramTarget.current.cancelRestartReceipt(...args),
       getTaskContext: (...args) => telegramTarget.current.getTaskContext?.(...args) || null,

@@ -10,13 +10,18 @@ function incomingChatMeta(ctx) {
   };
 }
 
-export function createTelegramWorkspaceController({ config, api, saveConfig }) {
+export function createTelegramWorkspaceController({ config, api, saveConfig, privateTopicsEnabled = () => false }) {
   const routes = new WeakMap();
   const gateStates = new Map();
 
   async function authorizeContext(ctx) {
-    const route = await resolveTelegramWorkspaceRoute({ config, api: ctx.api || api, ctx });
-    if (!route.workspace) {
+    const route = await resolveTelegramWorkspaceRoute({
+      config,
+      api: ctx.api || api,
+      ctx,
+      privateTopicsEnabled: privateTopicsEnabled()
+    });
+    if (!route.workspace || route.privateTopics) {
       const authorization = await authorizeChat({
         config,
         chatId: ctx.chat.id,

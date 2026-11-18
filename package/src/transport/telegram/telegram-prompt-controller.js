@@ -1,8 +1,10 @@
 import { getErrorMessage } from "../../core/agent/auth-flow.js";
 import { resolveChatSpeed } from "../../core/agent/model-selection.js";
 import { captureIncomingArtifact } from "./media.js";
+import { createReplyDraftStream } from "./reply-draft-stream.js";
 import {
   appendGeneralReplyRoutingInstruction,
+  appendTopicNamingInstruction,
   isGeneralWorkspaceRoute,
   routeGeneralWorkspaceReply
 } from "./reply-topic-routing.js";
@@ -55,6 +57,32 @@ export function createTelegramPromptController({
   withTyping,
   resolveBusyMessageMode
 }) {
+  const activeReplyDrafts = new Map();
+
+  function openReplyDraftStream({ route, sessionId }) {
+    // Telegram drafts exist only in private chats, whose ids are positive.
+    if (!config.telegram.streamReplies || !(Number(route.transportChatId) > 0)) return null;
+    const stream = createReplyDraftStream({
+      api,
+      chatId: route.transportChatId,
+      threadId: route.threadId,
+      intervalMs: config.telegram.replyDraftIntervalMs,
+      keepAliveMs: config.telegram.replyDraftKeepAliveMs,
+      logger
+    });
+    activeReplyDrafts.set(stream.draftId, { stream, sessionId, transportChatId: route.transportChatId });
+    return stream;
+  }
+
+  async function stopReplyDraft({ chatId, draftId }) {
+    const draft = activeReplyDrafts.get(draftId);
+    if (!draft || String(draft.transportChatId) !== String(chatId)) return false;
+    logger?.log("telegram", `user stopped reply draft ${draftId} for chat ${draft.sessionId}`);
+    draft.stream.markStopped();
+    await agentManager.abortSession(draft.sessionId);
+    return true;
+  }
+
   async function buildIncomingPrompt(ctx, route = contextRoute(ctx)) {
     logger?.log("telegram", `message ${ctx.msg.message_id} in chat ${route.transportChatId} session ${route.sessionId}`);
     const chatArtifactStore = artifactStore.forChat(route.scopeChatId);
@@ -71,12 +99,16 @@ export function createTelegramPromptController({
       logger?.log("telegram", `media normalization unavailable for chat ${route.transportChatId}: ${toolResult?.error || toolResult?.missingConfig?.join(", ") || "unknown error"}`);
     }
     const prompt = buildPrompt({ ctx, artifact, transcript, toolResult });
+    if (route.workspace && route.threadId) {
+      const topic = await workspaceTopics.getTopic(route.ownerChatId, route.transportChatId, route.threadId);
+      return topic?.nameImplicit ? appendTopicNamingInstruction(prompt, topic) : prompt;
+    }
     if (!isGeneralWorkspaceRoute(route)) return prompt;
     const [topics, recentProposals] = await Promise.all([
       workspaceTopics.listTopics(route.ownerChatId, route.transportChatId),
       workspaceTopics.listRecentProposals(route.ownerChatId, route.transportChatId)
     ]);
-    return appendGeneralReplyRoutingInstruction(prompt, topics, recentProposals);
+    return appendGeneralReplyRoutingInstruction(prompt, topics, recentProposals, { privateTopics: route.privateTopics === true });
   }
 
   // Runs a scheduled task or external event in a subagent session, then leaves the chat session
@@ -157,6 +189,7 @@ export function createTelegramPromptController({
       const chatState = getChatState(sessionId);
       chatState.activeSession = session;
       chatState.activeRoute = route;
+      const draftStream = executionReceipt ? null : openReplyDraftStream({ route, sessionId });
       try {
         text = await withPromptSpeed(automationPromptSpeedOptions({
           prompt,
@@ -166,6 +199,7 @@ export function createTelegramPromptController({
         }), () => collectText(session, prompt, {
           logger,
           chatId: sessionId,
+          onTextUpdate: draftStream?.update,
           onSlowPrompt: () => api.sendMessage(
             route.transportChatId,
             "This is taking longer than 5 minutes, so I will keep the current session running instead of starting over. Send /new if you want to abandon it and start fresh.",
@@ -173,13 +207,20 @@ export function createTelegramPromptController({
           )
         }));
       } catch (error) {
-        agentManager.resetSession(sessionId);
-        if (error && typeof error === "object") {
-          error.retryable = false;
-          error.outcomeUncertain = true;
+        if (!draftStream?.isStopped()) {
+          agentManager.resetSession(sessionId);
+          if (error && typeof error === "object") {
+            error.retryable = false;
+            error.outcomeUncertain = true;
+          }
+          throw error;
         }
-        throw error;
+        text = draftStream.text().trim();
       } finally {
+        if (draftStream) {
+          draftStream.close();
+          activeReplyDrafts.delete(draftStream.draftId);
+        }
         if (chatState.activeSession === session) chatState.activeSession = null;
         chatState.activeRoute = null;
         await sessionContext.release?.();
@@ -210,6 +251,7 @@ export function createTelegramPromptController({
         sendText: (message, extra) => api.sendMessage(deliveryRoute.transportChatId, message, deliveryOptions(extra)),
         sendDocument: (file, extra) => api.sendDocument(deliveryRoute.transportChatId, file, deliveryOptions(extra)),
         chatId: sessionId,
+        route,
         artifactChatId: deliveryRoute.scopeChatId,
         text: routedReply.text
       });
@@ -412,6 +454,7 @@ export function createTelegramPromptController({
     handleNewCommand,
     processChatPromptQueue,
     processPromptForChat,
+    stopReplyDraft,
     summarizeSessionBeforeReset
   };
 }

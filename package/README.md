@@ -61,9 +61,13 @@ The result is a toolset shaped by how you actually use the assistant, not by def
 - while a chat is busy, concurrent text steers Pi's active run by default
 - set `telegram.busyMessageMode` to `"queue"` to keep concurrent text messages in order; override one chat with `telegram.chatMeta[chatId].busyMessageMode`
 - media and normalized audio stay queued, and failed steering falls back to the ordered queue
-- an owner-workspace General topic may route only the assistant's visible reply to a matching topic; the incoming message and General session remain unchanged, and ambiguous replies stay in General
-- reply classification never runs in private chats or outside General
-- each owner workspace keeps a dynamic, chat-scoped topic registry; Arisa learns topic creation, rename, close, and reopen events, and records the context of topics it creates or initializes
+- when the bot has topics enabled in @BotFather, every topic of the private chat gets its own isolated session, while artifacts, memory, tools, and config stay shared with the chat; restart Arisa after changing that setting
+- the main private chat (General) keeps the regular chat session; owner workspace supergroups configured in `telegram.ownerWorkspaceGroups` keep working unchanged
+- a General message may route only the assistant's visible reply to a matching topic; the incoming message and General session remain unchanged, and ambiguous replies stay in General
+- reply classification never runs outside General, or in private chats whose bot has topics disabled
+- each chat with topics keeps a dynamic, chat-scoped topic registry; Arisa learns topic creation, rename, close, and reopen events, and records the context of topics it creates or initializes
+- a topic the user opens by just typing gets an automatic name, and Arisa renames it once the subject is clear
+- in private chats the reply streams as a draft while it is generated, with a stop button that keeps the partial answer; set `telegram.streamReplies` to `false` to disable it
 - when a substantial theme recurs in General without a matching topic, Arisa may occasionally propose a new one; creation still requires explicit user confirmation
 - legacy `replyTopics` configuration is imported once into the dynamic registry and then removed
 

@@ -116,6 +116,24 @@ For example, if a voice note was transcribed, the agent should answer the meanin
 - When a textual reply is too large to read comfortably inline, it is delivered as a generated Markdown artifact instead of a long inline message. The transport handles this automatically in `sendTextReply`: replies over the inline length limit become a `reply-<timestamp>.md` artifact sent as a document.
 - This is a transport-layer concern. The agent should write the full answer it wants to deliver and not pre-split or truncate it to fit the chat; the transport decides between inline text and a Markdown attachment.
 
+## Telegram topics
+When the bot has topics enabled, the private chat with the user is split into topics, the same way an owner workspace forum is. Each topic keeps its own isolated session; artifacts, memory, tools, and config stay shared with the chat. The main chat outside every topic is called General.
+
+Keeping topics in order is part of the job. The user should be able to find any conversation by its topic name without scrolling.
+
+- **One subject per topic.** A topic is a long-lived subject such as a project, a trip, or a recurring errand. One-off questions belong in General.
+- **Name topics for retrieval.** Use 2 to 5 words in the user's language that name the subject, not the first message. Good: `Madrid trip`, `Invoices 2026`. Bad: `Question`, `Help with this`.
+- **Fix automatic names.** A topic the user opened by just typing gets an automatic name. When the prompt says so, call `rename_telegram_topic` as soon as the subject is clear. Rename a topic again only if its subject truly changed, and never rename one the user named.
+- **Route from General.** When a General message clearly belongs to one registered topic, send the reply there with the routing marker from the prompt. If the fit is weak, answer in General.
+- **Propose before creating.** When a theme keeps coming back in General and no topic fits, propose a topic and wait for a yes. After the yes, call `create_telegram_topic` with a `context` that summarizes what the new topic needs to know: goal, decisions so far, open items. The new session sees only that context.
+- **Avoid duplicates.** Check the registered topics before proposing one. Prefer an existing topic that covers the subject over a narrower new one.
+- **Scheduled work stays put.** A task scheduled inside a topic reports back to that topic. Schedule from the topic the results belong to.
+- **Off-topic drift.** When a topic conversation moves to an unrelated subject that deserves its own space, say so once and offer to open a topic for it. Do not move the conversation without a yes.
+
+`create_telegram_topic`, `initialize_telegram_topic`, and `rename_telegram_topic` work only in a chat with topics. Topic management never applies to a private chat whose bot has topics disabled.
+
+**Suggest topics when they are off.** A private chat has topics disabled when its prompts carry no General-topic or topic-naming instruction. If that chat keeps mixing several long-lived subjects, suggest enabling topics so each subject gets its own conversation. Give the steps: open @BotFather, pick the bot, go to Bot Settings, then Threads Settings, turn on Threaded Mode, leave "Disallow users to create new threads" off, and restart Arisa. Suggest it at most once per session and never again after the user declines.
+
 ## How to inspect CLI tools
 Before using a tool, inspect its help:
 - via the custom tool: `tool_help`

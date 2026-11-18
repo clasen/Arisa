@@ -2,6 +2,12 @@ const replyTopicMarkerPattern = /\s*\[\[ARISA_REPLY_TOPIC:(\d+)\]\]\s*$/u;
 const proposalMarkerPattern = /\s*\[\[ARISA_PROPOSE_TOPIC:([^\]\r\n]{1,80})\]\]\s*$/u;
 const anyRoutingMarkerPattern = /\s*\[\[ARISA_(?:REPLY_TOPIC|PROPOSE_TOPIC):[^\]]*\]\]\s*$/u;
 
+const trailingMarkerFragmentPattern = /\s*\[(?:\[[^\]]*\]{0,2})?\s*$/u;
+
+export function stripTrailingRoutingMarker(text) {
+  return String(text || "").replace(trailingMarkerFragmentPattern, "");
+}
+
 function singleLine(value, maxLength) {
   return String(value || "").replace(/\s+/g, " ").trim().slice(0, maxLength);
 }
@@ -24,7 +30,7 @@ function activeTopics(topics = []) {
     .slice(0, 32);
 }
 
-export function buildGeneralReplyRoutingInstruction(topics = [], recentProposals = []) {
+export function buildGeneralReplyRoutingInstruction(topics = [], recentProposals = [], { privateTopics = false } = {}) {
   const available = activeTopics(topics);
   const options = available.length
     ? available.map((topic) => [
@@ -38,7 +44,9 @@ export function buildGeneralReplyRoutingInstruction(topics = [], recentProposals
     .slice(0, 12);
   return [
     "Telegram General-topic management instruction:",
-    "This applies only because the incoming message was written in General inside an owner workspace supergroup. It never applies to a private chat with the bot.",
+    privateTopics
+      ? "This applies only because the incoming message was written outside every topic in a private chat that has topics enabled. That main chat is called General here."
+      : "This applies only because the incoming message was written in General inside an owner workspace supergroup. It never applies to a private chat with the bot.",
     "The original message must stay in General and the conversation remains in the General session.",
     "If, and only if, your final response clearly belongs to exactly one registered topic below, append [[ARISA_REPLY_TOPIC:<id>]] as the final line. Do not mention this routing marker.",
     "If the relationship is weak, ambiguous, or no topic fits, do not append a reply marker and the response will remain in General.",
@@ -49,8 +57,17 @@ export function buildGeneralReplyRoutingInstruction(topics = [], recentProposals
   ].filter(Boolean).join("\n");
 }
 
-export function appendGeneralReplyRoutingInstruction(prompt, topics = [], recentProposals = []) {
-  return `${String(prompt || "")}\n\n${buildGeneralReplyRoutingInstruction(topics, recentProposals)}`;
+export function appendGeneralReplyRoutingInstruction(prompt, topics = [], recentProposals = [], options = {}) {
+  return `${String(prompt || "")}\n\n${buildGeneralReplyRoutingInstruction(topics, recentProposals, options)}`;
+}
+
+export function appendTopicNamingInstruction(prompt, topic) {
+  return [
+    String(prompt || ""),
+    "",
+    "Telegram topic naming instruction:",
+    `This topic still has the automatic name "${singleLine(topic?.name, 80)}". Once the subject of the conversation is clear, call rename_telegram_topic with a short descriptive name of 2 to 5 words in the user's language. Do not mention the rename unless the user asks.`
+  ].join("\n");
 }
 
 export function extractReplyTopicMetadata(text, topics = []) {

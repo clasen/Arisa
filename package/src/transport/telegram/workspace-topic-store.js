@@ -57,7 +57,8 @@ function normalizeTopic(threadId, topic) {
     status: topic?.status === "closed" ? "closed" : "open",
     source: oneLine(topic?.source, 40),
     createdAt: oneLine(topic?.createdAt, 40),
-    updatedAt: oneLine(topic?.updatedAt, 40)
+    updatedAt: oneLine(topic?.updatedAt, 40),
+    ...(topic?.nameImplicit === true ? { nameImplicit: true } : {})
   };
 }
 
@@ -121,7 +122,12 @@ export class WorkspaceTopicStore {
       .sort((left, right) => left.threadId - right.threadId);
   }
 
-  async upsertTopic(ownerChatId, groupChatId, { threadId, name, description, status = "open", source = "observed" }) {
+  async getTopic(ownerChatId, groupChatId, threadId) {
+    const topics = await this.listTopics(ownerChatId, groupChatId, { includeClosed: true });
+    return topics.find((topic) => topic.threadId === Number(threadId)) || null;
+  }
+
+  async upsertTopic(ownerChatId, groupChatId, { threadId, name, description, status = "open", source = "observed", nameImplicit = false }) {
     const scopedOwner = integer(ownerChatId, "ownerChatId");
     const scopedGroup = integer(groupChatId, "groupChatId");
     const scopedThread = integer(threadId, "threadId");
@@ -136,8 +142,10 @@ export class WorkspaceTopicStore {
       const key = String(scopedThread);
       const existing = group.topics[key] || {};
       const timestamp = new Date(this.now()).toISOString();
+      const { nameImplicit: _previousNameImplicit, ...retained } = existing;
       group.topics[key] = {
-        ...existing,
+        ...retained,
+        ...(nameImplicit === true ? { nameImplicit: true } : {}),
         name: scopedName,
         description: description === undefined ? oneLine(existing.description, 240) : oneLine(description, 240),
         status: status === "closed" ? "closed" : "open",
@@ -174,6 +182,7 @@ export class WorkspaceTopicStore {
       return this.upsertTopic(route.ownerChatId, route.transportChatId, {
         threadId,
         name: message.forum_topic_created.name,
+        nameImplicit: message.forum_topic_created.is_name_implicit === true,
         source: "telegram-created"
       });
     }

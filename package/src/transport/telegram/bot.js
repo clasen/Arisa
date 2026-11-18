@@ -56,7 +56,7 @@ export function isProcessableTelegramMessage(message = {}) {
 }
 
 export function resolveIncomingBusyMessageMode({ config, route, message }) {
-  if (route?.workspace) return "queue";
+  if (route?.workspace && !route.privateTopics) return "queue";
   if (typeof message?.text !== "string") return "queue";
   return resolveTelegramBusyMessageMode(config, route?.sessionId);
 }
@@ -153,10 +153,12 @@ export async function createTelegramBot({ config, artifactStore, toolRegistry, t
   const workspaceTopics = new WorkspaceTopicStore();
   const notifiedPromptErrors = new WeakSet();
   let taskTimer = null;
+  let privateTopicsEnabled = false;
   const { authorizeContext, contextRoute, registerRoute } = createTelegramWorkspaceController({
     config,
     api: bot.api,
-    saveConfig
+    saveConfig,
+    privateTopicsEnabled: () => privateTopicsEnabled
   });
 
   const requestRestartWithReceipt = async (ctx, reason = "Telegram restart") => {
@@ -242,7 +244,8 @@ export async function createTelegramBot({ config, artifactStore, toolRegistry, t
     createSessionBridge: createTelegramSessionBridge,
     createWorkspaceAccessGuard,
     installArtifactDeliveryHandler,
-    sendTextReply
+    sendTextReply,
+    sentReplyRoute
   } = createTelegramSessionBridgeController({
     config,
     api: bot.api,
@@ -259,7 +262,8 @@ export async function createTelegramBot({ config, artifactStore, toolRegistry, t
   const {
     enqueueOrProcess,
     enqueuePrompt,
-    handleNewCommand
+    handleNewCommand,
+    stopReplyDraft
   } = createTelegramPromptController({
     config,
     api: bot.api,
@@ -337,12 +341,14 @@ export async function createTelegramBot({ config, artifactStore, toolRegistry, t
     const destination = taskRoute?.transport === "telegram" ? taskRoute.destination : null;
     if (destination?.chatId && destination?.threadId) {
       ctx = {
-        chat: { id: destination.chatId, type: "supergroup", is_forum: true },
+        chat: String(destination.chatId) === String(chatId)
+          ? { id: destination.chatId, type: "private" }
+          : { id: destination.chatId, type: "supergroup", is_forum: true },
         from: { id: chatId },
         message: { message_thread_id: destination.threadId },
         api: bot.api
       };
-      const route = await resolveTelegramWorkspaceRoute({ config, api: bot.api, ctx });
+      const route = await resolveTelegramWorkspaceRoute({ config, api: bot.api, ctx, privateTopicsEnabled });
       if (!route.ok) throw new Error("Scheduled owner-workspace destination is unavailable.");
       registerRoute(ctx, route);
     }
@@ -398,6 +404,12 @@ export async function createTelegramBot({ config, artifactStore, toolRegistry, t
   bot.catch((error) => {
     logger?.error("telegram", `bot error: ${error instanceof Error ? error.message : String(error)}`);
     console.error("Telegram bot error:", error);
+  });
+
+  bot.use(async (ctx, next) => {
+    const stopped = ctx.update.stopped_message_generation;
+    if (!stopped) return next();
+    await stopReplyDraft({ chatId: stopped.chat.id, draftId: stopped.draft_id });
   });
 
   bot.command("start", async (ctx) => {
@@ -514,17 +526,33 @@ export async function createTelegramBot({ config, artifactStore, toolRegistry, t
 
   bot.on("message_reaction", async (ctx) => {
     const reaction = ctx.messageReaction;
-    const chatId = reaction.chat.id;
-    const auth = await authorizeChat({ config, chatId, saveConfig });
-    if (!auth.ok || authController.getIssue()) return;
+    const transportChatId = reaction.chat.id;
+    const route = sentReplyRoute(transportChatId, reaction.message_id);
+    let reactionCtx = null;
+    if (route) {
+      const accessOpen = await createWorkspaceAccessGuard(route)().then(() => true, () => false);
+      if (!accessOpen || !(config.telegram.authorizedChatIds || []).includes(route.ownerChatId)) return;
+      reactionCtx = {
+        chat: { id: transportChatId },
+        message: route.threadId ? { message_thread_id: route.threadId } : undefined,
+        api: bot.api
+      };
+      registerRoute(reactionCtx, route);
+    } else {
+      const auth = await authorizeChat({ config, chatId: transportChatId, saveConfig });
+      if (!auth.ok) return;
+    }
+    if (authController.getIssue()) return;
 
+    const chatId = route ? route.sessionId : transportChatId;
     const reactedMessageText = getChatState(chatId).assistantMessages.get(reaction.message_id) || "";
     const prompt = buildReactionPrompt({ reaction, reactedMessageText });
     enqueuePrompt({
       chatId,
       prompt,
       label: `reaction to message ${reaction.message_id}`,
-      busyMessageMode: "queue"
+      busyMessageMode: "queue",
+      ctx: reactionCtx
     }).catch((error) => {
       getChatState(chatId).processing = false;
       logger?.error("telegram", `reaction handling failed for chat ${chatId}: ${getErrorMessage(error)}`);
@@ -552,7 +580,7 @@ export async function createTelegramBot({ config, artifactStore, toolRegistry, t
     // grammY long polling awaits each middleware. Keep prompt execution in the background so
     // the next Telegram update can reach the active session as a steer or queued message.
     enqueueOrProcess(ctx).catch(async (error) => {
-      const chatState = getChatState(ctx.chat.id);
+      const chatState = getChatState(contextRoute(ctx).sessionId);
       chatState.processing = false;
       if (wasPromptErrorNotified(error)) return;
       const issue = getPiAuthIssue(error);
@@ -566,6 +594,9 @@ export async function createTelegramBot({ config, artifactStore, toolRegistry, t
     async start({ skipAgentStartupPrompts = false } = {}) {
       config.telegram.chatMeta ||= {};
       await migrateConfiguredReplyTopics();
+      await bot.init();
+      privateTopicsEnabled = bot.botInfo.has_topics_enabled === true;
+      logger?.log("telegram", `private chat topics ${privateTopicsEnabled ? "enabled" : "disabled"}`);
       await bot.api.setMyCommands(telegramCommands);
       if (!taskTimer) {
         taskTimer = setInterval(() => {
@@ -578,7 +609,7 @@ export async function createTelegramBot({ config, artifactStore, toolRegistry, t
       await bot.api.deleteWebhook({ drop_pending_updates: true });
       logger?.log("telegram", "bot polling started");
       scheduleStartupMessages({ skipAgentStartupPrompts });
-      await bot.start({ allowed_updates: ["message", "callback_query", "message_reaction"] });
+      await bot.start({ allowed_updates: ["message", "callback_query", "message_reaction", "stopped_message_generation"] });
     },
 
     async stop() {

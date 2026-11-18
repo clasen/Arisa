@@ -23,6 +23,46 @@ export function topicSessionId({ ownerChatId, groupChatId, threadId, generalTopi
   return `${ownerChatId}--telegram-group-${Math.abs(groupChatId)}--topic-${threadId}`;
 }
 
+export function privateTopicSessionId({ chatId, threadId }) {
+  return `${chatId}--telegram-private-topic-${threadId}`;
+}
+
+export function workspaceTopicSessionId(route, threadId) {
+  if (route.privateTopics) return privateTopicSessionId({ chatId: route.ownerChatId, threadId });
+  return topicSessionId({
+    ownerChatId: route.ownerChatId,
+    groupChatId: route.transportChatId,
+    threadId,
+    generalTopicId: route.generalTopicId
+  });
+}
+
+function resolvePrivateChatRoute({ ctx, chatId, privateTopicsEnabled }) {
+  const threadId = asInteger(ctx?.message?.message_thread_id ?? ctx?.msg?.message_thread_id);
+  if (ctx?.chat?.type !== "private" || (threadId == null && !privateTopicsEnabled)) {
+    return {
+      ok: true,
+      workspace: false,
+      sessionId: String(chatId),
+      scopeChatId: chatId,
+      transportChatId: chatId,
+      threadId: null
+    };
+  }
+  return {
+    ok: true,
+    workspace: true,
+    privateTopics: true,
+    ownerChatId: chatId,
+    sessionId: threadId == null ? String(chatId) : privateTopicSessionId({ chatId, threadId }),
+    scopeChatId: chatId,
+    transportChatId: chatId,
+    threadId,
+    topicThreadId: threadId,
+    generalTopicId: null
+  };
+}
+
 export async function verifyOwnerWorkspaceGroup({ api, groupChatId, ownerChatId, senderId }) {
   const [memberCount, administrators, me] = await Promise.all([
     api.getChatMemberCount(groupChatId),
@@ -39,19 +79,10 @@ export async function verifyOwnerWorkspaceGroup({ api, groupChatId, ownerChatId,
   return { ok: true, memberCount };
 }
 
-export async function resolveTelegramWorkspaceRoute({ config, api, ctx }) {
+export async function resolveTelegramWorkspaceRoute({ config, api, ctx, privateTopicsEnabled = false }) {
   const groupChatId = asInteger(ctx?.chat?.id);
   const configured = workspaceGroupConfig(config, groupChatId);
-  if (!configured) {
-    return {
-      ok: true,
-      workspace: false,
-      sessionId: String(groupChatId),
-      scopeChatId: groupChatId,
-      transportChatId: groupChatId,
-      threadId: null
-    };
-  }
+  if (!configured) return resolvePrivateChatRoute({ ctx, chatId: groupChatId, privateTopicsEnabled });
   if (ctx.chat?.type !== "supergroup" || !ctx.chat?.is_forum) {
     return { ok: false, workspace: true, reason: "forum-required" };
   }

@@ -149,7 +149,7 @@ export function createPiCapabilityTools({ capabilityService, telegram, chatId, p
     defineTool({
       name: "create_telegram_topic",
       label: "Create Telegram topic",
-      description: "Create and initialize a new topic in the current owner-only Telegram forum. Topic names are dynamic, and context seeds the isolated session without copying unrelated history.",
+      description: "Create and initialize a new topic in the current Telegram chat with topics (private chat or owner-only forum). Topic names are dynamic, and context seeds the isolated session without copying unrelated history.",
       parameters: Type.Object({
         name: Type.String({ minLength: 1, maxLength: 128 }),
         context: Type.String({ minLength: 1, maxLength: 4000 })
@@ -159,13 +159,23 @@ export function createPiCapabilityTools({ capabilityService, telegram, chatId, p
     defineTool({
       name: "initialize_telegram_topic",
       label: "Initialize Telegram topic",
-      description: "Seed or replace the isolated context of an existing topic in the current owner-only Telegram forum.",
+      description: "Seed or replace the isolated context of an existing topic in the current Telegram chat with topics.",
       parameters: Type.Object({
         messageThreadId: Type.Integer({ minimum: 2 }),
         name: Type.String({ minLength: 1, maxLength: 128 }),
         context: Type.String({ minLength: 1, maxLength: 4000 })
       }),
       execute: async (_id, params) => jsonResult(await execute("initialize_telegram_topic", "telegram.initializeTopic", params))
+    }),
+    defineTool({
+      name: "rename_telegram_topic",
+      label: "Rename Telegram topic",
+      description: "Rename a topic in the current Telegram chat with topics. Omit messageThreadId to rename the topic this conversation is in.",
+      parameters: Type.Object({
+        messageThreadId: Type.Optional(Type.Integer({ minimum: 2 })),
+        name: Type.String({ minLength: 1, maxLength: 128 })
+      }),
+      execute: async (_id, params) => jsonResult(await execute("rename_telegram_topic", "telegram.renameTopic", params))
     }),
     defineTool({
       name: "send_artifact",
